@@ -28,6 +28,7 @@ fn complete_folders_keep_binary_large_resources_scripts_and_pinned_versions() {
     let row = first.items.iter().find(|r|r.item.id == "package").unwrap();
     assert_eq!(row.state, "available");
     let pinned = &row.folder.as_ref().unwrap().directory;
+    assert_eq!(fs::read(source.join("SKILL.md")).unwrap(), fs::read(pinned.join("SKILL.md")).unwrap());
     assert_eq!(fs::read(pinned.join("assets/image.bin")).unwrap(), [0,255,1,0,2]);
     assert_eq!(first.read_skill("package", Some("references/large.txt")).unwrap().len(), 200_000);
     assert!(first.read_skill("package", Some("assets/image.bin")).unwrap_err().contains("Binary asset"));
@@ -113,8 +114,42 @@ fn internal_links_are_copied_but_escaping_links_and_cycles_fail_closed() {
     assert_eq!(first.read_skill("links", Some("copy.txt")).unwrap(), "internal");
     assert!(!fs::symlink_metadata(first.items.iter().find(|r|r.item.id == "links").unwrap().folder.as_ref().unwrap().directory.join("copy.txt")).unwrap().file_type().is_symlink());
     symlink(project.path(), source.join("outside")).unwrap();
-    assert!(library::resolve(data.path(), Some(project.path())).unwrap_err().contains("escapes"));
+    let invalid = library::resolve(data.path(), Some(project.path())).unwrap();
+    assert!(invalid.items.iter().find(|r|r.item.id == "links").unwrap().evaluation.reason.contains("escapes"));
+    assert!(invalid.read_skill("links", None).is_err());
     fs::remove_file(source.join("outside")).unwrap();
     symlink(".", source.join("cycle")).unwrap();
-    assert!(library::resolve(data.path(), Some(project.path())).unwrap_err().contains("cycle"));
+    let invalid = library::resolve(data.path(), Some(project.path())).unwrap();
+    assert!(invalid.items.iter().find(|r|r.item.id == "links").unwrap().evaluation.reason.contains("cycle"));
+}
+
+#[test]
+fn broken_folders_are_reported_without_disabling_valid_skills_or_library_edits() {
+    let (data, project) = setup();
+    put(data.path(), "skills/valid/SKILL.md", "Valid procedure");
+    put(data.path(), "skills/Bad Name/SKILL.md", "Invalid folder name");
+    put(data.path(), "skills/bad-yaml/SKILL.md", "---\nname: [\n---\nBad metadata");
+    put(data.path(), "skills/bad-json/SKILL.md", "Bad settings");
+    put(data.path(), "skills/bad-json/atelier.json", "{");
+    put(data.path(), "skills/duplicate/SKILL.md", "Folder source");
+    put(data.path(), "library.json", r#"{"items":[{"id":"duplicate","name":"Duplicate","kind":"skill","content":"JSON source"}]}"#);
+    #[cfg(unix)] {
+        put(data.path(), "skills/broken-link/SKILL.md", "Broken reference");
+        std::os::unix::fs::symlink("missing", data.path().join("skills/broken-link/ref")).unwrap();
+    }
+    let snapshot = library::resolve(data.path(), Some(project.path())).unwrap();
+    assert!(snapshot.read_skill("valid", None).unwrap().contains("Valid procedure"));
+    for row in snapshot.items.iter().filter(|r|r.folder_source.is_some() && r.item.id != "valid") {
+        assert_eq!(row.state, "invalid");
+        assert!(row.evaluation.reason.contains("Invalid skill folder"));
+        assert!(row.folder.is_none());
+        assert!(snapshot.read_skill(&row.item.id, None).is_err());
+    }
+    let held = library::read(data.path(), None).unwrap();
+    let mut repaired = held.clone();
+    repaired.items.clear();
+    library::write(data.path(), None, &repaired, &library::revision(&held)).unwrap();
+    assert!(library::resolve(data.path(), None).unwrap().read_skill("duplicate", None).is_ok());
+    assert!(snapshot.guidance().contains("valid"));
+    assert!(!snapshot.commands().iter().any(|c| c["name"] == "skill:bad-yaml"));
 }

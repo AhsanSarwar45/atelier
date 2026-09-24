@@ -9,6 +9,11 @@ Work: bw-yi74.10 and bw-yi74.11. Migration cutover: bw-yi74.9.
   session pinning after source edits, project conditions, manual invocation,
   project content customization, stale source revision, duplicate IDs and
   moving project settings with its complete folder tree.
+- Independent review identified that malformed folders could block unrelated
+  chats. The fix isolates malformed names/frontmatter/settings, broken links
+  and pinning failures as invalid rows with source paths and diagnostics. Valid
+  skills remain usable and library saves remain possible. Live cases also keep
+  a malformed folder present while starting both providers and using valid ones.
 - `agent-guidance.spec.ts` chat cases: both provider layouts; compact badge by
   default, grouped popover, hidden diagnostics, Escape and focus return, 390px
   layout without horizontal overflow. Before and after PNGs in

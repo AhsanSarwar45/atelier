@@ -83,6 +83,8 @@ escaping links, cycles, special files and oversized bundles are refused. Limits:
 128 KiB instructions, 64 MiB per asset, 256 MiB and 4096 files per skill. Git internals
 and Python bytecode caches are omitted. The text reader accepts resources up to
 2 MiB; larger or binary resources are used directly through the returned path.
+An invalid folder is shown as unavailable with its error and editable source
+path; it does not prevent valid skills, chats or the settings editor from loading.
 
 Folder-backed cards show their editable source path. Edit those files directly;
 project customizations still use the shared settings editor. To migrate a complete

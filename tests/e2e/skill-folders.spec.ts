@@ -22,9 +22,11 @@ for (const brand of ['claude', 'codex']) {
     if (corpus) cpSync(join(corpus, 'skills'), locations.global.skills, { recursive: true });
     const global = join(locations.global.skills, 'folder-global');
     const local = join(locations.project.skills, 'folder-local');
+    const broken = join(locations.global.skills, 'broken-metadata');
     const put = (folder: string, name: string, bytes: string | Buffer) => {
       const path = join(folder, name); mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, bytes);
     };
+    put(broken, 'SKILL.md', '---\nname: [\n---\nBroken metadata must not block a chat');
     for (const [folder, marker] of [[global, 'GLOBAL'], [local, 'LOCAL']]) {
       put(folder, 'SKILL.md', `---\nname: Folder ${marker}\ndescription: Use for the folder asset proof request.\n---\nRun python3 scripts/proof.py from this skill directory. Report its stdout. Do not guess or simulate it.`);
       put(folder, 'scripts/proof.py', 'from pathlib import Path\np = Path(__file__).resolve().parent.parent\nprint((p / "references/message.txt").read_text() + ":" + (p / "assets/data.bin").read_bytes().hex())\n');
@@ -35,10 +37,15 @@ for (const brand of ['claude', 'codex']) {
     try {
       const config = await (await request.get(`/api/settings/library?path=${encodeURIComponent(root)}`)).json();
       expect(config.resolved.items.filter((r: any) => r.folder).map((r: any) => r.item.id)).toEqual(expect.arrayContaining(['folder-global', 'folder-local']));
+      expect(config.resolved.items.find((r: any) => r.item.id === 'broken-metadata').state).toBe('invalid');
       await page.goto('/settings?section=library');
       await page.getByRole('button', { name: 'Skills', exact: true }).click();
       await expect(page.getByTestId('library-item-folder-global')).toContainText('Folder-backed skill');
+      await expect(page.getByTestId('library-item-broken-metadata')).toContainText('Folder-backed skill');
+      await expect(page.getByTestId('library-item-broken-metadata')).toContainText('Invalid folder');
+      await expect(page.getByTestId('library-item-broken-metadata').getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
       await expect(page.getByTestId('library-item-folder-global').getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+      await page.getByTestId('library-item-broken-metadata').scrollIntoViewIfNeeded();
       await page.screenshot({ path: `tests/results/shared-library/folder-settings-${brand}.png`, animations: 'disabled' });
       const started = await request.post('/api/workbench/command', { data: { type: 'session.start', brand, projectId: project.id, projectPath: root, permissionMode: brand === 'claude' ? 'bypassPermissions' : 'never' } });
       expect(started.ok(), await started.text()).toBeTruthy();
@@ -68,6 +75,7 @@ for (const brand of ['claude', 'codex']) {
       if (sessionId) await request.post('/api/workbench/command', { data: { type: 'session.close', sessionId } });
       await request.delete(`/api/projects/${project.id}`);
       rmSync(global, { recursive: true, force: true });
+      rmSync(broken, { recursive: true, force: true });
     }
   });
 }

@@ -35,6 +35,7 @@ pub struct Folder {
 pub struct Source {
     pub item: Item,
     pub directory: PathBuf,
+    pub error: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -55,7 +56,8 @@ pub fn discover(parent: &Path) -> Result<Vec<Source>, String> {
     paths.sort();
     let mut result = vec![];
     for path in paths {
-        if !path.join("SKILL.md").is_file() { continue; }
+        if fs::symlink_metadata(path.join("SKILL.md")).is_err() { continue; }
+        let parsed = (|| -> Result<Source, String> {
         let id = path.file_name().and_then(|v| v.to_str()).ok_or("Skill folder needs a UTF-8 name")?;
         if !super::library::valid_id(id) || id.starts_with("atelier-") {
             return Err(format!("Skill folder {id}: choose a lowercase kebab-case ID not starting with atelier-"));
@@ -77,7 +79,19 @@ pub fn discover(parent: &Path) -> Result<Vec<Source>, String> {
             parameters: settings.parameters, resources: BTreeMap::new(), bundle: String::new(),
         };
         super::library::validate(&super::library::Library { items: vec![item.clone()], ..Default::default() }, false)?;
-        result.push(Source { directory: fs::canonicalize(&path).map_err(|e| e.to_string())?, item });
+        Ok(Source { directory: fs::canonicalize(&path).map_err(|e| e.to_string())?, item, error: None })
+        })();
+        result.push(parsed.unwrap_or_else(|error| {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            let id = if super::library::valid_id(&name) && !name.starts_with("atelier-") { name.to_string() }
+                else { format!("invalid-folder-{:x}", Sha256::digest(name.as_bytes())) };
+            Source { directory: path.clone(), error: Some(error.clone()), item: Item {
+                id, name: name.chars().take(100).collect(), kind: Kind::Skill,
+                description: error.chars().take(500).collect(), content: String::new(),
+                when: Condition::Always, requires: vec![], automatic: true,
+                parameters: BTreeMap::new(), resources: BTreeMap::new(), bundle: String::new(),
+            }}
+        }));
     }
     Ok(result)
 }

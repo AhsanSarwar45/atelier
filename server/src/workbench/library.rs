@@ -167,6 +167,8 @@ impl Evaluation {
 pub struct Resolved {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<super::skill_folders::Folder>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_source: Option<PathBuf>,
     pub item: Item,
     pub source: String,
     pub customized: bool,
@@ -1105,12 +1107,13 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
         ("project", &mut local, located.as_ref().and_then(|p| p.path.parent().map(Path::to_path_buf))),
     ] {
         if let Some(base) = base {
-            for source in super::skill_folders::discover(&base.join("skills"))? {
+            for mut source in super::skill_folders::discover(&base.join("skills"))? {
                 if library.items.iter().any(|i| i.id == source.item.id) {
-                    return Err(format!("Skill {} exists in both {scope} library.json and a skill folder; keep one source", source.item.id));
+                    source.error = Some(format!("Skill {} exists in both {scope} library.json and a skill folder; keep one source", source.item.id));
+                } else {
+                    library.items.push(source.item.clone());
                 }
-                folders.insert((scope.to_string(), source.item.id.clone()), source.directory);
-                library.items.push(source.item);
+                folders.insert((scope.to_string(), source.item.id.clone()), (source.directory, source.error));
             }
         }
     }
@@ -1166,7 +1169,7 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
             }
             item.parameters.extend(over.parameters.clone());
         }
-        let evaluation = if conflicts.contains(&id) {
+        let mut evaluation = if conflicts.contains(&id) {
             Evaluation::unknown("This project item conflicts with a newly added global ID. Remove the project item and use Customize, or recreate it with a distinct ID.".into())
         } else {
             item.when.evaluate(root, beads)
@@ -1177,7 +1180,7 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
             .filter(|name| crate::routes::find_tool(name, &[]).is_none())
             .cloned()
             .collect();
-        let state = if conflicts.contains(&id) {
+        let mut state = if conflicts.contains(&id) {
             "conflict"
         } else if over.is_some_and(|o| o.disabled) {
             "disabled"
@@ -1192,10 +1195,18 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
         } else {
             "available"
         };
-        let folder = folders.get(&(source.to_string(), id.clone()))
-            .map(|path| super::skill_folders::pin(data, path, &item)).transpose()?;
+        let folder_source = folders.get(&(source.to_string(), id.clone()));
+        let folder = folder_source.map(|(path, error)| {
+            if let Some(error) = error { Err(error.clone()) }
+            else { super::skill_folders::pin(data, path, &item) }
+        }).transpose().unwrap_or_else(|error| {
+            if state != "disabled" { state = "invalid"; }
+            evaluation = Evaluation::unknown(format!("Invalid skill folder: {error}"));
+            None
+        });
         resolved.push(Resolved {
             folder,
+            folder_source: folder_source.map(|(path, _)| path.clone()),
             item,
             source: source.into(),
             customized: over.is_some(),
