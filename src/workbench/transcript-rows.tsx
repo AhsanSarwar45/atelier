@@ -51,7 +51,7 @@ import { ranOfAcp, whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { ANSWERED_BY_APP, NOBODY_ANSWERED, refuses } from '@/workbench/protocol';
 import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { Chipped, Line, SplitPaths, withChips } from '@/workbench/split-paths';
-import { PathChip } from '@/workbench/path-chip';
+import { ChipsInAControl, PathChip } from '@/workbench/path-chip';
 import { sendCommand, type TranscriptItem } from '@/workbench/use-session';
 
 /**
@@ -668,13 +668,15 @@ export const ToolRow = memo(function ToolRow({
               A span inside a button is fine; the conversation's own listener
               stops a chip's click reaching the toggle (bw-khe.13). */}
           <span className="relative top-px truncate">
-            {ranKind === 'edit' && shown.diff?.path.startsWith('/') ? (
-              <>
-                Changed <EditPath path={shown.diff.path} raw={(says ?? item.title).replace(/^Changed\s+/, '')} line={shown.diff.line} />
-              </>
-            ) : (
-              <Chipped text={says ?? item.title} />
-            )}
+            <ChipsInAControl.Provider value>
+              {ranKind === 'edit' && shown.diff?.path.startsWith('/') ? (
+                <>
+                  Changed <EditPath path={shown.diff.path} raw={(says ?? item.title).replace(/^Changed\s+/, '')} line={shown.diff.line} />
+                </>
+              ) : (
+                <Chipped text={says ?? item.title} />
+              )}
+            </ChipsInAControl.Provider>
           </span>
           {/* How long it has been running, while it is running: a call that takes a
               minute must not look the same as one that took none. */}

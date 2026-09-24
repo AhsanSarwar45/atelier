@@ -13,6 +13,8 @@
  * link. Everything written back out is escaped again, so a command containing
  * `&&` or a `<` is still the command it was.
  */
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { PathPiece } from '@/workbench/paths';
 
 /** A tag, or the words between two of them. */
@@ -79,10 +81,10 @@ function chipsInRun(run: string, split: (text: string) => PathPiece[]): string {
     }
     const line = piece.line === null ? '' : ` data-path-line="${piece.line}"`;
     out +=
-      `<span data-path-mention="${escapeHtml(piece.absolute)}"${line}` +
+      `<button type="button" data-slot="button" data-path-mention="${escapeHtml(piece.absolute)}"${line}` +
       ` data-testid="path-chip" data-path-look="link"` +
-      ` class="${CHIP_CLASS}" title="${escapeHtml(TITLE(piece.line))}">` +
-      `${escapeHtml(piece.raw)}</span>`;
+      ` class="${escapeHtml(CHIP_BUTTON.className)}" title="${escapeHtml(TITLE(piece.line))}">` +
+      `${escapeHtml(piece.raw)}</button>`;
   }
   return out;
 }
@@ -97,6 +99,19 @@ function chipsInRun(run: string, split: (text: string) => PathPiece[]): string {
 export const CHIP_CLASS =
   'cursor-pointer underline decoration-dotted underline-offset-2 ' +
   'decoration-muted-foreground/50 hover:decoration-foreground hover:text-foreground';
+
+/**
+ * The library's link `Button` a chip is, where there is room for a button: a
+ * word in the colour and type of the line, with the chip's dotted underline.
+ * `props` is what `PathChip` hands the component; `className` is the same
+ * button spelled into HTML, for the chips built into a painted string, where
+ * no component can be drawn (bw-weih.5).
+ */
+const CHIP_BUTTON_PROPS = { mode: 'link', variant: 'inverse', underlined: 'solid', size: 'inherit' } as const;
+export const CHIP_BUTTON = {
+  props: CHIP_BUTTON_PROPS,
+  className: cn(buttonVariants(CHIP_BUTTON_PROPS), CHIP_CLASS),
+};
 
 /**
  * What the reader is told a chip does, before they risk clicking it — including

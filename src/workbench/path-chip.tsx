@@ -34,14 +34,26 @@
  */
 'use client';
 
+import { createContext, useContext } from 'react';
+
 import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from '@/components/file-kinds';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { CHIP_CLASS, TITLE } from '@/workbench/paths-in-html';
+import { CHIP_BUTTON, CHIP_CLASS, TITLE } from '@/workbench/paths-in-html';
 
 /** How a file is drawn where it was named. */
 export type PathLook = 'badge' | 'link';
+
+/**
+ * Set by a control whose own words carry chips — the line that opens a tool
+ * row. A link chip is a button so the keyboard can reach it, and a button
+ * cannot sit inside another one: the browser would close the outer one at the
+ * inner one's tag. So inside such a line the chip stays marked words, which
+ * the conversation's listener answers all the same (bw-weih.5).
+ */
+export const ChipsInAControl = createContext(false);
 
 /** A file named in a message. Its words are the reader's, not the address. */
 export function PathChip({
@@ -92,11 +104,24 @@ export function PathChip({
     );
   }
 
+  return <LinkChip marks={marks} raw={raw} line={line} />;
+}
+
+function LinkChip({ marks, raw, line }: { marks: Record<string, string>; raw: string; line: number | null }) {
+  const inAControl = useContext(ChipsInAControl);
   return (
     <Tooltip label={TITLE(line)}>
-      <span {...marks} data-path-look="link" className={CHIP_CLASS}>
-        {raw}
-      </span>
+      {inAControl ? (
+        <span {...marks} data-path-look="link" className={CHIP_CLASS}>
+          {raw}
+        </span>
+      ) : (
+        // No handler of its own: the conversation's listener hears the click,
+        // and Enter on a button is a click, so the keyboard opens it the same.
+        <Button type="button" {...CHIP_BUTTON.props} {...marks} data-path-look="link" className={CHIP_CLASS}>
+          {raw}
+        </Button>
+      )}
     </Tooltip>
   );
 }

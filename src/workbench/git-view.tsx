@@ -312,8 +312,17 @@ function FileLine({
             : `${path} — click to ${showsDiff ? 'show its diff' : 'open in the Files tab'}`
         }
       >
-        <span
-          className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-1 hover:text-foreground"
+        {/* A button, so the keyboard reaches it too: Enter is a click, and the
+            rail's listener answers it the same. It is one line of a list, so on
+            a phone it takes the row's band rather than growing. */}
+        <Button
+          type="button"
+          mode="link"
+          variant="inverse"
+          underline="solid"
+          size="inherit"
+          className="flex min-w-0 flex-1 items-baseline gap-1"
+          data-reach="row"
           data-testid="git-file-name"
           data-git-show={showsDiff ? path : undefined}
           data-path-mention={absolute}
@@ -325,7 +334,7 @@ function FileLine({
             // file lives, a name cut short says nothing at all.
             <span className="min-w-0 shrink-[10] truncate text-[10px] text-t-faint">{folder}</span>
           )}
-        </span>
+        </Button>
       </Tooltip>
       {extra}
       <Button

@@ -41,6 +41,18 @@ describe('file links in activity', () => {
     }
   });
 
+  it('makes the diff header\'s chip a button, and keeps the row line\'s chip words inside its toggle', () => {
+    draw();
+    const [inRow, inHeader] = screen.getAllByTestId('path-chip');
+    // A button cannot hold another button, so the chip in the line that opens
+    // the row stays marked words; the one in the header can be reached by Tab.
+    expect(inRow!.tagName).toBe('SPAN');
+    expect(inRow!.closest('[data-testid="tool-toggle"]')).not.toBeNull();
+    expect(inHeader!.tagName).toBe('BUTTON');
+    expect(inHeader).toHaveAttribute('type', 'button');
+    expect(inHeader!.closest('button:not([data-path-mention])')).toBeNull();
+  });
+
   it('opens an edit link in the Files tab at that line without toggling the row', () => {
     draw();
     const chip = screen.getAllByTestId('path-chip')[0]!;

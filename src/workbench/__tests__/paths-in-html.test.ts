@@ -21,7 +21,19 @@ describe('chips in painted text', () => {
   it('wraps an address that is really there', () => {
     const out = chipsInHtml('cd /home/someone/project', split(ALL));
     expect(out).toContain('data-path-mention="/home/someone/project"');
-    expect(out).toContain('>/home/someone/project</span>');
+    expect(out).toContain('>/home/someone/project</button>');
+  });
+
+  it('makes the chip the library\'s link button, so the keyboard can reach it', () => {
+    const out = chipsInHtml('cd /home/someone/project', split(ALL));
+    const box = document.createElement('div');
+    box.innerHTML = out;
+    const chip = box.querySelector('[data-path-mention]')!;
+    expect(chip.tagName).toBe('BUTTON');
+    expect(chip.getAttribute('type')).toBe('button');
+    expect(chip.getAttribute('data-slot')).toBe('button');
+    expect(chip.classList.contains('decoration-dotted')).toBe(true);
+    expect(chip.classList.contains('[font:inherit]')).toBe(true);
   });
 
   it('hands back the same string when nothing in it is a file', () => {
@@ -53,7 +65,7 @@ describe('chips in painted text', () => {
   it('carries the line when one was written', () => {
     const out = chipsInHtml('src/lib/api.ts:42', split(ALL));
     expect(out).toContain('data-path-line="42"');
-    expect(out).toContain('>src/lib/api.ts:42</span>');
+    expect(out).toContain('>src/lib/api.ts:42</button>');
   });
 
   it('carries no line when none was', () => {
