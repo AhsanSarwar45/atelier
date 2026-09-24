@@ -8,8 +8,10 @@ Required verification and review happen before landing. Installation, deployment
 worktree cleanup and presentation do not keep delivered work open.
 
 A leaf is Todo until claimed, then In Progress. Review and Manager Review are
-pre-landing states. A failed prerequisite leaves the work unlanded. Cancelled
-means the scope was withdrawn, not delivered. Record the reason.
+pre-landing states. A missing review or manager approval leaves the work
+unlanded. Failing checks are different; see "Failing checks never block
+landing" below. Cancelled means the scope was withdrawn, not delivered. Record
+the reason.
 
 An epic is a recursive view of required descendants, never a second status to
 maintain. All required descendants landed means Done. Cancelled descendants
@@ -70,15 +72,23 @@ External review follows the project's policy; use the external-review skill
 when an independent review is required. The native lander runs missing checks,
 verifies required review and manager approval, rebases, acquires the merge slot,
 and fast-forwards main. A project that declares no verification suite has no
-check step at all: nothing is run and nothing is demanded. A suite that fails
-refuses the landing and says which of the two answers it wants. Failures this
-work caused are fixed and landed again. Failures it did not cause land with
-`atelier tool board/land CARD-ID --checks-unrelated 'why they are not this
-work'`, which records the reason and the still-failing result on the card
-rather than turning it green. A durable landing record closes every named deliverable
-and updates its ancestors. Retry the same command if interrupted. Never manually
+check step: nothing is run and nothing is demanded. A durable landing record
+closes every named deliverable and updates its ancestors. Retry the same command if interrupted. Never manually
 close a deliverable instead of landing it. No-code labels do not fabricate a
 landing. Review findings remain evidence on the work; resolve them before land.
+
+### Failing checks never block landing
+
+`board/land` fails when a declared check fails. Nothing lands, and its output
+says what to do next.
+
+- If this work caused the failures, fix them, commit, and run `board/land` again.
+- If this work did not cause them, land anyway and say why:
+  `atelier tool board/land CARD-ID --checks-unrelated 'REASON'`. The reason is
+  recorded on the card.
+
+So a failing suite is never a reason to mark work blocked. Always run
+`board/land` and read its output. Never predict what it will do.
 
 The caller's board actor must own the work. Hooks preserve it across compound
 commands and native tools. Another card's assignee is not permission to act as

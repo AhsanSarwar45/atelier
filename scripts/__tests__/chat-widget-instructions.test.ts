@@ -40,6 +40,18 @@ describe('agent chat widget instructions', () => {
     expect(beads).toMatch(/standalone ticket.*do not publish a checklist/i);
   });
 
+  it('says a failing suite never blocks landing, in every copy of the rules', () => {
+    expect(beads).toMatch(/board\/land` fails when a declared check fails/);
+    expect(beads).toMatch(/caused the failures, fix them/);
+    expect(beads).toContain("board/land CARD-ID --checks-unrelated 'REASON'");
+    expect(beads).toMatch(/failing suite is never a reason to mark work blocked/);
+    expect(beads).toMatch(/Always run\s+`board\/land` and read its output\. Never predict what it will do\./);
+    const body = (text: string) => text.slice(text.indexOf('# Atelier and Beads'));
+    const skill = body(beads);
+    expect(body(readFileSync('.agents/skills/beads/SKILL.md', 'utf8'))).toBe(skill);
+    expect(body(readFileSync('docs/board-lifecycle.md', 'utf8')).startsWith(skill.trimEnd())).toBe(true);
+  });
+
   it('keeps the checklist rules out of the skill every session gets', () => {
     expect(instructions[0]).not.toMatch(/checklist/i);
     expect(instructions[0]).not.toMatch(/beads/i);
