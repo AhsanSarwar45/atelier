@@ -20,6 +20,7 @@ import { useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Panel } from '@/components/ui/panel';
 import { Tooltip } from '@/components/ui/tooltip';
 import { usePlanUsage } from '@/workbench/live';
@@ -223,22 +224,14 @@ function spentReads(reset: PlanReset, windows: PlanWindow[]): string | null {
 
 function ResetRow({
   reset,
-  windows,
   now,
-  confirming,
   busy,
   onAsk,
-  onCancel,
-  onConfirm,
 }: {
   reset: PlanReset;
-  windows: PlanWindow[];
   now: Date;
-  confirming: boolean;
   busy: boolean;
   onAsk: () => void;
-  onCancel: () => void;
-  onConfirm: () => void;
 }) {
   const expires = expiryReads(reset.expiresAt);
   const until = untilReads(reset.expiresAt, now);
@@ -265,55 +258,73 @@ function ResetRow({
             </p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">Refills your {refills}</p>
           </div>
-          {!confirming && (
-            <Button
-              size="xs"
-              variant="outline"
-              className="shrink-0"
-              data-testid="usage-reset-use"
-              disabled={!reset.usable || busy}
-              onClick={onAsk}
-            >
-              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-              Use reset
-            </Button>
-          )}
-        </div>
-        {confirming && (
-          <Panel
-            tone="attention"
-            inset="md"
-            className="mt-3"
-            role="alertdialog"
-            aria-labelledby={`reset-ask-${reset.id}`}
-            data-testid="usage-reset-confirmation"
+          <Button
+            size="xs"
+            variant="outline"
+            className="shrink-0"
+            data-testid="usage-reset-use"
+            disabled={!reset.usable || busy}
+            onClick={onAsk}
           >
-            <p id={`reset-ask-${reset.id}`} className="text-sm font-medium text-foreground">
-              Use this reset now?
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              It refills your {refills} straight away and cannot be undone.
-              {spentReads(reset, windows) ? ` ${spentReads(reset, windows)}` : ''}
-            </p>
-            <div className="mt-3 flex justify-end gap-2">
-              <Button size="xs" variant="ghost" data-testid="usage-reset-cancel" disabled={busy} onClick={onCancel}>
-                Keep it
-              </Button>
-              <Button
-                size="xs"
-                variant="primary"
-                data-testid="usage-reset-confirm"
-                disabled={busy}
-                autoFocus
-                onClick={onConfirm}
-              >
-                {busy ? 'Using reset…' : 'Yes, use reset'}
-              </Button>
-            </div>
-          </Panel>
-        )}
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            Use reset
+          </Button>
+        </div>
       </li>
     </Panel>
+  );
+}
+
+/**
+ * The question asked before a reset is used, as a modal over the usage panel.
+ *
+ * Nested inside the panel's own dialog, so Escape and a click outside close
+ * only this one and leave the panel open. While the request is out it cannot
+ * be dismissed, so the answer always has somewhere to land.
+ */
+function ConfirmReset({
+  reset,
+  windows,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  reset: PlanReset | null;
+  windows: PlanWindow[];
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const spent = reset ? spentReads(reset, windows) : null;
+  return (
+    <Dialog
+      open={reset !== null}
+      onOpenChange={(open) => {
+        if (!open && !busy) onCancel();
+      }}
+    >
+      <DialogContent shape="sheet" hideClose role="alertdialog" className="sm:max-w-md" data-testid="usage-reset-confirmation">
+        {reset && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Use this reset now?</DialogTitle>
+              <DialogDescription>
+                {reset.title} refills your {clearsReads(reset.clears)} straight away. This cannot be undone.
+                {spent ? ` ${spent}` : ''}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" data-testid="usage-reset-cancel" disabled={busy} onClick={onCancel}>
+                Keep it
+              </Button>
+              <Button variant="primary" data-testid="usage-reset-confirm" disabled={busy} autoFocus onClick={onConfirm}>
+                {busy ? 'Using reset…' : 'Yes, use reset'}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -396,20 +407,26 @@ export function Resets({
             <ResetRow
               key={reset.id}
               reset={reset}
-              windows={windows}
               now={now}
-              confirming={confirming === reset.id}
               busy={busy}
               onAsk={() => {
                 setSaid(null);
                 setConfirming(reset.id);
               }}
-              onCancel={() => setConfirming(null)}
-              onConfirm={() => void use(reset)}
             />
           ))}
         </ul>
       )}
+      <ConfirmReset
+        reset={resets.items.find((r) => r.id === confirming) ?? null}
+        windows={windows}
+        busy={busy}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          const reset = resets.items.find((r) => r.id === confirming);
+          if (reset) void use(reset);
+        }}
+      />
       {unlisted > 0 && (
         <p className="mt-2 text-[11px] text-muted-foreground">
           {unlisted} more {unlisted === 1 ? 'reset is' : 'resets are'} not listed by the provider.

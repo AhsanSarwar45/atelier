@@ -68,12 +68,25 @@ test.describe('usage resets', () => {
     await use.click();
     const asking = page.getByTestId('usage-reset-confirmation');
     await expect(asking).toContainText('Use this reset now?');
+    await expect(page.getByRole('alertdialog')).toBeVisible();
+    // Let the dialog finish fading in, so the picture shows it as it rests.
+    await page.waitForFunction(() =>
+      document.getAnimations().every((a) => a.playState !== 'running'),
+    );
     await page.screenshot({ path: `${SHOTS}/usage-resets-confirm.png` });
     expect(sent, 'asking must not use the reset').toHaveLength(0);
 
     await page.getByTestId('usage-reset-cancel').click();
     await expect(asking).toHaveCount(0);
     expect(sent, 'keeping it must not use the reset').toHaveLength(0);
+
+    // Escape closes the question and nothing under it.
+    await use.click();
+    await expect(asking).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(asking).toHaveCount(0);
+    await expect(panel).toBeVisible();
+    expect(sent, 'escaping must not use the reset').toHaveLength(0);
 
     await use.click();
     await page.getByTestId('usage-reset-confirm').click();

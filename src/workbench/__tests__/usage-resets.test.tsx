@@ -59,8 +59,14 @@ describe('usage resets', () => {
     );
     expect(request).not.toHaveBeenCalled();
 
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('usage-reset-cancel'));
-    expect(screen.queryByTestId('usage-reset-confirmation')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('usage-reset-confirmation')).toBeNull());
+    expect(request).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('usage-reset-use'));
+    fireEvent.keyDown(screen.getByTestId('usage-reset-confirmation'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('usage-reset-confirmation')).toBeNull());
     expect(request).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('usage-reset-use'));
