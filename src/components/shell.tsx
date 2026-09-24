@@ -18,10 +18,10 @@ import { createContext, forwardRef, useContext, useEffect, useState, type ReactN
 import Link from 'next/link';
 
 import { Loader2, Menu, Settings, SquareTerminal } from 'lucide-react';
-import { createPortal } from 'react-dom';
 
 import { GlobalSettingsButton } from '@/components/global-settings-button';
 import { Button } from '@/components/ui/button';
+import { Portal } from '@/components/ui/portal';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -249,7 +249,7 @@ export function Shell({
 export function TabTools({ tab, children }: { tab: string; children: ReactNode }) {
   const { node, activeTab } = useContext(ToolSlot);
   if (!node || activeTab !== tab) return null;
-  return createPortal(<Toolbar>{children}</Toolbar>, node);
+  return <Portal container={node}><Toolbar>{children}</Toolbar></Portal>;
 }
 
 /**
@@ -262,7 +262,7 @@ export function TabTools({ tab, children }: { tab: string; children: ReactNode }
 export function TabLead({ tab, children }: { tab: string; children: ReactNode }) {
   const { lead, activeTab } = useContext(ToolSlot);
   if (!lead || activeTab !== tab) return null;
-  return createPortal(children, lead);
+  return <Portal container={lead}>{children}</Portal>;
 }
 
 /**
@@ -274,7 +274,7 @@ export function TabLead({ tab, children }: { tab: string; children: ReactNode })
 export function TabTrail({ tab, children }: { tab: string; children: ReactNode }) {
   const { trail, activeTab } = useContext(ToolSlot);
   if (!trail || activeTab !== tab) return null;
-  return createPortal(children, trail);
+  return <Portal container={trail}>{children}</Portal>;
 }
 
 /**
