@@ -327,6 +327,40 @@ const buttonVariants = cva(
           'font-medium text-foreground [&_svg:not([role=img]):not([class*=text-])]:opacity-60 underline underline-offset-4 decoration-dashed decoration-1',
       },
 
+      // A quiet link — "Skip this version", "Enter a sign-in code" — in the
+      // muted colour of the words around it, and a yes-link in the success
+      // colour, as the update notice's "Update & Restart" is (bw-weih.5).
+      {
+        variant: 'dim',
+        mode: 'link',
+        className: 'font-normal text-muted-foreground hover:text-foreground',
+      },
+      {
+        variant: 'dim',
+        mode: 'link',
+        underline: 'solid',
+        className: 'hover:underline hover:underline-offset-4 hover:decoration-solid',
+      },
+      {
+        variant: 'dim',
+        mode: 'link',
+        underlined: 'solid',
+        className: 'underline underline-offset-4 decoration-solid',
+      },
+      {
+        variant: 'success',
+        mode: 'link',
+        className: 'border-0 text-success hover:text-success/80',
+      },
+      // A link that is a word in a sentence: it sits inline and wraps with the
+      // words around it, where a button's box would keep it on one line and
+      // push the whole address past the edge of the card.
+      {
+        mode: 'link',
+        size: 'inherit',
+        className: 'inline whitespace-normal text-left',
+      },
+
       // Ghost
       {
         variant: 'primary',

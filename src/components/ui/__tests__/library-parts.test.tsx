@@ -246,3 +246,39 @@ describe('Badge color', () => {
     expect(tint).not.toHaveAttribute('color');
   });
 });
+
+describe('Button as a link', () => {
+  it('sits inline in a sentence, wrapping with it, when it takes the sentence type', () => {
+    render(
+      <p>
+        See{' '}
+        <Button mode="link" underlined="solid" size="inherit" asChild>
+          <a href="/settings">the settings</a>
+        </Button>
+      </p>,
+    );
+    const link = screen.getByRole('link', { name: 'the settings' });
+    expect(link).toHaveAttribute('href', '/settings');
+    expect(link).toHaveClass('inline', 'whitespace-normal', 'text-primary', 'underline');
+    expect(link).not.toHaveClass('inline-flex', 'whitespace-nowrap');
+  });
+
+  it('comes in a quiet muted colour and in the success colour', () => {
+    render(
+      <>
+        <Button mode="link" variant="dim" underlined="solid" size="sm">
+          Enter a code
+        </Button>
+        <Button mode="link" variant="success" size="xs">
+          Update
+        </Button>
+      </>,
+    );
+    const quiet = screen.getByRole('button', { name: 'Enter a code' });
+    expect(quiet).toHaveClass('text-muted-foreground', 'font-normal', 'underline', 'p-0', 'h-auto');
+    expect(quiet).not.toHaveClass('text-primary');
+    const yes = screen.getByRole('button', { name: 'Update' });
+    expect(yes).toHaveClass('text-success', 'border-0', 'bg-transparent');
+    expect(yes).not.toHaveClass('text-primary', 'bg-background');
+  });
+});
