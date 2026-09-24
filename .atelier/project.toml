@@ -28,8 +28,6 @@ work_areas = [
     "craft",
 ]
 
-[verification]
-
 [[verification.commands]]
 name = "Project checks"
 command = "npm test && (cd server && cargo test)"
