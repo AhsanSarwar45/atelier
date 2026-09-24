@@ -27,13 +27,13 @@ test('delete a skill folder in its own scope without touching another project', 
   expect((await request.put('/api/settings/library', { data: { library: library.library, revision: library.revision, source_revision: library.source_revision } })).ok()).toBeTruthy();
   try {
     await page.goto('/settings?section=library');
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     const shared = page.getByTestId('library-item-delete-shared');
     await expect(shared).toBeVisible();
     mkdirSync('tests/results/skill-deletion', { recursive: true });
     await page.screenshot({ path: `tests/results/skill-deletion/global-${process.env.ATELIER_CAPTURE_BEFORE ? 'before' : 'after'}.png` });
     await page.goto(`/project?id=${project.id}&settings=library`);
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     const local = page.getByTestId('library-item-delete-local');
     await expect(local).toBeVisible();
     await page.screenshot({ path: `tests/results/skill-deletion/project-${process.env.ATELIER_CAPTURE_BEFORE ? 'before' : 'after'}.png` });
@@ -59,10 +59,10 @@ test('delete a skill folder in its own scope without touching another project', 
     expect(existsSync(folders[1])).toBe(false);
     expect(readFileSync(join(folders[0], 'assets/data.bin'))).toEqual(asset);
     await page.reload();
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await expect(local).toHaveCount(0);
     await page.goto('/settings?section=library');
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await shared.getByRole('button', { name: 'Delete…', exact: true }).click();
     await expect(dialog).toContainText(folders[0]);
     await expect(dialog).toHaveCSS('opacity', '1');
@@ -78,7 +78,7 @@ test('delete a skill folder in its own scope without touching another project', 
     await textRow.getByRole('button', { name: 'Delete…', exact: true }).click();
     await dialog.getByRole('button', { name: 'Delete skill', exact: true }).click();
     await expect(textRow).toHaveCount(0);
-    await page.getByRole('button', { name: 'Commands', exact: true }).click();
+    await page.getByRole('radio', { name: 'Commands', exact: true }).click();
     const commandRow = page.getByTestId('library-item-delete-command');
     await commandRow.getByRole('button', { name: 'Delete…', exact: true }).click();
     await dialog.getByRole('button', { name: 'Delete command', exact: true }).click();

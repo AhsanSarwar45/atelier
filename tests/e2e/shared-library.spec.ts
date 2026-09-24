@@ -16,7 +16,7 @@ async function save(request: APIRequestContext, library: unknown, path?: string)
 }
 async function add(page: Page, kind: 'instruction' | 'skill' | 'output style', id: string, name: string, content: string) {
   await page.getByRole('button', { name: `Add ${kind}`, exact: true }).click();
-  await page.getByTestId('editor-advanced').locator('summary').click();
+  await page.getByTestId('editor-advanced').getByRole('button').first().click();
   await page.getByLabel('Item ID', { exact: true }).fill(id);
   await page.getByLabel('Item name', { exact: true }).fill(name);
   await page.getByLabel('Item content', { exact: true }).fill(content);
@@ -50,12 +50,12 @@ test('global and project editors persist conditional skills, instructions and ex
   await expect(page.getByTestId('shared-library')).toBeVisible();
   await add(page, 'instruction', 'shared-conventions', 'Shared conventions', 'When asked for the library proof, include GLOBAL-READY.');
   await saved(page);
-  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.getByRole('radio', { name: 'Skills', exact: true }).click();
   await add(page, 'skill', 'frontend-review', 'Frontend review', 'Read the supporting resource checklist.md with atelier_skill_read. Return its proof code and {{framework}}.');
   await page.getByLabel('Item description').fill('Use when asked to perform the shared frontend review.');
   await choose(page, 'Condition', 'Package declares dependency');
   await page.getByLabel('Dependency name').fill('next');
-  await page.getByTestId('editor-support').locator('summary').click();
+  await page.getByTestId('editor-support').getByRole('button').first().click();
   await page.getByRole('button', { name: 'Add parameters', exact: true }).click();
   await page.getByLabel('Parameters name').fill('framework');
   await page.getByLabel('Parameters value').fill('NEXT-READY');
@@ -78,27 +78,27 @@ test('global and project editors persist conditional skills, instructions and ex
     console.log(execFileSync('atelier', ['tool', 'present', 'compare', '--before-asset', 'fb43499c13b5de4bf5fe2bb8c61ff4474af3deb1ce659ba69fad1ee66f92ef13.png', '--after-asset', capture.captures[0].asset, '--before-alt', 'Settings before the shared library', '--after-alt', 'Shared global skills with condition evidence', '--mode', 'side_by_side'], { env, encoding: 'utf8' }));
   }
 
-  await page.getByRole('button', { name: 'Output styles', exact: true }).click();
+  await page.getByRole('radio', { name: 'Output styles', exact: true }).click();
   await add(page, 'output style', 'concise', 'Concise', 'Use short paragraphs. When asked for library proof, include STYLE-READY.');
   await saved(page);
   await choose(page, 'Selected output style', 'Concise');
   await expect(page.getByTestId('library-item-concise')).toContainText('Available');
   await page.reload();
-  await page.getByRole('button', { name: 'Output styles', exact: true }).click();
+  await page.getByRole('radio', { name: 'Output styles', exact: true }).click();
   await expect(page.getByRole('combobox', { name: 'Selected output style' })).toContainText('Concise');
 
   await page.goto(`/project?id=${project.id}&settings=library`);
   await page.getByRole('textbox', { name: 'Project instructions', exact: true }).fill('When asked for library proof, include PROJECT-READY.');
   await page.getByRole('button', { name: 'Save project instructions' }).click();
   await expect(page.getByRole('button', { name: 'Save project instructions' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.getByRole('radio', { name: 'Skills', exact: true }).click();
   await page.getByTestId('library-item-frontend-review').getByRole('button', { name: 'Customize', exact: true }).click();
-  await page.getByTestId('editor-support').locator('summary').click();
+  await page.getByTestId('editor-support').getByRole('button').first().click();
   await page.getByLabel('Parameters value').fill('PROJECT-NEXT');
   await saved(page);
   await page.getByTestId('library-item-frontend-review').getByRole('switch', { name: 'Enable Frontend review for this project', exact: true }).click();
   await expect(page.getByTestId('library-item-frontend-review')).toContainText('Disabled here');
-  await page.reload(); await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.reload(); await page.getByRole('radio', { name: 'Skills', exact: true }).click();
   await expect(page.getByTestId('library-item-frontend-review')).toContainText('Disabled here');
   await page.getByTestId('library-item-frontend-review').getByRole('switch', { name: 'Enable Frontend review for this project', exact: true }).click();
   await expect(page.getByTestId('library-item-frontend-review')).toContainText('Available');
@@ -106,18 +106,18 @@ test('global and project editors persist conditional skills, instructions and ex
   expect(held.library.overrides['frontend-review'].parameters.framework).toBe('PROJECT-NEXT');
   expect(held.guidance).toContain('GLOBAL-READY'); expect((await (await request.get(`/api/projects/${project.id}/settings`)).json()).instructions).toContain('PROJECT-READY'); expect(held.guidance).toContain('STYLE-READY');
   expect(held.guidance).not.toContain('RESOURCE-READY');
-  await page.getByRole('button', { name: 'Output styles', exact: true }).click();
+  await page.getByRole('radio', { name: 'Output styles', exact: true }).click();
   await choose(page, 'Selected output style', 'No shared output style');
   await expect(page.getByTestId('library-item-concise')).toContainText('Not selected');
   await choose(page, 'Selected output style', 'Use global selection');
   await expect(page.getByTestId('library-item-concise')).toContainText('Available');
   await page.screenshot({ path: join(results, 'project-style.png') });
   writeFileSync(join(project.path, 'CLAUDE.md'), 'Keep documentation examples short.');
-  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.getByRole('radio', { name: 'Skills', exact: true }).click();
   await page.getByRole('button', { name: 'Import native file', exact: true }).click();
   await page.getByRole('button', { name: 'CLAUDE.md · instructions', exact: true }).click();
   await expect(page.getByLabel('Item content')).toHaveValue('Keep documentation examples short.');
-  await page.getByTestId('editor-advanced').locator('summary').click();
+  await page.getByTestId('editor-advanced').getByRole('button').first().click();
   await page.getByLabel('Item ID').fill('imported-notes');
   await saved(page);
   expect(readFileSync(join(project.path, 'CLAUDE.md'), 'utf8')).toBe('Keep documentation examples short.');

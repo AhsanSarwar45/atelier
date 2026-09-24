@@ -23,7 +23,7 @@ async function command(request: APIRequestContext, data: unknown) {
 }
 async function edit(page: Page, id: string, inherited = false) {
   await page.getByTestId(`library-item-${id}`).getByRole('button', { name: inherited ? 'Customize' : 'Edit', exact: true }).click();
-  await page.getByTestId('editor-support').locator('summary').click();
+  await page.getByTestId('editor-support').getByRole('button').first().click();
 }
 async function commit(page: Page) { await page.getByRole('button', { name: 'Save item', exact: true }).click(); await expect(page.getByTestId('library-editor')).toHaveCount(0); }
 async function turn(page: Page, text: string) {
@@ -55,7 +55,7 @@ test.afterAll(async ({ request }) => { for (const p of [alpha, beta]) if (p) awa
 
 test('resource add/delete/rename and Unicode survive save and reload without collisions', async ({ page, request }) => {
   await save(request, { items: [item('edit-resources', 'skill', 'Read nested resources')], overrides: {} });
-  await page.goto('/settings?section=library'); await page.getByRole('button', { name: 'Skills', exact: true }).click(); await edit(page, 'edit-resources');
+  await page.goto('/settings?section=library'); await page.getByRole('radio', { name: 'Skills', exact: true }).click(); await edit(page, 'edit-resources');
   await page.getByRole('button', { name: 'Add resources' }).click(); await page.getByRole('button', { name: 'Add resources' }).click();
   await page.getByLabel('Resources value').nth(1).fill('KEEP 日本語 🧪');
   await page.getByRole('button', { name: 'Remove resources' }).first().click();
@@ -63,7 +63,7 @@ test('resource add/delete/rename and Unicode survive save and reload without col
   await expect(page.getByLabel('Resources name')).toHaveCount(2);
   await expect(page.getByLabel('Resources value').first()).toHaveValue('KEEP 日本語 🧪');
   await page.getByLabel('Resources name').first().fill('references/deep/check.md');
-  await commit(page); await page.reload(); await page.getByRole('button', { name: 'Skills', exact: true }).click(); await edit(page, 'edit-resources');
+  await commit(page); await page.reload(); await page.getByRole('radio', { name: 'Skills', exact: true }).click(); await edit(page, 'edit-resources');
   expect(await page.getByLabel('Resources value').evaluateAll(fields => fields.map(field => (field as HTMLTextAreaElement).value))).toContain('KEEP 日本語 🧪');
   expect((await held(request)).library.items[0].resources['references/deep/check.md']).toBe('KEEP 日本語 🧪');
 });
@@ -72,7 +72,7 @@ test('project customization resets to the actual global source and removes proje
   const original = item('inherited', 'skill', 'global {{runner}}', { parameters: { runner: 'npm test' } });
   await save(request, { items: [original], overrides: {} });
   await save(request, { items: [], overrides: { inherited: { parameters: { runner: 'cargo test', extra: 'remove me' }, content: 'project content', automatic: false } } }, alpha);
-  await page.goto(`/project?id=${alpha.id}&settings=library`); await page.getByRole('button', { name: 'Commands', exact: true }).click(); await edit(page, 'inherited', true);
+  await page.goto(`/project?id=${alpha.id}&settings=library`); await page.getByRole('radio', { name: 'Commands', exact: true }).click(); await edit(page, 'inherited', true);
   await page.getByRole('button', { name: 'Reset parameters to global' }).click();
   await page.getByRole('button', { name: 'Remove parameters' }).click();
   await page.getByLabel('Item content').fill(original.content); await page.getByRole('checkbox', { name: 'Allow automatic selection by the agent' }).check();
@@ -80,7 +80,7 @@ test('project customization resets to the actual global source and removes proje
   expect((await held(request, alpha)).library.overrides.inherited).toMatchObject({ parameters: {}, content: null, automatic: null });
   original.content = 'UPDATED GLOBAL {{runner}}'; original.parameters.runner = 'pnpm test';
   await save(request, { items: [original], overrides: {} });
-  await page.reload(); await page.getByRole('button', { name: 'Skills', exact: true }).click(); await edit(page, 'inherited', true);
+  await page.reload(); await page.getByRole('radio', { name: 'Skills', exact: true }).click(); await edit(page, 'inherited', true);
   await expect(page.getByLabel('Item content')).toHaveValue(original.content);
   await expect(page.getByLabel('Parameters value')).toHaveValue('pnpm test');
   expect((await held(request, beta)).library.overrides).toEqual({});
@@ -90,7 +90,7 @@ test('stale browser saves retain the draft, refuse overwrite, and recover on exp
   await save(request, { items: [item('stale', 'skill', 'original')], overrides: {} });
   const other = await context.newPage();
   try {
-    for (const p of [page, other]) { await p.goto('/settings?section=library'); await p.getByRole('button', { name: 'Skills', exact: true }).click(); await edit(p, 'stale'); }
+    for (const p of [page, other]) { await p.goto('/settings?section=library'); await p.getByRole('radio', { name: 'Skills', exact: true }).click(); await edit(p, 'stale'); }
     await page.getByLabel('Item content').fill('first editor'); await commit(page);
     await other.getByLabel('Item content').fill('second editor draft'); await other.getByRole('button', { name: 'Save item', exact: true }).click();
     await expect(other.getByRole('alert').filter({ hasText: 'another editor' })).toBeVisible();
@@ -105,7 +105,7 @@ test('project drafts cannot accidentally pin an outdated global parameter', asyn
   const source = item('changing-source', 'skill', 'Run {{runner}}', { parameters: { runner: 'npm test' } });
   await save(request, { items: [source], overrides: {} });
   await save(request, { items: [], overrides: {} }, alpha);
-  await page.goto(`/project?id=${alpha.id}&settings=library`); await page.getByRole('button', { name: 'Skills', exact: true }).click(); await edit(page, source.id, true);
+  await page.goto(`/project?id=${alpha.id}&settings=library`); await page.getByRole('radio', { name: 'Skills', exact: true }).click(); await edit(page, source.id, true);
   await page.getByLabel('Item content').fill('My procedure {{runner}}');
   source.parameters.runner = 'pnpm test'; await save(request, { items: [source], overrides: {} });
   await page.getByRole('button', { name: 'Save item', exact: true }).click();
@@ -133,7 +133,7 @@ test('conditions and unavailable requirements are explained and differ between p
   expect(a.resolved.items.find((r: any) => r.item.id === 'missing-tool').state).toBe('unavailable');
   writeFileSync(join(alpha.path, 'config.yaml'), 'enabled: [broken');
   expect((await held(request, alpha)).resolved.items.find((r: any) => r.item.id === 'yaml').state).toBe('unknown');
-  await page.goto(`/project?id=${alpha.id}&settings=library`); await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.goto(`/project?id=${alpha.id}&settings=library`); await page.getByRole('radio', { name: 'Skills', exact: true }).click();
   await expect(page.getByTestId('library-item-yaml')).toContainText('Needs evaluation');
   await expect(page.getByTestId('library-item-missing-tool')).toContainText('Missing requirements');
 });
@@ -150,7 +150,7 @@ test('removing global sources exposes orphan customizations and ambiguous IDs di
   await save(request, { items: [], overrides: { source: { content: 'custom' } } }, alpha);
   await page.reload();
   await expect(page.getByRole('button', { name: 'Forget customization' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.getByRole('radio', { name: 'Skills', exact: true }).click();
   await page.getByRole('button', { name: 'Forget customization' }).click();
   await expect(page.getByRole('button', { name: 'Forget customization' })).toHaveCount(0);
 });
@@ -161,13 +161,13 @@ test('global and project forms have clear sections and keep nested groups usable
   await save(request, { items: [], overrides: {} }, alpha);
   for (const project of [undefined, alpha]) {
     await page.goto(project ? `/project?id=${project.id}&settings=library` : '/settings?section=library');
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await edit(page, 'layout', !!project);
     const editor = page.getByTestId('library-editor');
     await expect(editor.getByTestId('editor-section')).toHaveCount(2);
     await expect(editor.getByRole('region', { name: 'What it does' })).toBeVisible();
     await expect(editor.getByRole('region', { name: 'When it applies' })).toBeVisible();
-    await expect(editor.getByTestId('editor-advanced')).not.toHaveAttribute('open');
+    await expect(editor.getByTestId('editor-advanced')).toHaveAttribute('data-state', 'closed');
     await expect(page.getByRole('group', { name: 'Library categories' })).toHaveCount(0);
     await expect(editor.locator('[data-slot="panel"] [data-slot="panel"]')).toHaveCount(0);
     await expect(editor).not.toHaveAttribute('data-slot', 'panel');
@@ -203,10 +203,10 @@ test('global and project forms have clear sections and keep nested groups usable
 test('new guidance needs no advanced setup and explicitly chosen identifiers stay stable', async ({ page, request }) => {
   await save(request, { items: [item('release-check', 'skill', 'existing')], overrides: {} });
   await page.goto('/settings?section=library');
-  await page.getByRole('button', { name: 'Skills', exact: true }).click();
+  await page.getByRole('radio', { name: 'Skills', exact: true }).click();
   await page.getByRole('button', { name: 'Add skill', exact: true }).click();
-  await expect(page.getByTestId('editor-advanced')).not.toHaveAttribute('open');
-  await expect(page.getByTestId('editor-support')).not.toHaveAttribute('open');
+  await expect(page.getByTestId('editor-advanced')).toHaveAttribute('data-state', 'closed');
+  await expect(page.getByTestId('editor-support')).toHaveAttribute('data-state', 'closed');
   await page.getByLabel('Item name').fill('Release check');
   await page.getByLabel('Item content').fill('Check release notes');
   await expect(page.getByText('/skill:release-check-2', { exact: true })).toBeVisible();
@@ -215,11 +215,11 @@ test('new guidance needs no advanced setup and explicitly chosen identifiers sta
   await page.getByRole('button', { name: 'Add skill', exact: true }).click();
   await page.getByLabel('Item name').fill('Atelier review');
   await page.getByLabel('Item content').fill('Review the app');
-  await expect(page.getByTestId('editor-advanced')).not.toHaveAttribute('open');
+  await expect(page.getByTestId('editor-advanced')).toHaveAttribute('data-state', 'closed');
   await commit(page);
   expect((await held(request)).library.items.find((i: any) => i.id === 'my-atelier-review').content).toBe('Review the app');
   await page.getByRole('button', { name: 'Add skill', exact: true }).click();
-  await page.getByTestId('editor-advanced').locator('summary').click();
+  await page.getByTestId('editor-advanced').getByRole('button').first().click();
   await page.getByLabel('Item ID', { exact: true }).fill('chosen-id');
   await page.getByLabel('Item name').fill('Different name');
   await expect(page.getByLabel('Item ID', { exact: true })).toHaveValue('chosen-id');
@@ -254,7 +254,7 @@ for (const brand of ['claude', 'codex']) {
       const s = await start(alpha);
       expect(JSON.parse(await turn(page, prompt))).toEqual({ proof: 'RELEASE-V1', project: 'ALPHA', global: 'GLOBAL-V1', local: 'ALPHA', unicode: '日本語 🧪' });
       await page.getByTestId('chat-shared-library').click();
-      await page.getByTestId('guidance-diagnostics').locator('summary').click();
+      await page.getByTestId('guidance-diagnostics').getByRole('button').first().click();
       const pinned = await page.getByTestId('guidance-popover').innerText();
       await page.keyboard.press('Escape');
       globals.general_instructions = 'For release readiness and manual audit reports the global field is GLOBAL-V2.';
@@ -262,7 +262,7 @@ for (const brand of ['claude', 'codex']) {
       globals.output_style = 'pipe-style'; await save(request, globals);
       expect(JSON.parse(await turn(page, prompt))).toEqual({ proof: 'RELEASE-V1', project: 'ALPHA', global: 'GLOBAL-V1', local: 'ALPHA', unicode: '日本語 🧪' });
       await page.getByTestId('chat-shared-library').click();
-      await page.getByTestId('guidance-diagnostics').locator('summary').click();
+      await page.getByTestId('guidance-diagnostics').getByRole('button').first().click();
       expect(await page.getByTestId('guidance-popover').innerText()).toBe(pinned);
       await page.keyboard.press('Escape');
       const info = await (await request.get(`/api/workbench/session/${s.id}`)).json();
@@ -275,7 +275,7 @@ for (const brand of ['claude', 'codex']) {
       await page.reload();
       expect(await turn(page, prompt)).toBe('PIPE|RELEASE-V2|ALPHA|GLOBAL-V2|ALPHA|日本語 🧪');
       await page.getByTestId('chat-shared-library').click();
-      await page.getByTestId('guidance-diagnostics').locator('summary').click();
+      await page.getByTestId('guidance-diagnostics').getByRole('button').first().click();
       expect(await page.getByTestId('guidance-popover').innerText()).not.toBe(pinned);
       await page.keyboard.press('Escape');
       expect(await turn(page, '/skill:manual-audit Perform the manual audit.')).toBe('PIPE|MANUAL-V1|ALPHA|GLOBAL-V2|ALPHA|日本語 🧪');

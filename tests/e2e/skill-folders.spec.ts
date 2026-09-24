@@ -19,7 +19,7 @@ test('folder collision recovery keeps unrelated saves and JSON removal usable', 
     await page.getByRole('textbox', { name: 'Global instructions', exact: true }).fill('Unrelated guidance can still be saved.');
     await page.getByRole('button', { name: 'Save global instructions', exact: true }).click();
     await expect.poll(async () => (await (await request.get('/api/settings/library')).json()).library.general_instructions).toBe('Unrelated guidance can still be saved.');
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     const row = page.getByTestId('library-item-collision-proof');
     await expect(row).toContainText('Invalid folder');
     await expect(row.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
@@ -83,7 +83,7 @@ for (const brand of ['claude', 'codex']) {
       expect(config.resolved.items.filter((r: any) => r.folder).map((r: any) => r.item.id)).toEqual(expect.arrayContaining(['folder-global', 'folder-local']));
       expect(config.resolved.items.find((r: any) => r.item.id === 'broken-metadata').state).toBe('invalid');
       await page.goto('/settings?section=library');
-      await page.getByRole('button', { name: 'Skills', exact: true }).click();
+      await page.getByRole('radio', { name: 'Skills', exact: true }).click();
       await expect(page.getByTestId('library-item-folder-global')).toContainText('Folder-backed skill');
       await expect(page.getByTestId('library-item-broken-metadata')).toContainText('Folder-backed skill');
       await expect(page.getByTestId('library-item-broken-metadata')).toContainText('Invalid folder');

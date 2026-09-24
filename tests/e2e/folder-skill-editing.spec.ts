@@ -18,7 +18,7 @@ test('edit a complete skill without losing scripts, assets or native metadata', 
   writeFileSync(join(folder, 'atelier.json'), JSON.stringify({ parameters: { subject: 'the project' } }));
   try {
     await page.goto('/settings?section=library');
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     const row = page.getByTestId('library-item-editing-proof');
     await expect(row).toContainText('Editing proof');
     await page.screenshot({ path: `tests/results/shared-library/folder-editor-${process.env.ATELIER_CAPTURE_BEFORE ? 'before' : 'after'}.png`, animations: 'disabled' });
@@ -30,7 +30,7 @@ test('edit a complete skill without losing scripts, assets or native metadata', 
     await page.getByRole('button', { name: 'Save item', exact: true }).click();
     await expect(page.getByRole('status')).toContainText('Saved');
     await page.reload();
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await expect(row).toContainText('Edited proof');
     expect(readFileSync(join(folder, 'assets/data.bin'))).toEqual(binary);
     expect(readFileSync(join(folder, 'scripts/proof.py'), 'utf8')).toBe(helper);
@@ -69,19 +69,19 @@ test('project folder edits and global customizations remain in their own scopes'
   }
   try {
     await page.goto(`/project?id=${project.id}&settings=library`);
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await page.getByTestId('library-item-edit-local').getByRole('button', { name: 'Edit', exact: true }).click();
     await page.getByLabel('Item content', { exact: true }).fill('Project command content.');
     await page.getByRole('checkbox', { name: 'Allow automatic selection by the agent' }).uncheck();
     await page.getByRole('button', { name: 'Save item', exact: true }).click();
     await expect(page.getByTestId('library-item-edit-local')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Commands', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('radio', { name: 'Commands', exact: true })).toHaveAttribute('aria-checked', 'true');
     await page.reload();
-    await page.getByRole('button', { name: 'Commands', exact: true }).click();
+    await page.getByRole('radio', { name: 'Commands', exact: true }).click();
     await page.getByTestId('library-item-edit-local').getByRole('button', { name: 'Edit', exact: true }).click();
     await expect(page.getByLabel('Item content', { exact: true })).toHaveValue('Project command content.');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await page.getByTestId('library-item-edit-global').getByRole('button', { name: 'Customize', exact: true }).click();
     await page.getByLabel('Item content', { exact: true }).fill('Only this project sees this customization.');
     await page.getByRole('button', { name: 'Save item', exact: true }).click();
@@ -103,6 +103,6 @@ test('provider settings link to the single shared output-style selector', async 
   await expect(page.getByText('Controls how Claude writes responses', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: 'tests/results/agent-files-delete/claude-style-after.png', fullPage: true });
   await page.getByRole('link', { name: 'Manage output styles' }).click();
-  await expect(page.getByRole('button', { name: 'Output styles', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('radio', { name: 'Output styles', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByText('Selected output style', { exact: true }).first()).toBeVisible();
 });

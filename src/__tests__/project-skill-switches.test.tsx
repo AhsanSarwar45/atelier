@@ -18,7 +18,7 @@ describe('project skill switches', () => {
     const initial = answer(source, 'available', { proof: { content: 'Keep customized text', parameters: { key: 'keep' } } });
     request.mockResolvedValue({ ok: true, json: async () => initial });
     render(<SharedLibrary projectPath="/project one" />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Skills', exact: true }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Skills', exact: true }));
     fireEvent.click(screen.getByRole('switch', { name: 'Enable Proof for this project' }));
     await waitFor(() => expect(request).toHaveBeenCalledWith('/api/settings/library?path=%2Fproject+one', expect.objectContaining({ method: 'PUT' })));
     const body = JSON.parse(request.mock.calls.find(call => call[1]?.method === 'PUT')![1].body);
@@ -28,7 +28,7 @@ describe('project skill switches', () => {
   it('uses the saved preference even when the effective state is conflict', async () => {
     request.mockResolvedValue({ ok: true, json: async () => answer('global', 'conflict', { proof: { disabled: true } }) });
     render(<SharedLibrary projectPath="/repo" />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Skills', exact: true }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Skills', exact: true }));
     const toggle = screen.getByRole('switch', { name: 'Enable Proof for this project' });
     expect(toggle).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(toggle);
@@ -42,7 +42,7 @@ describe('project skill switches', () => {
       ? { ok: false, text: async () => 'Settings changed. Reload before saving.' }
       : { ok: true, json: async () => answer() });
     render(<SharedLibrary projectPath="/repo" />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Skills', exact: true }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Skills', exact: true }));
     fireEvent.click(screen.getByRole('switch', { name: 'Enable Proof for this project' }));
     await screen.findByRole('alert');
     expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
@@ -51,14 +51,14 @@ describe('project skill switches', () => {
   it('does not offer project switches in global settings', async () => {
     request.mockImplementation(async url => ({ ok: true, json: async () => url === '/api/projects' ? [] : answer() }));
     render(<SharedLibrary />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Skills', exact: true }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Skills', exact: true }));
     expect(within(screen.getByTestId('library-item-proof')).queryByRole('switch')).toBeNull();
   });
 
   it('offers deletion only for items owned by the current scope', async () => {
     request.mockResolvedValue({ ok: true, json: async () => answer() });
     render(<SharedLibrary projectPath="/repo" />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Skills', exact: true }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Skills', exact: true }));
     expect(within(screen.getByTestId('library-item-proof')).queryByRole('button', { name: 'Delete…' })).toBeNull();
   });
 
@@ -73,7 +73,7 @@ describe('project skill switches', () => {
       return deleted ? { ...initial, resolved: { ...initial.resolved, items: [] } } : folderAnswer;
     } }));
     render(<SharedLibrary />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Skills', exact: true }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Skills', exact: true }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete…' }));
     expect(await screen.findByRole('alertdialog')).toHaveTextContent('scripts and assets');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Delete skill', exact: true })).toBeEnabled());

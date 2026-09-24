@@ -30,7 +30,7 @@ test('project switches preserve shared and local skills across reloads', async (
   try {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`/project?id=${project.id}&settings=library`);
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await expect(page.getByTestId('library-item-switch-global-folder')).toBeVisible();
     mkdirSync('tests/results/project-skill-enablement', { recursive: true });
     await page.screenshot({ path: `tests/results/project-skill-enablement/${process.env.ATELIER_CAPTURE_BEFORE ? 'before' : 'after'}.png`, animations: 'disabled' });
@@ -48,7 +48,7 @@ test('project switches preserve shared and local skills across reloads', async (
       await toggle.click();
       await expect(toggle).not.toBeChecked();
       await page.reload();
-      await page.getByRole('button', { name: 'Skills', exact: true }).click();
+      await page.getByRole('radio', { name: 'Skills', exact: true }).click();
       await expect(toggle).not.toBeChecked();
       const held = await (await request.get(projectApi)).json();
       expect(held.resolved.items.find((r: { item: { id: string } }) => r.item.id === id).state).toBe('disabled');
@@ -72,7 +72,7 @@ test('project switches preserve shared and local skills across reloads', async (
     await expect(page.getByRole('alert')).toBeVisible();
     expect((await (await request.get(projectApi)).json()).library.overrides['switch-global-json'].content).toBe('Newer external customization.');
     await page.reload();
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await customRow.getByRole('button', { name: 'Reset to global', exact: true }).click();
     await expect(customRow.getByRole('button', { name: 'Reset to global', exact: true })).toHaveCount(0);
     expect((await (await request.get(projectApi)).json()).library.overrides['switch-global-json']).toBeUndefined();
@@ -82,12 +82,12 @@ test('project switches preserve shared and local skills across reloads', async (
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
       await page.screenshot({ path: `tests/results/project-skill-enablement/after-${width}.png`, animations: 'disabled' });
     }
-    await page.getByRole('button', { name: 'Commands', exact: true }).click();
+    await page.getByRole('radio', { name: 'Commands', exact: true }).click();
     const command = page.getByRole('switch', { name: 'Enable Shared command for this project' });
     await command.click();
     await expect(command).not.toBeChecked();
     await page.reload();
-    await page.getByRole('button', { name: 'Commands', exact: true }).click();
+    await page.getByRole('radio', { name: 'Commands', exact: true }).click();
     await expect(command).not.toBeChecked();
     expect((await (await request.get(api)).json()).library).toEqual(globalBefore);
     expect(readFileSync(join(globalFolder, 'SKILL.md'), 'utf8')).toBe(folderBefore);
@@ -102,7 +102,7 @@ test('project switches preserve shared and local skills across reloads', async (
     } finally { await request.delete(`/api/projects/${otherProject.id}`); rmSync(other, { recursive: true, force: true }); }
     if (process.env.ATELIER_BROWSER_INSPECT) {
       await page.setViewportSize({ width: 1280, height: 800 });
-      await page.getByRole('button', { name: 'Skills', exact: true }).click();
+      await page.getByRole('radio', { name: 'Skills', exact: true }).click();
       console.log('SKILL_SWITCH_INSPECT_URL', page.url());
       await page.waitForTimeout(60_000);
     }
@@ -135,7 +135,7 @@ test('migrated project guidance is discovered without native provider files', as
     expect(readFileSync(join(root, '.atelier/skills/beads/agents/openai.yaml'), 'utf8')).toBe(readFileSync('.atelier/skills/beads/agents/openai.yaml', 'utf8'));
     await page.goto(`/project?id=${project.id}&settings=library`);
     await expect(page.getByRole('textbox', { name: 'Project instructions', exact: true })).toHaveValue(instructions);
-    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await expect(page.getByTestId('library-item-beads')).toContainText('Available');
     await expect(page.getByTestId('library-item-beads').getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
     await page.screenshot({ path: 'tests/results/project-skill-enablement/migrated-project.png', animations: 'disabled' });
