@@ -909,7 +909,8 @@ export function GitView({
           <Picker
             label="Branch"
             data-testid="git-branch-name"
-            className="h-6 min-w-0 flex-1 rounded border-0 px-2 text-xs font-medium text-t-primary shadow-none"
+            appearance="inline"
+            className="min-w-0 flex-1"
             placeholder={status?.branch ?? '—'}
             searchPlaceholder="Search branches"
             empty="No branch matches"

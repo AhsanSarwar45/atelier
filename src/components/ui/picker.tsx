@@ -54,6 +54,7 @@ export function Picker({
   empty = 'Nothing matches',
   label,
   disabled,
+  appearance = 'field',
   className,
   'data-testid': testId,
 }: {
@@ -66,6 +67,12 @@ export function Picker({
   /** What the trigger is called for a reader who cannot see it. */
   label?: string;
   disabled?: boolean;
+  /**
+   * `field` is a form's box. `inline` is the chosen thing written as the words
+   * of its line — no border, no fill — which reads as a label until pressed:
+   * the branch in the git pane's header.
+   */
+  appearance?: 'field' | 'inline';
   className?: string;
   'data-testid'?: string;
 }) {
@@ -114,7 +121,10 @@ export function Picker({
         disabled={disabled}
         data-testid={testId}
         className={cn(
-          'flex h-9 w-full items-center justify-between gap-2 whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+          'flex w-full items-center justify-between gap-2 whitespace-nowrap bg-transparent focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+          appearance === 'inline'
+            ? 'h-6 rounded px-2 text-xs font-medium text-t-primary'
+            : 'h-9 rounded-md border border-input px-3 py-2 text-sm shadow-sm',
           !chosen && 'text-muted-foreground',
           className,
         )}

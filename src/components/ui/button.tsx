@@ -30,6 +30,9 @@ const buttonVariants = cva(
         ghost:
           'text-foreground hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground',
         dim: 'text-muted-foreground hover:text-foreground data-[state=open]:text-foreground',
+        // White on the dark bar laid over a picture, which is dark in every
+        // skin: the picture viewer's zoom and close.
+        media: 'text-white hover:bg-white/10 hover:text-white data-[state=open]:bg-white/20',
         // A yes that moves work forward — approve, update — drawn in the
         // theme's success colour rather than filled, as sign-off and the update
         // notice each used to spell out for themselves.

@@ -199,17 +199,14 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
             <DialogTitle>Add server</DialogTitle>
             <DialogDescription className="sr-only">Add an MCP server from the catalogue</DialogDescription>
           </DialogHeader>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-t-muted" />
-            <Input
-              aria-label="Search servers"
-              placeholder="Search servers…"
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              className="pl-8"
-              data-testid="mcp-catalogue-search"
-            />
-          </div>
+          <Input
+            start={<Search className="text-t-muted" aria-hidden="true" />}
+            aria-label="Search servers"
+            placeholder="Search servers…"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            data-testid="mcp-catalogue-search"
+          />
           {catalogue && !searching && (
             <div className="flex flex-wrap gap-1.5" data-testid="mcp-catalogue-shelves">
               <Button size="sm" variant={shelf === null ? 'secondary' : 'ghost'} onClick={() => setShelf(null)} data-testid="catalogue-shelf-all">

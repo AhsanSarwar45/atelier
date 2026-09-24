@@ -489,13 +489,14 @@ export function UsageView({ brand = 'claude', profile, onClose }: { brand?: Bran
           )}
           <Button
             size="xs"
+            mode="icon"
             variant="ghost"
             className="ml-auto"
             data-testid="usage-close"
             aria-label="Close"
             onClick={onClose}
           >
-            <X className="h-4 w-4" aria-hidden="true" />
+            <X aria-hidden="true" />
           </Button>
         </div>
 

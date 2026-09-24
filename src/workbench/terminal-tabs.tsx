@@ -99,8 +99,7 @@ function TabStrip({ searching, onSearch }: { searching: boolean; onSearch: () =>
             label="Open another shell"
             onClick={openTab}
             busy={opening}
-            size="xs"
-            className="size-5 p-0"
+            size="2xs"
           />
         </div>
         {/*

@@ -389,8 +389,8 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
       <div className={cn(overlayPanel, 'max-w-3xl')}>
         <div className="flex items-center gap-2 border-b border-border/60 p-4">
           <h2 className="text-base font-semibold text-foreground">Tokens</h2>
-          <Button size="xs" variant="ghost" className="ml-auto" data-testid="token-close" aria-label="Close" onClick={onClose}>
-            <X className="h-4 w-4" aria-hidden="true" />
+          <Button size="xs" mode="icon" variant="ghost" className="ml-auto" data-testid="token-close" aria-label="Close" onClick={onClose}>
+            <X aria-hidden="true" />
           </Button>
         </div>
 

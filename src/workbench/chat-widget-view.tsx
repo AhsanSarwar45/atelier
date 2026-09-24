@@ -211,14 +211,14 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
         {current.detail && <p className="mt-0.5 text-xs text-muted-foreground">{current.detail}</p>}
       </div>
       <div className="mt-2 flex gap-1" aria-label="Explanation steps">
-        {widget.steps.map((item, index) => <Button key={`${item.label}-${index}`} type="button" variant="ghost" aria-label={`Step ${index + 1}: ${item.label}`} aria-current={index === step ? 'step' : undefined}
+        {widget.steps.map((item, index) => <Button key={`${item.label}-${index}`} type="button" variant="ghost" size="none" radius="full" aria-label={`Step ${index + 1}: ${item.label}`} aria-current={index === step ? 'step' : undefined}
           onClick={() => { setStep(index); setPlaying(false); }} style={index === step ? { background: explainerAccent(index) } : undefined}
-          className={`h-1.5 flex-1 rounded-full transition-colors motion-reduce:transition-none ${index === step ? '' : 'bg-muted hover:bg-muted-foreground/40'}`} />)}
+          className={`h-1.5 flex-1 transition-colors motion-reduce:transition-none ${index === step ? '' : 'bg-muted hover:bg-muted-foreground/40'}`} />)}
       </div>
       {widget.evidence && widget.evidence.length > 0 && <><Separator className="mt-3" /><div className="flex flex-wrap gap-1.5 pt-3">
         {widget.evidence.map((item) => <Button type="button" key={`${item.path}:${item.line ?? ''}`} variant="secondary" size="xs" onClick={() => openPath({ absolute: item.path, line: item.line ?? null, endLine: null }, 'files')}
-          className="text-[11px] text-muted-foreground hover:text-foreground">
-          <FileCode2 className="size-3" />{item.label}{item.line ? `:${item.line}` : ''}
+          className="text-muted-foreground hover:text-foreground">
+          <FileCode2 />{item.label}{item.line ? `:${item.line}` : ''}
         </Button>)}
       </div></>}
     </WidgetFrame>

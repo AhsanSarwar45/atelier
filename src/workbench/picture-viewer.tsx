@@ -91,10 +91,10 @@ function ZoomViewport({ transform, onChange, children, testId }: {
 function Controls({ transform, onChange }: { transform: ImageTransform; onChange: (transform: ImageTransform) => void }) {
   return (
     <Panel tone="media" inset="bar" className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 gap-1" data-testid="picture-zoom-controls">
-      <Button variant="ghost" mode="icon" size="sm" aria-label="Zoom out" disabled={transform.scale === MIN_SCALE} className="text-white" onClick={() => onChange(changedScale(transform, -0.5))}><Minus /></Button>
+      <Button variant="media" mode="icon" size="sm" aria-label="Zoom out" disabled={transform.scale === MIN_SCALE} onClick={() => onChange(changedScale(transform, -0.5))}><Minus /></Button>
       <span className="flex min-w-14 items-center justify-center text-xs text-white" data-testid="picture-zoom-level">{Math.round(transform.scale * 100)}%</span>
-      <Button variant="ghost" mode="icon" size="sm" aria-label="Zoom in" disabled={transform.scale === MAX_SCALE} className="text-white" onClick={() => onChange(changedScale(transform, 0.5))}><Plus /></Button>
-      <Button variant="ghost" mode="icon" size="sm" aria-label="Reset zoom and position" disabled={transform.scale === MIN_SCALE && transform.x === 0 && transform.y === 0} className="text-white" onClick={() => onChange(RESET)}><RotateCcw /></Button>
+      <Button variant="media" mode="icon" size="sm" aria-label="Zoom in" disabled={transform.scale === MAX_SCALE} onClick={() => onChange(changedScale(transform, 0.5))}><Plus /></Button>
+      <Button variant="media" mode="icon" size="sm" aria-label="Reset zoom and position" disabled={transform.scale === MIN_SCALE && transform.x === 0 && transform.y === 0} onClick={() => onChange(RESET)}><RotateCcw /></Button>
     </Panel>
   );
 }
@@ -226,7 +226,7 @@ export function PictureViewer({ image, onClose }: { image: LookableImage; onClos
         {comparison && comparisonMode === 'side_by_side' && <SideBySide comparison={comparison} transform={transform} onChange={setTransform} />}
         {comparison && comparisonMode === 'wipe' && <Wipe comparison={comparison} transform={transform} onChange={setTransform} />}
         {single && <Single image={single} transform={transform} onChange={setTransform} />}
-        <Button variant="ghost" mode="icon" size="sm" aria-label="Close the picture" data-testid="picture-viewer-close" className="absolute right-4 top-4 z-20 text-white" onClick={onClose}><X className="h-5 w-5" /></Button>
+        <Button variant="media" mode="icon" size="sm" aria-label="Close the picture" data-testid="picture-viewer-close" className="absolute right-4 top-4 z-20" onClick={onClose}><X /></Button>
       </DialogContent>
     </Dialog>
   );

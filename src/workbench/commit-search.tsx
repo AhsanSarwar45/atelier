@@ -59,33 +59,28 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
   return (
     <div className="flex flex-col gap-1.5" data-testid="commit-search">
       <div className="flex items-center gap-1">
-        <div className="relative min-w-0 flex-1">
-          <Search
-            className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-t-faint"
-            aria-hidden="true"
-          />
-          <Input
-            value={line}
-            onChange={(event) => onLine(event.target.value)}
-            placeholder="Search commits"
-            aria-label="Search commits"
-            data-testid="commit-search-box"
-            className="h-7 pl-7 pr-7 text-xs"
-          />
-          {asked && (
+        <Input
+          size="sm"
+          containerClassName="flex-1"
+          start={<Search className="text-t-faint" aria-hidden="true" />}
+          end={asked ? (
             <Button
               size="xs"
               mode="icon"
               variant="ghost"
               aria-label="Clear the search"
               data-testid="commit-search-clear"
-              className="absolute right-0.5 top-1/2 -translate-y-1/2"
               onClick={() => onLine('')}
             >
               <X aria-hidden="true" />
             </Button>
-          )}
-        </div>
+          ) : undefined}
+          value={line}
+          onChange={(event) => onLine(event.target.value)}
+          placeholder="Search commits"
+          aria-label="Search commits"
+          data-testid="commit-search-box"
+        />
         <Popover>
           <PopoverTrigger asChild>
             <Button
@@ -138,7 +133,7 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
                   placeholder="or a date, or 2 weeks ago"
                   aria-label="Since"
                   data-testid="commit-filter-since"
-                  className="h-7 text-xs"
+                  size="sm"
                 />
               </div>
               <Field
@@ -224,7 +219,7 @@ function Field({
         onChange={(event) => onValue(event.target.value)}
         placeholder={placeholder}
         data-testid={testId}
-        className="h-7 text-xs"
+        size="sm"
       />
     </label>
   );

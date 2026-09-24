@@ -160,17 +160,14 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
             <DialogTitle>Install plugin</DialogTitle>
             <DialogDescription className="sr-only">Install a plugin from a marketplace</DialogDescription>
           </DialogHeader>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-t-muted" />
-            <Input
-              aria-label="Search plugins"
-              placeholder="Search plugins…"
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              className="pl-8"
-              data-testid="plugin-catalogue-search"
-            />
-          </div>
+          <Input
+            start={<Search className="text-t-muted" aria-hidden="true" />}
+            aria-label="Search plugins"
+            placeholder="Search plugins…"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            data-testid="plugin-catalogue-search"
+          />
           {catalogue && want === '' && catalogue.categories.length > 0 && (
             <div className="flex flex-wrap gap-1.5" data-testid="plugin-catalogue-shelves">
               <Button size="sm" variant={shelf === null ? 'secondary' : 'ghost'} onClick={() => setShelf(null)} data-testid="plugin-shelf-all">

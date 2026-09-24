@@ -122,7 +122,7 @@ export function CreateBeadDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What needs to be done?"
-              className="bg-surface-overlay/50 border-b-strong text-t-primary placeholder:text-t-muted"
+             
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && !isSubmitting) {
@@ -154,7 +154,7 @@ export function CreateBeadDialog({
               <div className="grid gap-1.5">
                 <label htmlFor="new-card-type" className="text-sm font-medium text-t-secondary">Type</label>
                 <Select value={issueType} onValueChange={setIssueType}>
-                  <SelectTrigger id="new-card-type" className="bg-surface-overlay/50 border-b-strong text-t-primary">
+                  <SelectTrigger id="new-card-type">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-surface-raised border-b-default">
@@ -177,7 +177,7 @@ export function CreateBeadDialog({
             <div className="grid gap-1.5">
               <label htmlFor="new-card-priority" className="text-sm font-medium text-t-secondary">Priority</label>
               <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger id="new-card-priority" className="bg-surface-overlay/50 border-b-strong text-t-primary">
+                <SelectTrigger id="new-card-priority">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-surface-raised border-b-default">
