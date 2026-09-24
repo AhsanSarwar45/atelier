@@ -15,6 +15,7 @@ import { useMemo } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
+import { Badge } from '@/components/ui/badge';
 import { addressWith, cardWasPushed } from '@/lib/address';
 import * as api from '@/lib/api';
 import { ISSUE_TYPES } from '@/lib/issue-types';
@@ -150,7 +151,7 @@ function Meta({ card, matches }: { card: { status: string; issueType: string | n
           <span className="font-mono">{new Date(card.updatedAt).toLocaleDateString()}</span>
         </>
       )}
-      {!!matches && <span className="rounded bg-muted px-1 font-mono">{matches}</span>}
+      {!!matches && <Badge variant="secondary" size="xs" className="font-mono">{matches}</Badge>}
     </>
   );
 }

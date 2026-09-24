@@ -126,6 +126,7 @@ class FileBadge extends WidgetType {
       appearance: 'outline',
       size: 'sm',
       shape: 'circle',
+      wrap: true,
       className: cn(badgeClass(this.kind), opens ? 'cursor-pointer select-none' : 'cursor-default select-none'),
     });
     if (this.picture) {

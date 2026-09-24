@@ -93,6 +93,7 @@ export function PathChip({
           appearance="outline"
           size="sm"
           shape="circle"
+          wrap
           className={cn(FILE_BADGE_CLASS, 'cursor-pointer', FILE_KINDS[kind].color)}
         >
           <span {...marks} data-path-look="badge" data-file-kind={kind}>

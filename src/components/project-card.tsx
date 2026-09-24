@@ -139,13 +139,8 @@ export function ProjectCard({
           {tags.map((tag) => (
             <Badge
               key={tag.id}
-              variant="secondary"
               size="sm"
-              style={{
-                backgroundColor: `${tag.color}20`,
-                color: tag.color,
-                borderColor: tag.color,
-              }}
+              color={tag.color}
             >
               {tag.name}
             </Badge>

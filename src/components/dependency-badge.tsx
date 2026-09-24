@@ -5,7 +5,6 @@ import { AlertCircle, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 
 export interface DependencyBadgeProps {
   /** Bead IDs that this task depends on (blockers) */
@@ -66,11 +65,8 @@ export function DependencyBadge({ deps, blockers, isBlocked, onNavigate }: Depen
           </div>
         }
       >
-        <Badge
-          variant="destructive"
-          className="text-[10px] px-1.5 py-0 cursor-help"
-        >
-          <Lock className="h-3 w-3 mr-0.5" aria-hidden="true" />
+        <Badge variant="destructive" size="xs" className="cursor-help">
+          <Lock aria-hidden="true" />
           BLOCKED
         </Badge>
       </Tooltip>
@@ -102,13 +98,8 @@ export function DependencyBadge({ deps, blockers, isBlocked, onNavigate }: Depen
         </div>
       }
     >
-      <Badge
-        className={cn(
-          "text-[10px] px-1.5 py-0 cursor-help",
-          "bg-blocked-accent text-white hover:bg-blocked-accent/80 border-transparent"
-        )}
-      >
-        <AlertCircle className="h-3 w-3 mr-0.5" aria-hidden="true" />
+      <Badge variant="warning" size="xs" className="cursor-help">
+        <AlertCircle aria-hidden="true" />
         BLOCKING
       </Badge>
     </Tooltip>

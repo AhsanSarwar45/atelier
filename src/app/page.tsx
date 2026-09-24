@@ -125,21 +125,9 @@ export default function ProjectsPage() {
                       <Badge
                         key={tag.id}
                         asChild
-                        variant={isSelected ? "primary" : "outline"}
                         size="sm"
-                        style={
-                          isSelected
-                            ? {
-                                backgroundColor: tag.color,
-                                color: "#fff",
-                                borderColor: tag.color,
-                              }
-                            : {
-                                backgroundColor: `${tag.color}10`,
-                                color: tag.color,
-                                borderColor: `${tag.color}50`,
-                              }
-                        }
+                        color={tag.color}
+                        colorFill={isSelected ? "solid" : "faint"}
                       >
                         <Button
                           type="button"

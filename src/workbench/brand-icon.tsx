@@ -33,6 +33,12 @@ export function BrandIcon({ brand, label, className }: { brand: Brand; label?: s
   );
 }
 
+/**
+ * Each agent's own colour, as a hue the chip mixes against the live theme:
+ * Codex green, Claude orange, local models violet.
+ */
+const BRAND_HUE: Record<Brand, number> = { codex: 160, claude: 25, local: 262 };
+
 export function ProviderBadge({ brand, model, icon, className }: { brand: Brand; model?: string | null; icon?: ReactNode; className?: string }) {
   return (
     <Tooltip label={`Coding agent — ${brandName(brand)}`}>
@@ -40,15 +46,8 @@ export function ProviderBadge({ brand, model, icon, className }: { brand: Brand;
         appearance="light"
         size="sm"
         shape="circle"
-        className={cn(
-          'shrink-0 gap-1',
-          brand === 'codex'
-            ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-            : brand === 'claude'
-              ? 'border-orange-500/35 bg-orange-500/10 text-orange-700 dark:text-orange-300'
-              : 'border-violet-500/35 bg-violet-500/10 text-violet-700 dark:text-violet-300',
-          className,
-        )}
+        hue={BRAND_HUE[brand]}
+        className={cn('shrink-0', className)}
         data-testid="session-brand"
         data-brand={brand}
       >

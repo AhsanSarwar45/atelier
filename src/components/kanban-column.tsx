@@ -155,7 +155,7 @@ export const KanbanColumn = memo(function KanbanColumn({
         <h2 className={cn("font-semibold text-sm column-title-text", classesFor(status).text)}>{title}</h2>
         <Badge
           variant="secondary"
-          className={cn("text-xs px-2 py-0.5 column-count-badge", classesFor(status).badge)}
+          className={cn("column-count-badge", classesFor(status).badge)}
         >
           {beads.length}
         </Badge>

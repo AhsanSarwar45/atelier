@@ -236,16 +236,7 @@ export function TagBadgeList({ tags, className }: TagBadgeListProps) {
   return (
     <div className={cn("flex flex-wrap gap-1.5", className)}>
       {tags.map((tag) => (
-        <Badge
-          key={tag.id}
-          variant="secondary"
-          className="text-xs"
-          style={{
-            backgroundColor: `${tag.color}20`,
-            color: tag.color,
-            borderColor: tag.color,
-          }}
-        >
+        <Badge key={tag.id} color={tag.color}>
           {tag.name}
         </Badge>
       ))}

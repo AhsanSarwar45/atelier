@@ -234,7 +234,7 @@ function FileLinkBadge({ href, target, children }: {
   const Icon = FILE_KINDS[kind].icon;
   return (
     <Tooltip label={`Open ${target.path}${target.line === null ? '' : ` at line ${target.line}`}`}>
-      <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn(FILE_BADGE_CLASS, FILE_KINDS[kind].color)}>
+      <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" wrap className={cn(FILE_BADGE_CLASS, FILE_KINDS[kind].color)}>
         <a
           href={href}
           data-path-mention={target.path}

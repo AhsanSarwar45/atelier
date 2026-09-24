@@ -31,6 +31,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { ArrowRight, Folder, FolderGit2, GitBranch, GripVertical, Lock, Plus, Ticket, Type, X } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -274,14 +275,17 @@ function Chip({
     );
 
   return (
-    <div
+    // A chip, with the handle, the words and the cross each a button inside
+    // it. The chip's own gap is the room between them.
+    <Badge
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
+      variant={part.kind === 'title' ? 'primary' : part.kind === 'extract' ? 'info' : 'outline'}
+      appearance={part.kind === 'text' ? 'default' : 'outline'}
+      size="lg"
+      shape="circle"
       className={cn(
-        'flex h-8 items-center rounded-full border text-sm',
-        part.kind === 'title' && 'border-primary/40 bg-primary/10 text-t-primary',
-        part.kind === 'extract' && 'border-sky-500/40 bg-sky-500/10 text-t-primary',
-        part.kind === 'text' && 'border-dashed border-b-default bg-surface-raised text-t-secondary',
+        part.kind === 'text' && 'border-dashed',
         problem && 'border-destructive ring-1 ring-destructive/40',
         isDragging && 'z-10 opacity-80 shadow-md',
       )}
@@ -292,7 +296,7 @@ function Chip({
         type="button"
         variant="dim"
         size="none"
-        className="h-full cursor-grab pl-2 pr-0.5 touch-none active:cursor-grabbing"
+        className="h-full cursor-grab touch-none active:cursor-grabbing"
         aria-label="Drag to reorder"
         {...attributes}
         {...listeners}
@@ -300,11 +304,11 @@ function Chip({
         <GripVertical className="size-3.5" />
       </Button>
       {part.kind === 'title' ? (
-        <span className="flex items-center gap-1.5 px-1">{label}</span>
+        <span className="flex items-center gap-1.5">{label}</span>
       ) : (
         <Popover open={open} onOpenChange={onOpen}>
           <PopoverTrigger asChild>
-            <Button type="button" variant="foreground" size="none" className="h-full gap-1.5 px-1 hover:underline" data-testid="chat-name-chip-edit">
+            <Button type="button" variant="foreground" size="none" className="h-full gap-1.5 hover:underline" data-testid="chat-name-chip-edit">
               {label}
             </Button>
           </PopoverTrigger>
@@ -362,13 +366,13 @@ function Chip({
         type="button"
         variant="dim"
         size="none"
-        className="h-full pl-0.5 pr-2"
+        className="h-full"
         aria-label="Remove"
         onClick={onRemove}
         data-testid="chat-name-remove"
       >
         <X className="size-3.5" />
       </Button>
-    </div>
+    </Badge>
   );
 }

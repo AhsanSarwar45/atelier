@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle, Clock, FileCode2, Pause, Play, ZoomIn } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
@@ -117,11 +118,10 @@ function FlowDiagram({ widget, active, playing }: { widget: ExplainerWidget; act
   return <div className="grid grid-cols-3 gap-2">
     {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} accent={explainerAccent(index)} className={active.has(node.id) && playing ? 'animate-pulse motion-reduce:animate-none' : ''} />)}
     <div className="col-span-3 flex flex-wrap gap-1.5 pt-1">
-      {widget.edges.map((edge) => { const accent = explainerAccent(Math.max(0, widget.nodes.findIndex((node) => node.id === edge.from))); const lit = active.has(edge.from) || active.has(edge.to); return <span key={`${edge.from}-${edge.to}`} data-accent={accent}
-        style={{ borderColor: `color-mix(in srgb, ${accent} ${lit ? 75 : 30}%, transparent)`, background: `color-mix(in srgb, ${accent} ${lit ? 15 : 5}%, transparent)` }}
-        className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] transition-all duration-500 motion-reduce:transition-none ${lit ? 'text-foreground' : 'opacity-50'}`}>
-        {edge.from}<ChevronRight className="size-3" />{edge.label ?? edge.to}
-      </span>; })}
+      {widget.edges.map((edge) => { const accent = explainerAccent(Math.max(0, widget.nodes.findIndex((node) => node.id === edge.from))); const lit = active.has(edge.from) || active.has(edge.to); return <Badge key={`${edge.from}-${edge.to}`} data-accent={accent} color={accent} colorFill={lit ? 'tint' : 'faint'} size="sm" shape="circle"
+        className={cn('transition-all duration-500 motion-reduce:transition-none', !lit && 'opacity-50')}>
+        {edge.from}<ChevronRight />{edge.label ?? edge.to}
+      </Badge>; })}
     </div>
   </div>;
 }

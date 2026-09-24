@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
+import { Badge } from '@/components/ui/badge';
 import * as api from '@/lib/api';
 import { Excerpt, Heading, PLACE, TITLE } from '@/search/parts';
 import { Marked, Search } from '@/search/search';
@@ -104,9 +105,9 @@ function Meta({ project, brand, at, matches }: { project: string; brand: string;
       <span>·</span>
       <span className="font-mono">{new Date(at).toLocaleDateString()}</span>
       {!!matches && (
-        <span data-testid="search-chat-matches" className="rounded bg-muted px-1 font-mono">
+        <Badge variant="secondary" size="xs" data-testid="search-chat-matches" className="font-mono">
           {matches}
-        </span>
+        </Badge>
       )}
     </>
   );

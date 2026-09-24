@@ -101,7 +101,7 @@ function WaitingTray({ rows, clear }: { rows: Notification[]; clear: () => void 
           data-testid="tray-count"
           // Keep the whole count inside the bar. Negative offsets made it
           // float beyond the bell and let the phone's top edge crop it.
-          className="pointer-events-none absolute right-0 top-0 min-w-4 justify-center px-1"
+          className="pointer-events-none absolute right-0 top-0"
         >
           {waiting.length + updates.length}
         </Badge>
