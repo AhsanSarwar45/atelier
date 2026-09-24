@@ -141,15 +141,17 @@ for (const brand of ['claude', 'codex'] as const) test(`${brand} chat guidance h
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, route => route.fulfill({ json: [{ sessionId: chat, externalId: 'fixture', brand, title: 'Guidance preview', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: project.path, runningElsewhere: false, held: null, beads: [] }] }));
   await page.route(new RegExp(`/api/workbench/session/${chat}$`), route => route.fulfill({ json: { sessionId: chat, origin: 'terminal', brand, externalId: 'fixture', title: 'Guidance preview', cwd: project.path, runningElsewhere: false, held: null, beads: [] } }));
   await page.goto(`/project?id=${project.id}&tab=chat&chat=${chat}`);
-  const guidance = page.getByTestId('chat-shared-library');
-  await expect(guidance).toBeVisible();
+  const badge = page.getByTestId('chat-shared-library');
+  await expect(badge).toBeVisible();
   if (process.env.GUIDANCE_BEFORE === '1') {
-    await guidance.locator('summary').click();
+    await badge.locator(':scope > summary').click();
     await page.screenshot({ path: join(results, `active-guidance-before-${brand}.png`), animations: 'disabled' });
     return;
   }
-  await expect(guidance).not.toHaveAttribute('open');
-  await guidance.getByText('Active guidance', { exact: true }).click();
+  await expect(badge).toHaveAttribute('aria-expanded', 'false');
+  await page.screenshot({ path: join(results, `guidance-badge-${brand}.png`), animations: 'disabled' });
+  await badge.click();
+  const guidance = page.getByTestId('guidance-popover');
   await expect(guidance.getByText('Included in this connection · 2')).toBeVisible();
   await expect(guidance.getByText('Available on demand · 2')).toBeVisible();
   await expect(guidance.getByText('Revision diagnostic-revision-only')).not.toBeVisible();
@@ -157,4 +159,14 @@ for (const brand of ['claude', 'codex'] as const) test(`${brand} chat guidance h
   await page.screenshot({ path: join(results, `active-guidance-after-${brand}.png`), animations: 'disabled' });
   await guidance.getByText('Diagnostics', { exact: true }).click();
   await expect(guidance.getByText('Revision diagnostic-revision-only')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(guidance).not.toBeVisible();
+  await expect(badge).toBeFocused();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const scrim = page.getByTestId('chat-right-rail-scrim');
+  if (await scrim.isVisible()) await page.getByTestId('chat-right-rail-toggle').click();
+  await badge.click();
+  await expect(guidance).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: join(results, `guidance-badge-mobile-${brand}.png`), animations: 'disabled' });
 });

@@ -253,14 +253,18 @@ for (const brand of ['claude', 'codex']) {
     try {
       const s = await start(alpha);
       expect(JSON.parse(await turn(page, prompt))).toEqual({ proof: 'RELEASE-V1', project: 'ALPHA', global: 'GLOBAL-V1', local: 'ALPHA', unicode: '日本語 🧪' });
-      await page.getByTestId('chat-shared-library').locator(':scope > summary').click();
+      await page.getByTestId('chat-shared-library').click();
       await page.getByTestId('guidance-diagnostics').locator('summary').click();
-      const pinned = await page.getByTestId('chat-shared-library').innerText();
+      const pinned = await page.getByTestId('guidance-popover').innerText();
+      await page.keyboard.press('Escape');
       globals.general_instructions = 'For release readiness and manual audit reports the global field is GLOBAL-V2.';
       (globals.items[0].resources as Record<string, string>)['references/deep/release.md'] = 'Report proof RELEASE-V2; project {{workspace}}; unicode 日本語 🧪. Get global and local fields from shared instructions. Follow the selected output style.';
       globals.output_style = 'pipe-style'; await save(request, globals);
       expect(JSON.parse(await turn(page, prompt))).toEqual({ proof: 'RELEASE-V1', project: 'ALPHA', global: 'GLOBAL-V1', local: 'ALPHA', unicode: '日本語 🧪' });
-      expect(await page.getByTestId('chat-shared-library').innerText()).toBe(pinned);
+      await page.getByTestId('chat-shared-library').click();
+      await page.getByTestId('guidance-diagnostics').locator('summary').click();
+      expect(await page.getByTestId('guidance-popover').innerText()).toBe(pinned);
+      await page.keyboard.press('Escape');
       const info = await (await request.get(`/api/workbench/session/${s.id}`)).json();
       await command(request, { type: 'session.close', sessionId: s.id });
       await expect.poll(async () => {
@@ -270,9 +274,10 @@ for (const brand of ['claude', 'codex']) {
       }, { timeout: 30_000, intervals: [500, 1000] }).toBe(true);
       await page.reload();
       expect(await turn(page, prompt)).toBe('PIPE|RELEASE-V2|ALPHA|GLOBAL-V2|ALPHA|日本語 🧪');
-      await page.getByTestId('chat-shared-library').locator(':scope > summary').click();
+      await page.getByTestId('chat-shared-library').click();
       await page.getByTestId('guidance-diagnostics').locator('summary').click();
-      expect(await page.getByTestId('chat-shared-library').innerText()).not.toBe(pinned);
+      expect(await page.getByTestId('guidance-popover').innerText()).not.toBe(pinned);
+      await page.keyboard.press('Escape');
       expect(await turn(page, '/skill:manual-audit Perform the manual audit.')).toBe('PIPE|MANUAL-V1|ALPHA|GLOBAL-V2|ALPHA|日本語 🧪');
       const b = await start(beta);
       const refused = await request.post('/api/workbench/command', { data: { type: 'prompt.send', sessionId: b.id, text: '/skill:auto-release inspect release readiness' } });

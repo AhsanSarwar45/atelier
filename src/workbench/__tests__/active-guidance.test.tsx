@@ -10,8 +10,9 @@ describe('active guidance', () => {
       { id: 'command', name: 'Release', kind: 'skill', source: 'global', state: 'available', automatic: false },
       { id: 'off', name: 'Disabled rule', kind: 'instruction', source: 'global', state: 'disabled' },
     ] }} />);
-    expect(screen.getByTestId('chat-shared-library')).not.toHaveAttribute('open');
-    fireEvent.click(screen.getByText('Active guidance'));
+    expect(screen.getByRole('button', { name: 'Active guidance' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('guidance-popover')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Active guidance' }));
     expect(screen.getByText('Included in this connection · 1')).toBeVisible();
     expect(screen.getByText('Available on demand · 2')).toBeVisible();
     expect(screen.getByText(/Command · Global/)).toBeVisible();

@@ -2563,6 +2563,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       >
         {sessionProfileName && <ProfileBadge name={sessionProfileName} brand={sessionBrand} className="hidden md:inline-flex" />}
         <MemoryBadge />
+        {view.menu.sharedLibrary && <ActiveGuidance snapshot={view.menu.sharedLibrary} />}
         {facts?.folder && (
           <Tooltip label={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}>
             <Badge
@@ -2763,7 +2764,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       </SplitPaths.Provider>
 
       <div className="border-t border-border/60 px-4 py-3">
-        {view.menu.sharedLibrary && <ActiveGuidance snapshot={view.menu.sharedLibrary} />}
         {/* Nothing to write in while another program holds the conversation.
             The box used to be drawn in full and refuse every keystroke, which
             is a door with a lock on it where there is no door: typing here
