@@ -462,7 +462,7 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
         })?;
     let shared_library = super::super::library::snapshot(Path::new(&session.cwd))?;
     let policy = session_policy::build_with_library(Path::new(&session.cwd), &shared_library);
-    let shared_servers = shared_library.mcp_servers()?;
+    let shared_servers = session_servers(&shared_library, Path::new(&session.cwd))?;
     let meta = session_meta(&session.brand, &policy);
     let local_id = session.id.clone();
     let brand = session.brand.clone();
@@ -867,6 +867,19 @@ fn event(value: Value) -> Result<Event, agent_client_protocol::Error> {
 
 fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// The MCP servers every chat is given: the shared skills, and the `chrome`
+/// server for this chat's own private Chrome when the computer can run it.
+fn session_servers(
+    library: &super::super::library::Snapshot,
+    cwd: &Path,
+) -> Result<Vec<agent_client_protocol::schema::v1::McpServer>, String> {
+    let mut servers = library.mcp_servers()?;
+    if let Some(chrome) = super::super::chrome::session_server(cwd) {
+        servers.push(serde_json::from_value(chrome).map_err(|e| e.to_string())?);
+    }
+    Ok(servers)
 }
 
 fn session_meta(brand: &str, policy: &str) -> Meta {
@@ -2263,7 +2276,7 @@ impl AcpDriver {
         };
         let shared_library = super::super::library::snapshot(Path::new(&session.cwd))?;
         let task_policy = session_policy::build_with_library(Path::new(&session.cwd), &shared_library);
-        let shared_servers = shared_library.mcp_servers()?;
+        let shared_servers = session_servers(&shared_library, Path::new(&session.cwd))?;
         // Switching accounts deliberately clears the old provider id: that id
         // belongs to the old account's record directory. The local chat stays
         // the same, but its replacement provider process needs a new remote

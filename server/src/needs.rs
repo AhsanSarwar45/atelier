@@ -53,6 +53,18 @@ pub const NEEDED: &[Need] = &[
         carries: "Codex chats (optional when Claude is installed)",
         from: "https://developers.openai.com/codex/cli",
     },
+    Need {
+        name: "browser",
+        also: &["google-chrome", "chromium", "chromium-browser"],
+        carries: "each chat's private Chrome and screen checks",
+        from: "https://www.google.com/chrome/",
+    },
+    Need {
+        name: "npx",
+        also: &[],
+        carries: "the browser tools every chat gets (Node; Atelier does not bundle it)",
+        from: "https://nodejs.org/en/download",
+    },
 ];
 
 /// One need, and where this computer holds it.

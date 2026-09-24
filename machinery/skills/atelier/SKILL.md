@@ -151,46 +151,34 @@ Claude, and other shell-capable agents.
 
 ## Browser
 
-All Chrome work goes through `atelier tool chrome`: opening, checking,
+All Chrome work goes through Atelier's `chrome` MCP server: opening, checking,
 clicking through, testing, QA, console and network checks, and screenshots.
-It gives this worktree (or this folder, outside git) one private Chrome with
-its own profile and DevTools port. Nobody else uses it.
+Atelier gives it to every chat. It is the Chrome DevTools MCP server, connected
+only to this worktree's private Chrome, which has its own profile and port.
+Chrome starts headed on the first browser tool call, and stops when the last
+chat using it ends.
+
+- Give each simulated user their own `isolatedContext` name in `new_page`,
+  so their logins never overwrite each other.
+- For a script or an end-to-end run, use the same Chrome over CDP:
+  `eval "$(atelier tool chrome env)"`, then Playwright
+  `chromium.connectOverCDP(process.env.CDP_URL)` with one `browser.newContext()`
+  per user.
+- If there is no `chrome` server, `atelier tools` shows why (it needs Node's
+  `npx` and Chrome). Manage the browser by hand:
 
 | Do | Run |
 |---|---|
 | Start, headed on the person's display | `atelier tool chrome up` |
 | Start without a window, only when asked or no display exists | `atelier tool chrome up --headless` |
-| Put the port and driver path into the shell | `eval "$(atelier tool chrome env)"` |
+| Put the port into the shell | `eval "$(atelier tool chrome env)"` |
 | Check it | `atelier tool chrome status` |
 | Stop, or stop and delete the profile | `atelier tool chrome down`, `atelier tool chrome down --wipe` |
 
-Always run `down` when finished. Never stop a browser by name (`pkill`,
-`killall`), never pick a fixed port or a shared profile, and never attach to a
-DevTools port or profile you did not start.
-
-Drive it with the bundled Node driver (Node 22 or later). Give each simulated
-user their own context, so their logins never overwrite each other:
-
-```js
-const { newContext, Session } = await import(process.env.ATELIER_CHROME_DRIVER);
-const { targetId } = await newContext();      // own cookies and storage
-const s = await Session.attach(targetId);
-await s.goto('http://127.0.0.1:4173/');       // waits through redirects
-await s.waitForText('Dashboard');
-await s.typeInto('document.querySelector("#q")', 'text');
-await s.shot('/tmp/after.png');
-```
-
-`Session` also has `resize(w, h)` (kept across `goto`), `text()`, `url()`,
-`eval(body)` (an async function body; `return` a value), `events` (console and
-network), `startRecording()`/`stopRecording()` and `responseBody(id)`.
-`disposeContext(id)` closes one user. The page is told it has a mouse, so a
-headless run does not fall back to a touch layout.
-
-A browser tool your provider supplies (for example a DevTools MCP server) is
-acceptable only when it starts its own temporary profile for this session and
-gives each user a separate context. If you cannot confirm that, use
-`atelier tool chrome`.
+Never stop a browser by name (`pkill`, `killall`), never pick a fixed port or a
+shared profile, and never attach to a DevTools port or profile you did not get
+from `atelier tool chrome`. Do not use any other browser MCP server unless it
+starts its own temporary profile for this chat alone.
 
 ## Visual proof
 
@@ -203,10 +191,11 @@ for the manager to ask.
 
 Pick the route by how the screen is reached:
 
-- Reached by clicking, typing or signing in as one or more users: drive it in
-  `atelier tool chrome`, save it with `s.shot(path)`, then show it with
-  `present image --file` or `present compare --before ... --after ...`. To have
-  it judged, pass the file to `screen-check check --type image`.
+- Reached by clicking, typing or signing in as one or more users: drive it
+  with the `chrome` server, save it with `take_screenshot` and a `filePath`,
+  then show it with `present image --file` or
+  `present compare --before ... --after ...`. To have it judged, pass the file
+  to `screen-check check --type image`.
 - Reached by a URL or a declarative recipe, and it needs a settled, judged
   frame: `atelier tool screen-check`. It starts its own throwaway headless
   Chrome for each capture and deletes it afterwards, so its frames never carry
@@ -223,7 +212,7 @@ and follow the command it returns; do not widen the capture.
 | Page already in the right state | `--type web --target URL` |
 | Login, cookies, headers, clicks, typing, navigation, uploads or waits | `--recipe FILE` |
 | Native app, simulator or remote desktop | one window: `--type window --window-id ID` |
-| A screenshot from `atelier tool chrome` or another authorized tool | `--type image --target FILE` |
+| A screenshot from the `chrome` server or another authorized tool | `--type image --target FILE` |
 | Before and after already captured | `compare --before FILE --after FILE` |
 
 Commands:

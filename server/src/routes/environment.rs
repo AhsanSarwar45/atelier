@@ -36,7 +36,7 @@ const TOOLS: [(&str, &str, &str); 5] = [
     ("bd", "Beads boards", "Install here, or install Beads from https://github.com/gastownhall/beads."),
     ("claude", "Claude chats", "Install and sign in at https://docs.anthropic.com/en/docs/claude-code."),
     ("codex", "Codex chats", "Install and sign in at https://developers.openai.com/codex/cli."),
-    ("browser", "screen checks", "Install Chrome, Chromium, or Edge to capture browser evidence."),
+    ("browser", "each chat's private Chrome and screen checks", "Install Chrome, Chromium, or Edge to use the browser and capture evidence."),
 ];
 
 fn key(tool: &str) -> String { format!("tool.{tool}.path") }
