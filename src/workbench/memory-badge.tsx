@@ -130,7 +130,7 @@ export function MemoryBadge() {
         </div>)}
         {containers.length > 0 && <><div className="my-1 border-t" /><p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Docker containers</p>
           {containers.map(container => <div key={container.id} className="flex items-center gap-2 rounded px-2 py-1.5" data-testid="memory-container-row">
-            <span className="min-w-0 flex-1"><span className="block truncate">{container.name}</span><span className="block truncate text-xs text-muted-foreground" title={container.workingDir ?? undefined}>{owner(container)} · {container.image}</span></span>
+            <span className="min-w-0 flex-1"><span className="block truncate">{container.name}</span><span className="block truncate text-xs text-muted-foreground">{owner(container)} · {container.image}</span></span>
             <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(container.bytes)}</span>
           </div>)}</>}
         {error && <p className="px-2 py-1 text-xs text-destructive" role="alert">{error}</p>}
