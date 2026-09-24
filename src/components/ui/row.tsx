@@ -13,6 +13,12 @@
  * the keyboard is on, which is a different thing from the one the mouse is
  * over: both light up, and a menu being arrowed through with the pointer
  * resting on it shows the reader both answers at once, on purpose.
+ *
+ * `gap` lays a row out as a line of pieces — an icon, a name, a count at the
+ * far end — which is what most rows are; without it the row is a plain block
+ * for one span of words. `look="quiet"` is the row that heads a box of its
+ * own, a tool call's line or a file in a diff: the box is already drawn, so
+ * the row lifts its words rather than filling itself (bw-weih.5).
  */
 import * as React from 'react';
 
@@ -22,14 +28,28 @@ import { Slot as SlotPrimitive } from 'radix-ui';
 import { cn } from '@/lib/utils';
 
 const rowVariants = cva(
-  'block w-full cursor-pointer text-left transition-colors hover:bg-accent hover:text-accent-foreground ' +
-    'focus-visible:outline-hidden focus-visible:bg-accent focus-visible:text-accent-foreground ' +
-    'data-[state=selected]:bg-accent data-[state=selected]:text-accent-foreground ' +
-    'disabled:pointer-events-none disabled:opacity-50',
+  'block w-full cursor-pointer text-left transition-colors disabled:pointer-events-none disabled:opacity-50',
   {
     variants: {
+      look: {
+        fill:
+          'hover:bg-accent hover:text-accent-foreground ' +
+          'focus-visible:outline-hidden focus-visible:bg-accent focus-visible:text-accent-foreground ' +
+          'data-[state=selected]:bg-accent data-[state=selected]:text-accent-foreground',
+        quiet:
+          'hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ' +
+          'data-[state=selected]:text-foreground',
+      },
+      /** The space between the pieces of a row laid out as a line. */
+      gap: {
+        none: '',
+        sm: 'flex items-center gap-1.5',
+        md: 'flex items-center gap-2',
+        lg: 'flex items-center gap-3',
+      },
       inset: {
         none: '',
+        xs: 'px-2 py-1',
         sm: 'px-2 py-1.5',
         md: 'px-3 py-2',
         lg: 'px-4 py-3',
@@ -44,7 +64,7 @@ const rowVariants = cva(
         md: 'rounded-md',
       },
     },
-    defaultVariants: { inset: 'md', ruled: false, radius: 'none' },
+    defaultVariants: { look: 'fill', gap: 'none', inset: 'md', ruled: false, radius: 'none' },
   },
 );
 
@@ -56,7 +76,7 @@ const Row = React.forwardRef<
       selected?: boolean;
       asChild?: boolean;
     }
->(function Row({ className, inset, ruled, radius, selected, asChild = false, type, ...props }, ref) {
+>(function Row({ className, look, gap, inset, ruled, radius, selected, asChild = false, type, ...props }, ref) {
   const Comp = asChild ? SlotPrimitive.Slot : 'button';
   return (
     <Comp
@@ -66,7 +86,7 @@ const Row = React.forwardRef<
       // and takes nothing away from it, which is what keeps middle-click and
       // "open in a new tab" working on a list of places to go.
       {...(asChild ? {} : { type: type ?? 'button' })}
-      className={cn(rowVariants({ inset, ruled, radius }), className)}
+      className={cn(rowVariants({ look, gap, inset, ruled, radius }), className)}
       {...(selected && { 'data-state': 'selected' })}
       {...props}
     />

@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { PointerAnchor, PopoverAtPoint } from '@/components/ui/point-anchor';
 import { Popover, PopoverContent } from '@/components/ui/popover';
+import { Row } from '@/components/ui/row';
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -289,5 +290,41 @@ describe('Table', () => {
     expect(screen.getByRole('table')).toHaveClass('w-max', 'min-w-full', 'text-xs');
     expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveClass('px-3', 'py-2', 'font-medium');
     expect(screen.getByRole('cell', { name: 'web' })).toHaveClass('text-muted-foreground');
+  });
+});
+
+describe('Row', () => {
+  it('lays out a line of pieces, lights up by filling, and stays a link when it is one', () => {
+    render(
+      <>
+        <Row gap="md" inset="xs" selected>
+          <span>icon</span>
+          <span>Name</span>
+        </Row>
+        <Row asChild gap="sm">
+          <a href="/chat">Chat</a>
+        </Row>
+      </>,
+    );
+    const line = screen.getByRole('button', { name: /Name/ });
+    expect(line).toHaveAttribute('type', 'button');
+    expect(line).toHaveAttribute('data-state', 'selected');
+    expect(line).toHaveClass('flex', 'items-center', 'gap-2', 'px-2', 'py-1', 'hover:bg-accent');
+    expect(line).not.toHaveClass('block');
+    const link = screen.getByRole('link', { name: 'Chat' });
+    expect(link).toHaveAttribute('href', '/chat');
+    expect(link).not.toHaveAttribute('type');
+    expect(link).toHaveClass('flex', 'gap-1.5', 'w-full');
+  });
+
+  it('heads a box of its own by lifting its words, not filling', () => {
+    render(
+      <Row look="quiet" inset="none" gap="md">
+        Tool call
+      </Row>,
+    );
+    const head = screen.getByRole('button', { name: 'Tool call' });
+    expect(head).toHaveClass('hover:text-foreground', 'focus-visible:ring-2');
+    expect(head).not.toHaveClass('hover:bg-accent');
   });
 });
