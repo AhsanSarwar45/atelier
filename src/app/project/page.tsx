@@ -214,15 +214,21 @@ function ProjectTabs() {
               still the heading this screen is named by, with the control
               inside it.
 
-              Ten pixels either side on top of the bar's own eight: the name is
-              a WORD and its neighbours are pictures carrying ten pixels of
-              their own padding, so this is what makes the gap beside the name
+              Ten pixels before it on top of the bar's own eight: the name is
+              a WORD and the house before it is a picture carrying ten pixels
+              of its own padding, so this is what makes the gap before the name
               the same as the gap between two pictures — twenty-eight from one
-              drawn thing to the next, the whole way along the bar (bw-r8dg.1).
-              Eight between the two pictures and no less: their invisible
-              thumb bands are 44px around a 36px paint, so anything tighter has
-              one band reaching over its neighbour's middle. */}
-          <h1 className="mx-2.5 min-w-0">
+              drawn thing to the next (bw-r8dg.1). None after it: the dots are
+              the name's own menu, and the full twenty-eight set them as far
+              from their arrow as the house is from the back arrow, which read
+              as a stray button on a phone (bw-weih.10). Eight between the two
+              pictures and no less: their invisible thumb bands are 44px around
+              a 36px paint, so anything tighter has one band reaching over its
+              neighbour's middle.
+
+              A flex box so the switcher inside gives way with it: as a block
+              it kept the name's full width and ran over the dots. */}
+          <h1 className="ml-2.5 flex min-w-0">
             <ProjectSwitcher
               projectId={projectId}
               name={`${project?.name ?? ''}${terminal ? '_' : ''}`}

@@ -89,6 +89,13 @@ test('the bar leaves the same gap between each of its controls', async ({ page, 
       between: `${drawn[i].what} and ${next.what}`,
       size: next.left - drawn[i].right,
     }));
+    // The menu is the name's own, so it sits closer to the name than the bar's
+    // other neighbours do: eight for the bar's gap and ten for the dots' own
+    // padding, with none added after the name. At the full pitch it read as a
+    // stray button, and on a phone it ran into the bell (the owner, bw-weih.10).
+    const menuGap = gaps.pop()!;
+    expect(menuGap.size, `${menuGap.between} are ${menuGap.size.toFixed(1)}px apart`).toBeGreaterThanOrEqual(18 - TOLERANCE);
+    expect(menuGap.size, `${menuGap.between} are ${menuGap.size.toFixed(1)}px apart`).toBeLessThanOrEqual(18 + TOLERANCE);
     const widest = gaps.reduce((a, b) => (a.size > b.size ? a : b));
     const tightest = gaps.reduce((a, b) => (a.size < b.size ? a : b));
     expect(

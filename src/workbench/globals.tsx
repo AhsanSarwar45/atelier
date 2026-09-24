@@ -238,7 +238,11 @@ export function WorkbenchStatus() {
   }, [loaded, notifications, preferences, unheard]);
 
   return (
-    <div data-testid="workbench-globals" className="flex min-w-0 flex-1 items-center justify-end gap-3">
+    // Never narrower than the bell it holds. With `min-w-0` it shrank to
+    // nothing on a phone and the bell, pushed to its end, spilled left over the
+    // project menu's dots; the project's name is what gives way now, cut short
+    // by its own `truncate` (bw-weih.10).
+    <div data-testid="workbench-globals" className="flex flex-1 items-center justify-end gap-3">
       {notifications.length > 0 && <WaitingTray rows={notifications} clear={() => void clear()} />}
     </div>
   );
