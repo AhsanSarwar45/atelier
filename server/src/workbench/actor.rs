@@ -906,9 +906,22 @@ fn live_steering_menu(
                 .into_iter()
                 .flatten()
                 .find(|patch| patch["id"] == option["id"]);
-            if let Some(own) = own {
-                option["currentValue"] = own["currentValue"].clone();
-            }
+            // Unset here, it is whatever a freshly woken agent starts at, not
+            // what another chat turned it to: the wake sends only this chat's
+            // own values, so anything else would be shown and never applied.
+            option["currentValue"] = match own {
+                Some(own) => own["currentValue"].clone(),
+                None if option["type"] == "boolean" => serde_json::json!(false),
+                None => {
+                    let choices = option["options"].as_array().cloned().unwrap_or_default();
+                    choices
+                        .iter()
+                        .find(|choice| choice["value"] == "default")
+                        .or_else(|| choices.first())
+                        .map(|choice| choice["value"].clone())
+                        .unwrap_or(serde_json::Value::Null)
+                }
+            };
         }
     }
     Some(menu)
@@ -1470,7 +1483,7 @@ mod tests {
             "efforts":[{"value":"default","displayName":"Default"},{"value":"high","displayName":"High"}],
             "commands":[{"name":"project-only"}],
             "configOptions":[
-                {"id":"fast-mode","name":"Fast mode","type":"boolean","currentValue":false},
+                {"id":"fast-mode","name":"Fast mode","type":"boolean","currentValue":true},
                 {"id":"agent","type":"select","currentValue":"default","options":[{"value":"reviewer"}]}
             ]
         });
@@ -1482,6 +1495,10 @@ mod tests {
         assert_eq!(offered.fields["sessionId"], "stopped");
         assert_eq!(offered.fields["efforts"][1]["value"], "high");
         assert_eq!(offered.fields["configOptions"][0]["id"], "fast-mode");
+        // The chat that spoke had Fast mode on; this one never set it, so it
+        // shows what its own agent will start at.
+        assert_eq!(offered.fields["configOptions"][0]["currentValue"], false);
+        assert_eq!(offered.fields["configOptions"][1]["currentValue"], "reviewer");
         assert!(offered.fields.get("commands").is_none());
 
         // Another project may allow its provider different things.
