@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 
 import { Download, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 import { request } from '@/lib/api';
 import { onBootstrap } from '@/workbench/live-wire';
 
@@ -91,7 +92,7 @@ export function DependenciesSettings() {
 
   if (!tools.length && !error) return <p className="text-sm text-t-tertiary">Checking this computer…</p>;
   return <div className="space-y-4">
-    {tools.map((tool) => <div key={tool.tool} className="border-b border-b-default pb-4 last:border-0 last:pb-0">
+    {tools.map((tool, index) => <Fragment key={tool.tool}>{index > 0 && <Separator />}<div>
       <div className="flex items-start justify-between gap-3">
         <div><p className="font-medium capitalize text-t-secondary">{tool.tool}</p><p className="text-xs text-t-muted">For {tool.requiredFor} · {tool.version ?? (tool.found ? 'Found' : 'Not found')}</p></div>
         <Button variant="primary" mode="link" underline="solid" size="sm" className="text-xs" asChild><a href={docs[tool.tool]} target="_blank" rel="noreferrer">Install guide <ExternalLink className="size-3" /></a></Button>
@@ -102,7 +103,7 @@ export function DependenciesSettings() {
         {tool.tool === 'bd' && !tool.found && <Button size="sm" disabled={busy === 'bd'} onClick={() => setAsking(true)}>{busy === 'bd' ? <Loader2 className="animate-spin" /> : <Download />} Install</Button>}
       </div>
       {!tool.found && <p className="mt-1 text-xs text-danger">{tool.hint}</p>}
-    </div>)}
+    </div></Fragment>)}
     {progress && <p className="flex items-center gap-2 text-xs text-t-muted"><RefreshCw className={busy === 'bd' ? 'size-3 animate-spin' : 'size-3'} />{progress}</p>}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     <AlertDialog open={asking} onOpenChange={setAsking}>

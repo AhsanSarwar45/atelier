@@ -13,6 +13,7 @@ import { MessagesSquare } from 'lucide-react';
 
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
+import { Separator } from '@/components/ui/separator';
 import { request } from '@/lib/api';
 import type { LinkedChat } from '@/workbench/protocol';
 
@@ -50,7 +51,7 @@ export function CardChats({ beadId, projectId, projectPath }: CardChatsProps) {
         <MessagesSquare className="size-3.5" aria-hidden="true" />
         Chats ({chats.length})
       </h3>
-      <div className="mb-3 h-px bg-b-default" />
+      <Separator className="mb-3" />
       <Panel inset="md">
         <div className="space-y-1">
           {chats.map((c) => (

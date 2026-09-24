@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Row } from "@/components/ui/row";
+import { Separator } from "@/components/ui/separator";
 import type { Tag } from "@/lib/db";
 import {
   getTags,
@@ -162,7 +163,7 @@ export function TagPicker({
           )}
 
           {/* Divider */}
-          {allTags.length > 0 && <div className="border-t border-b-strong" />}
+          {allTags.length > 0 && <Separator />}
 
           {/* Create new tag section */}
           {isCreating ? (

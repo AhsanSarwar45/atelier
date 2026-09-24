@@ -7,6 +7,7 @@ import { MemoryStick, Square } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Separator } from '@/components/ui/separator';
 import { request } from '@/lib/api';
 
 interface MemoryReport {
@@ -117,7 +118,7 @@ export function MemoryBadge() {
           {report.chats.map(chat => <div key={chat.sessionId} className="flex items-center gap-3 rounded px-2 py-1.5" data-testid="memory-chat-row"><span className="min-w-0 flex-1"><span className="block truncate">{chat.title}<span className="ml-1 text-xs text-muted-foreground">({chat.processes})</span></span>
             {(chat.containers ?? 0) > 0 && <span className="block truncate text-xs text-muted-foreground" data-testid="memory-chat-containers">{memoryWords(chat.bytes)} in processes · {memoryWords(chat.containerBytes ?? 0)} in {chat.containers} {chat.containers === 1 ? 'container' : 'containers'}</span>}</span>
             <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(chat.bytes + (chat.containerBytes ?? 0))}</span></div>)}
-          <div className="my-1 border-t" /></>}
+          <Separator className="my-1" /></>}
         <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Processes</p>
         {report.processDetails.map(process => <div key={process.pid} className="flex items-center gap-2 rounded px-2 py-1.5" data-testid="memory-process-row">
           <span className="min-w-0 flex-1"><span className="block truncate">{process.name || 'Process'}</span><span className="block truncate text-xs text-muted-foreground">PID {process.pid} · {role(process)}</span></span>
@@ -128,7 +129,7 @@ export function MemoryBadge() {
             title={confirming === process.pid ? 'Click again to confirm' : 'Stop this subprocess without ending the chat'}
             onClick={() => stop(process)}><Square className="size-3" aria-hidden="true" /></Button>}
         </div>)}
-        {containers.length > 0 && <><div className="my-1 border-t" /><p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Docker containers</p>
+        {containers.length > 0 && <><Separator className="my-1" /><p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Docker containers</p>
           {containers.map(container => <div key={container.id} className="flex items-center gap-2 rounded px-2 py-1.5" data-testid="memory-container-row">
             <span className="min-w-0 flex-1"><span className="block truncate">{container.name}</span><span className="block truncate text-xs text-muted-foreground">{owner(container)} · {container.image}</span></span>
             <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(container.bytes)}</span>

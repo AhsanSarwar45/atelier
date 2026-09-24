@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Separator } from '@/components/ui/separator';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
 import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-widgets';
@@ -214,12 +215,12 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
           onClick={() => { setStep(index); setPlaying(false); }} style={index === step ? { background: explainerAccent(index) } : undefined}
           className={`h-1.5 flex-1 rounded-full transition-colors motion-reduce:transition-none ${index === step ? '' : 'bg-muted hover:bg-muted-foreground/40'}`} />)}
       </div>
-      {widget.evidence && widget.evidence.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5 border-t pt-3">
+      {widget.evidence && widget.evidence.length > 0 && <><Separator className="mt-3" /><div className="flex flex-wrap gap-1.5 pt-3">
         {widget.evidence.map((item) => <Button type="button" key={`${item.path}:${item.line ?? ''}`} variant="secondary" size="xs" onClick={() => openPath({ absolute: item.path, line: item.line ?? null, endLine: null }, 'files')}
           className="text-[11px] text-muted-foreground hover:text-foreground">
           <FileCode2 className="size-3" />{item.label}{item.line ? `:${item.line}` : ''}
         </Button>)}
-      </div>}
+      </div></>}
     </WidgetFrame>
   );
 }

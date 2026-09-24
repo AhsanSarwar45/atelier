@@ -58,6 +58,7 @@ import {
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Separator } from '@/components/ui/separator';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
@@ -700,10 +701,11 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
       </Row>
       {/* A long epic is a list, not a wall: it is capped and scrolls itself
           rather than pushing the transcript off the screen (bw-i7pg.1). */}
+      {expanded && <Separator />}
       <ul
         id="active-checklist-items"
         hidden={!expanded}
-        className="max-h-[min(16rem,40vh)] space-y-1 overflow-y-auto border-t border-border/60 px-3 py-2"
+        className="max-h-[min(16rem,40vh)] space-y-1 overflow-y-auto px-3 py-2"
       >
         {items.map((t) => (
           <li key={t.id} data-testid="todo-item" data-todo-status={t.status} className="flex items-center gap-2 text-sm">

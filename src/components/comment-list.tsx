@@ -8,6 +8,7 @@ import { MarkdownBody } from "@/components/markdown-body";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
+import { Separator } from "@/components/ui/separator";
 import { addComment } from "@/lib/cli";
 import type { Comment } from "@/types";
 
@@ -97,7 +98,7 @@ export function CommentList({
       </div>
 
       {/* Divider */}
-      <div className="border-t" />
+      <Separator />
 
       {/* Comments or empty state */}
       {comments.length === 0 ? (

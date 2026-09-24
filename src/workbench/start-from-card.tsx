@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Separator } from '@/components/ui/separator';
 import type { Bead } from '@/types';
 import { sendCommand } from '@/workbench/use-session';
 import type { Brand } from '@/workbench/protocol';
@@ -62,7 +63,7 @@ export function StartFromCard({ bead, projectId, projectPath, waiting = false }:
   return (
     <div className="mt-6">
       <h3 id={`start-chat-${bead.id}`} className="mb-2 text-sm font-semibold text-t-secondary">Start a chat</h3>
-      <div className="mb-3 h-px bg-b-default" />
+      <Separator className="mb-3" />
       <div className="mb-2 flex flex-wrap gap-2" role="group" aria-labelledby={`start-chat-${bead.id}`}>
         {providers.map((provider) => (
           <Tooltip

@@ -134,21 +134,20 @@ drawing but use library parts for any ordinary control inside them.
 - `path-chip.tsx` link chip → `Button mode="link" size="inherit"`; the chips built into painted HTML are the same button spelled out from `buttonVariants`; the listener is unchanged
 - `git-view.tsx` file name → `Button mode="link" size="inherit"` with the row reach; the listener is unchanged
 
-### Dividers
+### Dividers (done in bw-weih.6)
 
-`h-px` / `border-t` / `<hr>` divs drawn as dividers → `Separator`.
+`h-px` / `border-t` / `<hr>` divs drawn as dividers → `Separator`, which draws every divider in the one border colour; a divider's spacing stays a margin on it.
 
-- `src/components/bead-detail.tsx:394, 416, 428, 440, 500`
-- `src/components/comment-list.tsx:100`
-- `src/components/tag-picker.tsx:164`
-- `src/search/search.tsx:359` (vertical)
-- `src/workbench/card-chats.tsx:53`
-- `src/workbench/chat-tab.tsx:707`
-- `src/workbench/chat-widget-view.tsx:217`
-- `src/workbench/dependencies-settings.tsx:84`
-- `src/workbench/memory-badge.tsx:120, 131`
-- `src/workbench/start-from-card.tsx:65`
-- `src/workbench/visual-artifact-view.tsx:100`
+- `bead-detail.tsx` lines under Description, Design, Notes, Related Tasks and Subtasks → `Separator`
+- `comment-list.tsx` line under the heading → `Separator`
+- `tag-picker.tsx` line above "Create new tag" → `Separator`
+- `search.tsx` line between the scopes and the filters → `Separator orientation="vertical"`
+- `card-chats.tsx`, `start-from-card.tsx` line under the heading → `Separator`
+- `chat-tab.tsx` checklist's top edge → `Separator`, drawn while the list is open
+- `chat-widget-view.tsx` line above the evidence → `Separator`
+- `dependencies-settings.tsx` edge under each tool → `Separator` between tools
+- `memory-badge.tsx` lines before Processes and Docker containers → `Separator`
+- `visual-artifact-view.tsx` mock-up divider `<hr>` → `Separator decorative={false}`, still read out as a separator
 
 ### Badges, chips, dots and bars
 

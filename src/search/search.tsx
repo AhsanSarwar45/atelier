@@ -21,6 +21,7 @@ import { Overlay, overlayPanel } from '@/components/ui/overlay';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Row } from '@/components/ui/row';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { Ask } from '@/search/ask';
 import { QueryBox } from '@/search/parts';
@@ -356,7 +357,7 @@ export function Search<Item, Thing extends Found = Found>({
                   </div>
                 )}
                 {words.scopes.length > 0 && words.filters.length > 0 && (
-                  <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden="true" />
+                  <Separator orientation="vertical" className="mx-1 h-4" aria-hidden="true" />
                 )}
                 {words.filters.map((filter) => (
                   <FilterMenu

@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { Row } from "@/components/ui/row";
+import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -392,7 +393,7 @@ export function BeadDetail({
           {(bead.description || !isReadOnly) && (
             <div className="mt-6">
               <h3 className="text-sm font-semibold mb-2 text-t-secondary">Description</h3>
-              <div className="h-px bg-b-default mb-3" />
+              <Separator className="mb-3" />
               <div className="text-sm text-t-tertiary leading-relaxed">
                 <EditableField
                   value={bead.description ?? ""}
@@ -414,7 +415,7 @@ export function BeadDetail({
                 <span className="inline-block transition-transform group-open:rotate-90">▸</span>
                 Design
               </summary>
-              <div className="h-px bg-b-default my-2" />
+              <Separator className="my-2" />
               <MarkdownBody>{bead.design}</MarkdownBody>
             </details>
           )}
@@ -426,7 +427,7 @@ export function BeadDetail({
                 <span className="inline-block transition-transform group-open:rotate-90">▸</span>
                 Notes
               </summary>
-              <div className="h-px bg-b-default my-2" />
+              <Separator className="my-2" />
               <MarkdownBody>{bead.notes}</MarkdownBody>
             </details>
           )}
@@ -438,7 +439,7 @@ export function BeadDetail({
                 <Link2 className="size-3.5" aria-hidden="true" />
                 Related Tasks ({relatedTasks.length})
               </h3>
-              <div className="h-px bg-b-default mb-3" />
+              <Separator className="mb-3" />
               <Panel inset="md">
                 <div className="space-y-1">
                   {relatedTasks.map((related) => (
@@ -500,7 +501,7 @@ export function BeadDetail({
                   </Button>
                 )}
               </div>
-              <div className="h-px bg-b-default mb-3" />
+              <Separator className="mb-3" />
               <Panel inset="md">
                 <SubtaskList
                   childTasks={childTasks}

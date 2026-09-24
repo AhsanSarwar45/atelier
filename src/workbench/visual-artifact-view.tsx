@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Overlay } from '@/components/ui/overlay';
 import { Panel } from '@/components/ui/panel';
+import { Separator } from '@/components/ui/separator';
 import { request } from '@/lib/api';
 import type { FlowArtifact, MermaidArtifact, MockupArtifact, MockupComponent, SceneArtifact, SceneElement, VisualArtifact } from './visual-artifacts';
 import { visualArtifact } from './visual-artifacts';
@@ -97,7 +98,7 @@ function MockupItem({ item, hidden, onAction }: { item: MockupComponent; hidden:
   if (item.type === 'heading') return <h2 data-component={item.id} className="text-2xl font-semibold tracking-tight">{item.text}</h2>;
   if (item.type === 'text') return <p data-component={item.id} className="text-sm leading-relaxed text-muted-foreground">{item.text}</p>;
   if (item.type === 'badge') return <span data-component={item.id} className={`w-fit rounded-full border px-2.5 py-1 text-xs font-medium ${toneClass[item.tone ?? 'neutral']}`}>{item.text}</span>;
-  if (item.type === 'divider') return <hr data-component={item.id} className="border-border" />;
+  if (item.type === 'divider') return <Separator decorative={false} data-component={item.id} />;
   if (item.type === 'input') return <label data-component={item.id} className="grid gap-1.5 text-sm font-medium">{item.label}<Input aria-label={item.label} placeholder={item.placeholder} className="h-10 font-normal" /></label>;
   if (item.type === 'button') return <Button data-component={item.id} type="button" variant={item.tone === 'neutral' ? 'outline' : 'primary'} onClick={() => onAction(item)}>{item.text}</Button>;
   if (item.type === 'card') return <Panel asChild inset="none" data-component={item.id} className={`grid gap-3 rounded-xl p-4 shadow-sm ${toneClass[item.tone ?? 'neutral']}`}><section>{item.text && <h3 className="font-semibold">{item.text}</h3>}{children}</section></Panel>;
