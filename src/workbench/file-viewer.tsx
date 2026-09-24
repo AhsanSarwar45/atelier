@@ -116,7 +116,7 @@ function UnsavedDot() {
   );
 }
 
-function Notice({ testId, children }: { testId: string; children: ReactNode }) {
+function PaneMessage({ testId, children }: { testId: string; children: ReactNode }) {
   return (
     <div data-testid={testId} className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-t-muted">
       {children}
@@ -360,13 +360,13 @@ export function FileViewer({
       </div>
 
       {error ? (
-        <Notice testId="file-viewer-error">{error}</Notice>
+        <PaneMessage testId="file-viewer-error">{error}</PaneMessage>
       ) : loading || !file ? (
         // Quiet on purpose: a spinner on every click through a tree is a flicker
         // the reader has to look past, and most reads answer inside one frame.
-        <Notice testId="file-viewer-loading">{loading ? 'Reading…' : 'No file open'}</Notice>
+        <PaneMessage testId="file-viewer-loading">{loading ? 'Reading…' : 'No file open'}</PaneMessage>
       ) : file.kind === 'binary' ? (
-        <Notice testId="file-viewer-binary">Binary file, {humaneSize(file.size)}</Notice>
+        <PaneMessage testId="file-viewer-binary">Binary file, {humaneSize(file.size)}</PaneMessage>
       ) : plain ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <Panel shape="strip" inset="xs" className="shrink-0 text-[11px] text-t-muted">
