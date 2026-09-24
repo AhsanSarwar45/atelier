@@ -135,13 +135,7 @@ function Line({
           aria-label={node.label}
           onCheckedChange={() => onFlip(node)}
         />
-        <Button
-          type="button"
-          variant="foreground"
-          size="inherit"
-          onClick={() => onFlip(node)}
-          className="flex-1 justify-start gap-2 p-0 text-left"
-        >
+        <Row look="quiet" gap="md" inset="none" onClick={() => onFlip(node)} className="flex-1">
           <span className={cn('truncate', state === 'off' && 'text-t-tertiary')}>{node.label}</span>
           {/* The count sits at the far end so the numbers line up and the eye
               can run down them; a kind this conversation never used says 0
@@ -149,7 +143,7 @@ function Line({
           <span data-testid="kind-count" className="ml-auto pl-2 tabular-nums text-xs text-t-tertiary">
             {node.count}
           </span>
-        </Button>
+        </Row>
       </div>
 
       {branch &&

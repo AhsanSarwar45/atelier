@@ -37,8 +37,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { History, Search } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Row } from '@/components/ui/row';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -264,24 +264,22 @@ export function HistoryPanel({
           rows.map((ran, index) => {
             const ago = whenAgo(ran.at, now);
             return (
-              <Button
+              <Row
                 // The command, because the list is already de-duplicated on it
                 // by the server and two rows can never carry the same one.
                 key={ran.command}
-                variant="ghost"
-                size="xs"
+                gap="lg"
+                inset="xs"
+                selected={index === here}
                 data-testid="terminal-history-row"
                 data-here={index === here ? 'true' : undefined}
                 onMouseEnter={() => setAt(index)}
                 onClick={() => pick(ran.command)}
-                className={cn(
-                  'h-auto w-full justify-start gap-3 rounded-none px-3 py-1 text-left font-mono text-xs font-normal text-t-secondary',
-                  index === here && 'bg-surface-raised text-t-primary',
-                )}
+                className="font-mono text-xs text-t-secondary"
               >
                 <span className="min-w-0 flex-1 truncate">{ran.command}</span>
                 {ago && <span className="shrink-0 font-sans text-[10px] text-t-tertiary">{ago}</span>}
-              </Button>
+              </Row>
             );
           })
         )}

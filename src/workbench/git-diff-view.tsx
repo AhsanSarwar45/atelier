@@ -27,8 +27,8 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
+import { Row } from '@/components/ui/row';
 import { git, type GitCommitDetail, type GitDiffFile } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { languageOf } from '@/workbench/colouring';
@@ -107,19 +107,18 @@ function FileDiff({
     // room between a file's name and its lines, which nothing else notices,
     // give the target the whole of it (tests/e2e/the-app-on-a-phone.spec.ts).
     <div data-testid="git-diff-file" data-path={file.path} data-open={open} className="flex flex-col gap-1.5 px-3 py-2">
-      {/* The disclosure is the tool row's disclosure: a foreground button that
+      {/* The disclosure is the tool row's disclosure: a quiet row that
           is the whole line, with a chevron that turns. The chip inside it is
           not a second button — the container's capture listener answers the
           chip's click and stops it before this button ever hears it, which is
           the same arrangement the transcript's tool rows use (bw-khe.13). */}
-      <Button
-        type="button"
-        variant="foreground"
-        size="inherit"
+      <Row
+        look="quiet"
+        gap="md"
+        inset="none"
         data-reach="row"
         data-testid="git-diff-file-toggle"
         onClick={onFlip}
-        className="w-full justify-start gap-2 rounded-none p-0 text-left enabled:hover:text-foreground"
       >
         <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
         <span className="min-w-0 truncate">
@@ -142,7 +141,7 @@ function FileDiff({
           <span className="text-success">+{file.additions}</span>{' '}
           <span className="text-danger">−{file.deletions}</span>
         </span>
-      </Button>
+      </Row>
       {open && (
         file.binary ? (
           <p data-testid="git-diff-binary" className="pl-5 text-[11px] text-muted-foreground">

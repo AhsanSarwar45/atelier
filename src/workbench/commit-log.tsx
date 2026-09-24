@@ -21,6 +21,7 @@ import { GitMerge, Tag } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Row } from '@/components/ui/row';
 import { Tooltip } from '@/components/ui/tooltip';
 import { git, type GitCommit } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -229,15 +230,10 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
               const open = made.sha === openSha;
               return (
                 <li key={made.sha}>
-                  <Button
-                    // `inherit` because the row sets its own height, padding
-                    // and type: it is a list row that can be pressed, not a
-                    // capsule, and a second answer to any of those questions
-                    // would be settled by whichever rule the built sheet
-                    // happens to put last.
-                    type="button"
-                    variant="ghost"
-                    size="inherit"
+                  <Row
+                    inset="xs"
+                    radius="md"
+                    selected={open}
                     aria-current={open || undefined}
                     tabIndex={open || (!openSha && at === 0) ? 0 : -1}
                     data-testid="git-log-row"
@@ -245,12 +241,11 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
                     data-open={open || undefined}
                     onClick={() => onOpen?.(made)}
                     className={cn(
-                      'flex w-full flex-col items-stretch justify-start gap-0.5 rounded border-l-2 px-1.5 py-1 text-left',
-                      'hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      'flex flex-col gap-0.5 border-l-2',
                       // The one being read is marked twice -- a filled row and
                       // a bar down its edge -- because a change of background
                       // alone is easy to miss against a list this dense.
-                      open ? 'border-primary bg-surface-3' : 'border-transparent',
+                      open ? 'border-primary' : 'border-transparent',
                     )}
                   >
                     <div className="flex items-baseline gap-1.5">
@@ -294,7 +289,7 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
                         );
                       })}
                     </div>
-                  </Button>
+                  </Row>
                 </li>
               );
             })}

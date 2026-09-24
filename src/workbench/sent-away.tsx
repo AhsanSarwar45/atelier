@@ -487,16 +487,16 @@ export function SentAwayPanel({ agents, items, sessionId, controls, onOpen }: Se
 
       {finished.length > 0 && (
         <>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
+          <Row
+            gap="sm"
+            inset="xs"
+            radius="md"
             aria-expanded={showingFinished}
             aria-controls={finishedId}
             data-testid="toggle-stopped-agents"
             data-showing={showingFinished}
             onClick={() => setShowingFinished((was) => !was)}
-            className="h-auto w-full justify-start gap-1.5 px-1 py-1 text-[11px] font-normal text-muted-foreground hover:bg-muted/40"
+            className="text-[11px] text-muted-foreground"
           >
             {showingFinished ? (
               <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -504,7 +504,7 @@ export function SentAwayPanel({ agents, items, sessionId, controls, onOpen }: Se
               <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             )}
             <span className="min-w-0 truncate">{finishedLabel(showingFinished, finished.length)}</span>
-          </Button>
+          </Row>
           {/* Kept mounted so its rows keep their result and their stopped clock,
               and hidden with the utility rather than the `hidden` attribute:
               `display:flex` from the class beside it wins over preflight's

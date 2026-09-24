@@ -681,14 +681,12 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
   if (!items.length) return null;
   return (
     <Panel data-testid="todo-panel" inset="none" data-expanded={expanded ? 'yes' : 'no'} className="overflow-hidden">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
+      <Row
+        gap="md"
         aria-expanded={expanded}
         aria-controls="active-checklist-items"
         onClick={() => setExpanded((open) => !open)}
-        className="flex min-h-9 w-full justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-muted/40"
+        className="min-h-9"
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         <ListChecks className="h-4 w-4 text-muted-foreground" />
@@ -699,7 +697,7 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
           </span>
         )}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">{complete}/{items.length}</span>
-      </Button>
+      </Row>
       {/* A long epic is a list, not a wall: it is capped and scrolls itself
           rather than pushing the transcript off the screen (bw-i7pg.1). */}
       <ul

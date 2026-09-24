@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
+import { Row } from '@/components/ui/row';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -351,16 +352,15 @@ function DiffView({ diff }: { diff: NonNullable<TranscriptTool['diff']> }) {
             <DiffTable rows={shown} language={language} />
           </div>
           {long && (
-            <Button
-              variant="dim"
-              size="none"
+            <Row
+              inset="xs"
               data-testid="diff-expand"
               aria-expanded={open}
               onClick={() => setOpen(!open)}
-              className="w-full justify-start rounded-none border-t border-border/40 bg-muted/30 px-2 py-1 font-mono text-[11px] hover:bg-muted/60"
+              className="border-t border-border/40 bg-muted/30 font-mono text-[11px] text-muted-foreground"
             >
               {open ? 'Show fewer lines' : `Show all ${rows.length.toLocaleString('en-US')} lines`}
-            </Button>
+            </Row>
           )}
           {left && (
             <div data-testid="diff-omitted" className="border-t border-border/40 bg-muted/20 px-2 py-1 font-mono text-[11px] text-muted-foreground">
@@ -642,15 +642,14 @@ export const ToolRow = memo(function ToolRow({
       className={cn(nested && SENT_OFF)}
     >
       <Panel inset="none" className="px-2.5 py-1 font-mono text-xs text-muted-foreground md:py-1.5">
-        <Button
-          type="button"
-          variant="foreground"
-          size="inherit"
+        <Row
+          look="quiet"
+          gap="md"
+          inset="none"
           data-reach="row"
           data-testid="tool-toggle"
           disabled={!hasBody}
           onClick={() => setOpen(!open)}
-          className="w-full justify-start gap-2 rounded-none p-0 text-left enabled:hover:text-foreground"
         >
           <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
           {hasBody && (
@@ -679,7 +678,7 @@ export const ToolRow = memo(function ToolRow({
             </span>
           )}
           <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
-        </Button>
+        </Row>
         {/* What the agent this call sent away is doing NOW, in its own words.
             Only while it is still going: once the call is over, what it did is
             in its answer and this line is a stale guess (bw-7ks.22.2). */}
@@ -768,15 +767,17 @@ export const MachineLine = memo(
       >
         <Panel inset="none" className={cn('px-2.5 py-1 font-mono text-xs md:py-1.5', look.row)}>
           <Tooltip label={row.kind} wrapperClassName="w-full">
-            <Button
-              type="button"
-              variant="foreground"
-              size="inherit"
+            <Row
+              look="quiet"
+              gap="md"
+              inset="none"
               data-reach="row"
               data-testid="note-toggle"
               disabled={!opens}
               onClick={() => setOpen(!open)}
-              className="w-full justify-start gap-2 rounded-none p-0 text-left enabled:hover:brightness-125"
+              // The line is painted in its family's colour, which lifting the
+              // words to the ordinary text colour would wash out: it glows.
+              className="hover:text-inherit hover:brightness-125"
             >
               <Mark className="h-3 w-3 shrink-0" />
               {opens && (
@@ -796,7 +797,7 @@ export const MachineLine = memo(
               {/* Where a command says OK or FAILED, this says which of the six it
                   is — so the colour is never the only thing carrying it. */}
               <span className="ml-auto shrink-0 uppercase tracking-wide">{row.family}</span>
-            </Button>
+            </Row>
           </Tooltip>
           {open &&
             row.lines.map((line, i) => (
@@ -851,19 +852,19 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
       data-sent-by={item.parentId ?? undefined}
       className={cn('text-sm', sentOff(item.parentId) && SENT_OFF)}
     >
-      <Button
-        type="button"
-        variant="foreground"
-        size="inherit"
+      <Row
+        look="quiet"
+        gap="md"
+        inset="none"
         data-reach="row"
         data-testid="thinking-toggle"
         onClick={() => setOpenedByHand(!open)}
-        className="w-full justify-start gap-2 rounded-none p-0 text-left text-xs uppercase tracking-wide text-muted-foreground hover:text-foreground"
+        className="text-xs uppercase tracking-wide text-muted-foreground"
       >
         <Brain className="h-3.5 w-3.5 shrink-0" />
         <span className="shrink-0">{item.done ? 'Thought' : 'Thinking'}</span>
         {!open && <span className="truncate font-normal normal-case opacity-70">{firstLine}</span>}
-      </Button>
+      </Row>
       {open && (
         <div className="mt-1 border-l-2 border-border/60 pl-3">
           <MarkdownBody className="text-sm italic leading-relaxed text-muted-foreground">
