@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Overlay } from '@/components/ui/overlay';
 import { Panel } from '@/components/ui/panel';
 import { Separator } from '@/components/ui/separator';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { request } from '@/lib/api';
 import type { FlowArtifact, MermaidArtifact, MockupArtifact, MockupComponent, SceneArtifact, SceneElement, VisualArtifact } from './visual-artifacts';
 import { visualArtifact } from './visual-artifacts';
@@ -85,9 +86,9 @@ function SceneView({ artifact }: { artifact: SceneArtifact }) {
     <svg viewBox={artifact.viewBox.join(' ')} role="img" aria-label={`${artifact.title}: ${state.label}`} className="max-h-[36rem] w-full overflow-visible rounded-xl bg-gradient-to-br from-muted/30 to-primary/5">
       {artifact.elements.map((element) => <AnimatedElement key={element.id} element={element} animate={changes.get(element.id) ?? {}} duration={state.duration ?? .7} />)}
     </svg>
-    <div className="mt-3 flex flex-wrap items-center justify-center gap-2" aria-label="Animation states">
-      {artifact.states.map((item, index) => <Button key={item.id} type="button" size="sm" variant={index === step ? 'primary' : 'outline'} aria-current={index === step ? 'step' : undefined} onClick={() => setStep(index)}>{item.label}</Button>)}
-    </div>
+    <ToggleGroup type="single" variant="outline" size="sm" className="mt-3 flex-wrap justify-center gap-2" aria-label="Animation states" value={String(step)} onValueChange={(index) => setStep(Number(index))}>
+      {artifact.states.map((item, index) => <ToggleGroupItem key={item.id} value={String(index)}>{item.label}</ToggleGroupItem>)}
+    </ToggleGroup>
   </div>;
 }
 

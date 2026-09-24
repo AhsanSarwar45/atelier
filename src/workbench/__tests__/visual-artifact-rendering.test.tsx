@@ -27,7 +27,7 @@ describe('visual artifact rendering', () => {
     vi.stubGlobal('fetch', response({ version: 1, kind: 'scene', title: 'Orbit', viewBox: [0, 0, 400, 240], elements: [{ id: 'dot', type: 'circle', cx: 40, cy: 120, r: 12, fill: '#38bdf8' }], states: [{ id: 'start', label: 'Start', changes: [{ element: 'dot', x: 0 }] }, { id: 'finish', label: 'Finish', changes: [{ element: 'dot', x: 300 }] }] }));
     render(<VisualArtifactView asset={`${'c'.repeat(64)}.artifact.json`} />);
     expect(await screen.findByRole('img', { name: 'Orbit: Start' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Finish' }));
     await waitFor(() => expect(screen.getByRole('img', { name: 'Orbit: Finish' })).toBeInTheDocument());
   });
 });
