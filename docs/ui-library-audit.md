@@ -13,8 +13,11 @@ colours this app never defines. It was fixed in bw-weih.1.
 
 ## What was found
 
-No file uses a raw `<button>`, `<input>`, `<textarea>` or `<select>`. That part
-of the rule was already met. What remains falls into three kinds:
+Raw HTML controls are nearly gone. Four remain: the screen-reader-only
+`<button>` on each board card (`bead-card.tsx:131`, `epic-card.tsx:117`, moved
+in batch 7), and two hidden form mirrors with no library equivalent
+(`chat-tab.tsx:901` file input, `composer-editor.tsx:392` textarea). What
+remains falls into three kinds:
 
 1. **Library parts reshaped by `className`.** A `Button` forced into a list
    row, recoloured instead of given a variant, or sized with `h-5` instead of
@@ -63,7 +66,7 @@ drawing but use library parts for any ordinary control inside them.
 - The before/after wipe handle in image-comparison and picture-viewer.
 - Draggable dividers (`split-column`, `resize-divider`) and the terminal's
   floating, draggable window with its resize handles.
-- Screen-reader-only form mirrors (`chat-tab` file input, `composer-editor`
+- Hidden form mirrors (`chat-tab.tsx:901` file input, `composer-editor.tsx:392`
   textarea).
 - Colour swatches whose colour is the data (color-picker, theme-switcher).
 
@@ -153,7 +156,7 @@ drawing but use library parts for any ordinary control inside them.
 - Single choice from primary/outline `Button`s → toggle group or `RadioGroup`: `file-preview.tsx:172`, `commit-search.tsx:115`, `picture-viewer.tsx:220`, `visual-artifact-view.tsx:87`, `start-from-card.tsx:66`, `where-to-work.tsx:196, 263`, `chat-tab.tsx:2228`, `transcript-rows.tsx:1279`, `shared-library.tsx:214`
 - `Checkbox` used for a single-choice question → `RadioGroup`: `transcript-rows.tsx:1414`
 - Hand-drawn switch → `Switch`: `shared-library.tsx:246`
-- `<details>` disclosures → Collapsible: `bead-detail.tsx:411, 423`, `shared-library.tsx:231-302`, `transcript-rows.tsx:1424`, `mcp-servers-panel.tsx:75`
+- `<details>` disclosures → Collapsible: `bead-detail.tsx:411, 423`, `active-guidance.tsx:26`, `shared-library.tsx:231, 232, 249, 255, 295, 300, 301, 302`, `transcript-rows.tsx:1424`, `mcp-servers-panel.tsx:75`
 - Split buttons → button group: `chat-sidebar.tsx:709`, `chat-tab.tsx:371`
 - Native `<datalist>` → `Picker`: `add-project-dialog.tsx:370`
 - Native `title=` hover text → `Tooltip`: `where-to-work.tsx:204`
