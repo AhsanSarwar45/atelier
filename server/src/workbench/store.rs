@@ -1331,6 +1331,25 @@ fn held_in_its_project(
             .collect::<rusqlite::Result<Vec<String>>>();
         ids
     }
+    /// The tool calls this chat started since its transcript last began and
+    /// never reported the end of. Two passes over the type index, one per
+    /// kind, not one lookup per call: a long chat has thousands of calls.
+    pub fn unfinished_tools(&self, session_id: &str) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.connection.prepare(
+            "WITH since AS (SELECT COALESCE(MAX(seq),0) AS seq FROM event \
+               WHERE session_id=?1 AND type='transcript.reset') \
+             SELECT json_extract(json,'$.toolCallId') FROM event, since \
+               WHERE type='tool.started' AND session_id=?1 AND event.seq>since.seq \
+             EXCEPT \
+             SELECT json_extract(json,'$.toolCallId') FROM event, since \
+               WHERE type='tool.completed' AND session_id=?1 AND event.seq>since.seq",
+        )?;
+        let calls = statement
+            .query_map([session_id], |row| row.get::<_, Option<String>>(0))?
+            .filter_map(|call| call.transpose())
+            .collect::<rusqlite::Result<Vec<String>>>();
+        calls
+    }
     pub fn was_driven_here(&self, session_id: &str) -> rusqlite::Result<bool> {
         Ok(self.connection.query_row("SELECT 1 FROM event WHERE session_id=?1 AND type='session.started' AND COALESCE(json_extract(json,'$.readOnly'),0)!=1 LIMIT 1",[session_id],|_|Ok(())).optional()?.is_some())
     }

@@ -90,6 +90,7 @@ enum Command {
     EndDriving(String, Reply<()>),
     DrivenFrom(String, Reply<Option<i64>>),
     StillDriving(Reply<Vec<String>>),
+    UnfinishedTools(String, Reply<Vec<String>>),
     SessionStatus(String, Reply<Option<serde_json::Value>>),
     SessionActivity(String, Reply<SessionActivity>),
     SessionActivities(Reply<HashMap<String, SessionActivity>>),
@@ -438,6 +439,10 @@ impl ChatDb {
     }
     pub async fn still_driving(&self) -> Result<Vec<String>, String> {
         self.request(Command::StillDriving).await
+    }
+    pub async fn unfinished_tools(&self, session_id: String) -> Result<Vec<String>, String> {
+        self.request(|reply| Command::UnfinishedTools(session_id, reply))
+            .await
     }
     pub async fn was_driven_here(&self, session_id: String) -> Result<bool, String> {
         self.request(|reply| Command::WasDrivenHere(session_id, reply))
@@ -1270,6 +1275,9 @@ fn run(
                 respond(reply, store.driven_from(&session_id))
             }
             Command::StillDriving(reply) => respond(reply, store.still_driving()),
+            Command::UnfinishedTools(session_id, reply) => {
+                respond(reply, store.unfinished_tools(&session_id))
+            }
             Command::SessionStatus(session_id, reply) => {
                 respond(reply, store.session_status(&session_id))
             }

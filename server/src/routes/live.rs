@@ -1334,6 +1334,50 @@ mod tests {
         assert_eq!(event_count(&state).await, before);
     }
 
+    /// A tool call the driver never saw return ends with it: a server stopped
+    /// or lost mid-call leaves nothing that could report it (bw-tdxl).
+    #[tokio::test]
+    async fn a_tool_left_running_when_its_driver_goes_shows_as_ended() {
+        let (directory, state) = workbench_fixture();
+        driven_chat(&directory, &state, "codex", "abababab-abab-4bab-8bab-abababababab").await;
+        let tool = |kind: &str, call: &str| {
+            serde_json::from_value(serde_json::json!({
+                "type":kind,"sessionId":"chat-1","seq":0,"at":"2026-09-24T17:14:30Z",
+                "toolCallId":call,"name":"exec","title":"sleep 25","ok":true,"output":"done"
+            }))
+            .unwrap()
+        };
+        let endings = |call: &'static str| {
+            let state = state.clone();
+            async move {
+                state.database().events_since("chat-1".into(), 0).await.unwrap().into_iter()
+                    .filter(|event| event.kind == crate::workbench::protocol::EventKind::ToolCompleted
+                        && event.fields.get("toolCallId").and_then(serde_json::Value::as_str) == Some(call))
+                    .map(|event| event.fields.get("ok").and_then(serde_json::Value::as_bool))
+                    .collect::<Vec<_>>()
+            }
+        };
+
+        // Lost with the server, then handed back on the next start.
+        state.pretend_driver("chat-1").await;
+        state.database().append(tool("tool.started", "call-returned")).await.unwrap();
+        state.database().append(tool("tool.completed", "call-returned")).await.unwrap();
+        state.database().append(tool("tool.started", "call-cut-off")).await.unwrap();
+        state.database().append(tool("tool.started", "call-cut-off")).await.unwrap();
+        state.lose_driver("chat-1").await;
+        assert!(endings("call-cut-off").await.is_empty());
+        state.registry().hand_back_the_orphaned().await;
+        assert_eq!(endings("call-cut-off").await, vec![Some(false)], "a cut-off call still shows as running");
+        assert_eq!(endings("call-returned").await, vec![Some(true)], "a call that returned was ended again");
+
+        // Let go, as a graceful stop does; ended calls are not ended twice.
+        state.pretend_driver("chat-1").await;
+        state.database().append(tool("tool.started", "call-stopped")).await.unwrap();
+        state.let_driver_go("chat-1").await;
+        assert_eq!(endings("call-stopped").await, vec![Some(false)]);
+        assert_eq!(endings("call-cut-off").await, vec![Some(false)]);
+    }
+
     /// The follower itself hands back a lost driver's stretch when it is the
     /// first to reach the chat after a restart.
     #[tokio::test]

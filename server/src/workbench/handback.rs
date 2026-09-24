@@ -178,6 +178,33 @@ pub async fn hand_back(
                 }
             }
         }
+        end_unfinished_tools(database, session_id).await;
+    }
+}
+
+/// A tool call the driver left running can no longer return: the process that
+/// would have said how it ended is gone. A turn that ends, or a stop, closes
+/// its own calls; a server stopped or lost mid-call does neither, and the call
+/// showed as running for good.
+async fn end_unfinished_tools(database: &ChatDb, session_id: &str) {
+    let Ok(calls) = database.unfinished_tools(session_id.to_string()).await else {
+        return;
+    };
+    let at = chrono::Utc::now().to_rfc3339();
+    let endings: Vec<_> = calls
+        .into_iter()
+        .filter_map(|call| {
+            serde_json::from_value(json!({
+                "type": "tool.completed", "sessionId": session_id, "seq": 0, "at": at,
+                "toolCallId": call, "ok": false,
+                "output": "The chat's process ended before this tool returned.",
+                "source": "hand-back",
+            }))
+            .ok()
+        })
+        .collect();
+    if !endings.is_empty() {
+        let _ = database.append_many(endings).await;
     }
 }
 
