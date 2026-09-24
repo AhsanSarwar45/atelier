@@ -2515,6 +2515,12 @@ impl AcpDriver {
             let connection_ready = ready.clone();
             let stop_reply = Arc::new(Mutex::new(None::<Reply>));
             let connection_stop_reply = stop_reply.clone();
+            // Closing is answered once the connection has ended and dropping it
+            // has killed the adapter's process group, not when the loop breaks:
+            // the kit writes the end of its turn to the record until then, and
+            // whoever hears "closed" hands that record back (bw-6n29).
+            let close_reply = Arc::new(Mutex::new(None::<(Reply, Result<Value, String>)>));
+            let connection_close_reply = close_reply.clone();
             let stopped_normalizer = normalizer.clone();
             let result = client
                 .connect_with(agent, move |connection: ConnectionTo<Agent>| {
@@ -2528,6 +2534,7 @@ impl AcpDriver {
                     let replaying = replaying.clone();
                     let closing = task_closing.clone();
                     let stop_reply = connection_stop_reply.clone();
+                    let close_reply = connection_close_reply.clone();
                     let saved_menu = task_saved_menu.clone();
                     let io = task_io.clone();
                     async move {
@@ -3075,7 +3082,7 @@ impl AcpDriver {
                                             .map(|_| json!({"ok":true,"closed":false}))
                                             .map_err(|error| error.to_string())
                                     };
-                                    let _ = reply.send(result);
+                                    *close_reply.lock().await = Some((reply, result));
                                     break;
                                 }
                                 Control::Disconnect { reply } => {
@@ -3084,7 +3091,7 @@ impl AcpDriver {
                                     // conversation stays available if the
                                     // person later switches back.
                                     closing.store(true, Ordering::Release);
-                                    let _ = reply.send(Ok(json!({"ok":true})));
+                                    *close_reply.lock().await = Some((reply, Ok(json!({"ok":true}))));
                                     break;
                                 }
                             }
@@ -3094,6 +3101,10 @@ impl AcpDriver {
                     }
                 })
                 .await;
+            if let Some((reply, result)) = close_reply.lock().await.take() {
+                let _ = reply.send(result);
+                return;
+            }
             // The connection and all its notification/prompt tasks are gone.
             // Persist the ending last, so no late result can overwrite it.
             if let Some(reply) = stop_reply.lock().await.take() {
