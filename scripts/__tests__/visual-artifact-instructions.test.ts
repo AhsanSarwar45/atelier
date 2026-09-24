@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { visualArtifact } from '../../src/workbench/visual-artifacts';
 
-const skill = readFileSync('machinery/skills/atelier/SKILL.md', 'utf8');
+// Wrapping is layout, not policy: match with whitespace collapsed.
+const skill = readFileSync('machinery/skills/atelier/SKILL.md', 'utf8').replace(/\s+/g, ' ');
 const reference = readFileSync('machinery/skills/atelier/references/visual-artifacts.md', 'utf8');
 
 describe('visual artifact agent guidance', () => {

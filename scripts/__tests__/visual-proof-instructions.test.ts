@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const policy = readFileSync('machinery/skills/atelier/SKILL.md', 'utf8');
+// Wrapping is layout, not policy: match with whitespace collapsed.
+const policy = readFileSync('machinery/skills/atelier/SKILL.md', 'utf8').replace(/\s+/g, ' ');
 
 describe('visual proof instructions', () => {
   it('requires comparisons for changes and an image for new visuals', () => {
