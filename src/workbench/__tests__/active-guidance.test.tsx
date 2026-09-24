@@ -16,7 +16,7 @@ describe('active guidance', () => {
     expect(screen.getByText('Included in this connection · 1')).toBeVisible();
     expect(screen.getByText('Available on demand · 2')).toBeVisible();
     expect(screen.getByText(/Command · Global/)).toBeVisible();
-    expect(screen.getByTestId('guidance-diagnostics')).not.toHaveAttribute('open');
+    expect(screen.getByTestId('guidance-diagnostics')).toHaveAttribute('data-state', 'closed');
     fireEvent.click(screen.getByText('Diagnostics'));
     expect(screen.getByText('Revision private-revision')).toBeVisible();
     expect(screen.getByText('Disabled rule · disabled')).toBeVisible();

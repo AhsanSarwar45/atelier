@@ -3,6 +3,7 @@
 import { BookOpen } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 interface GuidanceItem { id: string; name: string; kind: string; source: string; state: string; automatic?: boolean }
@@ -23,7 +24,7 @@ export function ActiveGuidance({ snapshot }: { snapshot: GuidanceSnapshot }) {
       <section aria-label="Included guidance"><h3 className="mb-2 font-medium text-t-primary">Included in this connection · {included.length}</h3>{included.length ? <ul className="space-y-1">{included.map(item => <li key={item.id}>{item.name} <span className="text-t-muted">· {source(item.source)}{item.kind === 'output_style' ? ' · Output style' : ''}</span></li>)}</ul> : <p>No shared instructions or output style included.</p>}</section>
       {onDemand.length > 0 && <section aria-label="On-demand guidance"><h3 className="mb-2 font-medium text-t-primary">Available on demand · {onDemand.length}</h3><ul className="space-y-1">{onDemand.map(item => <li key={item.id}>{item.name} <span className="text-t-muted">· {item.automatic === false ? 'Command' : 'Skill'} · {source(item.source)}</span></li>)}</ul></section>}
       <p className="text-t-muted">This lists shared guidance, not every native provider instruction. Settings changes apply on reconnect.</p>
-      <details data-testid="guidance-diagnostics"><summary className="cursor-pointer">Diagnostics</summary><p className="mt-2 break-all font-mono">Revision {snapshot.revision}</p>{inactive.map(item => <p key={item.id}>{item.name} · {item.state.replaceAll('_', ' ')}</p>)}</details>
+      <Collapsible data-testid="guidance-diagnostics"><CollapsibleTriggerRow size="sm">Diagnostics</CollapsibleTriggerRow><CollapsibleContent><p className="mt-2 break-all font-mono">Revision {snapshot.revision}</p>{inactive.map(item => <p key={item.id}>{item.name} · {item.state.replaceAll('_', ' ')}</p>)}</CollapsibleContent></Collapsible>
     </div>
     </PopoverContent>
   </Popover>;

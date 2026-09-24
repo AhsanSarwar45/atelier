@@ -19,6 +19,7 @@ import { MarkdownBody } from "@/components/markdown-body";
 import { SubtaskList } from "@/components/subtask-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from "@/components/ui/collapsible";
 import { Panel } from "@/components/ui/panel";
 import { Row } from "@/components/ui/row";
 import { Separator } from "@/components/ui/separator";
@@ -410,26 +411,24 @@ export function BeadDetail({
 
           {/* Design (collapsed by default; rendered as Markdown) */}
           {bead.design && (
-            <details className="mt-6 group">
-              <summary className="text-sm font-semibold text-t-secondary cursor-pointer list-none flex items-center gap-1.5 hover:text-t-primary">
-                <span className="inline-block transition-transform group-open:rotate-90">▸</span>
-                Design
-              </summary>
-              <Separator className="my-2" />
-              <MarkdownBody>{bead.design}</MarkdownBody>
-            </details>
+            <Collapsible className="mt-6">
+              <CollapsibleTriggerRow>Design</CollapsibleTriggerRow>
+              <CollapsibleContent>
+                <Separator className="my-2" />
+                <MarkdownBody>{bead.design}</MarkdownBody>
+              </CollapsibleContent>
+            </Collapsible>
           )}
 
           {/* Notes (collapsed by default; rendered as Markdown) */}
           {bead.notes && (
-            <details className="mt-6 group">
-              <summary className="text-sm font-semibold text-t-secondary cursor-pointer list-none flex items-center gap-1.5 hover:text-t-primary">
-                <span className="inline-block transition-transform group-open:rotate-90">▸</span>
-                Notes
-              </summary>
-              <Separator className="my-2" />
-              <MarkdownBody>{bead.notes}</MarkdownBody>
-            </details>
+            <Collapsible className="mt-6">
+              <CollapsibleTriggerRow>Notes</CollapsibleTriggerRow>
+              <CollapsibleContent>
+                <Separator className="my-2" />
+                <MarkdownBody>{bead.notes}</MarkdownBody>
+              </CollapsibleContent>
+            </Collapsible>
           )}
 
           {/* Related Tasks */}
