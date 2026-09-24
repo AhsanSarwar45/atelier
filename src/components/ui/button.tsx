@@ -86,7 +86,9 @@ const buttonVariants = cva(
       mode: {
         default: 'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         icon: 'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 shrink-0',
-        link: 'text-primary h-auto p-0 bg-transparent rounded-none hover:bg-transparent data-[state=open]:bg-transparent',
+        // The ring is the only mark a link has that the keyboard is on it: the
+        // base takes the browser's outline away, and a link has no fill to light.
+        link: 'text-primary h-auto p-0 bg-transparent rounded-none hover:bg-transparent data-[state=open]:bg-transparent focus-visible:ring-2 focus-visible:ring-ring',
         input: `
             justify-start font-normal hover:bg-background [&_svg]:transition-colors [&_svg]:hover:text-foreground data-[state=open]:bg-background 
             focus-visible:border-ring focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/30 
@@ -352,13 +354,14 @@ const buttonVariants = cva(
         mode: 'link',
         className: 'border-0 text-success hover:text-success/80',
       },
-      // A link that is a word in a sentence: it sits inline and wraps with the
-      // words around it, where a button's box would keep it on one line and
-      // push the whole address past the edge of the card.
+      // A link that is a word in a sentence: it sits inline and wraps the way
+      // the words around it do — normally in prose, keeping its spaces in a
+      // command — where a button's box would keep it on one line and push a
+      // whole address past the edge of the card.
       {
         mode: 'link',
         size: 'inherit',
-        className: 'inline whitespace-normal text-left',
+        className: 'inline justify-start text-left [white-space:inherit]',
       },
 
       // Ghost

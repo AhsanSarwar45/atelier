@@ -259,8 +259,8 @@ describe('Button as a link', () => {
     );
     const link = screen.getByRole('link', { name: 'the settings' });
     expect(link).toHaveAttribute('href', '/settings');
-    expect(link).toHaveClass('inline', 'whitespace-normal', 'text-primary', 'underline');
-    expect(link).not.toHaveClass('inline-flex', 'whitespace-nowrap');
+    expect(link).toHaveClass('inline', '[white-space:inherit]', 'text-primary', 'underline', 'focus-visible:ring-2');
+    expect(link).not.toHaveClass('inline-flex');
   });
 
   it('comes in a quiet muted colour and in the success colour', () => {
