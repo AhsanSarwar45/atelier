@@ -149,23 +149,48 @@ drawing but use library parts for any ordinary control inside them.
 - `memory-badge.tsx` lines before Processes and Docker containers → `Separator`
 - `visual-artifact-view.tsx` mock-up divider `<hr>` → `Separator decorative={false}`, still read out as a separator
 
-### Badges, chips, dots and bars
+### Badges, chips, dots and bars (done in bw-weih.11)
 
-- Status dots drawn by hand → `BadgeDot`: `epic-card.tsx:164-179`, `app/page.tsx:185`, `tag-picker.tsx:150`, `file-viewer.tsx:105`, `open-files-strip.tsx:135`, `transcript-rows.tsx:575, 655`, `token-view.tsx:275`
-- Chips drawn by hand → `Badge`: `agent-files-browser.tsx:235`, `board-search.tsx:153`, `search-panel.tsx:107`, `settings/chat-name-editor.tsx:280`, `visual-artifact-view.tsx:99`, `chat-widget-view.tsx:119`
-- `Badge` sized or padded by hand instead of `size` → `dependency-badge.tsx:70, 101`, `kanban-column.tsx:156`, `path-chip.tsx:84`, `globals.tsx:104`
-- `Badge` coloured by inline style or fixed classes → `app/page.tsx:125`, `project-card.tsx:140`, `tag-picker.tsx:240`, `brand-icon.tsx:43`
-- Progress bars drawn by hand → `Progress`: `transcript-rows.tsx:1001`, `usage-view.tsx:78`, `token-view.tsx:327`
-- Status checkbox drawn by hand → `Checkbox`: `chat-tab.tsx:710`
+`BadgeDot` gained `size` (`xs`, `sm`, `md`), `solid` (a state's full colour, standing on its own) and `color` (a tag's own hex), and forwards its ref for a tooltip. `Badge` gained `wrap` (an address that breaks and grows), and `color` now takes any CSS colour, not only a hex. `Progress` gained `size` (`xs`, `sm`, `md`) and `pace="steady"` (a bar fed once a second glides between readings).
 
-### Panels and banners repainted
+- `epic-card.tsx` in-progress, dropped and blocked dots → `BadgeDot size="sm" solid`, in the state's colour
+- `app/page.tsx` loading dot → `BadgeDot solid`, still pinging
+- `tag-picker.tsx` tag swatch in the list → `BadgeDot size="md" solid color`, the tag's own colour
+- `file-viewer.tsx`, `open-files-strip.tsx` unsaved mark → `BadgeDot solid`, test id and label unchanged
+- `transcript-rows.tsx` tool row's running / done / failed dot → `BadgeDot size="sm" solid`, the running one still pulsing
+- `token-view.tsx` band key → `BadgeDot size="sm" solid` in the band's colour
+- `agent-files-browser.tsx` "Legacy" and "Shared" → `Badge variant="secondary" size="xs"`
+- `board-search.tsx`, `search-panel.tsx` match count → `Badge variant="secondary" size="xs"`
+- `settings/chat-name-editor.tsx` name piece → `Badge size="lg" shape="circle"`, primary, info or outline by kind, its handle, words and cross still buttons inside it
+- `visual-artifact-view.tsx` mock-up chip → `Badge appearance="outline" size="lg" shape="circle"`, the mock-up's tone as the variant
+- `chat-widget-view.tsx` diagram edge → `Badge color` in the node's accent, `tint` when lit and `faint` when not
+- `dependency-badge.tsx` BLOCKED → `Badge variant="destructive" size="xs"`; BLOCKING → `Badge variant="warning" size="xs"`
+- `kanban-column.tsx` column count → `Badge`'s own `md` size; the state's colours stay
+- `path-chip.tsx` file chip → `Badge wrap`; `FILE_BADGE_CLASS` keeps only the margin and the type, and the other file chips (markdown-body, composer-editor, transcript-rows) take `wrap` too
+- `globals.tsx` tray count → `Badge size="xs"` with no padding of its own
+- `app/page.tsx` tag filter → `Badge color colorFill`, `solid` when chosen and `faint` when not
+- `project-card.tsx`, `tag-picker.tsx` tag list → `Badge color`
+- `brand-icon.tsx` agent chip → `Badge hue`, each agent's own hue mixed against the theme
+- `transcript-rows.tsx` compaction bar → `Progress size="xs" pace="steady"`, test id and fill unchanged
+- `usage-view.tsx` usage window → `Progress size="sm"`, its severity as the `tone`
+- `token-view.tsx` token split → `Progress size="xs"`
+- `chat-tab.tsx` checklist tick → read-only `Checkbox`, ticked when done and half-ticked (pulsing) while the agent is on it
 
-- Error, warning and info strips painted by hand → `Panel tone`: `agent-files-browser.tsx:243`, `chat-sidebar.tsx:761, 775`, `file-viewer.tsx:367, 377, 384`, `chat-tab.tsx:885, 890, 2517, 2742`
-- Bordered list boxes copying Panel → `Panel tone="frame"`: `mcp-catalogue.tsx:241`, `plugin-catalogue.tsx:202`, `accounts-settings.tsx:329`
-- `Panel` recoloured instead of `tone`: `visual-artifact-view.tsx:103, 144`, `transcript-rows.tsx:1274, 1438`, `picture-viewer.tsx:92, 219`
-- Option cards copying Panel: `transcript-rows.tsx:1410`
-- Local `Card` shadowing the library name: `token-view.tsx:176`
-- `add-project-dialog.tsx:225` | ghost `Button` wearing Panel classes
+### Panels and banners repainted (done in bw-weih.11)
+
+`Panel` gained `shape="strip"` (a notice across the top of a pane, edged only underneath), the tones `accent` (the chosen box), `nested` (a box inside a box) and `media` (controls over a picture), and the insets `bar` (a row of buttons) and `xs` (one line of small print).
+
+- `agent-files-browser.tsx` save error and "First 2 MB" → `Panel shape="strip"`, `danger` and `attention`
+- `chat-sidebar.tsx` restore error and stale-helper notice → `Panel shape="strip"`, `danger` and `attention`
+- `file-viewer.tsx` "Too large to colour", "first 2 MiB" and changed-on-disk notices → `Panel shape="strip" inset="xs"`, the last two `attention`
+- `chat-tab.tsx` steer, send, start and chat errors → `Panel tone="danger"`
+- `mcp-catalogue.tsx`, `plugin-catalogue.tsx`, `accounts-settings.tsx` bordered lists → `Panel asChild tone="frame" inset="none"` around the list
+- `visual-artifact-view.tsx` mock-up card → `Panel tone` (`accent`, `default`, `success`, `attention`) with `inset="md"`; the reset / full-screen bar → `Panel tone="overlay" inset="bar"`
+- `transcript-rows.tsx` plan text inside the proposal → `Panel tone="nested"`; the custom answer → `Panel tone="accent"` while chosen
+- `picture-viewer.tsx` zoom and comparison bars → `Panel tone="media" inset="bar"`
+- `transcript-rows.tsx` question options → `Panel asChild` around the label, `accent` when chosen and `frame` when not
+- `token-view.tsx` local `Card` → renamed `TitledPanel`; nothing shadows the library's `Card`
+- `add-project-dialog.tsx` Local boards choices → `Button variant="outline"`, no Panel classes
 
 ### Tabs, toggles, switches and disclosures
 
