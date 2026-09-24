@@ -37,7 +37,7 @@ describe('question card', () => {
     expect(screen.getByText('Not answered')).toBeInTheDocument();
     expect(screen.getByText('Database')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Answer' })).toBeNull();
-    expect(screen.queryByRole('checkbox', { name: 'Postgres' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: 'Postgres' })).toBeNull();
   });
 
   it('groups vertical described choices and sends one deliberate multi-answer response with a note', async () => {
@@ -46,9 +46,12 @@ describe('question card', () => {
     const answer = screen.getByRole('button', { name: 'Answer' });
     expect(answer).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Postgres' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'SQLite' }));
-    expect(screen.getByRole('checkbox', { name: 'Postgres' })).not.toBeChecked();
+    // One answer of several is a radio group: taking a second lets the first go.
+    expect(screen.getByRole('radiogroup', { name: 'Database' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Postgres' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'SQLite' }));
+    expect(screen.getByRole('radio', { name: 'Postgres' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'SQLite' })).toBeChecked();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Unit tests' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Browser tests' }));
 
@@ -68,12 +71,21 @@ describe('question card', () => {
 
   it('keeps the canonical checkbox visual compact on coarse pointers while the whole option remains clickable', () => {
     render(<QuestionCard item={request()} sessionId="session-1" />);
-    const custom = screen.getAllByRole('checkbox', { name: 'Custom answer' })[0]!;
+    const custom = screen.getByRole('checkbox', { name: 'Custom answer' });
     expect(custom.className).toContain('!min-h-0');
     expect(custom.className).toContain('before:-inset-3.5');
+    expect(screen.getByRole('radio', { name: 'Custom answer' }).className).toContain('!min-h-0');
 
     fireEvent.click(screen.getByText('Durable relational storage.'));
-    expect(screen.getByRole('checkbox', { name: 'Postgres' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Postgres' })).toBeChecked();
+  });
+
+  it('makes the custom answer one of a single question\'s choices, taken by typing into it', () => {
+    render(<QuestionCard item={request()} sessionId="session-1" />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Postgres' }));
+    fireEvent.change(screen.getAllByLabelText('Custom answer text')[0]!, { target: { value: 'DuckDB' } });
+    expect(screen.getByRole('radio', { name: 'Custom answer' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Postgres' })).not.toBeChecked();
   });
 
   it('lets typing activate the custom row and keeps secret resolved text masked', async () => {

@@ -24,9 +24,11 @@ import { Badge, BadgeDot } from '@/components/ui/badge';
 import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from '@/components/file-kinds';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
+import { RadioGroup, RadioGroupItem, RadioGroupOption } from '@/components/ui/radio-group';
 import { Row } from '@/components/ui/row';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -1287,26 +1289,18 @@ export const PlanProposalCard = memo(function PlanProposalCard({
       <Panel tone="nested" inset="md" className="mt-3">
         <MarkdownBody className="text-sm">{item.markdown}</MarkdownBody>
       </Panel>
-      <div className="mt-3 grid gap-2">
+      <RadioGroup
+        className="mt-3"
+        aria-label="What to do with the plan"
+        value={selected ?? ''}
+        onValueChange={setSelected}
+      >
         {item.actions.map((candidate) => (
-          <Button
-            key={candidate.id}
-            type="button"
-            variant="outline"
-            className={cn(
-              'h-auto w-full justify-start px-3 py-2 text-left',
-              selected === candidate.id && 'border-primary bg-primary/10',
-            )}
-            aria-pressed={selected === candidate.id}
-            onClick={() => setSelected(candidate.id)}
-          >
-            <span className="flex min-w-0 flex-col items-start">
-              <span className="text-sm font-medium text-foreground">{candidate.label}</span>
-              {candidate.description && <span className="mt-0.5 text-xs font-normal text-muted-foreground">{candidate.description}</span>}
-            </span>
-          </Button>
+          <RadioGroupOption key={candidate.id} value={candidate.id} means={candidate.description}>
+            <span className="font-medium">{candidate.label}</span>
+          </RadioGroupOption>
         ))}
-      </div>
+      </RadioGroup>
       {action?.acceptsFeedback && (
         <Textarea
           className="mt-3 min-h-24"
@@ -1335,6 +1329,9 @@ export const PlanProposalCard = memo(function PlanProposalCard({
     </Panel>
   );
 });
+
+/** The custom answer's place in a single-answer question's radio group. */
+const CUSTOM_ANSWER = '\u0000custom';
 
 interface DraftQuestionAnswer {
   optionIds: string[];
@@ -1402,75 +1399,95 @@ export const QuestionCard = memo(function QuestionCard({
       <div className="space-y-6">
         {item.questions.map((question) => {
           const draft = drafts[question.id]!;
+          // One answer of several is a radio group, the custom answer one of
+          // its choices; several answers are a row of checkboxes. The rows are
+          // drawn the same either way: the whole of each is the target.
+          const single = question.selection === 'single';
           const choose = (optionId: string) => change(question.id, (current) => {
             const selected = current.optionIds.includes(optionId);
-            return {
-              ...current,
-              optionIds: selected ? current.optionIds.filter((id) => id !== optionId)
-                : question.selection === 'single' ? [optionId] : [...current.optionIds, optionId],
-              ...(question.selection === 'single' && !selected ? { custom: false } : {}),
-            };
+            return { ...current, optionIds: selected ? current.optionIds.filter((id) => id !== optionId) : [...current.optionIds, optionId] };
           });
+          const pickOne = (value: string) => change(question.id, (current) => (
+            value === CUSTOM_ANSWER ? { ...current, custom: true, optionIds: [] } : { ...current, custom: false, optionIds: [value] }
+          ));
+          const options = question.options.map((option) => {
+            const selected = draft.optionIds.includes(option.id);
+            return (
+              <Panel asChild key={option.id} tone={selected ? 'accent' : 'frame'} className={cn(
+                'flex cursor-pointer items-start gap-3',
+                !selected && 'hover:bg-muted/50',
+              )}>
+                <label>
+                  {single ? (
+                    <RadioGroupItem className="mt-0.5" value={option.id} aria-label={option.label} />
+                  ) : (
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={selected}
+                      onCheckedChange={() => choose(option.id)}
+                      aria-label={option.label}
+                    />
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-foreground">{option.label}</span>
+                    {option.description && <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>}
+                    {option.preview && (
+                      // Opening the preview is not choosing the option.
+                      <Collapsible className="mt-2 text-xs" onClick={(event) => event.stopPropagation()}>
+                        <CollapsibleTriggerRow size="sm">Preview</CollapsibleTriggerRow>
+                        <CollapsibleContent>
+                          <MarkdownBody className="mt-2 text-xs">{option.preview}</MarkdownBody>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
+                  </span>
+                </label>
+              </Panel>
+            );
+          });
+          const custom = (question.allowCustom || question.selection === 'text') && (
+            <Panel tone={draft.custom ? 'accent' : 'default'} className={cn('flex items-start gap-3', !single && 'mt-2')}>
+              {single ? (
+                <RadioGroupItem className="mt-0.5" value={CUSTOM_ANSWER} aria-label="Custom answer" />
+              ) : question.selection !== 'text' && (
+                <Checkbox
+                  className="mt-0.5"
+                  checked={draft.custom}
+                  aria-label="Custom answer"
+                  onCheckedChange={(checked) => change(question.id, (current) => ({ ...current, custom: checked === true }))}
+                />
+              )}
+              <Input
+                type={question.secret ? 'password' : 'text'}
+                aria-label={question.selection === 'text' ? 'Answer' : 'Custom answer text'}
+                placeholder={question.selection === 'text' ? 'Type your answer' : 'Something else…'}
+                value={draft.customText}
+                onChange={(event) => change(question.id, (current) => ({
+                  ...current, custom: true, customText: event.target.value,
+                  ...(single ? { optionIds: [] } : {}),
+                }))}
+              />
+            </Panel>
+          );
           return (
             <fieldset key={question.id} className="min-w-0">
               <legend className="text-sm font-semibold text-foreground">{question.header}</legend>
               <div className="mt-1 text-sm text-muted-foreground">{question.prompt}</div>
-              {question.selection !== 'text' && (
-                <div className="mt-3 grid gap-2">
-                  {question.options.map((option) => {
-                    const selected = draft.optionIds.includes(option.id);
-                    return (
-                      <Panel asChild key={option.id} tone={selected ? 'accent' : 'frame'} className={cn(
-                        'flex cursor-pointer items-start gap-3',
-                        !selected && 'hover:bg-muted/50',
-                      )}>
-                        <label>
-                          <Checkbox
-                            className="mt-0.5"
-                            checked={selected}
-                            onCheckedChange={() => choose(option.id)}
-                            aria-label={option.label}
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-medium text-foreground">{option.label}</span>
-                            {option.description && <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>}
-                            {option.preview && (
-                              <details className="mt-2 text-xs" onClick={(event) => event.stopPropagation()}>
-                                <summary className="cursor-pointer text-primary">Preview</summary>
-                                <MarkdownBody className="mt-2 text-xs">{option.preview}</MarkdownBody>
-                              </details>
-                            )}
-                          </span>
-                        </label>
-                      </Panel>
-                    );
-                  })}
-                </div>
-              )}
-              {(question.allowCustom || question.selection === 'text') && (
-                <Panel tone={draft.custom ? 'accent' : 'default'} className="mt-2 flex items-start gap-3">
-                  {question.selection !== 'text' && (
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={draft.custom}
-                      aria-label="Custom answer"
-                      onCheckedChange={(checked) => change(question.id, (current) => ({
-                        ...current, custom: checked === true,
-                        ...(question.selection === 'single' && !current.custom ? { optionIds: [] } : {}),
-                      }))}
-                    />
-                  )}
-                  <Input
-                    type={question.secret ? 'password' : 'text'}
-                    aria-label={question.selection === 'text' ? 'Answer' : 'Custom answer text'}
-                    placeholder={question.selection === 'text' ? 'Type your answer' : 'Something else…'}
-                    value={draft.customText}
-                    onChange={(event) => change(question.id, (current) => ({
-                      ...current, custom: true, customText: event.target.value,
-                      ...(question.selection === 'single' ? { optionIds: [] } : {}),
-                    }))}
-                  />
-                </Panel>
+              {single ? (
+                <RadioGroup
+                  className="mt-3"
+                  aria-label={question.header}
+                  value={draft.custom ? CUSTOM_ANSWER : draft.optionIds[0] ?? ''}
+                  onValueChange={pickOne}
+                >
+                  {options}
+                  {custom}
+                </RadioGroup>
+              ) : (
+                <>
+                  {question.selection !== 'text' && <div className="mt-3 grid gap-2">{options}</div>}
+                  {custom}
+                </>
               )}
               <Button
                 type="button"

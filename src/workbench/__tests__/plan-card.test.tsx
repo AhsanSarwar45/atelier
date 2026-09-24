@@ -28,7 +28,8 @@ describe('proposed plan card', () => {
     expect(screen.getByText('Continue with this approach.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: /^Approve plan/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /^Approve plan/ }));
+    expect(screen.getByRole('radio', { name: /^Approve plan/ })).toBeChecked();
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith({
       type: 'plan.respond', sessionId: 'session-1', proposalId: 'plan-1', response: { actionId: 'approve' },
@@ -37,7 +38,7 @@ describe('proposed plan card', () => {
 
   it('requires and sends feedback for a change request', async () => {
     render(<PlanProposalCard item={plan()} sessionId="session-1" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Request changes' }));
+    fireEvent.click(screen.getByRole('radio', { name: /^Request changes/ }));
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Requested plan changes'), { target: { value: 'Add rollback steps' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));

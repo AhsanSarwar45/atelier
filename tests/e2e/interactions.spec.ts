@@ -93,7 +93,7 @@ test('questions and proposed plans share one complete interaction language', asy
     await page.getByText('Browser tests', { exact: true }).click();
     await page.getByRole('group', { name: 'Verification' }).getByRole('button', { name: 'Add note' }).click();
     await page.getByLabel('Note for Verification').fill('Run these on every pull request.');
-    await page.getByTestId('plan-card').getByRole('button', { name: /^Request changes/ }).click();
+    await page.getByTestId('plan-card').getByRole('radio', { name: /^Request changes/ }).click();
     await page.getByLabel('Requested plan changes').fill('Include a rollback step before implementation.');
 
     await page.getByTestId('question-card').screenshot({ path: 'tests/results/question-card-after.png' });
