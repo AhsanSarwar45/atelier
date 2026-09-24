@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import type { Bead } from '@/types';
 import { sendCommand } from '@/workbench/use-session';
 import type { Brand } from '@/workbench/protocol';
@@ -64,23 +65,26 @@ export function StartFromCard({ bead, projectId, projectPath, waiting = false }:
     <div className="mt-6">
       <h3 id={`start-chat-${bead.id}`} className="mb-2 text-sm font-semibold text-t-secondary">Start a chat</h3>
       <Separator className="mb-3" />
-      <div className="mb-2 flex flex-wrap gap-2" role="group" aria-labelledby={`start-chat-${bead.id}`}>
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        size="sm"
+        className="mb-2 flex-wrap gap-2"
+        aria-labelledby={`start-chat-${bead.id}`}
+        value={brand}
+        onValueChange={(next) => setBrand(next as Brand)}
+      >
         {providers.map((provider) => (
           <Tooltip
             key={provider.brand}
             label={provider.available ? undefined : whyUnavailable(provider)}
           >
-            <Button
-              size="sm"
-              variant={brand === provider.brand ? 'primary' : 'secondary'}
-              disabled={!provider.available}
-              onClick={() => setBrand(provider.brand)}
-            >
+            <ToggleGroupItem value={provider.brand} disabled={!provider.available}>
               {brandName(provider.brand)}
-            </Button>
+            </ToggleGroupItem>
           </Tooltip>
         ))}
-      </div>
+      </ToggleGroup>
       {/* A greyed-out choice says why, in plain sight: a reason kept in a hover
           label is one a phone never shows. */}
       {providers.filter((provider) => !provider.available && provider.availabilityReason).map((provider) => (
