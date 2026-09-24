@@ -101,10 +101,9 @@ export function ProjectSwitcher({
         {name}
       </span>
       <ChevronDown
-        className="h-4 w-4 shrink-0 text-t-tertiary transition-transform"
         // The arrow turns over while the list is up, so the control says which
         // of its two states it is in without a second picture.
-        style={{ transform: open ? 'rotate(180deg)' : undefined }}
+        className={cn('size-4 shrink-0 text-t-tertiary transition-transform', open && 'rotate-180')}
         aria-hidden
       />
     </Button>

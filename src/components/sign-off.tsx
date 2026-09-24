@@ -9,7 +9,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/hooks/use-toast";
 import { truncate } from "@/lib/bead-utils";
 import * as api from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 /** Manager approval records the reviewed tree. Landing alone completes work. */
 export function useSignOff(
@@ -61,14 +60,11 @@ export interface SignOffButtonProps {
 export function SignOffButton({ isMarking, onPress, className }: SignOffButtonProps) {
   return (
     <Button
-      variant="outline"
+      variant="success"
       size="xs"
       onClick={onPress}
       disabled={isMarking}
-      className={cn(
-        "border-success/30 text-success hover:bg-success/10 hover:text-success/80",
-        className,
-      )}
+      className={className}
     >
       {isMarking
         ? <Spinner size="2xs" />

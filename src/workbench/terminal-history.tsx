@@ -108,8 +108,8 @@ export function HistoryButton({ open, onOpen }: { open: boolean; onOpen: () => v
       icon={<History />}
       label={open ? 'Close the command history' : 'Search the commands you have run before'}
       onClick={onOpen}
-      size="xs"
-      className={cn('size-5 p-0', open && 'text-t-primary')}
+      size="2xs"
+      className={cn(open && 'text-t-primary')}
       data-testid="terminal-history-open"
       aria-expanded={open}
     />

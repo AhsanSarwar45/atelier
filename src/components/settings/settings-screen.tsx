@@ -20,10 +20,10 @@
 
 import type { ReactNode } from 'react';
 
-import { ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { BackLink } from '@/components/back-link';
-import { Button } from '@/components/ui/button';
+import { ToolButton } from '@/components/shell';
 import { Row } from '@/components/ui/row';
 import { usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
@@ -77,16 +77,13 @@ export function SettingsScreen({
         className="flex h-12 shrink-0 items-center gap-2 border-b border-border/40 bg-background/80 px-3"
       >
         {phone && open ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
+          <ToolButton
+            size="md"
+            icon={<ChevronLeft />}
+            label="All sections"
             onClick={() => onOpen(null)}
             data-testid="settings-sections"
-          >
-            <ChevronRight className="h-4 w-4 rotate-180 opacity-100" />
-            <span className="sr-only">All sections</span>
-          </Button>
+          />
         ) : (
           <BackLink href={backHref} steps={backSteps} />
         )}

@@ -116,12 +116,12 @@ function Line({
         {branch ? (
           <Button
             type="button"
-            variant="foreground"
-            size="xs"
+            variant="dim"
+            size="2xs"
+            mode="icon"
             data-testid="kind-fold"
             aria-label={shut ? `Show what is under ${node.label}` : `Fold ${node.label}`}
             onClick={() => onFold(node.id)}
-            className="size-4 min-h-0 min-w-0 shrink-0 p-0 text-t-tertiary hover:text-t-primary"
           >
             <ChevronRight className={cn('size-3.5 transition-transform', !shut && 'rotate-90')} />
           </Button>
