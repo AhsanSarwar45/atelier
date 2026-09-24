@@ -48,7 +48,7 @@ describe('agent chat widget instructions', () => {
     expect(beads).toMatch(/Always run\s+`board\/land` and read its output\. Never predict what it will do\./);
     const body = (text: string) => text.slice(text.indexOf('# Atelier and Beads'));
     const skill = body(beads);
-    expect(body(readFileSync('.agents/skills/beads/SKILL.md', 'utf8'))).toBe(skill);
+    expect(body(readFileSync('.atelier/skills/beads/SKILL.md', 'utf8'))).toBe(skill);
     expect(body(readFileSync('docs/board-lifecycle.md', 'utf8')).startsWith(skill.trimEnd())).toBe(true);
   });
 
