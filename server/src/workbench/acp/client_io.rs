@@ -229,6 +229,10 @@ impl ClientIo {
             .args(&request.args)
             .current_dir(cwd)
             .env(super::super::memory::CHAT_ENV, request.session_id.0.as_ref())
+            .envs(
+                super::super::docker::host_for(request.session_id.0.as_ref())
+                    .map(|host| ("DOCKER_HOST", host)),
+            )
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

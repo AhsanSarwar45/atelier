@@ -13,6 +13,7 @@ pub mod browser;
 pub mod chat_name;
 pub mod claude;
 pub mod cli;
+pub mod docker;
 pub mod codex;
 pub mod extensions;
 pub mod external;

@@ -2287,7 +2287,15 @@ impl AcpDriver {
             session.model.as_deref(),
             session.profile.as_deref(),
         ) {
-            Some(config) => config.env(super::super::memory::CHAT_ENV, session.id.clone()),
+            Some(config) => {
+                let config = config.env(super::super::memory::CHAT_ENV, session.id.clone());
+                // Containers the chat creates are labelled with it on the way
+                // to the daemon, so the memory report can charge them to it.
+                match super::super::docker::host_for(&session.id) {
+                    Some(host) => config.env("DOCKER_HOST", host),
+                    None => config,
+                }
+            }
             None => {
                 let message = format!("bundled {brand} ACP adapter is incomplete or unavailable");
                 record_transport_failure(&database, &session, &message).await;

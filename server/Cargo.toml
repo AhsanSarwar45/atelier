@@ -101,6 +101,14 @@ tempfile = "3"
 # here: no dbus, no gio.
 trash = "5"
 sysinfo = "0.33"
+# The Docker endpoint each chat is given (`workbench::docker`): an HTTP/1 proxy
+# over Unix sockets that labels the containers a chat creates, and passes
+# upgraded attach and exec streams through. All three are already built for
+# axum and reqwest; this only names them.
+hyper = { version = "1", features = ["server", "client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
 
 [build-dependencies]
 # Gzips the screens once at build time, so they are carried and served compressed.
