@@ -23,6 +23,7 @@ const usage: PlanUsage = {
     plugins: [],
     servers: [{ name: 'chrome-devtools', pct: 7 }],
   }],
+  resets: null,
   at: '2026-09-20T00:00:00Z',
 };
 

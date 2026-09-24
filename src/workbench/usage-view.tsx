@@ -15,7 +15,8 @@
  */
 'use client';
 
-import { X } from 'lucide-react';
+import { RotateCcw, X } from 'lucide-react';
+import { useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,19 +26,24 @@ import { usePlanUsage } from '@/workbench/live';
 import { CHIP_GAP } from '@/workbench/what-it-runs';
 import type { Brand } from '@/workbench/protocol';
 import {
-
+  clearsReads,
   clockReads,
+  expiryReads,
   percentReads,
   sessionChipReads,
   type Driving,
   type PlanUsage,
+  type PlanReset,
+  type PlanResets,
   type PlanWindow,
+  type ResetOutcome,
   type Severity,
   untilReads,
   weekChipReads,
   windowReads,
 } from '@/workbench/plan-usage';
 
+import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 import { Overlay, overlayPanel } from '@/components/ui/overlay';
@@ -202,6 +208,225 @@ function Spending({ driving }: { driving: Driving }) {
   );
 }
 
+/* ------------------------------------------------------------------ *
+ * Usage resets.
+ * ------------------------------------------------------------------ */
+
+/** What using a reset now would refill, and how much of each window is spent. */
+function spentReads(reset: PlanReset, windows: PlanWindow[]): string | null {
+  const spent = reset.clears
+    .map((key) => windows.find((w) => w.key === key))
+    .filter((w): w is PlanWindow => !!w && w.percent !== null)
+    .map((w) => `${percentReads(w.percent)} of your ${w.key === 'session' ? 'session' : 'weekly'} limit`);
+  return spent.length ? `You have used ${spent.join(' and ')}.` : null;
+}
+
+function ResetRow({
+  reset,
+  windows,
+  now,
+  confirming,
+  busy,
+  onAsk,
+  onCancel,
+  onConfirm,
+}: {
+  reset: PlanReset;
+  windows: PlanWindow[];
+  now: Date;
+  confirming: boolean;
+  busy: boolean;
+  onAsk: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const expires = expiryReads(reset.expiresAt);
+  const until = untilReads(reset.expiresAt, now);
+  const granted = expiryReads(reset.grantedAt);
+  const refills = clearsReads(reset.clears);
+  return (
+    <li
+      className="rounded-md border border-border/60 bg-background/60 p-3"
+      data-testid="usage-reset"
+      data-reset={reset.id}
+      data-usable={reset.usable}
+    >
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-foreground">{reset.title}</p>
+          {reset.detail && <p className="mt-0.5 text-xs text-muted-foreground">{reset.detail}</p>}
+          <p className="mt-1 text-[11px] text-muted-foreground" data-testid="usage-reset-expiry">
+            {expires ? `Expires ${expires}${until ? ` · in ${until}` : ''}` : 'Does not expire'}
+            {granted ? ` · Granted ${granted}` : ''}
+            {reset.left !== null && reset.left > 1 ? ` · ${reset.left} uses left` : ''}
+          </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">Refills your {refills}</p>
+        </div>
+        {!confirming && (
+          <Button
+            size="xs"
+            variant="outline"
+            className="shrink-0"
+            data-testid="usage-reset-use"
+            disabled={!reset.usable || busy}
+            onClick={onAsk}
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            Use reset
+          </Button>
+        )}
+      </div>
+      {confirming && (
+        <Panel
+          tone="attention"
+          inset="md"
+          className="mt-3"
+          role="alertdialog"
+          aria-labelledby={`reset-ask-${reset.id}`}
+          data-testid="usage-reset-confirmation"
+        >
+          <p id={`reset-ask-${reset.id}`} className="text-sm font-medium text-foreground">
+            Use this reset now?
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            It refills your {refills} straight away and cannot be undone.
+            {spentReads(reset, windows) ? ` ${spentReads(reset, windows)}` : ''}
+          </p>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button size="xs" variant="ghost" data-testid="usage-reset-cancel" disabled={busy} onClick={onCancel}>
+              Keep it
+            </Button>
+            <Button
+              size="xs"
+              variant="primary"
+              data-testid="usage-reset-confirm"
+              disabled={busy}
+              autoFocus
+              onClick={onConfirm}
+            >
+              {busy ? 'Using reset…' : 'Yes, use reset'}
+            </Button>
+          </div>
+        </Panel>
+      )}
+    </li>
+  );
+}
+
+const SAID_TONE: Record<ResetOutcome['outcome'], 'success' | 'info' | 'danger'> = {
+  reset: 'success',
+  nothing_to_reset: 'info',
+  no_reset: 'info',
+  already_used: 'info',
+  cooldown: 'info',
+  unavailable: 'danger',
+  unconfirmed: 'danger',
+};
+
+/**
+ * The account's usage resets, each with when it expires, and a way to use one.
+ *
+ * Using one is the only thing in this panel that cannot be taken back, so the
+ * button only asks. The reset is used only after a second, explicit yes.
+ */
+export function Resets({
+  resets,
+  windows,
+  brand,
+  profile,
+  now,
+}: {
+  resets: PlanResets;
+  windows: PlanWindow[];
+  brand: Brand;
+  profile?: string | null;
+  now: Date;
+}) {
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<ResetOutcome | null>(null);
+  // One id per attempt the reader confirmed, kept when the answer was
+  // unconfirmed, so trying again cannot use a second reset for the same yes.
+  const attempt = useRef<{ reset: string; id: string } | null>(null);
+
+  async function use(reset: PlanReset) {
+    if (attempt.current?.reset !== reset.id) attempt.current = { reset: reset.id, id: crypto.randomUUID() };
+    setBusy(true);
+    setSaid(null);
+    try {
+      const res = await request('/api/workbench/usage/reset', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ brand, profile: profile ?? null, id: reset.id, attempt: attempt.current.id }),
+        deadlineMs: 45_000,
+      });
+      const outcome = res.ok
+        ? ((await res.json()) as ResetOutcome)
+        : { outcome: 'unavailable' as const, message: 'Could not reset your limits. Nothing was used.' };
+      setSaid(outcome);
+      if (outcome.outcome !== 'unconfirmed') attempt.current = null;
+    } catch {
+      setSaid({
+        outcome: 'unconfirmed',
+        message: 'Could not confirm the reset. Check your usage in a moment before trying again.',
+      });
+    } finally {
+      setBusy(false);
+      setConfirming(null);
+    }
+  }
+
+  const unlisted = resets.available - resets.items.reduce((sum, r) => sum + (r.left ?? 1), 0);
+  return (
+    <Panel inset="md" data-testid="usage-resets" data-available={resets.available}>
+      <div className="flex items-baseline gap-2">
+        <h3 className="text-sm font-semibold text-foreground">Usage resets</h3>
+        <span className="ml-auto text-xs text-muted-foreground" data-testid="usage-resets-count">
+          {resets.available === 0 ? 'None available' : `${resets.available} available`}
+        </span>
+      </div>
+      {resets.blocked && <p className="mt-1 text-xs text-muted-foreground">{resets.blocked}</p>}
+      {resets.items.length > 0 && (
+        <ul className="mt-2 space-y-2">
+          {resets.items.map((reset) => (
+            <ResetRow
+              key={reset.id}
+              reset={reset}
+              windows={windows}
+              now={now}
+              confirming={confirming === reset.id}
+              busy={busy}
+              onAsk={() => {
+                setSaid(null);
+                setConfirming(reset.id);
+              }}
+              onCancel={() => setConfirming(null)}
+              onConfirm={() => void use(reset)}
+            />
+          ))}
+        </ul>
+      )}
+      {unlisted > 0 && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          {unlisted} more {unlisted === 1 ? 'reset is' : 'resets are'} not listed by the provider.
+        </p>
+      )}
+      {said && (
+        <Panel
+          tone={SAID_TONE[said.outcome]}
+          inset="sm"
+          className="mt-2 text-xs text-foreground"
+          role="status"
+          data-testid="usage-reset-outcome"
+          data-outcome={said.outcome}
+        >
+          {said.message}
+        </Panel>
+      )}
+    </Panel>
+  );
+}
+
 export function UsageView({ brand = 'claude', profile, onClose }: { brand?: Brand; profile?: string | null; onClose: () => void }) {
   const usage = usePlanUsage(brand, profile);
   const now = new Date();
@@ -261,6 +486,10 @@ export function UsageView({ brand = 'claude', profile, onClose }: { brand?: Bran
                 : 'Off'}
             </p>
           </Panel>
+        )}
+
+        {usage.resets && (
+          <Resets resets={usage.resets} windows={windows} brand={brand} profile={profile} now={now} />
         )}
 
         {usage.driving.map((d) => (

@@ -143,6 +143,44 @@ export interface Driving {
   servers: { name: string; pct: number }[];
 }
 
+/**
+ * One usage reset: an allowance that refills the current limit windows early.
+ *
+ * Claude calls these grants and Codex calls them reset credits. The server
+ * reads both into this one shape (server/src/workbench/usage.rs).
+ */
+export interface PlanReset {
+  /** The provider's own id, handed back unchanged when the reset is used. */
+  id: string;
+  title: string;
+  detail: string | null;
+  /** ISO 8601. */
+  grantedAt: string | null;
+  /** ISO 8601, or null when it never expires. */
+  expiresAt: string | null;
+  /** Whether it can be used now. */
+  usable: boolean;
+  /** Uses left in this reset, when one reset can be used more than once. */
+  left: number | null;
+  /** The windows it refills, as `PlanWindow.key` values. Empty when unknown. */
+  clears: string[];
+}
+
+/** Every usage reset an account holds. */
+export interface PlanResets {
+  /** How many the account holds. Can exceed `items` when the provider lists only some. */
+  available: number;
+  items: PlanReset[];
+  /** Why none of them can be used right now, when the provider says. */
+  blocked: string | null;
+}
+
+/** What happened when a reset was used. */
+export interface ResetOutcome {
+  outcome: 'reset' | 'nothing_to_reset' | 'no_reset' | 'already_used' | 'cooldown' | 'unavailable' | 'unconfirmed';
+  message: string;
+}
+
 /** The whole picture, as the app holds it. */
 export interface PlanUsage {
   /**
@@ -161,6 +199,8 @@ export interface PlanUsage {
   perModel: PlanWindow[];
   credits: PlanCredits | null;
   driving: Driving[];
+  /** Usage resets the account holds, or null when the provider did not say. */
+  resets: PlanResets | null;
   /** When this was read, ISO 8601. */
   at: string;
 }
@@ -174,6 +214,7 @@ export const NOTHING_KNOWN: PlanUsage = {
   perModel: [],
   credits: null,
   driving: [],
+  resets: null,
   at: '',
 };
 
@@ -301,6 +342,7 @@ export function readUsage(raw: RawPlanUsage | null | undefined, at: string): Pla
     driving: [drivingFrom('day', raw.behaviors?.day), drivingFrom('week', raw.behaviors?.week)].filter(
       (d): d is Driving => d !== null,
     ),
+    resets: null,
     at,
   };
 }
@@ -376,6 +418,34 @@ export function sessionChipReads(w: PlanWindow, timeZone?: string): string {
  */
 export function weekChipReads(w: PlanWindow): string {
   return `wk ${percentReads(w.percent)}`;
+}
+
+/**
+ * The limits a reset refills, in words: `session and weekly limits`.
+ *
+ * Just `limits` when the provider does not say which.
+ */
+export function clearsReads(clears: string[]): string {
+  const words = clears.map((key) => (key === 'session' ? 'session' : key === 'week' ? 'weekly' : null)).filter(Boolean);
+  return words.length ? `${words.join(' and ')} ${words.length > 1 ? 'limits' : 'limit'}` : 'usage limits';
+}
+
+/**
+ * When a reset expires, as a date and time in the reader's own zone:
+ * `22 Oct, 16:00`. Null when it never expires.
+ */
+export function expiryReads(iso: string | null, timeZone?: string): string | null {
+  if (!iso) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone,
+  }).format(at);
 }
 
 /** The whole sentence, for the chip's tooltip and the panel's own lines. */

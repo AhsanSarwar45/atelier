@@ -66,6 +66,7 @@ function reading(percent: number): PlanUsage {
     perModel: [],
     credits: null,
     driving: [],
+    resets: null,
     at: '2026-08-20T18:00:00Z',
   };
 }

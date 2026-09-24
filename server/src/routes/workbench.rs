@@ -924,13 +924,62 @@ impl WorkbenchState {
             if result.is_err() {
                 self.forget_claude_usage_reader(profile, &transport).await;
             }
-            serde_json::to_value(result?).map_err(|e| e.to_string())?
+            let mut usage = result?;
+            // The control channel says nothing about resets, so they are read
+            // from the account API with the same login. A failure there costs
+            // the resets, never the figure.
+            if usage.available {
+                let directory = self.registry.profile_directory(brand, profile);
+                usage.resets = crate::workbench::usage::read_claude_resets(&directory)
+                    .await
+                    .ok()
+                    .flatten();
+            }
+            serde_json::to_value(usage).map_err(|e| e.to_string())?
         } else {
             return Err(format!("unknown usage provider {brand}"));
         };
         let mut cache = self.usage_cache.lock().await;
         cache.insert(key, (std::time::Instant::now(), value.clone()));
         Ok(value)
+    }
+    /// Use one usage reset, then read the account again so every page sees
+    /// the refilled windows at once.
+    pub(crate) async fn use_usage_reset(
+        &self,
+        brand: &str,
+        profile: Option<&str>,
+        id: &str,
+        attempt: &str,
+    ) -> Result<crate::workbench::usage::ResetOutcome, String> {
+        let profile = profile.unwrap_or(crate::workbench::profiles::SYSTEM);
+        let key = usage_key(brand, profile);
+        // Held for the whole attempt, so a beat of the poller cannot cache a
+        // reading taken half-way through it.
+        let refresh = self.usage_refresh(&key).await;
+        let outcome = {
+            let _refresh = refresh.lock().await;
+            let outcome = if brand == "codex" {
+                let named = (profile != crate::workbench::profiles::SYSTEM)
+                    .then(|| self.registry.profile_directory(brand, profile));
+                let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+                let transport = self.codex_reader(&cwd, named.as_deref()).await?;
+                crate::workbench::usage::use_codex_reset(&transport, id, attempt).await
+            } else if brand == "claude" {
+                let directory = self.registry.profile_directory(brand, profile);
+                crate::workbench::usage::use_claude_reset(&directory, id, attempt).await
+            } else {
+                return Err(format!("unknown usage provider {brand}"));
+            };
+            self.usage_cache.lock().await.remove(&key);
+            outcome
+        };
+        if let Ok(usage) = self.account_usage(brand, Some(profile)).await {
+            let _ = self.watch_polls.send(
+                json!({"kind":"usage","brand":brand,"profile":profile,"usage":usage}),
+            );
+        }
+        Ok(outcome)
     }
     async fn window_now(&self, session: &str) -> Option<Result<Value, String>> {
         self.registry.window_now(session).await
@@ -971,6 +1020,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/tool", get(tool))
         .route("/spend", get(spend))
         .route("/usage", get(usage))
+        .route("/usage/reset", post(usage_reset))
         .route("/chat-name/preview", post(chat_name_preview))
         .route("/memory", get(memory))
         .route("/memory/terminate", post(terminate_memory_process))
@@ -1176,6 +1226,33 @@ async fn usage(
                 query.brand.as_deref().unwrap_or("claude"),
                 query.profile.as_deref(),
             )
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageResetBody {
+    brand: String,
+    profile: Option<String>,
+    /// The reset's own id, as the usage reading gave it.
+    #[serde(default)]
+    id: String,
+    /// One per attempt the reader confirmed. A retry sends the same one, so
+    /// the provider uses at most one reset for it.
+    attempt: String,
+}
+async fn usage_reset(
+    State(state): State<WorkbenchState>,
+    Json(body): Json<UsageResetBody>,
+) -> Result<Json<crate::workbench::usage::ResetOutcome>, ApiError> {
+    // An empty reset id is allowed: Codex then uses its next credit.
+    if body.attempt.trim().is_empty() {
+        return Err(ApiError::from("an attempt id is required".to_string()));
+    }
+    Ok(Json(
+        state
+            .use_usage_reset(&body.brand, body.profile.as_deref(), &body.id, &body.attempt)
             .await?,
     ))
 }
