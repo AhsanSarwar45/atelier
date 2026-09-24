@@ -218,16 +218,23 @@ impl WorkbenchState {
     pub(crate) async fn reconcile_status(&self, session_id: &str) -> Result<Value, String> {
         self.registry.reconcile_status(session_id).await
     }
-    pub(crate) async fn has_driver(&self, session_id: &str) -> bool {
-        self.registry.has_driver(session_id).await
+    pub(crate) async fn is_supervising(&self, session_id: &str) -> bool {
+        self.registry.is_supervising(session_id).await
+    }
+    pub(crate) async fn hand_back_if_orphaned(&self, session_id: &str) {
+        self.registry.hand_back_if_orphaned(session_id).await
+    }
+    #[cfg(test)]
+    pub(crate) async fn let_driver_go(&self, session_id: &str) {
+        self.registry.let_driver_go(session_id).await
+    }
+    #[cfg(test)]
+    pub(crate) async fn lose_driver(&self, session_id: &str) {
+        self.registry.lose_driver(session_id).await
     }
     #[cfg(test)]
     pub(crate) async fn pretend_driver(&self, session_id: &str) {
         self.registry.pretend_driver(session_id).await
-    }
-    #[cfg(test)]
-    pub(crate) async fn forget_driver(&self, session_id: &str) {
-        self.registry.forget_driver(session_id).await
     }
     pub(crate) async fn looked_at(&self, session_id: &str) {
         self.registry.looked_at(session_id).await
@@ -276,26 +283,6 @@ impl WorkbenchState {
         id: &str,
         profile: Option<&str>,
     ) -> Option<std::path::PathBuf> {
-        fn find(root: &std::path::Path, id: &str, depth: u8) -> Option<std::path::PathBuf> {
-            if depth == 0 {
-                return None;
-            }
-            for entry in std::fs::read_dir(root).ok()?.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    if let Some(found) = find(&path, id, depth - 1) {
-                        return Some(found);
-                    }
-                } else if path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|name| name.contains(id) && name.ends_with(".jsonl"))
-                {
-                    return Some(path);
-                }
-            }
-            None
-        }
         // Two accounts each keep their own sessions directory, so the memo has
         // to remember which one a path was found under.
         let home = crate::workbench::profiles::chat_dir(
@@ -316,7 +303,7 @@ impl WorkbenchState {
         {
             return Some(path);
         }
-        let found = find(home.join("sessions").as_path(), id, 5);
+        let found = crate::workbench::handback::find_codex_record(&home, id);
         if let Some(path) = &found {
             if let Ok(mut records) = self.codex_records.lock() {
                 records.insert(key, path.clone());
@@ -611,16 +598,6 @@ impl WorkbenchState {
         }
     }
 
-    /// Whether this lease still holds open the chat's running follower.
-    async fn is_following(&self, session_id: &str, lease: Option<&ChatFollowLease>) -> bool {
-        let Some(lease) = lease else { return false };
-        self.chat_followers
-            .lock()
-            .await
-            .get(session_id)
-            .is_some_and(|current| Arc::ptr_eq(current, &lease.control))
-    }
-
     #[cfg(test)]
     pub(crate) async fn has_chat_follower(&self, session_id: &str) -> bool {
         self.chat_followers.lock().await.contains_key(session_id)
@@ -703,68 +680,6 @@ impl WorkbenchState {
                 _ = usage_tick.tick() => self.spread_usage(),
             }
         }
-    }
-
-    /**
-     * Keep reading the record of every Claude chat this server drives, for as
-     * long as its driver lives, whether or not anybody has it open.
-     *
-     * The byte cursor into a record only moves while a follower reads it, and
-     * a follower only ran while a browser looked at the chat. A chat working
-     * unwatched left its cursor where its driver was attached, so when the
-     * driver went — a stop, a memory stop, a restart — the next follower read
-     * the whole driven stretch as somebody else's work and appended every
-     * message again at the end of the chat (bw-6n29). Beside a driver the
-     * follower only advances the cursor and records the notices ACP never
-     * carries, so keeping it running is the same work a watched chat does.
-     */
-    pub fn follow_the_driven(&self) {
-        let state = self.clone();
-        let mut attached = self.registry.subscribe_attached();
-        tokio::spawn(async move {
-            loop {
-                let session_id = match attached.recv().await {
-                    Ok(id) => id,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => return,
-                };
-                let state = state.clone();
-                tokio::spawn(async move { state.follow_while_driven(session_id).await });
-            }
-        });
-    }
-
-    pub(crate) async fn follow_while_driven(&self, session_id: String) {
-        let Ok(Some(session)) = self.database().get_session(session_id.clone()).await else {
-            return;
-        };
-        if session.brand != "claude" {
-            return;
-        }
-        // A follower can end while its driver lives: a new chat's record is
-        // not written until its first entry lands, and a follower that finds
-        // no record goes at once. So the lease is renewed whenever the reading
-        // it holds open is no longer the chat's.
-        let mut lease: Option<ChatFollowLease> = None;
-        let mut beat = tokio::time::interval(Duration::from_millis(500));
-        while self.has_driver(&session_id).await {
-            if !self.is_following(&session_id, lease.as_ref()).await {
-                let (renewed, start) = self.chat_follow_subscription(&session_id).await;
-                lease = Some(renewed);
-                if let Some(control) = start {
-                    let state = self.clone();
-                    let id = session_id.clone();
-                    tokio::spawn(async move {
-                        crate::routes::live::follow_native_record(state, id, control).await;
-                    });
-                }
-            }
-            beat.tick().await;
-        }
-        // The end of the turn is still landing in the record; the follower
-        // counts it as the driver's for this long, so it must still be reading.
-        tokio::time::sleep(crate::routes::live::DRIVER_SETTLES + Duration::from_secs(1)).await;
-        drop(lease);
     }
 
     /**

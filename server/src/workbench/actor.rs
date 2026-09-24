@@ -86,6 +86,9 @@ enum Command {
     MarkImported(String, Reply<()>),
     RememberFollowed(String, i64, Reply<()>),
     WasDrivenHere(String, Reply<bool>),
+    SetDriving(String, bool, Reply<()>),
+    StillDriving(Reply<Vec<String>>),
+    Driving(String, Reply<bool>),
     SessionStatus(String, Reply<Option<serde_json::Value>>),
     SessionActivity(String, Reply<SessionActivity>),
     SessionActivities(Reply<HashMap<String, SessionActivity>>),
@@ -419,6 +422,17 @@ impl ChatDb {
     pub async fn remember_followed(&self, session_id: String, at: i64) -> Result<(), String> {
         self.request(|reply| Command::RememberFollowed(session_id, at, reply))
             .await
+    }
+    pub async fn set_driving(&self, session_id: String, driving: bool) -> Result<(), String> {
+        self.request(|reply| Command::SetDriving(session_id, driving, reply))
+            .await
+    }
+    pub async fn driving(&self, session_id: String) -> Result<bool, String> {
+        self.request(|reply| Command::Driving(session_id, reply))
+            .await
+    }
+    pub async fn still_driving(&self) -> Result<Vec<String>, String> {
+        self.request(Command::StillDriving).await
     }
     pub async fn was_driven_here(&self, session_id: String) -> Result<bool, String> {
         self.request(|reply| Command::WasDrivenHere(session_id, reply))
@@ -1241,6 +1255,11 @@ fn run(
             Command::WasDrivenHere(session_id, reply) => {
                 respond(reply, store.was_driven_here(&session_id))
             }
+            Command::SetDriving(session_id, driving, reply) => {
+                respond(reply, store.set_driving(&session_id, driving).map(|_| ()))
+            }
+            Command::StillDriving(reply) => respond(reply, store.still_driving()),
+            Command::Driving(session_id, reply) => respond(reply, store.driving(&session_id)),
             Command::SessionStatus(session_id, reply) => {
                 respond(reply, store.session_status(&session_id))
             }

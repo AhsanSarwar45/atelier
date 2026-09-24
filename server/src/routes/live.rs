@@ -278,15 +278,6 @@ async fn recover_chat_snapshot(
     }
 }
 
-/// How long a Claude record keeps growing after its driver is let go: the
-/// process is closed after it leaves the registry, and a closing kit still
-/// writes the end of its turn.
-pub(crate) const DRIVER_SETTLES: Duration = if cfg!(test) {
-    Duration::from_millis(600)
-} else {
-    Duration::from_secs(5)
-};
-
 /// Follow one provider record into the durable event stream. Browser windows
 /// never receive from this task directly: they all consume the same committed
 /// per-session broadcast, so one normalization cannot be delivered twice.
@@ -326,6 +317,9 @@ pub(crate) async fn follow_native_record(
         state.finish_chat_follow(&session_id, &control).await;
         return;
     };
+    // A driver that died with the last run of the server left its stretch
+    // ahead of the cursor; it is handed back before this reads from there.
+    state.hand_back_if_orphaned(&session.id).await;
     let followed_to = state
         .database()
         .followed_to(session_id.clone())
@@ -359,57 +353,50 @@ pub(crate) async fn follow_native_record(
     // new has nothing to remember, and writing the same number four times a
     // second is a database write per chat per quarter second (bw-fbzd.5).
     let mut remembered: Option<i64> = None;
-    // Until when new record lines still belong to a driver that has just gone.
-    // The registry lets go of a driver before its process has finished
-    // writing, and a stop, a memory stop or a crash all leave the tail of the
-    // turn still landing in the record. Replayed as someone else's work, it
-    // was every message of the turn again, piled at the end of the chat under
-    // new ids (bw-6n29).
-    let mut driven_until: Option<tokio::time::Instant> = None;
+    let mut was_supervised = false;
 
     loop {
         tokio::select! {
         _ = control.stopped() => break,
         _ = record_tick.tick() => {
             // A native driver is the sole live source for the conversation
-            // while Atelier owns the provider. For Codex that is the whole
-            // story: advance the durable byte cursor once and retire this
-            // outside follower instead of polling beside the driver.
+            // while Atelier owns the provider, so beside one this follower
+            // reads the record only for what the wire never carries — for
+            // Claude, the ending of a shell or a watch the chat left running
+            // (workbench/handback.rs) — and keeps its place, so nothing the
+            // driver wrote is read again as new once it goes (bw-6n29).
             //
-            // A Claude record has one thing to say that the wire never does:
-            // when a shell or a watch the chat left running ended. The kit
-            // tells itself, in a queue row, and ACP carries no word of it. So
-            // beside a driver this follower keeps reading the record for those
-            // rows alone — a driven chat's shells stayed Running for eleven
-            // hours after they finished, and reopening did not help (bw-3cmk.1).
-            // Helpers are the driver's: ACP ends them with their own answer.
-            let driven = state.has_driver(&session.id).await;
-            if driven && session.brand == "claude" {
-                driven_until = Some(tokio::time::Instant::now() + DRIVER_SETTLES);
-            }
-            if driven || driven_until.is_some_and(|until| tokio::time::Instant::now() < until) {
-                if session.brand != "claude" {
-                    if let Some(tail) = codex_tail.as_mut() { tail.to_end(); }
-                    if let Some(at)=codex_tail.as_ref().map(|tail|tail.through_line()){let _=state.database().remember_followed(session.id.clone(),at as i64).await;}
-                    break;
-                }
-                let growth=claude_tail.as_mut().and_then(|tail|tail.grown().ok());
-                let Some(growth)=growth else { continue; };
-                if growth.rewritten { claude_lines.clear(); continue; }
-                let rows: Vec<serde_json::Value> = growth.lines.iter().filter_map(|line| serde_json::from_str(line).ok()).collect();
-                for mut value in crate::workbench::claude::history::record_notices(&rows) {
-                    if crate::workbench::claude::history::about_a_helper(&value) { continue; }
-                    let event_id=crate::workbench::protocol::provider_record_event_id(&session.brand,&value);
-                    let Some(object) = value.as_object_mut() else { continue; };
-                    object.insert("providerEvent".into(),serde_json::json!({"provider":session.brand,"threadId":session.external_id,"eventId":event_id,"delivery":"live"}));
-                    object.insert("sessionId".into(), serde_json::json!(session.id));
-                    object.insert("seq".into(), serde_json::json!(0));
-                    object.entry("at").or_insert_with(|| serde_json::json!(chrono::Utc::now().to_rfc3339()));
-                    if let Ok(event) = serde_json::from_value(value) {
-                        let _ = state.database().append(event).await;
+            // The registry counts a driver as running until its process is
+            // closed and its stretch handed back. The first tick after that
+            // reads the same way once more: this follower may have read part
+            // of the stretch before the driver went, and the rest is still
+            // the driver's.
+            let supervised = state.is_supervising(&session.id).await;
+            let beside_a_driver = supervised || was_supervised;
+            was_supervised = supervised;
+            if beside_a_driver {
+                let tail = if session.brand == "claude" { claude_tail.as_mut() } else { codex_tail.as_mut() };
+                let Some(tail) = tail else { continue; };
+                if !crate::workbench::handback::keeps_notes(&session.brand) {
+                    tail.to_end();
+                } else {
+                    let Ok(growth) = tail.grown() else { continue; };
+                    if growth.rewritten { claude_lines.clear(); codex_lines.clear(); continue; }
+                    let rows: Vec<serde_json::Value> = growth.lines.iter()
+                        .filter(|line| crate::workbench::handback::may_hold_a_note(&session.brand, line))
+                        .filter_map(|line| serde_json::from_str(line).ok())
+                        .collect();
+                    for note in crate::workbench::handback::record_notes(&session.brand, &rows) {
+                        if let Some(event) = crate::workbench::handback::record_event(&session.brand, &session.id, session.external_id.as_deref(), note) {
+                            let _ = state.database().append(event).await;
+                        }
                     }
                 }
-                if let Some(at)=claude_tail.as_ref().map(|tail|tail.through_line() as i64).filter(|at|Some(*at)!=remembered){let _=state.database().remember_followed(session.id.clone(),at).await;remembered=Some(at);}
+                let at = tail.through_line() as i64;
+                if Some(at) != remembered {
+                    let _ = state.database().remember_followed(session.id.clone(), at).await;
+                    remembered = Some(at);
+                }
                 continue;
             }
             let mut fresh = if session.brand=="claude" {
@@ -1073,22 +1060,37 @@ mod tests {
         assert!(state.has_chat_follower("chat-1").await, "the follower stays on beside the driver");
     }
 
-    /// A driven chat of one saved Claude record, already read in.
-    async fn driven_claude_chat(
+    /// A driven chat of one saved record, already read in: the attach import
+    /// leaves the cursor at the record's end.
+    async fn driven_chat(
         directory: &tempfile::TempDir,
         state: &workbench::WorkbenchState,
+        brand: &str,
         external: &str,
     ) -> std::path::PathBuf {
-        let project = directory.path().join("claude/projects/project");
-        fs::create_dir_all(&project).unwrap();
-        let record = project.join(format!("{external}.jsonl"));
-        fs::write(&record, "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n").unwrap();
+        let record = if brand == "claude" {
+            let project = directory.path().join("claude/projects/project");
+            fs::create_dir_all(&project).unwrap();
+            let record = project.join(format!("{external}.jsonl"));
+            fs::write(&record, "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n").unwrap();
+            record
+        } else {
+            let day = directory.path().join("codex/sessions/2026/09/24");
+            fs::create_dir_all(&day).unwrap();
+            let record = day.join(format!("rollout-2026-09-24T17-14-00-{external}.jsonl"));
+            fs::write(
+                &record,
+                "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/work/project\"}}\n",
+            )
+            .unwrap();
+            record
+        };
         let at = "2026-09-24T17:14:00Z";
         state
             .database()
             .create_session(Session {
                 id: "chat-1".into(),
-                brand: "claude".into(),
+                brand: brand.into(),
                 external_id: Some(external.into()),
                 project_id: "project-1".into(),
                 project_path: "/work/project".into(),
@@ -1109,25 +1111,37 @@ mod tests {
             })
             .await
             .unwrap();
-        // Attaching reads the record in and puts the cursor at its end.
         state.database().mark_imported("chat-1".into()).await.unwrap();
         let size = fs::metadata(&record).unwrap().len() as i64;
         state.database().remember_followed("chat-1".into(), size).await.unwrap();
         record
     }
 
-    fn driven_answer(record: &std::path::Path, uuid: &str, text: &str) {
+    fn write_line(record: &std::path::Path, line: serde_json::Value) {
         let mut file = fs::OpenOptions::new().append(true).open(record).unwrap();
-        writeln!(
-            file,
-            "{}",
-            serde_json::json!({
-                "type":"assistant","uuid":uuid,"timestamp":"2026-09-24T17:14:41Z",
-                "message":{"id":format!("msg_{uuid}"),"role":"assistant","content":text}
-            })
-        )
-        .unwrap();
+        writeln!(file, "{line}").unwrap();
         file.flush().unwrap();
+    }
+
+    fn claude_answer(uuid: &str, text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type":"assistant","uuid":uuid,"timestamp":"2026-09-24T17:14:41Z",
+            "message":{"id":format!("msg_{uuid}"),"role":"assistant","content":text}
+        })
+    }
+
+    fn codex_prompt(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "timestamp":"2026-09-24T17:14:41.000Z","type":"event_msg",
+            "payload":{"type":"user_message","message":text,"images":[],"local_images":[]}
+        })
+    }
+
+    fn shell_finished(id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type":"queue-operation","operation":"enqueue","timestamp":"2026-09-24T17:15:02Z",
+            "content":format!("<task-notification>\n<task-id>{id}</task-id>\n<status>completed</status>\n<summary>Background command \"cargo test\" completed (exit code 0)</summary>\n</task-notification>")
+        })
     }
 
     async fn says(state: &workbench::WorkbenchState, text: &str) -> bool {
@@ -1140,124 +1154,183 @@ mod tests {
             .any(|event| event.fields.get("text").and_then(serde_json::Value::as_str) == Some(text))
     }
 
+    async fn event_count(state: &workbench::WorkbenchState) -> usize {
+        state.database().events_since("chat-1".into(), 0).await.unwrap().len()
+    }
+
+    /// The driver says a shell was handed off, off the tool's answer over ACP.
+    async fn shell_started(state: &workbench::WorkbenchState, id: &str) {
+        let started = serde_json::json!({
+            "type":"agent.started","sessionId":"chat-1","seq":0,"at":"2026-09-24T17:14:30Z",
+            "agentId":id,"toolCallId":format!("call-{id}"),"kind":"command",
+            "what":"cargo test","agentType":"shell","model":null
+        });
+        state.database().append(serde_json::from_value(started).unwrap()).await.unwrap();
+    }
+
+    async fn shell_ended(state: &workbench::WorkbenchState, id: &str) -> bool {
+        state.database().events_since("chat-1".into(), 0).await.unwrap().iter().any(|event| {
+            event.kind == crate::workbench::protocol::EventKind::AgentFinished
+                && event.fields.get("agentId").and_then(serde_json::Value::as_str) == Some(id)
+        })
+    }
+
+    fn start_following(state: &workbench::WorkbenchState, control: Arc<workbench::ChatFollowControl>) {
+        let state = state.clone();
+        tokio::spawn(async move { follow_native_record(state, "chat-1".into(), control).await });
+    }
+
+    async fn at_end(state: &workbench::WorkbenchState, record: &std::path::Path) -> bool {
+        let size = fs::metadata(record).unwrap().len() as i64;
+        state.database().followed_to("chat-1".into()).await.unwrap() == Some(size)
+    }
+
+    /// Stopped while somebody watched: the driver's closing lines land after
+    /// the registry has let the driver go, and are still the driver's.
     #[tokio::test]
-    async fn the_last_lines_of_a_driver_that_has_gone_stay_its_own() {
+    async fn a_watched_chats_driver_stopping_leaves_nothing_to_read_again() {
         let (directory, state) = workbench_fixture();
-        let record =
-            driven_claude_chat(&directory, &state, "33333333-3333-4333-8333-333333333333").await;
+        let record = driven_chat(&directory, &state, "claude", "33333333-3333-4333-8333-333333333333").await;
         state.pretend_driver("chat-1").await;
         let (_lease, start) = state.chat_follow_subscription("chat-1").await;
-        let control = start.unwrap();
-        let follow_state = state.clone();
-        tokio::spawn(async move {
-            follow_native_record(follow_state, "chat-1".into(), control).await;
-        });
+        start_following(&state, start.unwrap());
         tokio::time::sleep(Duration::from_millis(300)).await;
-
-        // The registry lets go of the driver first; the closing kit then writes
-        // the end of its turn, which the driver already carried over ACP.
-        state.forget_driver("chat-1").await;
-        driven_answer(&record, "last-1", "the end of the driven turn");
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        write_line(&record, claude_answer("driven-1", "an answer the driver carried"));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        write_line(&record, claude_answer("driven-2", "the end of the driven turn"));
+        state.let_driver_go("chat-1").await;
+        tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(
-            !says(&state, "the end of the driven turn").await,
-            "a driver's closing lines were read again as somebody else's work"
+            !says(&state, "an answer the driver carried").await
+                && !says(&state, "the end of the driven turn").await,
+            "the driven turn was appended again at the end of the chat"
         );
-        let size = fs::metadata(&record).unwrap().len() as i64;
-        assert_eq!(state.database().followed_to("chat-1".into()).await.unwrap(), Some(size));
+        assert!(at_end(&state, &record).await);
+        assert!(!state.database().driving("chat-1".into()).await.unwrap());
 
-        // Once it has settled, what the record gains is somebody else's again.
-        tokio::time::sleep(DRIVER_SETTLES).await;
-        driven_answer(&record, "outside-1", "a terminal took the chat over");
+        // What the record gains afterwards is somebody else's again.
+        write_line(&record, claude_answer("outside-1", "a terminal took the chat over"));
         let heard = tokio::time::timeout(Duration::from_secs(2), async {
             while !says(&state, "a terminal took the chat over").await {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
         .await;
-        assert!(heard.is_ok(), "work done after the driver settled was never followed");
+        assert!(heard.is_ok(), "work done after the driver went was never followed");
     }
 
+    /// Stopped while nobody watched: no follower ran beside the driver, so
+    /// the stretch is handed back when it goes, shells and all.
     #[tokio::test]
-    async fn a_new_chats_record_is_followed_once_its_driver_writes_it() {
+    async fn an_unwatched_chats_driver_stopping_hands_its_stretch_back() {
         let (directory, state) = workbench_fixture();
-        let external = "55555555-5555-4555-8555-555555555555";
-        let record = driven_claude_chat(&directory, &state, external).await;
-        // A new chat: the kit has not written its record yet.
-        fs::remove_file(&record).unwrap();
-        state.follow_the_driven();
+        let record = driven_chat(&directory, &state, "claude", "44444444-4444-4444-8444-444444444444").await;
         state.pretend_driver("chat-1").await;
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(state.database().driving("chat-1".into()).await.unwrap());
+        write_line(&record, claude_answer("driven-1", "an answer the driver carried"));
+        shell_started(&state, "bshell01").await;
+        write_line(&record, shell_finished("bshell01"));
+        write_line(&record, claude_answer("driven-2", "and another"));
+        assert!(!state.has_chat_follower("chat-1").await, "nothing reads beside an unwatched driver");
 
-        fs::write(&record, "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n").unwrap();
-        tokio::time::sleep(Duration::from_millis(800)).await;
-        assert!(state.has_chat_follower("chat-1").await, "nobody read the record once it appeared");
-        driven_answer(&record, "driven-1", "the first answer of a new chat");
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        let size = fs::metadata(&record).unwrap().len() as i64;
-        assert_eq!(state.database().followed_to("chat-1".into()).await.unwrap(), Some(size));
+        state.let_driver_go("chat-1").await;
+        assert!(at_end(&state, &record).await, "the cursor stayed where the driver was attached");
+        assert!(shell_ended(&state, "bshell01").await, "a shell that ended unwatched still shows as running");
+        assert!(!state.database().driving("chat-1".into()).await.unwrap());
 
-        state.forget_driver("chat-1").await;
-        let stopped = tokio::time::timeout(Duration::from_secs(5), async {
-            while state.has_chat_follower("chat-1").await {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await;
-        assert!(stopped.is_ok(), "the follower outlived its driver");
+        let before = event_count(&state).await;
         let (_lease, start) = state.chat_follow_subscription("chat-1").await;
-        let control = start.unwrap();
-        let follow_state = state.clone();
-        tokio::spawn(async move {
-            follow_native_record(follow_state, "chat-1".into(), control).await;
-        });
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        assert!(!says(&state, "the first answer of a new chat").await);
-    }
-
-    #[tokio::test]
-    async fn a_driven_chat_nobody_opened_is_not_read_again_when_its_driver_goes() {
-        let (directory, state) = workbench_fixture();
-        let record =
-            driven_claude_chat(&directory, &state, "44444444-4444-4444-8444-444444444444").await;
-        state.follow_the_driven();
-        state.pretend_driver("chat-1").await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(state.has_chat_follower("chat-1").await, "nobody reads beside an unwatched driver");
-
-        // The chat works with nobody looking at it.
-        driven_answer(&record, "driven-1", "an answer the driver carried");
-        driven_answer(&record, "driven-2", "and another");
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        let size = fs::metadata(&record).unwrap().len() as i64;
-        assert_eq!(
-            state.database().followed_to("chat-1".into()).await.unwrap(),
-            Some(size),
-            "the cursor stayed where the driver was attached"
-        );
-
-        // The driver goes; the keeper lets the follower settle, then stops.
-        state.forget_driver("chat-1").await;
-        let stopped = tokio::time::timeout(Duration::from_secs(5), async {
-            while state.has_chat_follower("chat-1").await {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await;
-        assert!(stopped.is_ok(), "the follower outlived its driver");
-
-        // Somebody opens the chat afterwards, as after a restart.
-        let (_lease, start) = state.chat_follow_subscription("chat-1").await;
-        let control = start.unwrap();
-        let follow_state = state.clone();
-        tokio::spawn(async move {
-            follow_native_record(follow_state, "chat-1".into(), control).await;
-        });
+        start_following(&state, start.unwrap());
         tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(
             !says(&state, "an answer the driver carried").await && !says(&state, "and another").await,
             "the driven turn was appended again at the end of the chat"
         );
+        assert_eq!(event_count(&state).await, before);
+    }
+
+    /// A driver that died with the server leaves its mark; the next run hands
+    /// the stretch back before anything reads it again.
+    #[tokio::test]
+    async fn a_driver_lost_with_the_server_is_handed_back_on_the_next_start() {
+        let (directory, state) = workbench_fixture();
+        let record = driven_chat(&directory, &state, "claude", "55555555-5555-4555-8555-555555555555").await;
+        state.pretend_driver("chat-1").await;
+        write_line(&record, claude_answer("driven-1", "an answer the driver carried"));
+        shell_started(&state, "bshell02").await;
+        write_line(&record, shell_finished("bshell02"));
+        state.lose_driver("chat-1").await;
+        assert!(state.database().driving("chat-1".into()).await.unwrap(), "the mark did not survive");
+
+        state.registry().hand_back_the_orphaned().await;
+        assert!(at_end(&state, &record).await);
+        assert!(shell_ended(&state, "bshell02").await);
+        assert!(!state.database().driving("chat-1".into()).await.unwrap());
+        let before = event_count(&state).await;
+        let (_lease, start) = state.chat_follow_subscription("chat-1").await;
+        start_following(&state, start.unwrap());
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(!says(&state, "an answer the driver carried").await);
+        assert_eq!(event_count(&state).await, before);
+    }
+
+    /// The follower itself hands back a lost driver's stretch when it is the
+    /// first to reach the chat after a restart.
+    #[tokio::test]
+    async fn a_follower_reaching_a_lost_drivers_chat_first_hands_it_back() {
+        let (directory, state) = workbench_fixture();
+        let record = driven_chat(&directory, &state, "claude", "66666666-6666-4666-8666-666666666666").await;
+        state.pretend_driver("chat-1").await;
+        write_line(&record, claude_answer("driven-1", "an answer the driver carried"));
+        state.lose_driver("chat-1").await;
+
+        let (_lease, start) = state.chat_follow_subscription("chat-1").await;
+        start_following(&state, start.unwrap());
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(!says(&state, "an answer the driver carried").await);
+        assert!(at_end(&state, &record).await);
+        assert!(!state.database().driving("chat-1".into()).await.unwrap());
+    }
+
+    /// The same rule for Codex, watched or not.
+    #[tokio::test]
+    async fn a_codex_chats_driver_stopping_leaves_nothing_to_read_again() {
+        let (directory, state) = workbench_fixture();
+        let record = driven_chat(&directory, &state, "codex", "77777777-7777-4777-8777-777777777777").await;
+        state.pretend_driver("chat-1").await;
+        let (_lease, start) = state.chat_follow_subscription("chat-1").await;
+        start_following(&state, start.unwrap());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let before = event_count(&state).await;
+        write_line(&record, codex_prompt("a prompt the driver carried"));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        write_line(&record, codex_prompt("the end of the driven turn"));
+        state.let_driver_go("chat-1").await;
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert_eq!(event_count(&state).await, before, "the driven turn was appended again");
+        assert!(at_end(&state, &record).await);
+        assert!(state.has_chat_follower("chat-1").await, "the follower gave up beside the driver");
+
+        // A Codex chat nobody watched is handed back the same way.
+        drop(_lease);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        state.pretend_driver("chat-1").await;
+        write_line(&record, codex_prompt("unwatched driven prompt"));
+        state.let_driver_go("chat-1").await;
+        assert!(at_end(&state, &record).await);
+        let (_lease, start) = state.chat_follow_subscription("chat-1").await;
+        start_following(&state, start.unwrap());
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert_eq!(event_count(&state).await, before, "the unwatched turn was appended again");
+
+        write_line(&record, codex_prompt("somebody else's prompt"));
+        let heard = tokio::time::timeout(Duration::from_secs(2), async {
+            while event_count(&state).await == before {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await;
+        assert!(heard.is_ok(), "work done after the driver went was never followed");
     }
 
     #[tokio::test]

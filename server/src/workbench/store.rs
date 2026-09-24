@@ -1299,6 +1299,30 @@ fn held_in_its_project(
             rusqlite::params![at, session_id],
         )
     }
+    /// Mark a chat as run by a driver of this process, or as handed back.
+    pub fn set_driving(&self, session_id: &str, driving: bool) -> rusqlite::Result<usize> {
+        self.connection.execute(
+            "UPDATE session SET driving=?1 WHERE id=?2",
+            rusqlite::params![driving, session_id],
+        )
+    }
+    pub fn driving(&self, session_id: &str) -> rusqlite::Result<bool> {
+        self.connection
+            .query_row("SELECT driving FROM session WHERE id=?1", [session_id], |row| row.get(0))
+            .optional()
+            .map(|driving| driving.unwrap_or(false))
+    }
+    /// Every chat still marked as driven. Read once at start, when no driver
+    /// of this process can be running any of them.
+    pub fn still_driving(&self) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT id FROM session WHERE driving=1")?;
+        let ids = statement
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>();
+        ids
+    }
     pub fn was_driven_here(&self, session_id: &str) -> rusqlite::Result<bool> {
         Ok(self.connection.query_row("SELECT 1 FROM event WHERE session_id=?1 AND type='session.started' AND COALESCE(json_extract(json,'$.readOnly'),0)!=1 LIMIT 1",[session_id],|_|Ok(())).optional()?.is_some())
     }
@@ -3056,6 +3080,18 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     {
         transaction.execute_batch(
             "ALTER TABLE transcript_projection ADD COLUMN fold_version INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+
+    // Whether a driver of this process was running the chat, so a chat whose
+    // driver died with the server is handed back on the next start rather
+    // than read again from where its driver was attached (bw-6n29).
+    if !columns(transaction, "session")?
+        .iter()
+        .any(|name| name == "driving")
+    {
+        transaction.execute_batch(
+            "ALTER TABLE session ADD COLUMN driving INTEGER NOT NULL DEFAULT 0;",
         )?;
     }
 

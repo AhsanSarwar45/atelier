@@ -387,9 +387,44 @@ pub struct WorkbenchRegistry {
     /// connection: a person who reloads the page mid-sign-in should find the
     /// same code waiting, not a new one (signin.rs).
     signins: Arc<super::signin::SignIns>,
-    /// The id of every chat a driver has just been attached to, for whoever
-    /// has to read beside it for as long as it lives (bw-6n29).
-    attached: tokio::sync::broadcast::Sender<String>,
+    /// How many drivers of this process each chat has, from the launch until
+    /// its stretch has been handed back — longer than the drivers map holds
+    /// one, which lets go before the process is closed and done writing.
+    supervising: Supervising,
+}
+
+type Supervising = Arc<tokio::sync::Mutex<HashMap<String, usize>>>;
+
+/// Count one more driver of a chat, and mark the chat as driven where a crash
+/// cannot lose the mark.
+async fn begin_supervising(supervising: &Supervising, database: &ChatDb, session_id: &str) {
+    let mut counts = supervising.lock().await;
+    *counts.entry(session_id.to_string()).or_default() += 1;
+    let _ = database.set_driving(session_id.to_string(), true).await;
+}
+
+/// One driver of a chat is gone and its process closed. The last one hands the
+/// driven stretch back before the chat counts as undriven, so a follower never
+/// sees it undriven with the stretch still ahead of its cursor.
+async fn end_supervising(
+    supervising: &Supervising,
+    database: &ChatDb,
+    paths: &RegistryPaths,
+    session_id: &str,
+) {
+    let last = supervising.lock().await.get(session_id).copied() == Some(1);
+    if last {
+        super::handback::hand_back(database, session_id, &paths.claude_config, &paths.codex_home)
+            .await;
+    }
+    let mut counts = supervising.lock().await;
+    let left = counts.get(session_id).copied().unwrap_or(1).saturating_sub(1);
+    if left == 0 {
+        counts.remove(session_id);
+        let _ = database.set_driving(session_id.to_string(), false).await;
+    } else {
+        counts.insert(session_id.to_string(), left);
+    }
 }
 
 impl WorkbenchRegistry {
@@ -484,13 +519,8 @@ impl WorkbenchRegistry {
             defaults,
             profiles,
             signins: Arc::default(),
-            attached: tokio::sync::broadcast::channel(64).0,
+            supervising: Arc::default(),
         }
-    }
-
-    /// Hear of each driver as it is attached.
-    pub fn subscribe_attached(&self) -> tokio::sync::broadcast::Receiver<String> {
-        self.attached.subscribe()
     }
 
     pub fn database(&self) -> &ChatDb {
@@ -744,6 +774,42 @@ impl WorkbenchRegistry {
         screen_check::compare_and_store(before, after, media)
     }
 
+    /// Whether a driver of this process runs the chat, or has just gone and
+    /// its stretch is not handed back yet. The record belongs to the driver
+    /// for all of that time.
+    pub async fn is_supervising(&self, session_id: &str) -> bool {
+        self.supervising.lock().await.contains_key(session_id)
+    }
+
+    /// Hand back a chat left marked as driven by a driver that died with an
+    /// earlier run of the server. A chat a driver of this process runs is not
+    /// touched: its own ending hands it back.
+    pub async fn hand_back_if_orphaned(&self, session_id: &str) {
+        if self.is_supervising(session_id).await
+            || !self.database.driving(session_id.to_string()).await.unwrap_or(false)
+        {
+            return;
+        }
+        super::handback::hand_back(
+            &self.database,
+            session_id,
+            &self.paths.claude_config,
+            &self.paths.codex_home,
+        )
+        .await;
+        let counts = self.supervising.lock().await;
+        if !counts.contains_key(session_id) {
+            let _ = self.database.set_driving(session_id.to_string(), false).await;
+        }
+    }
+
+    /// Hand back every chat whose driver died with the last run of the server.
+    pub async fn hand_back_the_orphaned(&self) {
+        for session_id in self.database.still_driving().await.unwrap_or_default() {
+            self.hand_back_if_orphaned(&session_id).await;
+        }
+    }
+
     pub async fn has_driver(&self, session_id: &str) -> bool {
         self.drivers
             .read()
@@ -765,13 +831,23 @@ impl WorkbenchRegistry {
                 reconcile: None,
             },
         );
-        let _ = self.attached.send(session_id.to_string());
+        begin_supervising(&self.supervising, &self.database, session_id).await;
     }
 
-    /// The stand-in driver going away, as a stop or a crash takes one.
+    /// The stand-in driver going as a real one does: out of the map, then its
+    /// process closed, then its stretch handed back.
     #[cfg(test)]
-    pub(crate) async fn forget_driver(&self, session_id: &str) {
+    pub(crate) async fn let_driver_go(&self, session_id: &str) {
         self.drivers.write().await.remove(session_id);
+        end_supervising(&self.supervising, &self.database, &self.paths, session_id).await;
+    }
+
+    /// The stand-in driver dying with the server: the mark stays, and nothing
+    /// is handed back.
+    #[cfg(test)]
+    pub(crate) async fn lose_driver(&self, session_id: &str) {
+        self.drivers.write().await.remove(session_id);
+        self.supervising.lock().await.remove(session_id);
     }
 
     /// Reading by URL is the same operation as clicking a stored row. It does
@@ -815,20 +891,25 @@ impl WorkbenchRegistry {
             },
         );
         drop(drivers);
-        let _ = self.attached.send(session_id.clone());
+        begin_supervising(&self.supervising, &self.database, &session_id).await;
         let live = self.drivers.clone();
         let database = self.database.clone();
+        let supervising = self.supervising.clone();
+        let paths = self.paths.clone();
         tokio::spawn(async move {
             supervise_driver(database.clone(), session_id.clone(), driver, receiver).await;
-            let mut live = live.write().await;
-            if live
-                .get(&session_id)
-                .is_some_and(|current| current.same_channel(&owner))
             {
-                live.remove(&session_id);
-                // Even a dropped completion callback leaves no active status.
-                let _ = super::status::reconcile(&database, &session_id, None).await;
+                let mut live = live.write().await;
+                if live
+                    .get(&session_id)
+                    .is_some_and(|current| current.same_channel(&owner))
+                {
+                    live.remove(&session_id);
+                    // Even a dropped completion callback leaves no active status.
+                    let _ = super::status::reconcile(&database, &session_id, None).await;
+                }
             }
+            end_supervising(&supervising, &database, &paths, &session_id).await;
         });
         Ok(launched.reply)
     }

@@ -18,6 +18,7 @@ pub mod docker;
 pub mod codex;
 pub mod extensions;
 pub mod external;
+pub mod handback;
 pub mod hunks;
 pub mod kit_words;
 pub mod library;

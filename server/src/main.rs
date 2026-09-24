@@ -538,9 +538,13 @@ async fn serve(open_browser: bool) {
     // (workbench/memory_limit.rs).
     workbench::memory_limit::watch(database.clone(), workbench_state.registry().clone());
 
-    // What keeps a driven chat's place in its provider record while nobody has
-    // it open, so its turns are not read again as new when the driver goes.
-    workbench_state.follow_the_driven();
+    // A chat whose driver died with the last run of the server still has its
+    // driven stretch ahead of its cursor; hand it back once, before a follower
+    // could read it again as new (workbench/handback.rs).
+    {
+        let registry = workbench_state.registry().clone();
+        tokio::spawn(async move { registry.hand_back_the_orphaned().await });
+    }
 
     // Initialize Dolt connection manager. Local boards already backed by Dolt
     // are brought up through bd before the read-ahead can fall back to stale
