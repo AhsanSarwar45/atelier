@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Panel } from '@/components/ui/panel';
 import { Picker } from '@/components/ui/picker';
-import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { request } from '@/lib/api';
 import { buildCustomization, nextEntryName, suggestedItemId } from '@/lib/shared-guidance';
 import { sendCommand } from '@/workbench/use-session';
@@ -88,6 +88,8 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   const [folderRevision, setFolderRevision] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<{ row: Row; revision?: string; source?: string; files?: number }>();
+  // Leaving a draft throws it away, so it is asked about first.
+  const [discarding, setDiscarding] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [preview, setPreview] = useState('');
   const [projects, setProjects] = useState<{ name: string; path: string; localPath?: string }[]>([]);
@@ -218,7 +220,7 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
       {!draft && projectPath && kind === 'skill' && <Panel className="space-y-2"><h3 className="font-medium">Choose what this project can use</h3><p className="text-sm text-t-secondary">Switch off any {category === 'command' ? 'command' : 'skill'} this project does not need. This keeps its files and customizations, and changes nothing globally or in other projects.</p><p className="text-xs text-t-muted">Applies to new and reconnected chats, including explicit invocations. Switching on still respects conditions and required tools.</p></Panel>}
       {imports && <Panel tone="frame" className="space-y-2"><p className="text-sm">Choose a file to copy into {names[category].toLowerCase()}.</p>{imports.length === 0 && <p className="text-sm">No native files found.</p>}{imports.map(f => <Button key={f.path} variant="ghost" className="h-auto w-full justify-start whitespace-normal text-left" onClick={() => void copyNative(f)}>{f.name} · {f.category}</Button>)}<Button variant="outline" onClick={() => setImports(undefined)}>Cancel import</Button></Panel>}
       {projectRules ? <ProjectInstructionSummary rows={answer.resolved.items.filter(row => row.item.kind === 'instruction')} /> : draft ? <section className="min-w-0 space-y-6" aria-label="Library item editor" data-testid="library-editor">
-        <header className="space-y-3"><Button variant="ghost" size="sm" disabled={saving} onClick={() => { if (window.confirm('Discard this draft and return to the library?')) { setDraft(undefined); setEditing(undefined); } }}><ArrowLeft className="mr-2 size-4" />Back to {names[category].toLowerCase()}</Button><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-semibold">{inherited ? 'Customize' : editing ? 'Edit' : 'New'} {itemLabel}</h2><Badge>{projectPath ? 'This project only' : 'All projects'}</Badge></div><p className="text-sm text-t-secondary">{inherited ? 'Overrides affect only this project. Unchanged fields keep following the global version.' : projectPath ? 'This guidance belongs to this project and is shared by its providers.' : 'Changes are shared with every project that inherits this item.'}</p></header>
+        <header className="space-y-3"><Button variant="ghost" size="sm" disabled={saving} onClick={() => setDiscarding(true)}><ArrowLeft className="mr-2 size-4" />Back to {names[category].toLowerCase()}</Button><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-semibold">{inherited ? 'Customize' : editing ? 'Edit' : 'New'} {itemLabel}</h2><Badge>{projectPath ? 'This project only' : 'All projects'}</Badge></div><p className="text-sm text-t-secondary">{inherited ? 'Overrides affect only this project. Unchanged fields keep following the global version.' : projectPath ? 'This guidance belongs to this project and is shared by its providers.' : 'Changes are shared with every project that inherits this item.'}</p></header>
         <EditorSection step="1" title="What it does" description={draft.kind === 'output_style' ? 'Describe how the agent should write its answers.' : 'Give this guidance a clear name and tell the agent what to do.'}>
           <label className="block space-y-2 text-sm"><span className="font-medium">Name{inherited ? ' · inherited' : ''}</span><Input aria-label="Item name" disabled={inherited} value={draft.name} placeholder="e.g. Release check" onChange={e => patch({ name: e.target.value, ...(!editing && !idEdited ? { id: suggestedItemId(e.target.value, answer.resolved.items.map(r => r.item.id)) } : {}) })} /></label>
           <label className="block space-y-2 text-sm"><span className="font-medium">{draft.kind === 'skill' && draft.automatic ? 'When should the agent choose this skill?' : 'Short description'}{inherited ? ' · inherited' : ''}</span><Input aria-label="Item description" disabled={inherited} value={draft.description} placeholder={draft.kind === 'skill' ? 'e.g. Before releasing a package' : 'Optional summary for the library'} onChange={e => patch({ description: e.target.value })} /></label>
@@ -254,6 +256,13 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
       </Panel>)}</div>}
       {!draft && <details className="border-t border-border/40 pt-4"><summary className="cursor-pointer text-sm font-medium">Preview and diagnostics</summary><div className="mt-4 space-y-4">{!projectPath && <div className="space-y-2"><span className="text-sm">Evaluate for project</span><Picker label="Evaluate for project" value={preview} onChange={setPreview} choices={[{ value: '', label: 'Choose a project to explain conditions' }, ...projects.filter(p => !(p.localPath || p.path).startsWith('dolt://')).map(p => ({ value: p.localPath || p.path, label: p.name }))]} /></div>}<h3 className="text-sm font-medium">Saved session preview</h3><p className="break-all text-xs text-t-muted">Revision {answer.resolved.revision}. Instructions and the selected style are included; skills are loaded on use. Current chats retain their connection’s snapshot.</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{answer.guidance}</pre></div></details>}
     </>}
+    <AlertDialog open={discarding} onOpenChange={setDiscarding}>
+      <AlertDialogContent>
+        <AlertDialogTitle>Discard this draft?</AlertDialogTitle>
+        <AlertDialogDescription>Discard this draft and return to the library?</AlertDialogDescription>
+        <AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction onClick={() => { setDraft(undefined); setEditing(undefined); }}>Discard</AlertDialogAction></AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <AlertDialog open={!!deleting} onOpenChange={open => { if (!open && !saving) setDeleting(undefined); }}>
       <AlertDialogContent>
         <AlertDialogTitle>Delete {deleting?.row.item.name}?</AlertDialogTitle>

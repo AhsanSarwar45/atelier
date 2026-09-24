@@ -348,8 +348,8 @@ export function useFileActions(onMoved?: PathMoved, onMade?: (path: string) => v
         </AlertDialogContent>
     </AlertDialog>
     <Dialog open={asked !== null && asked.what !== 'delete'} onOpenChange={(open) => { if (!open) setAsked(null); }}>
-      // One box for all three, because they are one question — what is this
-      // called — asked about a name that exists or one that does not yet.
+      {/* One box for all three, because they are one question — what is this
+          called — asked about a name that exists or one that does not yet. */}
       <DialogContent className="sm:max-w-md" data-testid="path-name-dialog">
         <DialogHeader>
           <DialogTitle>

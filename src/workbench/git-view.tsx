@@ -538,12 +538,11 @@ export function GitView({
   /**
    * The destructive thing that has been asked for and not yet agreed to.
    *
-   * There is no `window.confirm` anywhere in here. The browser's box is drawn
-   * outside the app, cannot be styled, cannot be reached by the end-to-end
-   * run without special handling, and — the reason that matters — blocks the
-   * whole page while it is up. This is the app's own modal dialog, the same
-   * one the passphrase is asked for in, and it names the thing it is about to
-   * throw away.
+   * There is no browser confirm box anywhere in here. The browser's box is
+   * drawn outside the app, cannot be styled, cannot be reached by the
+   * end-to-end run without special handling, and — the reason that matters —
+   * blocks the whole page while it is up. This is the library's confirmation
+   * window, and it names the thing it is about to throw away.
    *
    * `run` is held as a function returning a function, because a plain one
    * handed to `setAsking` would be taken for an updater and called on the spot
