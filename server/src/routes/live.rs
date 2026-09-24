@@ -1068,6 +1068,20 @@ mod tests {
         brand: &str,
         external: &str,
     ) -> std::path::PathBuf {
+        let record = new_chat(directory, state, brand, external).await;
+        state.database().mark_imported("chat-1".into()).await.unwrap();
+        let size = fs::metadata(&record).unwrap().len() as i64;
+        state.database().remember_followed("chat-1".into(), size).await.unwrap();
+        record
+    }
+
+    /// A chat of one saved record that was never read in.
+    async fn new_chat(
+        directory: &tempfile::TempDir,
+        state: &workbench::WorkbenchState,
+        brand: &str,
+        external: &str,
+    ) -> std::path::PathBuf {
         let record = if brand == "claude" {
             let project = directory.path().join("claude/projects/project");
             fs::create_dir_all(&project).unwrap();
@@ -1111,9 +1125,6 @@ mod tests {
             })
             .await
             .unwrap();
-        state.database().mark_imported("chat-1".into()).await.unwrap();
-        let size = fs::metadata(&record).unwrap().len() as i64;
-        state.database().remember_followed("chat-1".into(), size).await.unwrap();
         record
     }
 
@@ -1206,7 +1217,7 @@ mod tests {
             "the driven turn was appended again at the end of the chat"
         );
         assert!(at_end(&state, &record).await);
-        assert!(!state.database().driving("chat-1".into()).await.unwrap());
+        assert_eq!(state.database().driven_from("chat-1".into()).await.unwrap(), None);
 
         // What the record gains afterwards is somebody else's again.
         write_line(&record, claude_answer("outside-1", "a terminal took the chat over"));
@@ -1226,7 +1237,7 @@ mod tests {
         let (directory, state) = workbench_fixture();
         let record = driven_chat(&directory, &state, "claude", "44444444-4444-4444-8444-444444444444").await;
         state.pretend_driver("chat-1").await;
-        assert!(state.database().driving("chat-1".into()).await.unwrap());
+        assert!(state.database().driven_from("chat-1".into()).await.unwrap().is_some());
         write_line(&record, claude_answer("driven-1", "an answer the driver carried"));
         shell_started(&state, "bshell01").await;
         write_line(&record, shell_finished("bshell01"));
@@ -1236,7 +1247,7 @@ mod tests {
         state.let_driver_go("chat-1").await;
         assert!(at_end(&state, &record).await, "the cursor stayed where the driver was attached");
         assert!(shell_ended(&state, "bshell01").await, "a shell that ended unwatched still shows as running");
-        assert!(!state.database().driving("chat-1".into()).await.unwrap());
+        assert_eq!(state.database().driven_from("chat-1".into()).await.unwrap(), None);
 
         let before = event_count(&state).await;
         let (_lease, start) = state.chat_follow_subscription("chat-1").await;
@@ -1247,6 +1258,25 @@ mod tests {
             "the driven turn was appended again at the end of the chat"
         );
         assert_eq!(event_count(&state).await, before);
+    }
+
+    /// A new chat has no record when its driver starts and no cursor into it
+    /// after; the whole record is the driver's stretch.
+    #[tokio::test]
+    async fn a_new_chats_shell_that_ended_unwatched_shows_as_finished() {
+        let (directory, state) = workbench_fixture();
+        let record = new_chat(&directory, &state, "claude", "88888888-8888-4888-8888-888888888888").await;
+        fs::remove_file(&record).unwrap();
+        assert_eq!(state.database().followed_to("chat-1".into()).await.unwrap(), None);
+        state.pretend_driver("chat-1").await;
+        assert_eq!(state.database().driven_from("chat-1".into()).await.unwrap(), Some(0));
+
+        fs::write(&record, "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n").unwrap();
+        shell_started(&state, "bshell03").await;
+        write_line(&record, shell_finished("bshell03"));
+        state.let_driver_go("chat-1").await;
+        assert!(shell_ended(&state, "bshell03").await, "a new chat's shell still shows as running");
+        assert_eq!(state.database().driven_from("chat-1".into()).await.unwrap(), None);
     }
 
     /// A driver that died with the server leaves its mark; the next run hands
@@ -1260,12 +1290,12 @@ mod tests {
         shell_started(&state, "bshell02").await;
         write_line(&record, shell_finished("bshell02"));
         state.lose_driver("chat-1").await;
-        assert!(state.database().driving("chat-1".into()).await.unwrap(), "the mark did not survive");
+        assert!(state.database().driven_from("chat-1".into()).await.unwrap().is_some(), "the mark did not survive");
 
         state.registry().hand_back_the_orphaned().await;
         assert!(at_end(&state, &record).await);
         assert!(shell_ended(&state, "bshell02").await);
-        assert!(!state.database().driving("chat-1".into()).await.unwrap());
+        assert_eq!(state.database().driven_from("chat-1".into()).await.unwrap(), None);
         let before = event_count(&state).await;
         let (_lease, start) = state.chat_follow_subscription("chat-1").await;
         start_following(&state, start.unwrap());
@@ -1289,7 +1319,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(!says(&state, "an answer the driver carried").await);
         assert!(at_end(&state, &record).await);
-        assert!(!state.database().driving("chat-1".into()).await.unwrap());
+        assert_eq!(state.database().driven_from("chat-1".into()).await.unwrap(), None);
     }
 
     /// The same rule for Codex, watched or not.

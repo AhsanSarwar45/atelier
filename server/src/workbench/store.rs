@@ -1299,25 +1299,33 @@ fn held_in_its_project(
             rusqlite::params![at, session_id],
         )
     }
-    /// Mark a chat as run by a driver of this process, or as handed back.
-    pub fn set_driving(&self, session_id: &str, driving: bool) -> rusqlite::Result<usize> {
+    /// Mark a chat as run by a driver of this process from one byte of its
+    /// record on. A mark already there stays: it is the start of a stretch
+    /// not handed back yet.
+    pub fn begin_driving(&self, session_id: &str, from: i64) -> rusqlite::Result<usize> {
         self.connection.execute(
-            "UPDATE session SET driving=?1 WHERE id=?2",
-            rusqlite::params![driving, session_id],
+            "UPDATE session SET driven_from=COALESCE(driven_from,?1) WHERE id=?2",
+            rusqlite::params![from, session_id],
         )
     }
-    pub fn driving(&self, session_id: &str) -> rusqlite::Result<bool> {
+    /// The chat's driven stretch has been handed back.
+    pub fn end_driving(&self, session_id: &str) -> rusqlite::Result<usize> {
         self.connection
-            .query_row("SELECT driving FROM session WHERE id=?1", [session_id], |row| row.get(0))
+            .execute("UPDATE session SET driven_from=NULL WHERE id=?1", [session_id])
+    }
+    /// Where the chat's driven stretch began, if it has one not handed back.
+    pub fn driven_from(&self, session_id: &str) -> rusqlite::Result<Option<i64>> {
+        self.connection
+            .query_row("SELECT driven_from FROM session WHERE id=?1", [session_id], |row| row.get(0))
             .optional()
-            .map(|driving| driving.unwrap_or(false))
+            .map(Option::flatten)
     }
     /// Every chat still marked as driven. Read once at start, when no driver
     /// of this process can be running any of them.
     pub fn still_driving(&self) -> rusqlite::Result<Vec<String>> {
         let mut statement = self
             .connection
-            .prepare("SELECT id FROM session WHERE driving=1")?;
+            .prepare("SELECT id FROM session WHERE driven_from IS NOT NULL")?;
         let ids = statement
             .query_map([], |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<String>>>();
@@ -3083,16 +3091,15 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
         )?;
     }
 
-    // Whether a driver of this process was running the chat, so a chat whose
-    // driver died with the server is handed back on the next start rather
-    // than read again from where its driver was attached (bw-6n29).
+    // Where in its record a driver of this process began running the chat,
+    // NULL when none does, so a chat whose driver died with the server is
+    // handed back on the next start rather than read again from where its
+    // driver was attached (bw-6n29).
     if !columns(transaction, "session")?
         .iter()
-        .any(|name| name == "driving")
+        .any(|name| name == "driven_from")
     {
-        transaction.execute_batch(
-            "ALTER TABLE session ADD COLUMN driving INTEGER NOT NULL DEFAULT 0;",
-        )?;
+        transaction.execute_batch("ALTER TABLE session ADD COLUMN driven_from INTEGER;")?;
     }
 
     one_row_per_external_chat(transaction)

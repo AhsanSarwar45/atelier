@@ -134,11 +134,16 @@ pub async fn hand_back(
     codex_home: &Path,
 ) {
     if let Ok(Some(session)) = database.get_session(session_id.to_string()).await {
-        let from = database
-            .followed_to(session_id.to_string())
-            .await
-            .ok()
-            .flatten();
+        // The cursor, where a follower kept it; otherwise where the driver
+        // began, which is all a new chat has.
+        let from = match database.followed_to(session_id.to_string()).await {
+            Ok(Some(at)) => Some(at),
+            _ => database
+                .driven_from(session_id.to_string())
+                .await
+                .ok()
+                .flatten(),
+        };
         let record = session.external_id.as_deref().and_then(|id| {
             record_path(
                 &session.brand,
@@ -148,8 +153,7 @@ pub async fn hand_back(
                 codex_home,
             )
         });
-        // No cursor means the next follower starts at the record's end, and a
-        // missing record has nothing in it to read again.
+        // A missing record has nothing in it to read again.
         if let (Some(from), Some(record)) = (from, record) {
             let brand = session.brand.clone();
             let read = tokio::task::spawn_blocking(move || {
@@ -175,6 +179,38 @@ pub async fn hand_back(
             }
         }
     }
+}
+
+/**
+ * Where a driver's stretch of a chat's record begins: the follower's cursor
+ * if it has one, else the record's end, or its start if it is not written yet.
+ */
+pub async fn stretch_start(
+    database: &ChatDb,
+    session_id: &str,
+    claude_config: &Path,
+    codex_home: &Path,
+) -> i64 {
+    if let Ok(Some(at)) = database.followed_to(session_id.to_string()).await {
+        return at;
+    }
+    let Ok(Some(session)) = database.get_session(session_id.to_string()).await else {
+        return 0;
+    };
+    session
+        .external_id
+        .as_deref()
+        .and_then(|id| {
+            record_path(
+                &session.brand,
+                session.profile.as_deref(),
+                id,
+                claude_config,
+                codex_home,
+            )
+        })
+        .and_then(|record| std::fs::metadata(record).ok())
+        .map_or(0, |metadata| metadata.len() as i64)
 }
 
 /// The notes in a record after one byte, and where its last whole line ends.

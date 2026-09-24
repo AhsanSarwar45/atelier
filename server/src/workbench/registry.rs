@@ -397,10 +397,25 @@ type Supervising = Arc<tokio::sync::Mutex<HashMap<String, usize>>>;
 
 /// Count one more driver of a chat, and mark the chat as driven where a crash
 /// cannot lose the mark.
-async fn begin_supervising(supervising: &Supervising, database: &ChatDb, session_id: &str) {
+async fn begin_supervising(
+    supervising: &Supervising,
+    database: &ChatDb,
+    paths: &RegistryPaths,
+    session_id: &str,
+) {
     let mut counts = supervising.lock().await;
-    *counts.entry(session_id.to_string()).or_default() += 1;
-    let _ = database.set_driving(session_id.to_string(), true).await;
+    let count = counts.entry(session_id.to_string()).or_default();
+    *count += 1;
+    if *count == 1 {
+        let from = super::handback::stretch_start(
+            database,
+            session_id,
+            &paths.claude_config,
+            &paths.codex_home,
+        )
+        .await;
+        let _ = database.begin_driving(session_id.to_string(), from).await;
+    }
 }
 
 /// One driver of a chat is gone and its process closed. The last one hands the
@@ -421,7 +436,7 @@ async fn end_supervising(
     let left = counts.get(session_id).copied().unwrap_or(1).saturating_sub(1);
     if left == 0 {
         counts.remove(session_id);
-        let _ = database.set_driving(session_id.to_string(), false).await;
+        let _ = database.end_driving(session_id.to_string()).await;
     } else {
         counts.insert(session_id.to_string(), left);
     }
@@ -786,7 +801,7 @@ impl WorkbenchRegistry {
     /// touched: its own ending hands it back.
     pub async fn hand_back_if_orphaned(&self, session_id: &str) {
         if self.is_supervising(session_id).await
-            || !self.database.driving(session_id.to_string()).await.unwrap_or(false)
+            || !matches!(self.database.driven_from(session_id.to_string()).await, Ok(Some(_)))
         {
             return;
         }
@@ -799,7 +814,7 @@ impl WorkbenchRegistry {
         .await;
         let counts = self.supervising.lock().await;
         if !counts.contains_key(session_id) {
-            let _ = self.database.set_driving(session_id.to_string(), false).await;
+            let _ = self.database.end_driving(session_id.to_string()).await;
         }
     }
 
@@ -831,7 +846,7 @@ impl WorkbenchRegistry {
                 reconcile: None,
             },
         );
-        begin_supervising(&self.supervising, &self.database, session_id).await;
+        begin_supervising(&self.supervising, &self.database, &self.paths, session_id).await;
     }
 
     /// The stand-in driver going as a real one does: out of the map, then its
@@ -891,7 +906,7 @@ impl WorkbenchRegistry {
             },
         );
         drop(drivers);
-        begin_supervising(&self.supervising, &self.database, &session_id).await;
+        begin_supervising(&self.supervising, &self.database, &self.paths, &session_id).await;
         let live = self.drivers.clone();
         let database = self.database.clone();
         let supervising = self.supervising.clone();
