@@ -684,6 +684,55 @@ fn same_file(a: &Path, b: &Path) -> bool {
         }
 }
 
+/// Delete only the exact listed file in the requested scope. In particular,
+/// never turn a listed symlink into authority to delete its target.
+pub fn delete(
+    path: &Path,
+    project: Option<&Path>,
+    home: &Path,
+    claude: Option<&Path>,
+    codex: Option<&Path>,
+) -> Result<(), String> {
+    let refused = "That file is not part of the selected agent configuration";
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|part| matches!(part, Component::ParentDir | Component::CurDir))
+    {
+        return Err(refused.into());
+    }
+    let (claude, codex) = account_dirs(home, claude, codex);
+    let location = locations(project, home, &claude, &codex)
+        .into_iter()
+        .find(|location| {
+            (project.is_some() == (location.scope != Scope::Personal))
+                && location.files.iter().any(|listed| listed == path)
+        })
+        .ok_or(refused)?;
+    // Reject a directory symlink escaping the allowed root. remove_file unlinks
+    // a final symlink itself, but follows symlinks in its parent components.
+    let scope_root = match (project, location.scope, location.provider, location.shared) {
+        (Some(project), Scope::Project | Scope::ProjectLocal, _, _) => project.to_path_buf(),
+        (_, _, _, true) => home.join(".agents"),
+        (_, _, Provider::Claude, _) => claude,
+        (_, _, Provider::Codex, _) => codex,
+    };
+    let root = fs::canonicalize(scope_root).map_err(|e| e.to_string())?;
+    let parent = fs::canonicalize(path.parent().ok_or(refused)?).map_err(|e| e.to_string())?;
+    if !parent.starts_with(root) {
+        return Err(
+            "Cannot delete through a directory link outside the agent configuration".into(),
+        );
+    }
+    let kind = fs::symlink_metadata(path)
+        .map_err(|e| e.to_string())?
+        .file_type();
+    if !kind.is_file() && !kind.is_symlink() {
+        return Err("Only individual files can be deleted".into());
+    }
+    fs::remove_file(path).map_err(|e| e.to_string())
+}
+
 /// Replace one discovered file, or make one of the well-known ones, keeping
 /// the previous contents beside it as `.bak`. Anything outside what
 /// `discover` and `creatable` name for this scope is refused.
@@ -725,6 +774,69 @@ pub fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn deletion_is_exact_and_scoped_to_account_and_project() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let account = home.path().join("work");
+        fs::create_dir_all(home.path().join(".claude")).unwrap();
+        fs::create_dir_all(&account).unwrap();
+        let personal = home.path().join(".claude/CLAUDE.md");
+        let work = account.join("CLAUDE.md");
+        let local = project.path().join("CLAUDE.md");
+        let arbitrary = project.path().join("secret.txt");
+        for file in [&personal, &work, &local, &arbitrary] {
+            fs::write(file, "keep").unwrap();
+        }
+        assert!(delete(&personal, None, home.path(), Some(&account), None).is_err());
+        assert!(delete(&personal, Some(project.path()), home.path(), None, None).is_err());
+        assert!(delete(&local, None, home.path(), None, None).is_err());
+        assert!(delete(&arbitrary, Some(project.path()), home.path(), None, None).is_err());
+        assert!(delete(
+            project.path(),
+            Some(project.path()),
+            home.path(),
+            None,
+            None
+        )
+        .is_err());
+        delete(&work, None, home.path(), Some(&account), None).unwrap();
+        delete(&local, Some(project.path()), home.path(), None, None).unwrap();
+        assert!(!work.exists());
+        assert!(!local.exists());
+        assert!(personal.exists());
+        assert!(arbitrary.exists());
+        assert!(delete(&local, Some(project.path()), home.path(), None, None).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deletion_unlinks_final_symlinks_but_refuses_escaped_parent_links() {
+        use std::os::unix::fs::symlink;
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let claude = home.path().join(".claude");
+        fs::create_dir_all(claude.join("skills")).unwrap();
+        let target = outside.path().join("SKILL.md");
+        fs::write(&target, "keep target").unwrap();
+        let link = claude.join("CLAUDE.md");
+        symlink(&target, &link).unwrap();
+        assert!(delete(&target, None, home.path(), None, None).is_err());
+        delete(&link, None, home.path(), None, None).unwrap();
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert!(target.exists());
+        symlink(outside.path(), claude.join("skills/external")).unwrap();
+        assert!(delete(
+            &claude.join("skills/external/SKILL.md"),
+            None,
+            home.path(),
+            None,
+            None
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(target).unwrap(), "keep target");
+    }
+
     #[test]
     fn native_workbench_services_metadata_discovers_and_guards_agent_files() {
         let home = tempfile::tempdir().unwrap();

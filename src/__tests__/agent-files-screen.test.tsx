@@ -61,4 +61,41 @@ describe('Agent files browser', () => {
     fireEvent.change(screen.getByLabelText('Search agent files'), { target: { value: 'nothing-here' } });
     expect(screen.getByText('No agent files')).toBeInTheDocument();
   });
+
+  it.each([false, true])('confirms and deletes the exact file at the selected scope (project: %s)', async (project) => {
+    let removed = false;
+    const file = project ? { ...row, scope: 'project', path: '/repo/CLAUDE.md' } : row;
+    sendCommand.mockImplementation(async (command) => {
+      if (command.type === 'agent-files.list') return { files: removed ? [] : [file] };
+      if (command.type === 'agent-files.delete') { removed = true; return { ok: true }; }
+      return { content: '# Hello', truncated: false };
+    });
+    render(<AgentFilesBrowser {...(project ? { projectPath: '/repo' } : { profileId: 'work' })} />);
+    const target = await screen.findByTestId('agent-file-CLAUDE.md');
+    fireEvent.contextMenu(target, { clientX: 50, clientY: 80 });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete file…' }));
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent(file.path);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(removed).toBe(false);
+    fireEvent.contextMenu(target);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete file…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete file', exact: true }));
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith({ type: 'agent-files.delete', path: file.path, ...(project ? { projectPath: '/repo' } : { profileId: 'work' }) }));
+    await waitFor(() => expect(screen.queryByTestId('agent-file-CLAUDE.md')).not.toBeInTheDocument());
+    expect(screen.getByText('No file selected')).toBeInTheDocument();
+  });
+
+  it('keeps the file and shows a failed deletion in the confirmation', async () => {
+    sendCommand.mockImplementation(async (command) => {
+      if (command.type === 'agent-files.list') return { files: [row] };
+      if (command.type === 'agent-files.delete') throw new Error('Permission denied');
+      return { content: '# Hello', truncated: false };
+    });
+    render(<AgentFilesBrowser />);
+    fireEvent.contextMenu(await screen.findByTestId('agent-file-CLAUDE.md'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete file…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete file', exact: true }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Permission denied');
+    expect(screen.getByTestId('agent-file-CLAUDE.md')).toBeInTheDocument();
+  });
 });

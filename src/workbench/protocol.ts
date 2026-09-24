@@ -1109,6 +1109,7 @@ export type WbpCommand =
   | { type: 'agent-files.list'; projectPath?: string; profileId?: string }
   | { type: 'agent-files.read'; path: string; projectPath?: string; profileId?: string }
   | { type: 'agent-files.write'; path: string; content: string; projectPath?: string; profileId?: string }
+  | { type: 'agent-files.delete'; path: string; projectPath?: string; profileId?: string }
   | ({ type: 'provider-settings.read'; brand: Brand } & SettingsScope)
   | { type: 'mcp.catalogue'; search?: string }
   | ({ type: 'mcp.add-from-catalogue'; brand: Brand; source: McpSource; entry: McpCatalogueEntry; id?: string; env?: Record<string, string> } & SettingsScope)

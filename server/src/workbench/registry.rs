@@ -1399,6 +1399,19 @@ impl WorkbenchRegistry {
                 )?;
                 Ok(json!({"ok":true,"path":path,"size":size}))
             }
+            CommandKind::AgentFilesDelete => {
+                let project = Self::maybe(command, "projectPath");
+                let path = Self::field(command, "path")?;
+                let (claude, codex) = self.agent_dirs(Self::maybe(command, "profileId"));
+                agent_files::delete(
+                    Path::new(path),
+                    project.map(Path::new),
+                    &self.paths.home,
+                    Some(&claude),
+                    Some(&codex),
+                )?;
+                Ok(json!({"ok":true,"path":path}))
+            }
             CommandKind::ProviderSettingsRead => {
                 let brand = Self::field(command, "brand")?;
                 let scope = Self::settings_scope(command)?;

@@ -8,11 +8,14 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ChevronLeft, ChevronRight, Copy, ExternalLink, FileCode2, FilePlus2, FolderOpen, Loader2, Search } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from '@/components/ui/alert-dialog';
+import { PointerAnchor, type PointerAt } from '@/workbench/menu-anchor';
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -94,6 +97,11 @@ export function AgentFilesBrowser({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [menu, setMenu] = useState<{ file: AgentFileRow; at: PointerAt } | null>(null);
+  const [deleting, setDeleting] = useState<AgentFileRow | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const keepSelectionEmpty = useRef(false);
   const { toast } = useToast();
   const dirty = draft !== content;
   const scoped = useMemo(
@@ -115,6 +123,7 @@ export function AgentFilesBrowser({
         setFiles(mine);
         setCreatable((missing ?? []).filter(here));
         setSelected((before) => {
+          if (keepSelectionEmpty.current) return null;
           if (mine.some((file) => file.id === before)) return before;
           const wide = typeof window.matchMedia !== 'function' || window.matchMedia(NOT_PHONE_SCREEN).matches;
           return wide ? (mine.find((file) => file.category === 'instructions') ?? mine[0])?.id ?? null : null;
@@ -124,6 +133,32 @@ export function AgentFilesBrowser({
       .finally(() => live && setLoading(false));
     return () => { live = false; };
   }, [scoped, brand, projectPath, attempt]);
+
+  useEffect(() => {
+    setMenu(null); setDeleting(null); setDeleteError(null);
+    keepSelectionEmpty.current = false;
+  }, [scoped, brand]);
+
+  async function deleteFile() {
+    if (!deleting || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await sendCommand({ type: 'agent-files.delete', path: deleting.path, ...scoped });
+      if (selected === deleting.id) {
+        keepSelectionEmpty.current = true;
+        setSelected(null);
+      }
+      setFiles((before) => before.filter((file) => file.id !== deleting.id));
+      setDeleting(null);
+      setAttempt((n) => n + 1);
+      toast({ title: `Deleted ${deleting.name}`, description: 'The file was permanently deleted.' });
+    } catch (reason) {
+      setDeleteError(said(reason));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   const chosen = files.find((file) => file.id === selected) ?? null;
   useEffect(() => {
@@ -183,12 +218,21 @@ export function AgentFilesBrowser({
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden border-t border-border/50 md:grid-cols-[22rem_minmax(0,1fr)]" data-testid="agent-files">
-      <aside className={cn('min-h-0 overflow-y-auto border-r border-border/50 bg-surface-base', chosen && 'hidden md:block')} aria-label="Agent files">
+      <aside className={cn('min-h-0 overflow-y-auto border-r border-border/50 bg-surface-base', chosen && 'hidden md:block')} aria-label="Agent files"
+        onContextMenu={(event) => {
+          const row = (event.target as HTMLElement).closest<HTMLElement>('[data-testid^="agent-file-"]');
+          const file = files.find((candidate) => row?.dataset.testid === `agent-file-${candidate.name}` && row.dataset.filePath === candidate.path);
+          if (!file) return;
+          event.preventDefault();
+          setMenu({ file, at: { left: event.clientX, top: event.clientY } });
+        }}
+        onClick={() => { keepSelectionEmpty.current = false; }}
+      >
         <div className="sticky top-0 z-10 border-b border-border/50 bg-surface-base/95 p-4 backdrop-blur">
           <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-t-muted" /><Input aria-label="Search agent files" placeholder="Search files…" value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" /></div>
         </div>
         {loading ? <p className="p-6 text-sm text-t-muted">Loading…</p> : error && files.length === 0 ? <ReadFailed className="m-4" what="Couldn’t load agent files." why={error} onRetry={() => setAttempt((n) => n + 1)} /> : grouped.length === 0 ? <div className="p-8 text-center"><FileCode2 className="mx-auto mb-3 size-7 text-t-muted" /><p className="text-sm text-t-secondary">No agent files</p></div> : (
-          <div className="p-2">{grouped.map((provider) => <section key={provider.provider} className="mb-4">{!brand && <h2 className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-t-muted">{provider.provider === 'claude' ? 'Claude' : 'Codex'}</h2>}{provider.categories.map((group) => <div key={group.category} className="mb-2"><div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-t-tertiary"><span>{CATEGORY[group.category]}</span>{group.category === 'commands' && <span className="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px]">Legacy</span>}{group.files.every((file) => file.shared) && <Tooltip label="Shared by all accounts"><span className="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px]" data-testid={`agent-files-shared-${group.category}`}>Shared</span></Tooltip>}<span className="ml-auto tabular-nums text-t-muted">{group.files.length}</span></div>{group.files.map((file) => <Button key={file.id} type="button" variant="ghost" data-testid={`agent-file-${file.name}`} onClick={() => setSelected(file.id)} className={cn('h-auto w-full justify-start gap-3 px-2 py-2 text-left', selected === file.id && 'bg-surface-overlay text-t-primary')}><FileCode2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span>{(projectPath || file.relativePath !== file.name) && <span className="block truncate text-xs text-t-muted">{projectPath ? `${scopeName(file.scope)} · ` : ''}{file.relativePath}</span>}</span><ChevronRight className="size-4 shrink-0 text-t-muted" /></Button>)}</div>)}
+          <div className="p-2">{grouped.map((provider) => <section key={provider.provider} className="mb-4">{!brand && <h2 className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-t-muted">{provider.provider === 'claude' ? 'Claude' : 'Codex'}</h2>}{provider.categories.map((group) => <div key={group.category} className="mb-2"><div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-t-tertiary"><span>{CATEGORY[group.category]}</span>{group.category === 'commands' && <span className="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px]">Legacy</span>}{group.files.every((file) => file.shared) && <Tooltip label="Shared by all accounts"><span className="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px]" data-testid={`agent-files-shared-${group.category}`}>Shared</span></Tooltip>}<span className="ml-auto tabular-nums text-t-muted">{group.files.length}</span></div>{group.files.map((file) => <Button key={file.id} type="button" variant="ghost" data-testid={`agent-file-${file.name}`} data-file-path={file.path} onClick={() => setSelected(file.id)} className={cn('h-auto w-full justify-start gap-3 px-2 py-2 text-left', selected === file.id && 'bg-surface-overlay text-t-primary')}><FileCode2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span>{(projectPath || file.relativePath !== file.name) && <span className="block truncate text-xs text-t-muted">{projectPath ? `${scopeName(file.scope)} · ` : ''}{file.relativePath}</span>}</span><ChevronRight className="size-4 shrink-0 text-t-muted" /></Button>)}</div>)}
             {provider.missing.length > 0 && <div className="mb-2"><div className="px-2 py-1 text-xs font-medium text-t-tertiary">Available to create</div>{provider.missing.map((file) => <Button key={file.path} type="button" variant="ghost" data-testid={`agent-file-create-${file.name}`} onClick={() => void create(file)} className="h-auto w-full justify-start gap-3 px-2 py-2 text-left text-t-secondary"><FilePlus2 className="size-4 shrink-0 text-t-muted" /><span className="min-w-0 flex-1"><span className="block truncate text-sm">{file.name}</span><span className="block truncate text-xs text-t-muted">{projectPath ? `Create · ${scopeName(file.scope)}` : 'Create'}</span></span></Button>)}</div>}
           </section>)}</div>
         )}
@@ -202,6 +246,29 @@ export function AgentFilesBrowser({
           <footer className="flex items-center justify-between border-t border-border/50 px-4 py-2 text-xs text-t-muted"><span>{CATEGORY[chosen.category]} · {chosen.shared ? 'Shared' : scopeName(chosen.scope)}</span><span>{chosen.size.toLocaleString()} bytes · {new Date(chosen.modifiedAt).toLocaleString()}</span></footer>
         </>}
       </main>
+      <DropdownMenu open={menu !== null} onOpenChange={(open) => { if (!open) setMenu(null); }}>
+        <PointerAnchor at={menu?.at ?? null} />
+        <DropdownMenuContent align="start" collisionPadding={8}>
+          <DropdownMenuItem className="text-danger" onSelect={() => { setDeleting(menu?.file ?? null); setDeleteError(null); setMenu(null); }}>Delete file…</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AlertDialog open={deleting !== null} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleting(null); }}>
+        <AlertDialogContent>
+          <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Permanently delete this file? This cannot be undone.
+            <span className="mt-2 block break-all font-mono text-xs">{deleting?.path}</span>
+            {deleting?.category === 'skills' && <span className="mt-2 block">Only SKILL.md is deleted; supporting files remain.</span>}
+            {deleting?.symlinkTarget && <span className="mt-2 block">Only the symbolic link is removed, not its target.</span>}
+            {deleting?.id === selected && dirty && <span className="mt-2 block">Unsaved edits will be discarded.</span>}
+          </AlertDialogDescription>
+          {deleteError && <p role="alert" className="text-sm text-danger">{deleteError}</p>}
+          <AlertDialogFooter>
+            <Button variant="outline" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</Button>
+            <Button variant="destructive" disabled={deleteBusy} onClick={() => void deleteFile()}>{deleteBusy ? 'Deleting…' : 'Delete file'}</Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
