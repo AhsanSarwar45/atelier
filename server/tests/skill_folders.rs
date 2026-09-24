@@ -146,9 +146,15 @@ fn broken_folders_are_reported_without_disabling_valid_skills_or_library_edits()
         assert!(snapshot.read_skill(&row.item.id, None).is_err());
     }
     let held = library::read(data.path(), None).unwrap();
-    let mut repaired = held.clone();
+    let duplicate = snapshot.items.iter().find(|r| r.item.id == "duplicate").unwrap();
+    assert_eq!(duplicate.state, "invalid");
+    assert!(duplicate.folder_source.is_none(), "Keep JSON editing and removal available");
+    let mut edited = held.clone();
+    edited.general_instructions = "Unrelated settings still save".into();
+    library::write(data.path(), None, &edited, &library::revision(&held)).unwrap();
+    let mut repaired = edited.clone();
     repaired.items.clear();
-    library::write(data.path(), None, &repaired, &library::revision(&held)).unwrap();
+    library::write(data.path(), None, &repaired, &library::revision(&edited)).unwrap();
     assert!(library::resolve(data.path(), None).unwrap().read_skill("duplicate", None).is_ok());
     assert!(snapshot.guidance().contains("valid"));
     assert!(!snapshot.commands().iter().any(|c| c["name"] == "skill:bad-yaml"));

@@ -1045,13 +1045,15 @@ pub fn write_with_source(
     }
     validate(library, root.is_some())?;
     let path = library_path(data, root)?;
+    let previous = read_path(&path)?;
+    if revision(&previous) != expected {
+        return Err("Library changed in another editor. Reload before saving.".into());
+    }
     let folder_ids: std::collections::HashSet<_> = super::skill_folders::discover(&path.with_file_name("skills"))?
         .into_iter().map(|s| s.item.id).collect();
-    if library.items.iter().any(|item| folder_ids.contains(&item.id)) {
+    if library.items.iter().any(|item| folder_ids.contains(&item.id)
+        && !previous.items.iter().any(|old| old.id == item.id)) {
         return Err("A skill folder already owns this ID. Edit its SKILL.md or choose another ID.".into());
-    }
-    if revision(&read_path(&path)?) != expected {
-        return Err("Library changed in another editor. Reload before saving.".into());
     }
     super::provider_defaults::atomic_write(
         &path,
@@ -1108,12 +1110,13 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
     ] {
         if let Some(base) = base {
             for mut source in super::skill_folders::discover(&base.join("skills"))? {
-                if library.items.iter().any(|i| i.id == source.item.id) {
-                    source.error = Some(format!("Skill {} exists in both {scope} library.json and a skill folder; keep one source", source.item.id));
+                let duplicate = library.items.iter().any(|i| i.id == source.item.id);
+                if duplicate {
+                    source.error = Some(format!("Skill {} exists in both {scope} library.json and {}; remove the JSON item or move the folder to keep one source", source.item.id, source.directory.display()));
                 } else {
                     library.items.push(source.item.clone());
                 }
-                folders.insert((scope.to_string(), source.item.id.clone()), (source.directory, source.error));
+                folders.insert((scope.to_string(), source.item.id.clone()), (source.directory, source.error, duplicate));
             }
         }
     }
@@ -1196,7 +1199,7 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
             "available"
         };
         let folder_source = folders.get(&(source.to_string(), id.clone()));
-        let folder = folder_source.map(|(path, error)| {
+        let folder = folder_source.map(|(path, error, _)| {
             if let Some(error) = error { Err(error.clone()) }
             else { super::skill_folders::pin(data, path, &item) }
         }).transpose().unwrap_or_else(|error| {
@@ -1206,7 +1209,8 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
         });
         resolved.push(Resolved {
             folder,
-            folder_source: folder_source.map(|(path, _)| path.clone()),
+            // A colliding JSON item remains editable/removable in Settings.
+            folder_source: folder_source.filter(|(_, _, duplicate)| !duplicate).map(|(path, _, _)| path.clone()),
             item,
             source: source.into(),
             customized: over.is_some(),

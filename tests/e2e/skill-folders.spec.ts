@@ -5,6 +5,36 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 test.describe.configure({ mode: 'serial' });
+test('folder collision recovery keeps unrelated saves and JSON removal usable', async ({ page, request }) => {
+  const run = process.env.WORKBENCH_E2E_RUN!;
+  expect(run).toBeTruthy();
+  const locations = JSON.parse(execFileSync(process.env.ATELIER_BINARY!, ['tool', 'skills', 'locations', '--project', run], { encoding: 'utf8' }));
+  const held = await (await request.get('/api/settings/library')).json();
+  const folder = join(locations.global.skills, 'collision-proof');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'SKILL.md'), 'Folder replacement');
+  writeFileSync(locations.global.library, JSON.stringify({ ...held.library, items: [...held.library.items, { id: 'collision-proof', name: 'Collision proof', kind: 'skill', content: 'Older JSON copy' }] }));
+  try {
+    await page.goto('/settings?section=library');
+    await page.getByRole('textbox', { name: 'Global instructions', exact: true }).fill('Unrelated guidance can still be saved.');
+    await page.getByRole('button', { name: 'Save global instructions', exact: true }).click();
+    await expect.poll(async () => (await (await request.get('/api/settings/library')).json()).library.general_instructions).toBe('Unrelated guidance can still be saved.');
+    await page.getByRole('button', { name: 'Skills', exact: true }).click();
+    const row = page.getByTestId('library-item-collision-proof');
+    await expect(row).toContainText('Invalid folder');
+    await expect(row.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+    page.once('dialog', dialog => dialog.accept());
+    await row.getByRole('button', { name: 'Remove', exact: true }).click();
+    await expect(row).toContainText('Folder-backed skill');
+    await expect(row).toContainText('Available');
+    await expect(row.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+    const current = await (await request.get('/api/settings/library')).json();
+    expect((await request.put('/api/settings/library', { data: { library: held.library, revision: current.revision } })).ok()).toBeTruthy();
+  }
+});
+
 for (const brand of ['claude', 'codex']) {
   test(`${brand} uses global and project folder helpers with binary assets`, async ({ page, request }) => {
     test.skip(process.env.BEADS_E2E_LIVE_PROVIDERS !== '1', 'Needs isolated provider credentials');
