@@ -38,6 +38,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { TabLead, TabTrail, ToolButton } from '@/components/shell';
 import { Picker } from '@/components/ui/picker';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { useShutOnNavigation } from '@/hooks/use-shut-on-navigation';
 import { addressWith } from '@/lib/address';
 import * as api from '@/lib/api';
 import type { GitTree } from '@/lib/api';
@@ -137,6 +138,7 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   // rail is a sheet; above it the rail is a column and the CSS keeps it drawn
   // whatever this says.
   const [railOpen, setRailOpen] = useState(false);
+  useShutOnNavigation(useCallback(() => setRailOpen(false), []));
   /*
    * The column on the other edge, which is the chat's own — the same switch,
    * the same width, the same remembered diff (bw-rpgh.5). Only the Git tab is

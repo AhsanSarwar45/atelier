@@ -38,6 +38,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
+import { useShutOnNavigation } from '@/hooks/use-shut-on-navigation';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
@@ -1308,6 +1309,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   );
   /** The sheet a narrow screen opens the chat list in. */
   const [railOpen, setRailOpen] = useState(false);
+  useShutOnNavigation(useCallback(() => setRailOpen(false), []));
   /** The chat list's column on a wide screen, remembered between visits. */
   const [leftOpen, flipLeft] = useLeftRail();
   /** The chat's own column on the right, remembered between visits. */
