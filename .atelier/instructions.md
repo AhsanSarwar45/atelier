@@ -1,5 +1,7 @@
 # Agent Instructions
 
+Every non-trivial change needs to be tested end to end using chrome in a realistic environment. Any test projects should be deleted after testing
+
 ## Enforced board lifecycle
 
 Do not rely on an agent voluntarily following the merge and review lifecycle.
