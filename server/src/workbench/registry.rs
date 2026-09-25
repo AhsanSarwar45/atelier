@@ -1343,6 +1343,92 @@ impl WorkbenchRegistry {
         Ok(json!({"ok":true}))
     }
 
+    /// Close the idle provider processes of every chat on one account, after
+    /// that account has been signed in again.
+    ///
+    /// A provider program reads its login when it starts, and one whose login
+    /// expired has given up on it: the chat that said "OAuth session expired"
+    /// would say it again on the next message, even with a fresh login on
+    /// disk. Retiring keeps the conversation, so the next message attaches a
+    /// new process that resumes it on the new login. A chat mid-answer is left
+    /// alone; it is not the one that failed.
+    pub async fn retire_idle_on_account(&self, brand: &str, profile_id: &str) {
+        let chosen = (profile_id != super::profiles::SYSTEM).then(|| profile_id.to_string());
+        let ids: Vec<String> = self.drivers.read().await.keys().cloned().collect();
+        for session_id in ids {
+            let Ok(Some(session)) = self.database.get_session(session_id.clone()).await else {
+                continue;
+            };
+            if session.brand != brand
+                || session.profile != chosen
+                || matches!(
+                    session.state.as_str(),
+                    "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
+                )
+            {
+                continue;
+            }
+            let Some(driver) = self.drivers.write().await.remove(&session_id) else {
+                continue;
+            };
+            let (reply, receive) = oneshot::channel();
+            if driver.send(DriverRequest::Retire(reply)).is_ok() {
+                let _ = receive.await;
+            }
+            // The process that raised "Sign in to continue" is gone, and a new
+            // one knows nothing of it, so nothing would ever take the notice
+            // down. It is taken down here, and the chat says what to do now.
+            if session.state == "stopped" {
+                let _ = self.after_signing_in(&session, profile_id).await;
+            }
+        }
+    }
+
+    async fn after_signing_in(&self, session: &crate::workbench::store::Session, profile_id: &str) -> Result<(), String> {
+        let resolved: crate::workbench::protocol::Event = serde_json::from_value(json!({
+            "type":"provider.message", "sessionId":session.id, "seq":0, "at":chrono::Utc::now().to_rfc3339(),
+            "signal":{
+                "id":"condition:authentication", "kind":"authentication", "phase":"resolved",
+                "severity":"info", "scope":"session"
+            }
+        }))
+        .map_err(|error| error.to_string())?;
+        self.database.append(resolved).await?;
+        let name = self
+            .profiles
+            .list(&session.brand)
+            .into_iter()
+            .find(|profile| profile.id == profile_id)
+            .map(|profile| profile.name)
+            .unwrap_or_else(|| profile_id.to_string());
+        // His to act on, so drawn by default: an aside with no audience is
+        // the app talking about itself and starts hidden.
+        let notice: crate::workbench::protocol::Event = serde_json::from_value(json!({
+            "type":"notice", "sessionId":session.id, "seq":0, "at":chrono::Utc::now().to_rfc3339(),
+            "text":format!("Signed in to {name}. Send your message again to continue."),
+            "family":"background", "audience":"you"
+        }))
+        .map_err(|error| error.to_string())?;
+        self.database.append(notice).await?;
+        self.database
+            .update_session(
+                session.id.clone(),
+                crate::workbench::store::SessionPatch {
+                    state: Some("idle".into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+        let state: crate::workbench::protocol::Event = serde_json::from_value(json!({
+            "type":"session.state", "sessionId":session.id, "seq":0,
+            "at":chrono::Utc::now().to_rfc3339(), "state":"idle", "label":"Idle"
+        }))
+        .map_err(|error| error.to_string())?;
+        self.database.append(state).await?;
+        Ok(())
+    }
+
     /// Move the next turn to another login while keeping this local chat.
     /// Provider CLIs choose their account from an environment variable at
     /// process startup, so this cannot be an in-process setting change.

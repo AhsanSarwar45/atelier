@@ -908,7 +908,12 @@ impl WorkbenchState {
         } else if brand == "claude" {
             let transport = self.claude_usage_reader(profile, named.as_deref()).await?;
             let result = crate::workbench::usage::read_claude(&transport, at).await;
-            if result.is_err() {
+            // A reader that answers "no allowance known" is as stuck as one
+            // that errors: it read its login when it started, so an account
+            // that was signed out then (or whose login has since died) keeps
+            // saying nothing even after the account is signed in again. The
+            // next beat starts a fresh one that reads the login as it is now.
+            if result.as_ref().map_or(true, |usage| !usage.available) {
                 self.forget_claude_usage_reader(profile, &transport).await;
             }
             let mut usage = result?;
@@ -930,6 +935,60 @@ impl WorkbenchState {
         cache.insert(key, (std::time::Instant::now(), value.clone()));
         Ok(value)
     }
+    /// An account has just been signed in: forget everything read on its old
+    /// login and read it again now, so the plan chip comes back at once rather
+    /// than on some later beat — or never, behind a reader that started
+    /// signed out.
+    pub(crate) async fn account_signed_in(&self, brand: &str, profile: &str) {
+        self.registry.retire_idle_on_account(brand, profile).await;
+        let key = usage_key(brand, profile);
+        let refresh = self.usage_refresh(&key).await;
+        {
+            let _refresh = refresh.lock().await;
+            self.usage_cache.lock().await.remove(&key);
+            if brand == "claude" {
+                let removed = self.claude_usage_readers.lock().await.remove(profile);
+                if let Some(transport) = removed {
+                    transport.close().await;
+                }
+            } else if brand == "codex" {
+                let home = (profile != crate::workbench::profiles::SYSTEM)
+                    .then(|| self.registry.profile_directory(brand, profile));
+                let removed: Vec<_> = {
+                    let mut readers = self.codex_readers.lock().await;
+                    let keys: Vec<_> = readers
+                        .keys()
+                        .filter(|(_, at)| *at == home)
+                        .cloned()
+                        .collect();
+                    keys.into_iter().filter_map(|key| readers.remove(&key)).collect()
+                };
+                for reader in removed {
+                    reader.close().await;
+                }
+            }
+        }
+        // A reader started a moment after the login lands can answer before
+        // it has loaded the account, and say "nothing known". Asked again a
+        // few times, a few seconds apart, rather than left to the next beat.
+        for attempt in 0..4 {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                self.usage_cache.lock().await.remove(&key);
+            }
+            let Ok(usage) = self.account_usage(brand, Some(profile)).await else {
+                continue;
+            };
+            let known = usage["available"] == true;
+            let _ = self.watch_polls.send(
+                json!({"kind":"usage","brand":brand,"profile":profile,"usage":usage}),
+            );
+            if known {
+                break;
+            }
+        }
+    }
+
     /// Use one usage reset, then read the account again so every page sees
     /// the refilled windows at once.
     pub(crate) async fn use_usage_reset(
@@ -3100,6 +3159,22 @@ async fn command(
         _ => false,
     };
     let reply = state.registry.execute(&command).await?;
+    // The one moment a login changes under the app's feet. Whatever was read
+    // on the old one is now wrong, and the chats that failed on it are waiting.
+    if matches!(
+        command.kind,
+        CommandKind::ProfileSignInStart | CommandKind::ProfileSignInRead | CommandKind::ProfileSignInPaste
+    ) && reply["state"] == "signed-in"
+    {
+        let brand = command.fields.get("brand").and_then(Value::as_str);
+        let profile = command.fields.get("profileId").and_then(Value::as_str);
+        if let (Some(brand), Some(profile)) = (brand.map(str::to_owned), profile.map(str::to_owned)) {
+            // Not awaited: a fresh reading can take fifteen seconds, and the
+            // dialog waiting on this reply should say "Signed in" now.
+            let state = state.clone();
+            tokio::spawn(async move { state.account_signed_in(&brand, &profile).await });
+        }
+    }
     if attaches {
         // Before the reply: the browser opens the chat on the reply, and the
         // hold set it opens it against must already say the chat is ours.
