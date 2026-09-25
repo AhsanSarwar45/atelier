@@ -179,6 +179,9 @@ pub fn chats(sessions: &[(Session, String)], wanted: &str, here: Option<&str>, p
             let mut offer = Offer::new(Kind::Chat, session.id.clone(), name.clone(), score * 2 + i32::from(local));
             offer.brand = Some(session.brand.clone());
             offer.project_id = Some(session.project_id.clone());
+            // Two chats in one folder often share a name; when each was last
+            // used is what tells them apart in the menu.
+            offer.detail = session.last_active_at.clone();
             Some((offer, session.last_active_at.as_str()))
         })
         .collect::<Vec<_>>();

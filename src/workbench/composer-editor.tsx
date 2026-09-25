@@ -224,19 +224,29 @@ class AtelierBadge extends WidgetType {
  * the writer moves on; anywhere else it is one atomic badge, and Backspace takes
  * all of it, the same as a file's.
  */
+function stillTyped(state: EditorState, ref: { end: number }): boolean {
+  const { empty, head } = state.selection.main;
+  return empty && head === ref.end && ref.end === state.doc.length;
+}
+
 function atelierBadges(state: EditorState, describe: DescribeReference | undefined) {
   if (!describe) return [];
   const text = state.doc.toString();
-  const head = state.selection.main.head;
   return findAtelierReferences(text)
-    .filter((ref) => !(state.selection.main.empty && head === ref.end && ref.end === text.length))
+    .filter((ref) => !stillTyped(state, ref))
     .map((ref) => Decoration.replace({ widget: new AtelierBadge(describe(ref.kind, ref.id)) }).range(ref.start, ref.end));
 }
 
-/** Every reference in the document, as a badge over exactly its characters. */
+/**
+ * Every reference in the document, as a badge over exactly its characters. A
+ * file's is held back while the `@` menu is open on it, since then it is still
+ * being typed: `@z` on its way to a name was drawn as a badge for a file called
+ * `z`. One pasted whole opens no menu and is drawn at once.
+ */
 function badges(state: EditorState, icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void, describe: () => DescribeReference | undefined): DecorationSet {
   const text = state.doc.toString();
-  const references = findReferences(text).map((ref) =>
+  const menuOpen = completionStatus(state) !== null;
+  const references = findReferences(text).filter((ref) => !(menuOpen && stillTyped(state, ref))).map((ref) =>
       Decoration.replace({ widget: new FileBadge(referenceLabel(ref), fileKind(ref.path), icon) }).range(
         ref.start,
         ref.end,
@@ -274,7 +284,7 @@ function referenceBadges(icon: IconSource, picture: (id: string) => DraftPicture
       }
 
       update(update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet || update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(RefreshPictures)))) {
+        if (update.docChanged || update.selectionSet || completionStatus(update.startState) !== completionStatus(update.state) || update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(RefreshPictures)))) {
           this.decorations = badges(update.state, icon, picture, onOpen, describe);
         }
       }

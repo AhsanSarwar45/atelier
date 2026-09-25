@@ -37,6 +37,8 @@
  * asked for at the moment of the keystroke instead of captured at build.
  */
 
+import { createElement } from 'react';
+
 import {
   acceptCompletion,
   autocompletion,
@@ -51,6 +53,9 @@ import {
 } from '@codemirror/autocomplete';
 import { Prec, StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, keymap, tooltips, type ViewUpdate } from '@codemirror/view';
+import { formatDistanceToNow } from 'date-fns';
+import { AtSign, CircleDot, File, MessageSquare, Sparkles, type LucideIcon } from 'lucide-react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import { iconForFile, iconForFolder } from '@/components/file-icon';
 import { ICON_FALLBACK, iconUrl } from '@/components/file-icons';
@@ -185,13 +190,46 @@ function tabKey(step: 1 | -1) {
   };
 }
 
+/** Each tab's picture: the one its kind's badge carries, and an @ for all. */
+const SCOPE_ICONS: Record<Scope, LucideIcon> = {
+  all: AtSign,
+  file: File,
+  bead: CircleDot,
+  chat: MessageSquare,
+  skill: Sparkles,
+};
+
+/** A key drawn as a key, for the menu's hints. */
+function key(label: string): HTMLElement {
+  const drawn = document.createElement('kbd');
+  drawn.className = 'cm-mentionKey';
+  drawn.textContent = label;
+  return drawn;
+}
+
+/** One hint: the key, then what it does. */
+function hint(keys: string[], says: string): HTMLElement {
+  const drawn = document.createElement('span');
+  drawn.className = 'cm-mentionHintItem';
+  for (const each of keys) drawn.append(key(each));
+  drawn.append(says);
+  return drawn;
+}
+
 /**
- * The row of tabs across the top of the `@` menu.
+ * The `@` menu's head and foot.
  *
- * CodeMirror draws the menu itself and has no place for a header, so the row
- * is put in as the menu's first child after every update, and put back if the
- * menu was drawn afresh. The list CodeMirror redraws is appended after it, so
- * the row stays on top. It is drawn with the app's own tab strip classes.
+ * CodeMirror draws the menu itself and has no place for either, so the head
+ * is put in as the menu's first child after every update and the foot as its
+ * last, and both are put back if the menu was drawn afresh. The list
+ * CodeMirror redraws is appended to the menu, so the foot is moved back under
+ * it each time.
+ *
+ * The head is the app's segmented tabs, the look of the Chat, Board and Files
+ * switch, one per kind with the picture that kind's badge carries. The foot
+ * names the keys, since Tab switching tabs is not something anyone would guess.
+ * The menu is marked with the lit tab, so the list's own heading, which only
+ * repeats it, is shown only under All.
  */
 const scopeTabs = ViewPlugin.fromClass(
   class {
@@ -204,28 +242,36 @@ const scopeTabs = ViewPlugin.fromClass(
     private draw() {
       const menu = this.view.dom.querySelector<HTMLElement>('.cm-tooltip-autocomplete');
       if (!menu) return;
-      let row = menu.querySelector<HTMLElement>(':scope > .cm-mentionTabs');
+      let head = menu.querySelector<HTMLElement>(':scope > .cm-mentionHead');
+      let foot = menu.querySelector<HTMLElement>(':scope > .cm-mentionFoot');
       if (!typedAt(this.view.state)) {
-        row?.remove();
+        head?.remove();
+        foot?.remove();
+        delete menu.dataset.scope;
         return;
       }
-      if (!row) {
-        row = this.build();
-        menu.prepend(row);
+      if (!head) {
+        head = this.head();
+        menu.prepend(head);
         // The menu is taller by a row; let the tooltip place itself again.
         this.view.requestMeasure();
       }
+      if (!foot) foot = this.foot();
+      if (menu.lastElementChild !== foot) menu.append(foot);
       const lit = scopeOf(this.view.state);
-      for (const tab of Array.from(row.children) as HTMLElement[]) {
+      menu.dataset.scope = lit;
+      for (const tab of Array.from(head.querySelectorAll<HTMLElement>('[role=tab]'))) {
         const on = tab.dataset.scope === lit;
         tab.setAttribute('aria-selected', String(on));
         tab.dataset.state = on ? 'active' : 'inactive';
       }
     }
 
-    private build(): HTMLElement {
-      const row = document.createElement('div');
-      row.className = cn('cm-mentionTabs', tabsListVariants({ variant: 'strip' }));
+    private head(): HTMLElement {
+      const head = document.createElement('div');
+      head.className = 'cm-mentionHead';
+      const row = head.appendChild(document.createElement('div'));
+      row.className = cn(tabsListVariants(), 'cm-mentionTabs h-8 gap-0.5 p-0.5 sm:h-8');
       row.setAttribute('role', 'tablist');
       row.setAttribute('aria-label', 'What to look for');
       row.setAttribute('data-testid', 'mention-tabs');
@@ -233,11 +279,15 @@ const scopeTabs = ViewPlugin.fromClass(
         const tab = row.appendChild(document.createElement('button'));
         tab.type = 'button';
         tab.tabIndex = -1;
-        tab.className = cn(tabsTriggerVariants({ variant: 'strip' }), 'border-r border-r-default');
+        tab.className = cn(
+          tabsTriggerVariants(),
+          'h-7 gap-1.5 px-2.5 text-xs sm:h-7 data-[state=inactive]:hover:text-foreground [&_svg]:size-3.5 [&_svg]:shrink-0',
+        );
         tab.setAttribute('role', 'tab');
         tab.setAttribute('data-testid', 'mention-tab');
         tab.dataset.scope = scope;
-        tab.textContent = SCOPE_NAMES[scope];
+        tab.innerHTML = renderToStaticMarkup(createElement(SCOPE_ICONS[scope], { 'aria-hidden': true }));
+        tab.append(SCOPE_NAMES[scope]);
         // Focus stays in the line being written, so typing carries on.
         tab.addEventListener('mousedown', (event) => event.preventDefault());
         tab.addEventListener('pointerdown', (event) => {
@@ -245,7 +295,17 @@ const scopeTabs = ViewPlugin.fromClass(
           pickScope(this.view, scope);
         });
       }
-      return row;
+      const switching = head.appendChild(hint(['Tab'], 'switch'));
+      switching.classList.add('cm-mentionSwitch');
+      return head;
+    }
+
+    private foot(): HTMLElement {
+      const foot = document.createElement('div');
+      foot.className = 'cm-mentionFoot';
+      foot.setAttribute('data-testid', 'mention-keys');
+      foot.append(hint(['↑', '↓'], 'move'), hint(['↵'], 'insert'), hint(['Tab', '⇧Tab'], 'section'), hint(['Esc'], 'close'));
+      return foot;
     }
   },
 );
@@ -305,6 +365,17 @@ function learn(found: MentionOffer): void {
 }
 
 /**
+ * What tells one chat from another of the same name: when it was last used,
+ * and the start of its id.
+ */
+function chatDetail(found: MentionOffer): string {
+  const short = found.id.slice(0, 8);
+  const when = found.detail ? new Date(found.detail) : null;
+  if (!when || Number.isNaN(when.getTime())) return short;
+  return `Active ${formatDistanceToNow(when, { addSuffix: true })} · ${short}`;
+}
+
+/**
  * A card, a chat or a skill as a line of the menu: its badge — the very badge
  * picking it writes — and, for a card, its title after it.
  */
@@ -316,7 +387,7 @@ function atelierOffer(found: MentionOffer, rank: number): Completion {
     // A card's badge says only its id, so its title is the line's words. A
     // chat's and a skill's badge already say their name.
     displayLabel: kind === 'bead' ? found.label : ' ',
-    detail: kind === 'skill' ? found.detail : '',
+    detail: kind === 'skill' ? found.detail : kind === 'chat' ? chatDetail(found) : '',
     type: kind,
     section: { name: HEADINGS[kind], rank },
     apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
@@ -674,34 +745,92 @@ const tapPicks = ViewPlugin.fromClass(
 const menuTheme = EditorView.theme({
   '.cm-tooltip.cm-tooltip-autocomplete': {
     border: '1px solid hsl(var(--border))',
-    borderRadius: '0.5rem',
+    borderRadius: '0.625rem',
     backgroundColor: 'hsl(var(--popover))',
     color: 'hsl(var(--popover-foreground))',
-    boxShadow: '0 4px 12px rgb(0 0 0 / 0.12)',
+    boxShadow: '0 12px 32px -8px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.2)',
     overflow: 'hidden',
   },
+  // The `@` menu keeps one width while its tabs change what it lists, so the
+  // tabs do not jump about under the pointer.
+  '.cm-tooltip.cm-tooltip-autocomplete[data-scope]': { width: 'min(34rem, calc(100vw - 1rem))' },
   '.cm-tooltip.cm-tooltip-autocomplete > ul': {
     fontFamily: 'inherit',
     fontSize: '13px',
-    maxHeight: '16rem',
+    maxHeight: '18rem',
+    padding: '0.25rem',
   },
   '.cm-tooltip.cm-tooltip-autocomplete > ul > li': {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.375rem',
+    gap: '0.5rem',
+    minHeight: '2rem',
     padding: '0.25rem 0.5rem',
+    borderRadius: '0.375rem',
   },
   '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': {
     backgroundColor: 'hsl(var(--accent))',
     color: 'hsl(var(--accent-foreground))',
   },
-  '.cm-mentionTabs': { borderRadius: '0.5rem 0.5rem 0 0' },
-  '.cm-completion-nothing': { opacity: '0.6', cursor: 'default' },
+  '.cm-mentionHead': {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.5rem',
+    padding: '0.375rem',
+    borderBottom: '1px solid hsl(var(--border))',
+  },
+  '.cm-mentionTabs': { minWidth: '0', overflowX: 'auto', scrollbarWidth: 'none' },
+  '.cm-mentionFoot': {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '0.25rem 0.875rem',
+    padding: '0.375rem 0.625rem',
+    borderTop: '1px solid hsl(var(--border))',
+  },
+  '.cm-mentionHintItem': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.25rem',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+    whiteSpace: 'nowrap',
+  },
+  '.cm-mentionSwitch': { flexShrink: '0', paddingRight: '0.25rem' },
+  '.cm-mentionKey': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '1.125rem',
+    height: '1.125rem',
+    padding: '0 0.25rem',
+    borderRadius: '0.25rem',
+    border: '1px solid hsl(var(--border))',
+    borderBottomWidth: '2px',
+    backgroundColor: 'hsl(var(--muted))',
+    color: 'hsl(var(--foreground))',
+    fontFamily: 'inherit',
+    fontSize: '10px',
+    lineHeight: '1',
+  },
+  // A thumb has no Tab or arrow keys to be told about.
+  '@media (pointer: coarse)': {
+    '.cm-mentionFoot, .cm-mentionSwitch': { display: 'none' },
+  },
+  '.cm-completion-nothing': {
+    justifyContent: 'center',
+    minHeight: '3rem',
+    color: 'hsl(var(--muted-foreground))',
+    cursor: 'default',
+  },
+  '.cm-completion-nothing[aria-selected]': { backgroundColor: 'transparent !important', color: 'hsl(var(--muted-foreground)) !important' },
   '.cm-fileIcon': { height: '16px', width: '16px', flexShrink: '0' },
   // The badge is kept whole up to most of the line and the words after it give
   // way first. It was let shrink as much as the words, so a skill's badge was
   // squeezed to a few letters wide and broken down the line (bw-mydas.1).
-  '.cm-referenceBadge': { flexShrink: '0', maxWidth: '65%', margin: '0' },
+  '.cm-referenceBadge': { maxWidth: '100%', margin: '0' },
+  '.cm-optionLead': { display: 'flex', flex: '0 0 auto', width: 'min(12rem, 45%)', minWidth: '0' },
   // A command's line is drawn whole by `drawCommand`.
   '.cm-completion-command .cm-completionLabel, .cm-completion-pending .cm-completionLabel': { display: 'none' },
   '.cm-commandRow': { display: 'flex', alignItems: 'baseline', gap: '0.5rem', minWidth: '0', width: '100%' },
@@ -720,15 +849,22 @@ const menuTheme = EditorView.theme({
   '.cm-commandPending': { fontSize: '12px', opacity: '0.6' },
   // A chat's and a skill's badge is its name, so the line has no words of its own.
   '.cm-completion-chat .cm-completionLabel, .cm-completion-skill .cm-completionLabel': { display: 'none' },
-  'completion-section': {
+  // `> ul >` to outrank CodeMirror's own heading rule, which underlines it;
+  // the tabs above already rule the list off.
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > completion-section': {
     display: 'block',
-    padding: '0.375rem 0.5rem 0.125rem',
+    padding: '0.5rem 0.5rem 0.25rem',
     fontSize: '11px',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    opacity: '0.6',
+    fontWeight: '500',
+    opacity: '1',
+    color: 'hsl(var(--muted-foreground))',
     borderBottom: 'none',
+  },
+  // Under one kind's tab the heading would only say the tab again.
+  '.cm-tooltip.cm-tooltip-autocomplete[data-scope]:not([data-scope="all"]) > ul > completion-section': { display: 'none' },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > li + completion-section': {
+    marginTop: '0.25rem',
+    borderTop: '1px solid hsl(var(--border))',
   },
   '.cm-completionLabel': { flexShrink: '0' },
   // A card's title and a skill's description are sentences, read from their
@@ -736,6 +872,8 @@ const menuTheme = EditorView.theme({
   '.cm-completion-bead .cm-completionLabel': {
     flexShrink: '1',
     minWidth: '0',
+    opacity: '0.7',
+    paddingLeft: '0.25rem',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -747,6 +885,7 @@ const menuTheme = EditorView.theme({
     paddingLeft: '0.25rem',
     flex: '1 1 auto',
     minWidth: '0',
+    opacity: '0.7',
   },
   // The folder, after the name and behind it: enough to tell two files of the
   // same name apart, never enough to read before the name itself.
@@ -761,6 +900,10 @@ const menuTheme = EditorView.theme({
     direction: 'rtl',
     textAlign: 'right',
   },
+  // Drawn right to left so a long folder loses its start, not its end; the
+  // marks either side keep its dots and slashes in their places, or `.cursor`
+  // read `cursor.`.
+  '.cm-completionDetail::before, .cm-completionDetail::after': { content: '"\\200E"' },
 });
 
 /**
@@ -867,7 +1010,11 @@ export function mentionCompletions(
               const drawn = referenceBadgeElement(badge);
               drawn.classList.add('cm-referenceBadge');
               drawn.setAttribute('data-testid', 'mention-option-badge');
-              return drawn;
+              // A column of one width, so every line's words start together.
+              const lead = document.createElement('span');
+              lead.className = 'cm-optionLead';
+              lead.append(drawn);
+              return lead;
             }
             if (completion.type === 'nothing') return null;
             const path = completion.label.slice(1);

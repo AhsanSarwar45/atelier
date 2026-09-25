@@ -451,7 +451,7 @@ export interface MentionOffer {
   id: string;
   /** A file's name, a card's title, a chat's or a skill's name. */
   label: string;
-  /** Read after it, dimmed: a file's folder, a card's id, a skill's description. */
+  /** Read after it, dimmed: a file's folder, a card's id, a chat's last activity, a skill's description. */
   detail?: string;
   folder?: boolean;
   status?: string;
