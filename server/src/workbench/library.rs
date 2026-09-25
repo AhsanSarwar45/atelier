@@ -1371,26 +1371,49 @@ impl Snapshot {
         }
         Ok(text)
     }
-    pub fn expand(&self, text: &str) -> Result<Option<String>, String> {
+    /// A skill's library name and its text, for a message that names it as a
+    /// reference rather than running it (`references.rs`, bw-mi3s.2).
+    pub fn skill_text(&self, id: &str) -> Result<(String, String), String> {
+        let text = self.read_skill(id, None)?;
+        let name = self.items.iter().find(|r| r.item.id == id).map(|r| r.item.name.clone()).unwrap_or_else(|| id.to_string());
+        Ok((name, text))
+    }
+    /// The block that tells the agent to run `/skill:<id>`, for a message that
+    /// starts with one; nothing for any other message.
+    ///
+    /// A block of its own, sent after everything the person sent, rather than
+    /// the message's text rewritten: a message with an attachment is sent as
+    /// its parts, and rewriting the text alone lost the instructions on the way
+    /// (bw-mi3s.2).
+    pub fn command_block(&self, text: &str) -> Result<Option<String>, String> {
         let Some(rest) = text.trim_start().strip_prefix("/skill:") else {
             return Ok(None);
         };
         let (id, arguments) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-        // What the person typed stays first and stays theirs: the instructions
-        // ride in a block Atelier added, which the chat's title and transcript
-        // leave out.
         // The block says outright that this is a command the person ran, so the
         // provider carries it out the way it would one of its own slash
         // commands rather than reading a pasted skill as background (bw-zldt.1).
         let arguments = arguments.trim();
-        let typed = format!("/skill:{id}{}{arguments}", if arguments.is_empty() { "" } else { " " });
         let body = format!(
             "The user ran the Atelier command /skill:{id} (shared skill {id}, revision {}). Carry out the instructions below now, as you would a slash command the user typed. The user's arguments are: {}\n\n{}",
             self.revision,
             if arguments.is_empty() { "(none)" } else { arguments },
             self.read_skill(id, None)?,
         );
-        Ok(Some(format!("{typed}\n\n{}", super::metadata::added_by_atelier(super::metadata::COMMAND, &body))))
+        Ok(Some(super::metadata::added_by_atelier(super::metadata::COMMAND, &body)))
+    }
+    /// A `/skill:` line and its block together, as one text: what the person
+    /// typed stays first and stays theirs, and the instructions ride in a block
+    /// Atelier added, which the chat's title and transcript leave out.
+    pub fn expand(&self, text: &str) -> Result<Option<String>, String> {
+        let Some(block) = self.command_block(text)? else {
+            return Ok(None);
+        };
+        let rest = text.trim_start().strip_prefix("/skill:").unwrap_or_default();
+        let (id, arguments) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+        let arguments = arguments.trim();
+        let typed = format!("/skill:{id}{}{arguments}", if arguments.is_empty() { "" } else { " " });
+        Ok(Some(format!("{typed}\n\n{block}")))
     }
     pub fn guidance(&self) -> String {
         // Native resume can retain older instruction blocks. The connector

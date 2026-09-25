@@ -3295,23 +3295,52 @@ impl AcpDriver {
             .map_err(|_| "ACP adapter stopped before replying".to_string())?
     }
 
+    /// What the cards, chats and skills a message names are, looked up now
+    /// (`references.rs`). Cards come from the board already held for this
+    /// chat's project; chats from this app's own store.
+    async fn references_block(&self, text: &str) -> Option<String> {
+        use crate::workbench::references::{self, Kind, Looked};
+        let found = references::find(text);
+        if found.iter().all(|reference| reference.run) {
+            return None;
+        }
+        let mut looked = Looked::default();
+        for id in references::wanted(&found, Kind::Bead) {
+            let card = crate::routes::beads::card_for_reference(&self.session.project_path, &id).await;
+            looked.cards.push((id, card));
+        }
+        for id in references::wanted(&found, Kind::Chat) {
+            let chat = self.database.get_session(id.clone()).await.ok().flatten().map(|session| {
+                (crate::workbench::chat_name::name_session(&session), session.brand.clone())
+            });
+            looked.chats.push((id, chat));
+        }
+        references::block(&found, &looked, &self.shared_library)
+    }
+
     async fn run(&mut self, command: &Command) -> Result<Value, String> {
         match command.kind {
             CommandKind::PromptSend => {
-                let expansion = self.shared_library.expand(command.at("text").as_str().unwrap_or_default())?;
-                let native_command = expansion.is_none()
-                    && slash_name(command.at("text").as_str().unwrap_or_default()).is_some();
-                if expansion.is_none() {
-                    validate_offered_command(
-                        &self.database,
-                        &self.session.id,
-                        command.at("text").as_str().unwrap_or_default(),
-                    ).await?;
+                let typed = command.at("text").as_str().unwrap_or_default();
+                let skill_command = self.shared_library.command_block(typed)?;
+                let native_command = skill_command.is_none() && slash_name(typed).is_some();
+                if skill_command.is_none() {
+                    validate_offered_command(&self.database, &self.session.id, typed).await?;
                 }
-                let mut expanded_command = command.clone();
-                if let Some(text) = expansion { expanded_command.fields.insert("text".into(), json!(text)); }
                 let mut content =
-                    prompt_content(&expanded_command, Carries::unpacked(self.carries.load(Ordering::SeqCst)))?;
+                    prompt_content(command, Carries::unpacked(self.carries.load(Ordering::SeqCst)))?;
+                // What Atelier adds goes after everything the person sent, as
+                // blocks of its own, whether the message went as one text or as
+                // parts around attachments (bw-mi3s.2). A native command stays
+                // the one text block its adapter recognizes.
+                if let Some(block) = skill_command {
+                    content.push(ContentBlock::Text(TextContent::new(block)));
+                }
+                if !native_command {
+                    if let Some(block) = self.references_block(typed).await {
+                        content.push(ContentBlock::Text(TextContent::new(block)));
+                    }
+                }
                 // Native slash commands must remain the leading (and only
                 // textual) command block for adapters to recognize them.
                 // Keep guidance pending until a normal/shared-skill turn.

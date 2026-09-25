@@ -52,6 +52,9 @@ pub const GUIDANCE: &str = "atelier_connection_guidance";
 pub const HANDOFF: &str = "account_handoff";
 /// The instructions of an Atelier command, sent after the line that ran it.
 pub const COMMAND: &str = "atelier_command";
+/// What the cards, chats and skills a message names are, sent after it
+/// (`references.rs`, bw-mi3s.2).
+pub const REFERENCES: &str = "atelier_references";
 
 /// One block Atelier adds to a message, in the form `persons_words` removes.
 ///
@@ -60,7 +63,7 @@ pub const COMMAND: &str = "atelier_command";
 /// `&lt;` and cannot end the block early (bw-zldt.1).
 pub fn added_by_atelier(tag: &str, body: &str) -> String {
     let mut body = body.to_string();
-    for inner in [GUIDANCE, HANDOFF, COMMAND] {
+    for inner in [GUIDANCE, HANDOFF, COMMAND, REFERENCES] {
         for written in [format!("<{inner}>"), format!("</{inner}>")] {
             body = body.replace(&written, &format!("&lt;{}", &written[1..]));
         }
@@ -74,10 +77,12 @@ pub fn persons_words(message: &str) -> String {
     // A command's instructions are added after what the person typed, and
     // their own tags inside it are escaped, so the last opening is Atelier's;
     // one the person typed in front of it is theirs (bw-zldt.1).
-    let (opening, closing) = (format!("<{COMMAND}>"), format!("</{COMMAND}>"));
-    if let Some(start) = rest.rfind(&opening) {
-        if let Some(at) = rest[start..].find(&closing) {
-            rest.replace_range(start..start + at + closing.len(), "");
+    for tag in [REFERENCES, COMMAND] {
+        let (opening, closing) = (format!("<{tag}>"), format!("</{tag}>"));
+        if let Some(start) = rest.rfind(&opening) {
+            if let Some(at) = rest[start..].find(&closing) {
+                rest.replace_range(start..start + at + closing.len(), "");
+            }
         }
     }
     for tag in [GUIDANCE, HANDOFF] {

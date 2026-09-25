@@ -977,6 +977,22 @@ pub fn forget_board(project_path: &str) {
     boards().lock().unwrap_or_else(|e| e.into_inner()).remove_matching(&key);
 }
 
+/// One card as a reference in a message names it (bw-mi3s.2): out of the board
+/// already held for the project when there is one, which is the ordinary case,
+/// and otherwise from one `bd show`. As JSON, so what `bd` knows and the held
+/// board does not — the acceptance criteria — comes along when it is there.
+pub async fn card_for_reference(project_path: &str, id: &str) -> Option<serde_json::Value> {
+    let key = project_path.replace('\\', "/");
+    if let Some((beads, _, _)) = kept_board(&key) {
+        if let Some(bead) = beads.iter().find(|bead| bead.id == id) {
+            return serde_json::to_value(bead).ok();
+        }
+    }
+    let output = run_bd(&["show", id, "--json"], Path::new(&key)).await.ok()?;
+    let json = extract_json_array(&output).ok()?;
+    serde_json::from_str::<Vec<serde_json::Value>>(json).ok()?.into_iter().next()
+}
+
 /// Everything read of every board is thrown away: a command we did not write
 /// has just run against one of them and we cannot tell which.
 pub fn forget_all_boards() {
