@@ -329,3 +329,16 @@ describe('a chat whose reply is done, with a task of its own still running', () 
     expect(screen.getAllByTestId('held-message')[0]).toHaveTextContent('Sending now');
   });
 });
+
+describe('a stopped chat with a message still waiting', () => {
+  it('says the message is kept, not that it is going', async () => {
+    chatState.current = 'stopped';
+    held.current = [aWaitingMessage('first thing')];
+
+    await aWorkingChat();
+
+    const row = screen.getAllByTestId('held-message')[0];
+    expect(row).toHaveTextContent('Kept while the chat is stopped');
+    expect(row).not.toHaveTextContent('Sending now');
+  });
+});

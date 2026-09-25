@@ -22,8 +22,15 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { HeldMessage } from '@/workbench/protocol';
 
-/** The one-line word for where a waiting message stands in the queue. */
-export function waitingWord(at: number, working: boolean): string {
+/**
+ * The one-line word for where a waiting message stands in the queue.
+ *
+ * A chat that was stopped, failed or fell asleep sends nothing by itself: the
+ * message is kept for the reader to send, and saying it is going would be
+ * saying it was read (bw-fhyi).
+ */
+export function waitingWord(at: number, working: boolean, stopped = false): string {
+  if (stopped) return at === 0 ? 'Kept while the chat is stopped' : `Kept, ${at + 1} in line`;
   if (!working) return 'Sending now';
   return at === 0 ? 'Next, when this turn ends' : `Waiting, ${at + 1} in line`;
 }
@@ -31,6 +38,7 @@ export function waitingWord(at: number, working: boolean): string {
 export function HeldMessages({
   held,
   working,
+  stopped = false,
   onPush,
   onEdit,
   onDrop,
@@ -39,6 +47,8 @@ export function HeldMessages({
   held: HeldMessage[];
   /** Whether the chat is still working, which is what the queue waits on. */
   working: boolean;
+  /** Whether the chat has stopped, so nothing is sent until the reader sends it. */
+  stopped?: boolean;
   onPush: (held: HeldMessage) => void;
   onEdit: (held: HeldMessage) => void;
   onDrop: (held: HeldMessage) => void;
@@ -69,7 +79,7 @@ export function HeldMessages({
               data-testid="held-message-standing"
               className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
             >
-              {waitingWord(at, working)}
+              {waitingWord(at, working, stopped)}
             </p>
             {/* Two lines of it, whatever was written: the queue is a reminder
                 of what is waiting, and the whole of a long message belongs in

@@ -2620,13 +2620,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         <HeldMessages
           held={view.held}
           working={midTurn}
+          stopped={view.state === 'stopped' || view.state === 'errored' || view.state === 'dormant'}
           busyId={heldWorking}
           onPush={pushHeldSteady}
           onEdit={editHeldSteady}
           onDrop={dropHeldSteady}
         />
     </>
-  ), [dropHeldSteady, editHeldSteady, heldWorking, midTurn, pushHeldSteady, view.held]);
+  ), [dropHeldSteady, editHeldSteady, heldWorking, midTurn, pushHeldSteady, view.held, view.state]);
 
   const settingsRow = useMemo(() => (
     <>

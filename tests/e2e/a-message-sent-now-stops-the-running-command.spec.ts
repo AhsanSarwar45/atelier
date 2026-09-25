@@ -136,6 +136,9 @@ test('a message still waiting when the chat is stopped stays waiting, and can st
   await page.waitForTimeout(2_000);
   await expect(waiting).toHaveCount(1);
   await expect(waiting.getByTestId('held-message-text')).toHaveText(WAITING);
+  // And it does not claim to be going: a stopped chat sends nothing by itself.
+  await expect(waiting).toContainText('Kept while the chat is stopped');
+  await expect(waiting).not.toContainText('Sending now');
   await expect(page.getByTestId('user-message').filter({ hasText: WAITING })).toHaveCount(0);
   await page.screenshot({ path: `${SHOTS}/waiting-after-stop.png` });
 
