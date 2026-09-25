@@ -2858,8 +2858,8 @@ fn with_library(menu: &mut Value, mut native: Vec<Value>, shared: Vec<Value>) {
 
 /// Nothing has told this app what the provider of a stopped chat can run:
 /// no chat on it has spoken since the catalogue began keeping commands. Ask
-/// the provider in the background, once at a time for each account and
-/// folder; every stopped chat that asked meanwhile is given the answer. A
+/// the provider in the background, once at a time for each account, project
+/// and folder; every stopped chat that asked meanwhile is given the answer. A
 /// question that failed is asked again after a pause, a few times, for the
 /// chats already waiting; opening a chat after that starts over (bw-zldt.2).
 fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::store::Session) {
@@ -2867,7 +2867,7 @@ fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::stor
     if !matches!(session.brand.as_str(), "claude" | "codex") {
         return;
     }
-    let key = format!("{}\u{0}{}\u{0}{}", session.brand, session.profile.as_deref().unwrap_or_default(), session.project_path);
+    let key = ask_key(session);
     if !ASKS.lock().map(|mut asks| asks.join(&key, &session.id)).unwrap_or(false) {
         return;
     }
@@ -2901,6 +2901,14 @@ fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::stor
             }
         }
     });
+}
+
+/// Which chats one answer serves. The folder is part of the question: the
+/// provider reads its project commands, and Atelier its library, from there,
+/// so every chat waiting on one answer is in the folder it was asked from.
+fn ask_key(session: &crate::workbench::store::Session) -> String {
+    [session.brand.as_str(), session.profile.as_deref().unwrap_or_default(), &session.project_path, &session.cwd]
+        .join("\u{0}")
 }
 
 /// Asks until an answer comes or the tries run out, pausing longer after each
@@ -2966,6 +2974,20 @@ impl CommandAsks {
 mod command_asks_tests {
     use super::{ask_until_answered, with_library, CommandAsks};
     use serde_json::json;
+
+    #[test]
+    fn chats_in_other_folders_of_one_project_are_asked_for_apart() {
+        let chat = |cwd: &str| crate::workbench::store::Session {
+            id: cwd.into(), brand: "claude".into(), external_id: None,
+            project_id: "p".into(), project_path: "/repo".into(), cwd: cwd.into(),
+            model: None, permission_mode: "default".into(), effort: None,
+            collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
+            origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
+            last_spoke_at: None, begun_by: None, named_by_owner: false,
+        };
+        assert_eq!(super::ask_key(&chat("/repo")), super::ask_key(&chat("/repo")));
+        assert_ne!(super::ask_key(&chat("/repo")), super::ask_key(&chat("/repo/worktrees/a")));
+    }
 
     #[test]
     fn a_chat_without_a_driver_lists_the_library_as_it_stands() {
