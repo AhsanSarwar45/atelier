@@ -229,6 +229,9 @@ impl ClientIo {
             .args(&request.args)
             .current_dir(cwd)
             .env(super::super::memory::CHAT_ENV, request.session_id.0.as_ref())
+            // So a command it leaves behind stops with the server too
+            // (`leftovers`).
+            .env(super::super::external::OWNER_ENV, super::super::external::owner_token())
             .envs(
                 super::super::docker::host_for(request.session_id.0.as_ref())
                     .map(|host| ("DOCKER_HOST", host)),

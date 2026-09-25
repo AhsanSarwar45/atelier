@@ -859,6 +859,16 @@ async fn serve(open_browser: bool) {
         Err(_) => info!("{} stopped with connections still open.", identity::DISPLAY),
     }
 
+    // Every chat's provider, and every command one was running, stops with
+    // the server rather than running on with nothing to report to — even one
+    // its provider started outside the adapter's process group (bw-s78t.1).
+    let stopped = tokio::task::spawn_blocking(workbench::leftovers::stop_what_this_server_started)
+        .await
+        .unwrap_or(0);
+    if stopped > 0 {
+        info!("Stopped {stopped} process(es) left running for chats.");
+    }
+
     // And take the address back down with it, so it does not go on answering
     // from anywhere with a dead port behind it.
     remote::follow_the_app_down(port);
