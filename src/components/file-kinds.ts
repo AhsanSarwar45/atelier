@@ -70,4 +70,4 @@ export function isMarkdownPath(path: string): boolean {
  * the box is allowed to grow tall enough to hold them. The chip's own centring
  * keeps the icon in the middle of however tall that turns out to be.
  */
-export const FILE_BADGE_CLASS = 'mx-0.5 font-mono no-underline';
+export const FILE_BADGE_CLASS = 'mx-0.5 no-underline';

@@ -578,7 +578,7 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
     <span className={cn('flex items-center', CHIP_GAP)} data-testid="plan-chips">
       {five && (
         <Tooltip label={title}>
-          <Badge variant={severityVariant(five.severity)} appearance="light" size="sm" className="font-mono">
+          <Badge variant={severityVariant(five.severity)} appearance="light" size="sm">
             <Button
               type="button"
               variant="foreground"
@@ -596,7 +596,7 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
       )}
       {week && (
         <Tooltip label={title}>
-          <Badge variant={severityVariant(week.severity)} appearance="light" size="sm" className="font-mono">
+          <Badge variant={severityVariant(week.severity)} appearance="light" size="sm">
             <Button
               type="button"
               variant="foreground"

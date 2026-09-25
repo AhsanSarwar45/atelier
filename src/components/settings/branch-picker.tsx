@@ -84,7 +84,7 @@ export function BranchesPicker({ id, value, branches, onChange, testid }: { id: 
       {value.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {value.map((b) => (
-            <Badge key={b} variant="secondary" className="gap-1 font-mono text-xs" data-testid={`${testid}-${b}`}>
+            <Badge key={b} variant="secondary" className="gap-1 text-xs" data-testid={`${testid}-${b}`}>
               {b}
               <BadgeButton aria-label={`Remove ${b}`} onClick={() => onChange(value.filter((v) => v !== b))}>
                 <X />

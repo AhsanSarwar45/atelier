@@ -380,7 +380,7 @@ function WebLinkBadge({ href, target, children }: { href: string; target: WebTar
   const definition = WEB_KINDS[target.kind];
   return (
     <Tooltip label={`Open ${definition.title.toLowerCase()} on ${target.host}`}>
-      <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', definition.color)}>
+      <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn('mx-0.5 align-middle no-underline', definition.color)}>
         <a href={href} target="_blank" rel="noopener noreferrer" data-testid="markdown-web-badge" data-web-kind={target.kind}>
           <SiteIcon target={target} />
           <span>{label}</span>

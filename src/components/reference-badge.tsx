@@ -78,7 +78,7 @@ export function referenceTitle(ref: Reference): string {
 }
 
 function referenceClass(ref: Reference): string {
-  if (ref.kind === 'bead') return cn('shrink-0 font-mono', classesFor(ref.status).badge);
+  if (ref.kind === 'bead') return cn('shrink-0', classesFor(ref.status).badge);
   if (ref.kind === 'chat') return cn('shrink-0', ref.brand ? BRAND_COLOR[ref.brand] : classesFor(undefined).badge);
   return cn('shrink-0', SKILL_COLOR);
 }

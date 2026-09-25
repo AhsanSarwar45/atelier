@@ -105,7 +105,7 @@ function Meta({ project, brand, at, matches }: { project: string; brand: string;
       <span>·</span>
       <span className="font-mono">{new Date(at).toLocaleDateString()}</span>
       {!!matches && (
-        <Badge variant="secondary" size="xs" data-testid="search-chat-matches" className="font-mono">
+        <Badge variant="secondary" size="xs" data-testid="search-chat-matches">
           {matches}
         </Badge>
       )}

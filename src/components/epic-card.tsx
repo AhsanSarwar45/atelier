@@ -251,7 +251,7 @@ export const EpicCard = memo(function EpicCard({
 
           {/* Property tags */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="secondary" appearance="light" size="xs" className="theme-badge font-mono">
+            <Badge variant="secondary" appearance="light" size="xs" className="theme-badge">
               {epic.id}
             </Badge>
             <Badge variant="epic" appearance="light" size="xs" className="theme-badge font-semibold">

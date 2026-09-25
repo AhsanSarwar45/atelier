@@ -188,7 +188,7 @@ export function ProjectCard({
                   <p className="text-xs">
                     This project uses the old JSONL data format. Run this in the project directory to migrate to Dolt:
                   </p>
-                  <Badge asChild variant="secondary" appearance="light" size="sm" className="w-full font-mono">
+                  <Badge asChild variant="secondary" appearance="light" size="sm" className="w-full">
                     <code>bd init --prefix {deriveBeadPrefix(path, name)}</code>
                   </Badge>
                 </div>

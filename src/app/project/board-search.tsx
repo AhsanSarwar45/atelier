@@ -151,7 +151,7 @@ function Meta({ card, matches }: { card: { status: string; issueType: string | n
           <span className="font-mono">{new Date(card.updatedAt).toLocaleDateString()}</span>
         </>
       )}
-      {!!matches && <Badge variant="secondary" size="xs" className="font-mono">{matches}</Badge>}
+      {!!matches && <Badge variant="secondary" size="xs">{matches}</Badge>}
     </>
   );
 }

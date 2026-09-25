@@ -78,9 +78,22 @@ const badgeVariants = cva(
   //
   // Trimmed, the box is shorter than the letters, and a label wrapped in
   // `truncate` hides what overflows it, which would cut the tails off g and y
-  // (bw-96is.20, bw-jaoz.1). The equal padding above and below gives the
-  // descenders their room back without moving the centre. `[data-slot]`
+  // (bw-96is.20, bw-jaoz.1). The padding gives the descenders their room back.
+  //
+  // It is not equal, because the eye centres the whole of the letters, from
+  // the top of a d to the bottom of a g, and not the capitals alone: a label
+  // such as "beads-web" or "main" hangs its tails below the capitals' band,
+  // so a chip centred on capitals read as sitting low. Measured on the running
+  // app, the whole of the letters sat 0.92px below the middle of the pill; the
+  // 0.09em more below than above lifts them onto it (bw-81xy8.1). It is one
+  // number because every chip is drawn in one face (below). `[data-slot]`
   // spares the dot and the button, which are not text.
+  //
+  // Every chip is drawn in the body face, and so is everything inside it. A
+  // chip that switched to monospace sat higher than the ones beside it, because
+  // each face puts its letters at a different height in the same box, and
+  // correcting that face by face is a fight nobody wins (bw-81xy8.1). Marked
+  // important so a caller's `font-mono`, or a label's own, cannot bring it back.
   //
   // Inside a chip, a quoted word is drawn by the chip and not by the page. A
   // chip in a message is built from what the reader wrote, and if the label was
@@ -100,7 +113,7 @@ const badgeVariants = cva(
   // resets: it returns family, size, weight and line height to the chip's in
   // one declaration, which is what `size` below spent two comments getting
   // right.
-  'inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:[text-box:trim-both_cap_alphabetic] [&>span:not([data-slot])]:py-[0.3em] [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!rounded-none [&_code]:!text-inherit [&_code]:![font:inherit]',
+  '![font-family:var(--font-body)] [&_*]:![font-family:inherit] inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:[text-box:trim-both_cap_alphabetic] [&>span:not([data-slot])]:pt-[0.21em] [&>span:not([data-slot])]:pb-[0.39em] [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!rounded-none [&_code]:!text-inherit [&_code]:![font:inherit]',
   {
     variants: {
       variant: {

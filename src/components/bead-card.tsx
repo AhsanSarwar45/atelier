@@ -244,7 +244,7 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, worktreeStatu
 
         {/* Property tags row */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary" appearance="light" size="xs" className="theme-badge font-mono">
+          <Badge variant="secondary" appearance="light" size="xs" className="theme-badge">
             {bead.id}
           </Badge>
           {blocked && (
