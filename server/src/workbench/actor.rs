@@ -942,7 +942,7 @@ fn provider_menu(
         matches!(field.as_str(), "type" | "sessionId" | "seq" | "at")
             || super::store::PROVIDER_CATALOGUE_FIELDS.contains(&field.as_str())
     });
-    // What he could type is listed too, so a slash in a stopped chat is not
+    // What the person could type is listed too, so a slash in a stopped chat is not
     // an empty menu. Shown only: the command is accepted or refused by the
     // chat's own session once the prompt wakes it (bw-zldt.2).
     if !commands.is_empty() {
@@ -1608,7 +1608,7 @@ mod tests {
         // shows what its own agent will start at.
         assert_eq!(offered.fields["configOptions"][0]["currentValue"], false);
         assert_eq!(offered.fields["configOptions"][1]["currentValue"], "reviewer");
-        // What he could type is still listed after a restart (bw-zldt.2).
+        // What the person could type is still listed after a restart (bw-zldt.2).
         assert_eq!(offered.fields["commands"], json!([{"name":"project-only"}]));
 
         // Another project may allow its provider different things.

@@ -54,7 +54,17 @@ pub const HANDOFF: &str = "account_handoff";
 pub const COMMAND: &str = "atelier_command";
 
 /// One block Atelier adds to a message, in the form `persons_words` removes.
+///
+/// What goes inside can be anyone's text -- a skill, a person's arguments, an
+/// earlier chat's words -- so a tag of these blocks inside it is written
+/// `&lt;` and cannot end the block early (bw-zldt.1).
 pub fn added_by_atelier(tag: &str, body: &str) -> String {
+    let mut body = body.to_string();
+    for inner in [GUIDANCE, HANDOFF, COMMAND] {
+        for written in [format!("<{inner}>"), format!("</{inner}>")] {
+            body = body.replace(&written, &format!("&lt;{}", &written[1..]));
+        }
+    }
     format!("<{tag}>\n{body}\n</{tag}>")
 }
 

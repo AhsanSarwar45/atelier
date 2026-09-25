@@ -796,7 +796,7 @@ const ComposerBody = memo(function ComposerBody({
   const found = useMemo(() => {
     if (typedCommand === null) return [];
     const wanted = typedCommand.toLowerCase();
-    // An Atelier command is named `skill:<id>`, and he types the id: `/stand`
+    // An Atelier command is named `skill:<id>`, and a person types the id: `/stand`
     // finds `/skill:standup`. Unbounded, because the provider's own list can
     // run past any cap on its own, and the Atelier rows come after it, so a
     // cap hid every one of them (bw-zldt.1). The panel scrolls.

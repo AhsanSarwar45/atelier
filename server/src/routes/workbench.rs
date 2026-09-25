@@ -2813,48 +2813,47 @@ pub(crate) async fn snapshot(state: &WorkbenchState, session_id: &str) -> Result
 /// A chat that is not awake still lists the Atelier commands it can run.
 ///
 /// A woken chat's own menu already carries them, from the library its
-/// connection pinned. Any other chat is given the library as it stands now, so
-/// a slash offers the same Atelier rows whether or not it has woken; the
-/// command is expanded from the pinned revision when the prompt wakes it
-/// (bw-zldt.2).
+/// connection pinned. Any other chat is given the library as it stands now, in
+/// place of whatever Atelier rows its last menu kept, so a slash offers the
+/// same Atelier rows whether or not it has woken; the command is expanded from
+/// the pinned revision when the prompt wakes it (bw-zldt.2).
 async fn with_atelier_commands(
     database: &ChatDb,
     registry: &WorkbenchRegistry,
     session_id: &str,
     menu: &mut Value,
 ) -> Result<(), String> {
-    let has_them = menu["commands"]
-        .as_array()
-        .is_some_and(|commands| commands.iter().any(|command| command["execution"] == "shared"));
-    let native_missing = crate::workbench::store::native_commands(menu).is_empty();
-    if has_them && !native_missing {
+    if registry.has_driver(session_id).await {
         return Ok(());
     }
     let Some(session) = database.get_session(session_id.to_string()).await? else {
         return Ok(());
     };
+    let commands = crate::workbench::store::native_commands(menu);
     // A chat with a driver is told its commands by that driver; one without,
     // whatever state it stopped in, asks for them (bw-zldt.2).
-    if native_missing && !registry.has_driver(session_id).await {
+    if commands.is_empty() {
         ask_provider_for_commands(database, &session);
-    }
-    if has_them {
-        return Ok(());
     }
     let root = std::path::PathBuf::from(&session.cwd);
     let shared = tokio::task::spawn_blocking(move || crate::workbench::library::commands_for(&root))
         .await
         .map_err(|error| error.to_string())?;
-    if shared.is_empty() {
-        return Ok(());
+    with_library(menu, commands, shared);
+    Ok(())
+}
+
+/// A menu's commands as the provider's own, then the library's as it stands.
+fn with_library(menu: &mut Value, mut native: Vec<Value>, shared: Vec<Value>) {
+    let kept = menu["commands"].as_array().map_or(0, Vec::len);
+    if shared.is_empty() && kept == native.len() {
+        return;
     }
     if !menu.is_object() {
         *menu = json!({});
     }
-    let mut commands = menu["commands"].as_array().cloned().unwrap_or_default();
-    commands.extend(shared);
-    menu["commands"] = Value::Array(commands);
-    Ok(())
+    native.extend(shared);
+    menu["commands"] = Value::Array(native);
 }
 
 /// Nothing has told this app what the provider of a stopped chat can run:
@@ -2970,7 +2969,27 @@ impl CommandAsks {
 
 #[cfg(test)]
 mod command_asks_tests {
-    use super::{ask_until_answered, CommandAsks};
+    use super::{ask_until_answered, with_library, CommandAsks};
+    use serde_json::json;
+
+    #[test]
+    fn a_chat_without_a_driver_lists_the_library_as_it_stands() {
+        let mut menu = json!({"models":[], "commands":[
+            {"name":"compact"},
+            {"name":"skill:removed","execution":"shared"},
+        ]});
+        let native = crate::workbench::store::native_commands(&menu);
+        with_library(&mut menu, native, vec![json!({"name":"skill:added","execution":"shared"})]);
+        assert_eq!(menu["commands"], json!([{"name":"compact"},{"name":"skill:added","execution":"shared"}]));
+
+        let native = crate::workbench::store::native_commands(&menu);
+        with_library(&mut menu, native, vec![]);
+        assert_eq!(menu["commands"], json!([{"name":"compact"}]), "a removed command is not listed");
+
+        let mut nothing = serde_json::Value::Null;
+        with_library(&mut nothing, vec![], vec![]);
+        assert!(nothing.is_null(), "a chat with no menu is not given an empty one");
+    }
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
