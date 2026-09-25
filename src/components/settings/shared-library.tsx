@@ -99,6 +99,9 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [category, setCategory] = useState<Category>('instruction');
+  // The unsaved global instructions live here, not in their editor, so they
+  // survive opening another item's editor or an import.
+  const [generalDraft, setGeneralDraft] = useState<string>();
   useEffect(() => {
     const asked = new URLSearchParams(window.location.search).get('guidance');
     if (asked === 'output_style' || asked === 'memory') setCategory(asked);
@@ -250,6 +253,16 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   const counts = Object.fromEntries((Object.keys(names) as Category[]).map(c => [c, all.filter(r => inCategory(r, c)).length])) as Record<Category, number>;
   const rows = all.filter(r => inCategory(r, category));
 
+  const savedGeneral = answer?.library.general_instructions ?? '';
+  const generalText = generalDraft ?? savedGeneral;
+  useEffect(() => setGeneralDraft(undefined), [savedGeneral]);
+  useEffect(() => {
+    if (generalText === savedGeneral) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [generalText, savedGeneral]);
+
   if (draft && answer) return <div className="mx-auto max-w-6xl" data-testid="shared-library">
     {error && <Panel role="alert" tone="danger" className="mb-4 space-y-2 text-sm"><p>{error}</p><Button variant="outline" size="sm" onClick={() => { setDraft(undefined); setEditing(undefined); void load(); }}>Reload</Button></Panel>}
     {notice && <p role="status" className="mb-4 text-sm text-t-secondary">{notice}</p>}
@@ -298,7 +311,7 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
     </AlertDialog>
   </div>;
 
-  const general = !projectPath && answer ? <GeneralInstructions saved={answer.library.general_instructions ?? ''} saving={saving} onSave={text => persist({ ...answer.library, general_instructions: text })} /> : projectInstructions;
+  const general = !projectPath && answer ? <GeneralInstructions saved={savedGeneral} text={generalText} setText={setGeneralDraft} saving={saving} onSave={text => persist({ ...answer.library, general_instructions: text })} /> : projectInstructions;
   const owned = (row: Row) => row.source !== 'built-in' && !(row.source === 'project' && !projectPath);
   const actions = (row: Row) => {
     if (!answer || !owned(row)) return undefined;
@@ -427,15 +440,7 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   </div>;
 }
 
-function GeneralInstructions({ saved, saving, onSave }: { saved: string; saving: boolean; onSave: (text: string) => Promise<void> }) {
-  const [text, setText] = useState(saved);
-  useEffect(() => setText(saved), [saved]);
-  useEffect(() => {
-    if (text === saved) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [text, saved]);
+function GeneralInstructions({ saved, text, setText, saving, onSave }: { saved: string; text: string; setText: (text: string) => void; saving: boolean; onSave: (text: string) => Promise<void> }) {
   return <section aria-label="Global instructions" className="min-w-0">
     <DetailHeader title="Global instructions" meta={<><span className="inline-flex items-center gap-1.5"><StateDot tone="good" />Always active</span><span>Shared by all projects</span></>} actions={<Button size="sm" disabled={saving || text === saved} onClick={() => void onSave(text)}><Save className="size-3.5" /><span aria-hidden="true" className="max-sm:hidden">Save</span><span className="sr-only">Save global instructions</span></Button>} />
     <label className="mt-4 block"><span className="sr-only">Global instructions</span><Textarea className="min-h-[max(24rem,calc(100dvh-22rem))] font-mono text-sm leading-relaxed" value={text} onChange={event => setText(event.target.value)} /></label>

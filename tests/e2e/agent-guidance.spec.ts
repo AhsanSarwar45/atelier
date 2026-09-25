@@ -30,6 +30,14 @@ test('one instruction destination preserves old text, global drafts, commands an
   await page.getByRole('radio', { name: 'Commands', exact: true }).click();
   await page.getByRole('radio', { name: 'Instructions', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Global instructions', exact: true })).toHaveValue('Global guidance for every provider');
+  // Opening another item's editor and backing out keeps the unsaved text.
+  await page.getByRole('radio', { name: 'Commands', exact: true }).click();
+  await page.getByRole('button', { name: 'Add command', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to commands', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Discard', exact: true }).click();
+  await page.getByRole('radio', { name: 'Instructions', exact: true }).click();
+  await page.getByTestId('library-item-general').getByRole('button').first().click();
+  await expect(page.getByRole('textbox', { name: 'Global instructions', exact: true })).toHaveValue('Global guidance for every provider');
   await page.getByRole('button', { name: 'Save global instructions' }).click();
   await expect(page.getByRole('button', { name: 'Save global instructions' })).toBeDisabled();
   await page.reload();
