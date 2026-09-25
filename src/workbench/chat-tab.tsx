@@ -95,6 +95,7 @@ import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords } from '@/workbenc
 import { isBusy, isMidTurn, readAndKeep, sendCommand, useSession, useSessionFactsRead, useSessionView, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProfileBadge, brandName } from '@/workbench/brand-icon';
+import { ChatAccount, useSignIn } from '@/workbench/sign-in-dialog';
 import { workingLine } from '@/workbench/working-line';
 import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
@@ -1765,6 +1766,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const sessionProfileLabel =
     sessionAccounts.find((profile) => profile.id === sessionProfile)?.name ??
     (view.profile || 'System');
+  // What a "Sign in to continue" line in this transcript signs in: the
+  // account this chat runs on, named as the Accounts screen names it.
+  const signing = useSignIn();
+  const { start: startSignIn, busy: signInBusy, refused: signInRefused, outcome: signInOutcome } = signing;
+  const chatAccount = useMemo(() => {
+    if (!ACCOUNTED_BRANDS.includes(sessionBrand)) return null;
+    const profile = sessionAccounts.find((p) => p.id === sessionProfile) ?? {
+      id: sessionProfile,
+      brand: sessionBrand,
+      name: sessionProfileLabel,
+      system: sessionProfile === 'system',
+    };
+    return {
+      brand: sessionBrand,
+      profile,
+      start: () => void startSignIn(sessionBrand, profile),
+      busy: signInBusy,
+      refused: signInRefused,
+      outcome: signInOutcome,
+    };
+  }, [sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, startSignIn, signInBusy, signInRefused, signInOutcome]);
   const switchAccount = useCallback((profileId: string) => {
     if (!sessionId) return;
     setSteerError(null);
@@ -3145,6 +3167,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           <NothingShowing hidden={view.items.length} onShowAll={() => changeKinds(EVERYTHING)} />
         )}
         {!view.loading && (
+          <ChatAccount.Provider value={chatAccount}>
           <DrawnTranscript
             /* One per chat, and never the last chat's. The measurements a
                virtualiser makes belong to the rows it made them for, and this
@@ -3164,7 +3187,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             onOlder={view.loadOlder}
             target={params.get('message')}
           />
+          </ChatAccount.Provider>
         )}
+        {signing.dialog}
         {view.error && <Panel tone="danger" className="text-sm text-danger">{view.error}</Panel>}
         {/* What it is doing, where he is looking. Present exactly while it owes
             an answer (docs/agent-workbench.md §8.2.2) — whoever owes it, which

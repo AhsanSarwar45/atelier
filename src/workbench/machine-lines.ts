@@ -97,6 +97,9 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   // one (bw-iiv6.12).
   'kit/limit_reached': 'stopped',
   'kit/org_blocked': 'stopped',
+  // The login this chat runs on has expired: the same standstill, and the one
+  // thing that clears it is signing in again.
+  'kit/signed_out': 'stopped',
 
   // Something did not happen that was meant to.
   result: 'failed',
@@ -234,6 +237,7 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
   // says so, and one of them carries the time it comes back.
   'kit/limit_reached': 'you',
   'kit/org_blocked': 'you',
+  'kit/signed_out': 'you',
 
   // The turn did not do what he asked.
   result: 'you',
@@ -500,7 +504,17 @@ export const opensOn = (row: MachineRow): boolean =>
 const SAME_FACT: Record<string, string> = {
   'provider/usage_limit': 'kit/limit_reached',
   'provider/authorization': 'kit/org_blocked',
+  'provider/authentication': 'kit/signed_out',
 };
+
+/**
+ * The kind whose line offers to sign this chat's account in again.
+ *
+ * The condition only, never the provider's sentence: the condition is current
+ * state and goes away once the account is signed in, where the sentence stays
+ * in the conversation as a record of what happened (bw-lep5.1).
+ */
+export const NEEDS_SIGNING_IN: ReadonlySet<string> = new Set(['provider/authentication']);
 
 /**
  * The kinds whose sentence this transcript no longer needs to draw, because the

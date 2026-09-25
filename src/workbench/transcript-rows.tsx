@@ -41,8 +41,9 @@ import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colourin
 import { DiffTable } from '@/workbench/diff-table';
 import type { TranscriptTool } from '@/workbench/fold';
 import { diffLines, hunksToRows } from '@/workbench/line-diff';
-import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
+import { NEEDS_SIGNING_IN, opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
+import { ChatSignIn } from '@/workbench/sign-in-dialog';
 import { attachmentMarker, attachmentsIn } from '@/workbench/mentions';
 import { AttachmentGrid, shownFrom } from '@/workbench/attachment-grid';
 import { withoutProposedPlans } from '@/workbench/proposed-plan';
@@ -811,6 +812,10 @@ export const MachineLine = memo(
               <span className="ml-auto shrink-0 uppercase tracking-wide">{row.family}</span>
             </Row>
           </Tooltip>
+          {/* Said plainly, with the way out beside it: the provider's own
+              sentence names a token, and what it means is that this account
+              has to be signed in again (bw-lep5.1). */}
+          {NEEDS_SIGNING_IN.has(row.kind) && <ChatSignIn />}
           {open &&
             row.lines.map((line, i) => (
               <Body

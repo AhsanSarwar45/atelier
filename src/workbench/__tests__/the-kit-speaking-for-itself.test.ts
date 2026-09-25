@@ -97,6 +97,10 @@ describe('the kit talking in the chat’s own voice', () => {
     expect(kitSpoke(essay.text)).toBeNull();
   });
 
+  it('reads an expired login as the account being signed out (bw-lep5.1)', () => {
+    expect(kitSpoke('Failed to authenticate: OAuth session expired and could not be refreshed')).toBe('kit/signed_out');
+  });
+
   it('has a family and a reader for every sentence the kit can speak', () => {
     expect(SPOKEN_KINDS.length).toBeGreaterThan(0);
     for (const kind of SPOKEN_KINDS) {
@@ -111,7 +115,7 @@ describe('the kit talking in the chat’s own voice', () => {
         expect(kitSpoke(`${opening} — and then some detail`)).toBe(spoken.kind);
       }
       // A stop is a stop whichever way the kit worded it.
-      if (spoken.kind === 'kit/limit_reached' || spoken.kind === 'kit/org_blocked') {
+      if (['kit/limit_reached', 'kit/org_blocked', 'kit/signed_out'].includes(spoken.kind)) {
         expect(familyOf(spoken.kind, 'note')).toBe('stopped');
         expect(forWhom(spoken.kind, 'note')).toBe('you');
       }

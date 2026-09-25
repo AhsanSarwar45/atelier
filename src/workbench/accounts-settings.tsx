@@ -21,9 +21,9 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { Check, ExternalLink, LogIn, Pencil, Plus, Star, Trash2, TriangleAlert } from 'lucide-react';
+import { LogIn, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -37,29 +37,19 @@ import {
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
-import { Spinner } from '@/components/ui/spinner';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { NO_DEFAULTS, readNewChatDefaults, saveNewChatProfile, type NewChatDefaults } from '@/workbench/new-chat-defaults';
-import type { Brand, ProfileChoice, ProfileStanding, SignInProgress } from '@/workbench/protocol';
+import type { Brand, ProfileChoice, ProfileStanding } from '@/workbench/protocol';
+import { useSignIn } from '@/workbench/sign-in-dialog';
 import { sendCommand } from '@/workbench/use-session';
 
 /** The brands that sign in. `local` runs on this computer and has no account. */
 const ACCOUNTED: readonly Brand[] = ['claude', 'codex'];
 
-/** How often a running sign-in is asked how it is getting on. */
-const POLL_MS = 1500;
-
 /** Everything known about one brand's accounts. */
 interface Held {
   profiles: ProfileChoice[];
   standing: Record<string, ProfileStanding>;
-}
-
-/** The sign-in being watched, if one is. */
-interface Signing {
-  brand: Brand;
-  profile: ProfileChoice;
-  progress: SignInProgress;
 }
 
 function said(e: unknown): string {
@@ -75,10 +65,6 @@ export function AccountsSettings() {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
-  const [signing, setSigning] = useState<Signing | null>(null);
-  const [code, setCode] = useState('');
-  /** Whether the person said their page handed them a code. */
-  const [typing, setTyping] = useState(false);
   const [defaults, setDefaults] = useState<NewChatDefaults>(NO_DEFAULTS);
   /** The account being renamed, and the name typed so far. */
   const [renaming, setRenaming] = useState<{ brand: Brand; id: string; name: string } | null>(null);
@@ -129,81 +115,9 @@ export function AccountsSettings() {
       .catch((e: unknown) => setRefused(said(e)));
   }, [read]);
 
-  /** Start a sign-in and watch it. */
-  const signIn = useCallback(async (brand: Brand, profile: ProfileChoice) => {
-    setRefused(null);
-    setCode('');
-    setBusy(profile.id);
-    try {
-      const progress = await sendCommand<SignInProgress>({
-        type: 'profile.signin.start',
-        brand,
-        profileId: profile.id,
-      });
-      setTyping(false);
-      setSigning({ brand, profile, progress });
-    } catch (e: unknown) {
-      setRefused(said(e));
-    } finally {
-      setBusy(null);
-    }
-  }, []);
-
-  // The sign-in happens in a browser tab that is not this one, so there is
-  // nothing to wait on here but the answer. Polled rather than streamed: it is
-  // one short question, asked while a dialog is open and never otherwise.
-  const watching = signing?.progress.state;
-  const watchingId = signing?.profile.id;
-  const watchingBrand = signing?.brand;
-  const done = watching === 'signed-in' || watching === 'failed';
-  const settled = useRef(false);
-  useEffect(() => {
-    if (!watchingId || !watchingBrand || done) return;
-    let gone = false;
-    const timer = setInterval(() => {
-      void sendCommand<SignInProgress>({
-        type: 'profile.signin.read',
-        brand: watchingBrand,
-        profileId: watchingId,
-      })
-        .then((progress) => {
-          if (gone) return;
-          setSigning((was) => (was && was.profile.id === watchingId ? { ...was, progress } : was));
-        })
-        .catch(() => {
-          // A sign-in the server has forgotten is not an error to shout
-          // about; the dialog already shows the last thing it said.
-        });
-    }, POLL_MS);
-    return () => {
-      gone = true;
-      clearInterval(timer);
-    };
-  }, [watchingId, watchingBrand, done]);
-
   // Once it has ended one way or the other, the list underneath is wrong.
-  useEffect(() => {
-    if (!done) {
-      settled.current = false;
-      return;
-    }
-    if (settled.current) return;
-    settled.current = true;
-    refresh();
-  }, [done, refresh]);
-
-  const close = useCallback(() => {
-    if (signing && !done) {
-      void sendCommand({
-        type: 'profile.signin.cancel',
-        brand: signing.brand,
-        profileId: signing.profile.id,
-      }).catch(() => {});
-    }
-    setSigning(null);
-    setCode('');
-    setTyping(false);
-  }, [signing, done]);
+  const signing = useSignIn(refresh);
+  const signIn = signing.start;
 
   const add = useCallback(
     async (brand: Brand) => {
@@ -267,25 +181,6 @@ export function AccountsSettings() {
       setBusy(null);
     }
   }, [renaming, refresh]);
-
-  const hand = useCallback(async () => {
-    if (!signing || !code.trim()) return;
-    setBusy('code');
-    try {
-      const progress = await sendCommand<SignInProgress>({
-        type: 'profile.signin.paste',
-        brand: signing.brand,
-        profileId: signing.profile.id,
-        code: code.trim(),
-      });
-      setSigning((was) => (was ? { ...was, progress } : was));
-      setCode('');
-    } catch (e: unknown) {
-      setRefused(said(e));
-    } finally {
-      setBusy(null);
-    }
-  }, [signing, code]);
 
   if (unread) {
     return (
@@ -387,7 +282,7 @@ export function AccountsSettings() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={busy !== null}
+                      disabled={busy !== null || signing.busy}
                       onClick={() => void signIn(brand, profile)}
                       data-testid={`account-signin-${brand}-${profile.id}`}
                     >
@@ -418,9 +313,9 @@ export function AccountsSettings() {
         );
       })}
 
-      {refused && (
+      {(refused ?? signing.refused) && (
         <p role="alert" className="mt-3 text-sm text-danger" data-testid="accounts-refused">
-          {refused}
+          {refused ?? signing.refused}
         </p>
       )}
 
@@ -458,147 +353,7 @@ export function AccountsSettings() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={signing !== null} onOpenChange={(open) => !open && close()}>
-        <DialogContent data-testid="account-signin-dialog">
-          <DialogHeader>
-            <DialogTitle>
-              {signing ? `Sign in to ${signing.profile.name}` : 'Sign in'}
-            </DialogTitle>
-            {/* Said to a screen reader and not drawn: the buttons below are
-                the instruction, and a sentence repeating them is reading
-                material on a screen that is meant to be used. */}
-            <DialogDescription className="sr-only">
-              {signing
-                ? `${brandName(signing.brand)} does the signing in. This app never sees your password.`
-                : ''}
-            </DialogDescription>
-          </DialogHeader>
-          {signing && <SignInSteps brand={signing.brand} progress={signing.progress} />}
-          {/* Claude prints "Paste code here if prompted" the moment it starts,
-              and the words that matter are "if prompted": the page signs the
-              person in by itself and hands nothing back. Drawing a box for a
-              code they will never be shown sends them looking for one. So the
-              box is behind a sentence, for the flows that do hand one over —
-              an SSO sign-in, or a browser on another machine. */}
-          {signing?.progress.state === 'paste-the-code' && !typing && (
-            <Button
-              type="button"
-              mode="link"
-              variant="dim"
-              underlined="solid"
-              size="sm"
-              className="self-start"
-              onClick={() => setTyping(true)}
-              data-testid="account-signin-has-code"
-            >
-              Enter a sign-in code
-            </Button>
-          )}
-          {signing?.progress.state === 'paste-the-code' && typing && (
-            <div>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void hand();
-                  }}
-                  placeholder="Paste sign-in code"
-                  aria-label="Sign-in code"
-                  className="flex-1 font-mono"
-                  data-testid="account-signin-code"
-                />
-                <Button size="sm" disabled={busy !== null || !code.trim()} onClick={() => void hand()}>
-                  Submit
-                </Button>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={close} data-testid="account-signin-close">
-              {done ? 'Done' : 'Cancel'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-/** What the sign-in is waiting on, in the words for the step it is at. */
-function SignInSteps({ brand, progress }: { brand: Brand; progress: SignInProgress }) {
-  const [copied, setCopied] = useState(false);
-  if (progress.state === 'signed-in') {
-    return (
-      <p className="flex items-center gap-2 text-sm text-t-primary" data-testid="account-signin-state">
-        <Check className="h-4 w-4 text-success" />
-        Signed in{progress.standing?.account ? ` as ${progress.standing.account}` : ''}.
-      </p>
-    );
-  }
-  if (progress.state === 'failed') {
-    return (
-      <div data-testid="account-signin-state">
-        <p className="flex items-center gap-2 text-sm text-danger">
-          <TriangleAlert className="h-4 w-4" />
-          Sign-in failed.
-        </p>
-        {/* What the program printed, as it printed it. It is the only party
-            that knows what went wrong, and a wording of our own here would be
-            a guess drawn over its answer. */}
-        {progress.said && (
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-surface-2 p-2 text-xs text-t-muted">
-            {progress.said}
-          </pre>
-        )}
-      </div>
-    );
-  }
-  if (progress.state === 'starting' || !progress.url) {
-    return (
-      <p className="flex items-center gap-2 text-sm text-t-muted" data-testid="account-signin-state">
-        <Spinner />
-        Starting…
-      </p>
-    );
-  }
-  // The address itself is a hundred characters of query string. Printed in
-  // full it filled the dialog and told the reader nothing; what they need is
-  // somewhere to click, and somewhere to copy from when the browser they want
-  // is on a different machine.
-  const url = progress.url ?? '';
-  return (
-    <div className="text-sm" data-testid="account-signin-state">
-      <div className="flex items-center gap-2">
-        <Button asChild size="sm">
-          <a href={url} target="_blank" rel="noreferrer" data-testid="account-signin-url" data-url={url}>
-            <ExternalLink className="mr-1 h-3.5 w-3.5" />
-            Open the sign-in page
-          </a>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            void navigator.clipboard?.writeText(url).then(() => setCopied(true));
-          }}
-          data-testid="account-signin-copy"
-        >
-          {copied ? 'Copied' : 'Copy link'}
-        </Button>
-      </div>
-      {progress.code && (
-        <>
-          <p className="mb-1 mt-4 text-xs text-t-muted">Verification code</p>
-          <p className="font-mono text-lg tracking-wide text-t-primary" data-testid="account-signin-onetime">
-            {progress.code}
-          </p>
-        </>
-      )}
-      <p className="mt-4 flex items-center gap-2 text-xs text-t-muted">
-        <Spinner size="2xs" />
-        {progress.code ? 'Waiting for verification…' : 'Waiting for sign-in…'}
-      </p>
+      {signing.dialog}
     </div>
   );
 }

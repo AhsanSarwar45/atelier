@@ -936,6 +936,12 @@ export const KIT_SPEAKS: SpokenWords[] = [
     ],
   },
   {
+    kind: 'kit/signed_out',
+    kit: null,
+    means: 'the account this chat runs on is no longer signed in, and nothing runs until it is signed in again. Claude says it this way when its login expires under a running chat (bw-lep5.1)',
+    opens: ['Failed to authenticate', 'OAuth session expired', 'OAuth token has expired'],
+  },
+  {
     kind: 'kit/service_failed',
     kit: null,
     means: 'the turn died on the service rather than on anything he asked for. Six of these in his record, all of them drawn as ordinary answers',

@@ -103,6 +103,13 @@ pub fn condition(brand: &str, text: &str) -> Option<Value> {
             "authentication",
             "unauthenticated",
             "invalid api key",
+            // Claude's own words when its login has died under a running chat:
+            // "Failed to authenticate: OAuth session expired and could not be
+            // refreshed", and the variant asking to re-authenticate.
+            "failed to authenticate",
+            "re-authenticate",
+            "oauth session expired",
+            "oauth token has expired",
         ],
     ) {
         "authentication"
@@ -195,6 +202,20 @@ mod tests {
         let signal = condition("claude", "HTTP 429: too many requests").unwrap();
         assert_eq!(signal["kind"], "rate_limit");
         assert_eq!(signal["id"], "condition:rate_limit");
+    }
+
+    /// A login that died under a running chat reads as the sign-in it needs,
+    /// not as an internal error (bw-lep5.1).
+    #[test]
+    fn native_workbench_services_an_expired_login_asks_to_sign_in() {
+        for said in [
+            "Internal error: Failed to authenticate: OAuth session expired and could not be refreshed",
+            "Failed to authenticate: OAuth session expired and could not be refreshed",
+        ] {
+            let signal = condition("claude", said).unwrap();
+            assert_eq!(signal["kind"], "authentication");
+            assert_eq!(signal["severity"], "blocking");
+        }
     }
 
     /// Every usage limit in the owner's own record arrived as prose naming a

@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const screen = readFileSync('src/workbench/accounts-settings.tsx', 'utf8');
+// The sign-in dialog itself, shared by the Accounts screen and a chat's
+// "Sign in to continue" notice (bw-lep5.1).
+const signing = readFileSync('src/workbench/sign-in-dialog.tsx', 'utf8');
 const asking = readFileSync('server/src/workbench/signin.rs', 'utf8');
 
 describe('the accounts screen', () => {
@@ -17,16 +20,17 @@ describe('the accounts screen', () => {
   it('says nothing it can show instead', () => {
     // A dialog whose buttons are the instruction does not also need a
     // sentence describing them; the description stays for a screen reader.
-    expect(screen).toContain('<DialogDescription className="sr-only">');
-    expect(screen).not.toContain('Open this page and sign in to');
-    expect(screen).not.toContain('Paste the code that page gave you');
+    expect(signing).toContain('<DialogDescription className="sr-only">');
+    expect(signing).not.toContain('Open this page and sign in to');
+    expect(signing).not.toContain('Paste the code that page gave you');
   });
 
   it('keeps the code box behind the sentence that offers it', () => {
     // Claude's page signs the person in by itself and hands nothing back, so
     // a code box drawn up front sends them looking for a code.
-    expect(screen).toContain("state === 'paste-the-code' && !typing");
-    expect(screen).toContain('Enter a sign-in code');
+    expect(signing).toContain("state === 'paste-the-code' && !typing");
+    expect(signing).toContain('Enter a sign-in code');
+    expect(screen).toContain('useSignIn(');
   });
 });
 
