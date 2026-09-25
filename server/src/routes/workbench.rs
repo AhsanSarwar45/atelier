@@ -2851,24 +2851,119 @@ async fn with_atelier_commands(database: &ChatDb, session_id: &str, menu: &mut V
 
 /// Nothing has told this app what the provider of a stopped chat can run:
 /// no chat on it has spoken since the catalogue began keeping commands. Ask
-/// the provider once, in the background, for each account and folder; the
-/// chat's menu fills in when it answers (bw-zldt.2).
+/// the provider in the background, once at a time for each account and
+/// folder; every stopped chat that asked meanwhile is given the answer. A
+/// question that failed is asked again after a pause (bw-zldt.2).
 fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::store::Session) {
-    static ASKED: std::sync::LazyLock<std::sync::Mutex<HashSet<String>>> =
-        std::sync::LazyLock::new(Default::default);
+    static ASKS: std::sync::LazyLock<std::sync::Mutex<CommandAsks>> = std::sync::LazyLock::new(Default::default);
     if !matches!(session.brand.as_str(), "claude" | "codex") {
         return;
     }
     let key = format!("{}\u{0}{}\u{0}{}", session.brand, session.profile.as_deref().unwrap_or_default(), session.project_path);
-    if !ASKED.lock().map(|mut asked| asked.insert(key)).unwrap_or(false) {
+    let first = ASKS
+        .lock()
+        .map(|mut asks| asks.join(&key, &session.id, std::time::Instant::now()))
+        .unwrap_or(false);
+    if !first {
         return;
     }
     let (database, session) = (database.clone(), session.clone());
     tokio::spawn(async move {
-        if let Err(error) = crate::workbench::acp::client::offer_provider_catalogue(&database, &session).await {
-            tracing::warn!(session_id = %session.id, %error, "could not ask the provider for its commands");
+        let answer = crate::workbench::acp::client::ask_provider_catalogue(&session).await;
+        let waiting = ASKS
+            .lock()
+            .map(|mut asks| asks.finish(&key, answer.is_ok(), std::time::Instant::now()))
+            .unwrap_or_default();
+        let (menu, shared) = match answer {
+            Ok(answer) => answer,
+            Err(error) => {
+                tracing::warn!(session_id = %session.id, %error, "could not ask the provider for its commands");
+                return;
+            }
+        };
+        for session_id in waiting {
+            if let Err(error) = crate::workbench::acp::client::offer_provider_catalogue(
+                &database,
+                &session_id,
+                menu.clone(),
+                shared.clone(),
+            )
+            .await
+            {
+                tracing::warn!(%session_id, %error, "could not offer a stopped chat its provider's commands");
+            }
         }
     });
+}
+
+/// Which providers are being asked for their commands, and by which chats.
+#[derive(Default)]
+struct CommandAsks {
+    waiting: HashMap<String, Vec<String>>,
+    answered: HashSet<String>,
+    failed: HashMap<String, std::time::Instant>,
+}
+
+impl CommandAsks {
+    const RETRY_AFTER: Duration = Duration::from_secs(60);
+
+    /// Adds a chat to the question for `key`; true when it must be asked now.
+    fn join(&mut self, key: &str, session_id: &str, now: std::time::Instant) -> bool {
+        if self.answered.contains(key) {
+            return false;
+        }
+        if let Some(waiting) = self.waiting.get_mut(key) {
+            if !waiting.iter().any(|id| id == session_id) {
+                waiting.push(session_id.to_string());
+            }
+            return false;
+        }
+        if self.failed.get(key).is_some_and(|at| now.duration_since(*at) < Self::RETRY_AFTER) {
+            return false;
+        }
+        self.waiting.insert(key.to_string(), vec![session_id.to_string()]);
+        true
+    }
+
+    /// Ends the question for `key` and returns the chats that were waiting.
+    fn finish(&mut self, key: &str, answered: bool, now: std::time::Instant) -> Vec<String> {
+        if answered {
+            self.failed.remove(key);
+            self.answered.insert(key.to_string());
+        } else {
+            self.failed.insert(key.to_string(), now);
+        }
+        self.waiting.remove(key).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod command_asks_tests {
+    use super::CommandAsks;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn every_chat_that_asked_meanwhile_is_given_the_answer() {
+        let (mut asks, now) = (CommandAsks::default(), Instant::now());
+        assert!(asks.join("claude", "one", now));
+        assert!(!asks.join("claude", "two", now));
+        assert!(!asks.join("claude", "two", now));
+        assert!(asks.join("codex", "three", now));
+        assert_eq!(asks.finish("claude", true, now), ["one", "two"]);
+        assert!(!asks.join("claude", "four", now), "an answered provider is not asked again");
+    }
+
+    #[test]
+    fn a_question_that_failed_is_asked_again_after_a_pause() {
+        let (mut asks, now) = (CommandAsks::default(), Instant::now());
+        assert!(asks.join("claude", "one", now));
+        assert_eq!(asks.finish("claude", false, now), ["one"]);
+        assert!(!asks.join("claude", "one", now + Duration::from_secs(5)));
+        let later = now + CommandAsks::RETRY_AFTER;
+        assert!(asks.join("claude", "one", later));
+        assert_eq!(asks.finish("claude", true, later), ["one"]);
+        assert!(!asks.join("claude", "two", later + CommandAsks::RETRY_AFTER));
+    }
 }
 
 async fn command(

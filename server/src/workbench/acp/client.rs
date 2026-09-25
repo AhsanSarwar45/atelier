@@ -609,9 +609,10 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
 /// this build (a catalogue kept before commands were) listed none until a chat
 /// woke. This opens a throwaway session in the chat's folder, keeps what the
 /// adapter announces, and closes it. The chat itself is not touched: its own
-/// conversation is neither loaded nor resumed, and no prompt is sent
-/// (bw-zldt.2).
-pub async fn offer_provider_catalogue(database: &ChatDb, session: &Session) -> Result<(), String> {
+/// conversation is neither loaded nor resumed, and no prompt is sent. An
+/// adapter that names no commands in time is an error, so it is asked again
+/// later (bw-zldt.2).
+pub async fn ask_provider_catalogue(session: &Session) -> Result<(Value, Vec<Value>), String> {
     if adapter_refused_recently(&session.brand).await {
         return Err(format!("{} refused this app a moment ago", session.brand));
     }
@@ -675,11 +676,23 @@ pub async fn offer_provider_catalogue(database: &ChatDb, session: &Session) -> R
     let (modes, config_options, agent_controls) = answered?;
     let mut menu = menu_fields(&session.brand, session.model.as_deref(), &modes, &config_options, &agent_controls, &json!([]));
     let commands = std::mem::take(&mut *announced.lock().await);
-    if commands.as_array().is_some_and(|list| !list.is_empty()) {
-        menu["commands"] = commands;
+    if !commands.as_array().is_some_and(|list| !list.is_empty()) {
+        return Err(format!("{} named no commands in time", session.brand));
     }
+    menu["commands"] = commands;
+    Ok((menu, shared_library.commands()))
+}
+
+/// Gives one stopped chat the catalogue a provider answered with; see
+/// [`ask_provider_catalogue`].
+pub async fn offer_provider_catalogue(
+    database: &ChatDb,
+    session_id: &str,
+    menu: Value,
+    shared: Vec<Value>,
+) -> Result<(), String> {
     database
-        .offer_catalogue(session.id.clone(), menu_event(&session.id, menu)?, shared_library.commands())
+        .offer_catalogue(session_id.to_string(), menu_event(session_id, menu)?, shared)
         .await
 }
 
