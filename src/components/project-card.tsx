@@ -237,7 +237,7 @@ export function ProjectCard({
                   aria-label="Project settings"
                   onClick={(e) => {
                     e.stopPropagation();
-                    router.push(`/project?id=${encodeURIComponent(id)}&settings=project`);
+                    router.push(`/project?id=${encodeURIComponent(id)}&settings=list`);
                   }}
                 >
                   <Settings className="h-4 w-4" />

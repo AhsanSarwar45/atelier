@@ -251,7 +251,10 @@ function ProjectTabs() {
             className="shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
             aria-label="Project settings"
             data-testid="project-menu"
-            onClick={() => goSettings({ settings: 'project', ptab: null })}
+            // The list, not the first section: on a phone the list is the
+            // screen settings open on, and a wide screen shows the first
+            // section beside it anyway.
+            onClick={() => goSettings({ settings: 'list', ptab: null })}
           >
             <EllipsisVertical className="h-4 w-4 opacity-100" />
           </Button>
