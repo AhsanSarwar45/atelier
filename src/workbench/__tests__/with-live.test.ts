@@ -1,13 +1,13 @@
 /**
  * The list of chats keeps up with what is happening.
  *
- * It is asked for once when the tab opens. Everything after that — a chat
- * started here, from a card, or in another window — reaches it through the
- * app's one live stream, and this is the join.
+ * It is asked for when the tab opens. What the chats in it are doing reaches
+ * it through the app's one live stream, and this is the join. Which chats are
+ * in it is the server's answer alone: the stream only says when to ask again.
  */
 import { describe, expect, it } from 'vitest';
 
-import { heldHere, withLive } from '@/workbench/chat-sidebar';
+import { unlisted, withLive, withLocal } from '@/workbench/chat-sidebar';
 import type { LiveSession } from '@/workbench/live';
 import type { RestoreRow } from '@/workbench/protocol';
 
@@ -55,50 +55,58 @@ function session(over: Partial<LiveSession> = {}): LiveSession {
   };
 }
 
-describe('the list keeps up', () => {
-  it('a chat that started after the list was fetched joins it, newest first', () => {
-    const merged = withLive([row()], [session()], PROJECT);
-    expect(merged.map((r) => r.sessionId)).toEqual(['s2', 's1']);
-    expect(merged[0]!.title).toBe('Just started');
+describe('which chats are listed is the server\'s answer', () => {
+  it('a chat the stream knows and the list does not is never drawn from the stream', () => {
+    expect(withLive([row()], [session()]).map((r) => r.sessionId)).toEqual(['s1']);
+    expect(withLive([], [session({ state: 'dormant' })])).toEqual([]);
   });
 
-  it('the new row says where it is working', () => {
-    // The worktree it was started in, not the project it belongs to: the two
-    // are different the moment somebody uses a worktree, and the row that
-    // named the project could never say which one (bw-ov7a.4).
-    const [fresh] = withLive([], [session()], PROJECT);
-    expect(fresh!.folder).toBe('fix-a-thing');
-    expect(fresh!.cwdHint).toBe('/home/me/project/worktrees/fix-a-thing');
+  it('it is a reason to ask the server again, awake or asleep, wherever it works', () => {
+    // A new chat that has not been spoken in is asleep, and so is one whose
+    // profile was just changed; both used to fall out of the list here
+    // (bw-ljko.1). A chat in a worktree the page has never heard of is the
+    // server's to place, not the page's.
+    expect(unlisted([row()], [session()], PROJECT)).toEqual(['s2:claude:']);
+    expect(unlisted([row()], [session({ state: 'dormant' })], PROJECT)).toEqual(['s2:claude:']);
+    expect(unlisted([row()], [session({ cwd: '/somewhere/else' })], PROJECT)).toEqual(['s2:claude:']);
+  });
 
-    // And a chat working in the project itself still names the project.
-    const [home] = withLive([], [session({ cwd: '/home/me/project' })], PROJECT);
-    expect(home!.folder).toBe('project');
-    expect(home!.cwdHint).toBe('/home/me/project');
+  it('a chat whose conversation was replaced under it is asked about again', () => {
+    // A profile switch keeps the chat and its provider and starts a new
+    // conversation, so the row's conversation id is the old one.
+    const listed = row({ externalId: 'x-old' });
+    expect(unlisted([listed], [session({ id: 's1', externalId: 'x-old' })], PROJECT)).toEqual([]);
+    expect(unlisted([listed], [session({ id: 's1', externalId: null })], PROJECT)).toEqual(['s1:claude:']);
+    expect(unlisted([listed], [session({ id: 's1', brand: 'codex', externalId: 'x-old' })], PROJECT)).toEqual(['s1:codex:x-old']);
+  });
+
+  it('another project\'s chats are not this list\'s question', () => {
+    expect(unlisted([], [session({ projectId: 'other' })], PROJECT)).toEqual([]);
+  });
+
+  it('the database\'s answer replaces what it holds and keeps what only discovery found', () => {
+    const found = row({ sessionId: null, externalId: 'x9', title: 'Only in the tool' });
+    const drawn = [row({ title: 'Old title' }), found];
+    const local = [row({ title: 'New title' }), row({ sessionId: 's2', title: 'Just started' })];
+    const laid = withLocal(drawn, local);
+    expect(laid.map((r) => r.title).sort()).toEqual(['Just started', 'New title', 'Only in the tool']);
   });
 
   it('a chat already listed is not listed twice, and takes the newer state', () => {
-    const merged = withLive([row()], [session({ id: 's1', state: 'thinking', title: 'Renamed' })], PROJECT);
+    const merged = withLive([row()], [session({ id: 's1', state: 'thinking', title: 'Renamed' })]);
     expect(merged).toHaveLength(1);
     expect(merged[0]!.state).toBe('thinking');
     expect(merged[0]!.title).toBe('An older chat');
   });
 
   it('what the row already knew survives a live frame that knows less', () => {
-    const merged = withLive([row({ beads: ['bw-1'] })], [session({ id: 's1', title: null, beads: [] })], PROJECT);
+    const merged = withLive([row({ beads: ['bw-1'] })], [session({ id: 's1', title: null, beads: [] })]);
     expect(merged[0]!.beads).toEqual(['bw-1']);
     expect(merged[0]!.title).toBe('An older chat');
   });
 
-  it('another project\'s chats stay out of this one\'s list', () => {
-    expect(withLive([], [session({ projectId: 'other' })], PROJECT)).toEqual([]);
-  });
-
-  it('a sleeping chat the list left out does not come back through the live stream', () => {
-    expect(withLive([], [session({ state: 'dormant', title: null })], PROJECT)).toEqual([]);
-  });
-
   it('a sleeping chat the list does hold keeps its place', () => {
-    const merged = withLive([row()], [session({ id: 's1', state: 'dormant' })], PROJECT);
+    const merged = withLive([row()], [session({ id: 's1', state: 'dormant' })]);
     expect(merged).toHaveLength(1);
     expect(merged[0]!.sessionId).toBe('s1');
   });
@@ -107,7 +115,8 @@ describe('the list keeps up', () => {
   // stream must not undo that when it merges a chat this app is driving.
   it('a chat somebody is working in stays above one that only started later', () => {
     const busy = row({ sessionId: 's1', runningElsewhere: true });
-    const merged = withLive([busy], [session()], PROJECT);
+    const later = row({ sessionId: 's2', lastActiveAt: '2026-08-16T11:00:00.000Z' });
+    const merged = withLive([later, busy], [session()]);
     expect(merged.map((r) => r.sessionId)).toEqual(['s1', 's2']);
   });
 
@@ -115,13 +124,12 @@ describe('the list keeps up', () => {
     const merged = withLive(
       [row({ lastActiveAt: '2026-08-16T12:00:00.000Z' })],
       [session({ id: 's1', state: 'thinking', lastActiveAt: '2026-08-16T11:00:00.000Z' })],
-      PROJECT,
     );
     expect(merged[0]!.lastActiveAt).toBe('2026-08-16T12:00:00.000Z');
   });
 
   it('the working mark survives the stream touching the row', () => {
-    const merged = withLive([row({ runningElsewhere: true })], [session({ id: 's1', state: 'thinking' })], PROJECT);
+    const merged = withLive([row({ runningElsewhere: true })], [session({ id: 's1', state: 'thinking' })]);
     expect(merged[0]!.runningElsewhere).toBe(true);
   });
 });
@@ -133,7 +141,7 @@ describe('the list keeps up', () => {
  */
 describe('the working mark keeps up', () => {
   it('a chat that starts being worked in is marked, without the list being asked again', () => {
-    const marked = withLive([row({ sessionId: null, externalId: 'x1' })], [], PROJECT, new Set(['x1']));
+    const marked = withLive([row({ sessionId: null, externalId: 'x1' })], [], new Set(['x1']));
     expect(marked[0]!.runningElsewhere).toBe(true);
   });
 
@@ -141,7 +149,6 @@ describe('the working mark keeps up', () => {
     const marked = withLive(
       [row({ sessionId: 's1', state: 'dormant', externalId: 'x1' })],
       [],
-      PROJECT,
       new Set(['x1']),
       new Map([['x1', { id: 'x1', holder: 'program' as const, doing: 'running' as const, detail: 'Bash', since: 1_000 }]]),
     );
@@ -154,7 +161,6 @@ describe('the working mark keeps up', () => {
     const marked = withLive(
       [row({ sessionId: 'imported', origin: 'terminal', state: 'dormant', externalId: 'x1' })],
       [],
-      PROJECT,
       new Set(['x1']),
       new Map([['x1', { id: 'x1', holder: 'terminal' as const, doing: 'running' as const, detail: 'Bash', since: 1_000 }]]),
     );
@@ -164,7 +170,7 @@ describe('the working mark keeps up', () => {
   });
 
   it('and it goes when the work stops', () => {
-    const marked = withLive([row({ externalId: 'x1', runningElsewhere: true })], [], PROJECT, new Set<string>());
+    const marked = withLive([row({ externalId: 'x1', runningElsewhere: true })], [], new Set<string>());
     expect(marked[0]!.runningElsewhere).toBe(false);
   });
 
@@ -173,19 +179,19 @@ describe('the working mark keeps up', () => {
       row({ sessionId: null, externalId: 'x1', lastActiveAt: '2026-08-16T09:00:00.000Z' }),
       row({ sessionId: 's2', externalId: 'x2', lastActiveAt: '2026-08-16T12:00:00.000Z' }),
     ];
-    expect(withLive(rows, [], PROJECT, new Set<string>()).map((r) => r.externalId ?? r.sessionId)).toEqual(['x2', 'x1']);
-    expect(withLive(rows, [], PROJECT, new Set(['x1'])).map((r) => r.externalId ?? r.sessionId)).toEqual(['x1', 'x2']);
+    expect(withLive(rows, [], new Set<string>()).map((r) => r.externalId ?? r.sessionId)).toEqual(['x2', 'x1']);
+    expect(withLive(rows, [], new Set(['x1'])).map((r) => r.externalId ?? r.sessionId)).toEqual(['x1', 'x2']);
   });
 
   // Until the stream has spoken there is nothing to apply, and the list has
   // already arrived marked from the sidecar.
   it('says nothing before the stream has, rather than saying nothing is running', () => {
-    const merged = withLive([row({ externalId: 'x1', runningElsewhere: true })], [], PROJECT, null);
+    const merged = withLive([row({ externalId: 'x1', runningElsewhere: true })], [], null);
     expect(merged[0]!.runningElsewhere).toBe(true);
   });
 
   it('a chat this app started itself is left alone: the stream names conversations', () => {
-    const merged = withLive([row({ externalId: null, runningElsewhere: true })], [], PROJECT, new Set<string>());
+    const merged = withLive([row({ externalId: null, runningElsewhere: true })], [], new Set<string>());
     expect(merged[0]!.runningElsewhere).toBe(true);
   });
 
@@ -196,7 +202,6 @@ describe('the working mark keeps up', () => {
     const merged = withLive(
       [row({ externalId: 'x1', runningElsewhere: true })],
       [session({ id: 's1', externalId: 'x1', state: 'thinking' })],
-      PROJECT,
       new Set(['x1']),
       new Map([['x1', { id: 'x1', holder: 'terminal' as const, doing: 'working' as const, since: null }]]),
     );
@@ -208,7 +213,6 @@ describe('the working mark keeps up', () => {
     const merged = withLive(
       [row({ sessionId: null, externalId: 'x1' })],
       [],
-      PROJECT,
       new Set(['x1']),
       new Map([['x1', { id: 'x1', holder: 'terminal' as const, doing: 'working' as const, since: null }]]),
     );
@@ -239,7 +243,7 @@ describe('what the stream may move a row for', () => {
       lastSpokeAt: '2026-08-16T08:00:00.000Z',
       state: 'streaming',
     });
-    expect(withLive(rows, [working], PROJECT).map((r) => r.sessionId)).toEqual(['talking', 'busy']);
+    expect(withLive(rows, [working]).map((r) => r.sessionId)).toEqual(['talking', 'busy']);
   });
 
   it('a message he sends carries its chat to the top', () => {
@@ -248,20 +252,20 @@ describe('what the stream may move a row for', () => {
       row({ sessionId: 'busy', lastActiveAt: '2026-08-16T08:00:00.000Z', lastSpokeAt: '2026-08-16T08:00:00.000Z' }),
     ];
     const answered = session({ id: 'busy', lastActiveAt: '2026-08-16T12:00:00.000Z', lastSpokeAt: '2026-08-16T12:00:00.000Z' });
-    expect(withLive(rows, [answered], PROJECT).map((r) => r.sessionId)).toEqual(['busy', 'talking']);
+    expect(withLive(rows, [answered]).map((r) => r.sessionId)).toEqual(['busy', 'talking']);
   });
 
   it('never backwards: the row keeps a later time read from the chat’s own record', () => {
     // He typed in a terminal, which our driver never saw; the record did.
     const known = row({ sessionId: 's1', lastSpokeAt: '2026-08-16T12:00:00.000Z' });
     const stale = session({ id: 's1', lastSpokeAt: '2026-08-16T09:00:00.000Z' });
-    expect(withLive([known], [stale], PROJECT)[0]!.lastSpokeAt).toBe('2026-08-16T12:00:00.000Z');
+    expect(withLive([known], [stale])[0]!.lastSpokeAt).toBe('2026-08-16T12:00:00.000Z');
   });
 
   it('a chat nobody has spoken in keeps no clock of its own, so it orders by what happened', () => {
     const known = row({ sessionId: 's1', lastSpokeAt: null });
     const quiet = session({ id: 's1', lastSpokeAt: null, lastActiveAt: '2026-08-16T12:00:00.000Z' });
-    const [merged] = withLive([known], [quiet], PROJECT);
+    const [merged] = withLive([known], [quiet]);
     expect(merged!.lastSpokeAt, 'silence was written down as a time').toBeNull();
     expect(merged!.lastActiveAt).toBe('2026-08-16T12:00:00.000Z');
   });
@@ -279,7 +283,7 @@ describe('what the stream may move a row for', () => {
       held: { id: 'x1', holder: 'terminal', doing: 'working', since: 1_000 },
     });
 
-    const [drawn] = withLive([working], [], PROJECT, null, null, true);
+    const [drawn] = withLive([working], [], null, null, true);
     expect(drawn!.held?.holder, 'the badge went with it: a terminal does not leave because a browser did').toBe('terminal');
     expect(drawn!.held?.doing, 'the row went on saying what a dead connection last saw').toBe('unknown');
     expect(drawn!.held?.since, 'the seconds went on counting from a fact nobody stands behind').toBeNull();
@@ -297,43 +301,9 @@ describe('what the stream may move a row for', () => {
       held: { id: 'x1', holder: 'terminal', doing: 'working', since: 1_000 },
     });
 
-    const [drawn] = withLive([working], [], PROJECT, null, null, false);
+    const [drawn] = withLive([working], [], null, null, false);
     expect(drawn!.held?.doing, 'a list rubbed its own marks out before anybody had spoken').toBe('working');
     expect(drawn!.held?.since).toBe(1_000);
   });
 
-});
-
-describe('a live chat is only added where it is working', () => {
-  // The home folder is a project, and so is a checkout inside it.
-  const HOME = { folders: ['/home/me'], others: ['/home/me', '/home/me/dev/beads-web'] };
-
-  it('a chat inside a project nested in this one is left to that project', () => {
-    const [nested] = [session({ projectPath: '/home/me', cwd: '/home/me/dev/beads-web/server' })];
-    expect(withLive([], [nested], PROJECT, null, null, false, HOME)).toEqual([]);
-    const [mine] = withLive([], [session({ projectPath: '/home/me', cwd: '/home/me/notes' })], PROJECT, null, null, false, HOME);
-    expect(mine!.sessionId).toBe('s2');
-  });
-
-  it('a chat begun above the project is never the project\'s', () => {
-    const place = { folders: ['/home/me/project'], others: ['/home/me', '/home/me/project'] };
-    expect(withLive([], [session({ cwd: '/home/me' })], PROJECT, null, null, false, place)).toEqual([]);
-    // A worktree git keeps beside the project is still the project's.
-    const beside = { ...place, folders: [...place.folders, '/home/me/worktrees/project/fix'] };
-    expect(withLive([], [session({ cwd: '/home/me/worktrees/project/fix/src' })], PROJECT, null, null, false, beside)).toHaveLength(1);
-  });
-
-  it('a chat the list already holds is kept whatever its folder', () => {
-    const merged = withLive([row()], [session({ id: 's1', cwd: '/elsewhere', state: 'thinking' })], PROJECT, null, null, false, HOME);
-    expect(merged).toHaveLength(1);
-  });
-
-  it('asks the nearest of the project\'s own folders', () => {
-    // A registered project inside the project's own worktree folder does not
-    // take the worktree's chats when the worktree is itself a checkout.
-    const place = { folders: ['/p', '/p/worktrees/a'], others: ['/p', '/p/worktrees'] };
-    expect(heldHere('/p/worktrees/a/src', place)).toBe(true);
-    expect(heldHere('/p/worktrees/b', place)).toBe(false);
-    expect(heldHere('/p-old', place)).toBe(false);
-  });
 });

@@ -4243,6 +4243,96 @@ mod tests {
         assert_eq!(listed_threads(Some(home), &codex_listing_stamp(Some(home))), None);
     }
 
+    /// The sidebar keeps no rule of its own for which chats are listed: when
+    /// the live stream names a chat the list does not hold, it asks this
+    /// answer again (chat-sidebar.tsx, `unlisted`). So this answer has to hold
+    /// every chat a person began here, in the states the page used to drop:
+    /// one never spoken in, one whose profile switch left it asleep with no
+    /// conversation, and one in a worktree made after the page loaded
+    /// (bw-ljko.1).
+    #[tokio::test]
+    async fn the_local_list_holds_every_chat_a_person_began_here() {
+        let (directory, state) = fixture();
+        let project = directory.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&project)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap();
+            assert!(status.status.success(), "{status:?}");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "start"]);
+        let worktree = directory.path().join("elsewhere").join("fix-a-thing");
+        git(&["worktree", "add", "-q", worktree.to_str().unwrap(), "-b", "fix-a-thing"]);
+        let project_path = project.to_str().unwrap().to_string();
+
+        let chat = |id: &str, cwd: &std::path::Path| {
+            let mut session = saved_session();
+            session.id = id.into();
+            session.brand = "claude".into();
+            session.external_id = None;
+            session.project_path = project_path.clone();
+            session.cwd = cwd.to_str().unwrap().into();
+            session.title = None;
+            session.last_spoke_at = None;
+            session.begun_by = Some("person".into());
+            session
+        };
+        // Begun a moment ago and not yet spoken in.
+        state.database().create_session(chat("new", &project)).await.unwrap();
+        // Its profile switched: asleep, and the old conversation let go.
+        let mut switched = chat("switched", &project);
+        switched.external_id = Some("old-conversation".into());
+        state.database().create_session(switched).await.unwrap();
+        state
+            .database()
+            .update_session(
+                "switched".into(),
+                crate::workbench::store::SessionPatch {
+                    external_id: Some(None),
+                    state: Some("dormant".into()),
+                    profile: Some(Some("work".into())),
+                    ..crate::workbench::store::SessionPatch::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        // Working in a worktree git keeps outside the project's folder.
+        state.database().create_session(chat("in-a-worktree", &worktree)).await.unwrap();
+        // And one an agent began, which the list leaves out by the same rule.
+        let mut agents = chat("agents", &project);
+        agents.begun_by = Some("agent".into());
+        state.database().create_session(agents).await.unwrap();
+
+        let uri = format!(
+            "/restore?project=project-1&path={}&local=1",
+            project_path.replace('/', "%2F")
+        );
+        let response = router(state)
+            .oneshot(axum::http::Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let rows: Vec<Value> = serde_json::from_slice(&bytes).unwrap();
+        let mut ids: Vec<&str> = rows.iter().filter_map(|row| row["sessionId"].as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["in-a-worktree", "new", "switched"]);
+        let switched = rows.iter().find(|row| row["sessionId"] == "switched").unwrap();
+        assert!(switched["externalId"].is_null(), "the row kept the conversation the switch let go");
+        let tree = rows.iter().find(|row| row["sessionId"] == "in-a-worktree").unwrap();
+        assert_eq!(tree["branch"], "fix-a-thing");
+    }
+
     #[tokio::test]
     async fn native_workbench_local_restore_orders_and_groups_by_human_clock() {
         let (_directory, state) = fixture();

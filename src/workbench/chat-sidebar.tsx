@@ -43,7 +43,7 @@ import { Panel } from '@/components/ui/panel';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Spinner } from '@/components/ui/spinner';
 import { toast } from '@/hooks/use-toast';
-import { git, projects as projectList, request } from '@/lib/api';
+import { git, request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, HOLDER_WORD, type HeldChat } from '@/workbench/chat-state';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
@@ -56,7 +56,7 @@ import {
   useRunningElsewhere,
   type LiveSession,
 } from '@/workbench/live';
-import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type Brand, type RestoreRow } from '@/workbench/protocol';
+import { byWhatIsWorking, laterOf, laterSpoke, whenHeSpoke, type Brand, type RestoreRow } from '@/workbench/protocol';
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
@@ -216,49 +216,51 @@ export function holdStill(fresh: RestoreRow[], settled: readonly SettledRow[], n
   return held;
 }
 
-/** Where this project's chats are held, for a chat the list has not placed. */
-export interface Place {
-  /** The project's folder and every checkout git keeps of it. */
-  folders: readonly string[];
-  /** The registered projects' roots, each of which keeps its own chats. */
-  others: readonly string[];
-}
-
-const within = (dir: string, folder: string) => {
-  const root = folder.replace(/\/+$/, '');
-  return dir === root || dir.startsWith(`${root}/`);
-};
-
 /**
- * Whether a chat working in `cwd` is this project's: inside one of its
- * folders, and not inside another registered project on the way down. The
- * server's own rule (provider.rs, `held_in`), less the `.atelier` it can see
- * on disk and this page cannot (bw-6twt.1).
- */
-export function heldHere(cwd: string, place: Place): boolean {
-  const nearest = place.folders
-    .filter((folder) => within(cwd, folder))
-    .sort((a, b) => b.length - a.length)[0];
-  if (nearest === undefined) return false;
-  const root = nearest.replace(/\/+$/, '');
-  return !place.others.some((other) => {
-    const nested = other.replace(/\/+$/, '');
-    return nested.length > root.length && within(nested, root) && within(cwd, nested);
-  });
-}
-
-/**
- * The list as it stands, plus whatever has happened since it was asked for.
+ * The chats the live stream knows in this project that the list does not hold
+ * as they now are: one begun since the list was asked for, or one whose
+ * conversation has been replaced under it (a profile switch). Each is named by
+ * what it is — id, brand and conversation — so the same change is asked about
+ * once.
  *
- * The list is fetched once when the tab opens; a chat started after that —
- * here, from a card, or in another window — is announced on the app's one live
- * stream, and this is where it joins the list. Without it the owner starts a
- * chat and does not see it.
+ * The list never adds or drops a chat on the stream's word. Which chats belong
+ * in it is the server's rule alone (store.rs, `list_restore_sessions`): who
+ * began it, and whether its folder is this project's. A second copy of that rule
+ * here, in a browser that cannot see the disk, is how a new chat stayed off the
+ * list until it was spoken in, and how a chat vanished when its profile changed
+ * (bw-ljko.1). What this returns is only a reason to ask the server again.
+ */
+export function unlisted(rows: readonly RestoreRow[], live: readonly LiveSession[], projectId: string): string[] {
+  const what = (id: string, brand: string, externalId: string | null) => `${id}:${brand}:${externalId ?? ''}`;
+  const held = new Set(rows.filter((r) => r.sessionId).map((r) => what(r.sessionId!, r.brand, r.externalId)));
+  return live
+    .filter((session) => session.projectId === projectId)
+    .map((session) => what(session.id, session.brand, session.externalId))
+    .filter((key) => !held.has(key));
+}
+
+/**
+ * A database-only answer laid over the list already drawn. It is the server's
+ * answer for every chat the database holds, so its rows replace the drawn ones
+ * and join where they are new; a chat only provider discovery finds is not in
+ * it, and is kept rather than dropped (bw-0nie).
+ */
+export function withLocal(drawn: readonly RestoreRow[], local: readonly RestoreRow[]): RestoreRow[] {
+  const fresh = new Map(local.filter((r) => r.sessionId).map((r) => [r.sessionId!, r]));
+  const kept = drawn.filter((r) => !r.sessionId || !fresh.has(r.sessionId));
+  return [...local, ...kept];
+}
+
+/**
+ * The list as the server gave it, with what the live stream has said since
+ * about the chats in it: what each is doing, when it last spoke, who holds it.
+ *
+ * Only the chats already in the list are touched. A chat the stream knows and
+ * the list does not is the server's to place (`unlisted`).
  */
 export function withLive(
   rows: RestoreRow[],
   live: LiveSession[],
-  projectId: string,
   /**
    * The conversations a live process is holding, as the stream last said, or
    * `null` while it has not said anything. Null leaves each row's own answer
@@ -281,85 +283,39 @@ export function withLive(
    * (live.ts, `useHeldFactsAreOld`, bw-96is.22).
    */
   heldFactsAreOld = false,
-  /**
-   * Where the project's chats are held. A chat the list has not placed is
-   * only added when it is working there: one filed under this project but
-   * begun above it, or inside a project nested in it, is that other project's
-   * (bw-6twt.1). `null` adds every one, as before.
-   */
-  place: Place | null = null,
 ): RestoreRow[] {
-  const byId = new Map(rows.filter((r) => r.sessionId).map((r) => [r.sessionId!, r]));
-  const merged = [...rows];
-
-  for (const session of live) {
-    if (session.projectId !== projectId) continue;
-    const known = byId.get(session.id);
-    // A chat that is awake is always worth seeing, whatever it is called. One
-    // that is asleep and not in the list is one the list deliberately left out
-    // (docs/agent-workbench.md §6.3.1).
-    const awake = session.state !== 'dormant';
-    if (!known && !awake) continue;
-    if (!known && place && session.cwd && !heldHere(session.cwd, place)) continue;
-    if (known) {
-      merged[merged.indexOf(known)] = {
-        ...known,
-        state: session.state,
-        model: session.model,
-        // The restore row has already asked the provider for its conversation
-        // name. Keep that over our live session's temporary generated label.
-        title: known.title ?? session.title,
-        // And keep the server's name for it, unless the stream has just
-        // brought a title for a chat that had none — in which case the
-        // stream's own name for it, by the same rule (server, `chat_name`).
-        name: known.title ? known.name : session.title ? (session.name ?? session.title) : known.name,
-        // Never backwards: the stream carries what our own driver has seen, and
-        // the row may already hold a later time from the tool's index — a chat
-        // being worked on in a terminal moves that index and not our driver.
-        lastActiveAt: laterOf(known.lastActiveAt, session.lastActiveAt),
-        // Never backwards here either, and for a second reason: the row may
-        // carry a time read out of the chat's own record, which is the only
-        // place a message he typed in a terminal is written down.
-        lastSpokeAt: laterSpoke(known.lastSpokeAt, session.lastSpokeAt),
-        beads: session.beads.length ? session.beads : known.beads,
-        // The mark's own two halves, so the row says what the bar above it says
-        // (protocol.ts, RestoreRow.activity; bw-96is.31).
-        activity: session.activity,
-        activityDetail: session.activityDetail ?? null,
-        activityCall: session.activityCall ?? null,
-        busySince: session.busySince,
-      };
-      continue;
-    }
-    merged.push({
-      sessionId: session.id,
-      externalId: null,
-      brand: session.brand,
-      model: session.model,
-      title: session.title,
-      // The server's own name for this chat (server, `chat_name`), or a
-      // stand-in from an older server until the restore list arrives. A chat
-      // this new usually has no title at all, and it is the one the reader is
-      // looking straight at.
-      name: session.name ?? session.title ?? folderOf(session.cwd) ?? 'Chat',
-      lastActiveAt: session.lastActiveAt,
-      lastSpokeAt: session.lastSpokeAt,
+  const byId = new Map(live.map((session) => [session.id, session]));
+  const merged = rows.map((known) => {
+    const session = known.sessionId ? byId.get(known.sessionId) : undefined;
+    if (!session) return known;
+    return {
+      ...known,
       state: session.state,
-      origin: 'app',
-      projectId: session.projectId,
-      // Where it is really working, which for a chat started in a worktree is
-      // not the project (bw-ov7a.4). The branch waits for the restore row: the
-      // stream carries no git, and a name is better than nothing meanwhile.
-      cwdHint: session.cwd,
-      folder: folderOf(session.cwd),
-      branch: null,
-      beads: session.beads,
+      model: session.model,
+      // The restore row has already asked the provider for its conversation
+      // name. Keep that over our live session's temporary generated label.
+      title: known.title ?? session.title,
+      // And keep the server's name for it, unless the stream has just
+      // brought a title for a chat that had none — in which case the
+      // stream's own name for it, by the same rule (server, `chat_name`).
+      name: known.title ? known.name : session.title ? (session.name ?? session.title) : known.name,
+      // Never backwards: the stream carries what our own driver has seen, and
+      // the row may already hold a later time from the tool's index — a chat
+      // being worked on in a terminal moves that index and not our driver.
+      lastActiveAt: laterOf(known.lastActiveAt, session.lastActiveAt),
+      // Never backwards here either, and for a second reason: the row may
+      // carry a time read out of the chat's own record, which is the only
+      // place a message he typed in a terminal is written down.
+      lastSpokeAt: laterSpoke(known.lastSpokeAt, session.lastSpokeAt),
+      beads: session.beads.length ? session.beads : known.beads,
+      // The mark's own two halves, so the row says what the bar above it says
+      // (protocol.ts, RestoreRow.activity; bw-96is.31).
       activity: session.activity,
       activityDetail: session.activityDetail ?? null,
       activityCall: session.activityCall ?? null,
       busySince: session.busySince,
-    });
-  }
+    };
+  });
 
   // The mark last, and over everything: a chat that starts or stops being worked
   // in changes nothing else about its row, and the reader is not reloading.
@@ -782,30 +738,9 @@ export const ChatSidebar = memo(function ChatSidebar({
   // what he is pointing at is what decides where the rows go (holdStill).
   const settled = useRef<SettledRow[]>([]);
   const [checkouts, setCheckouts] = useState<readonly string[]>([]);
-  // Every registered project's root, whose chats stay its own even when it
-  // sits inside this one: the home folder's list does not hold beads-web's.
-  const [others, setOthers] = useState<readonly string[]>([]);
-  useEffect(() => {
-    let current = true;
-    Promise.resolve()
-      .then(() => projectList.listAll())
-      .then((projects) => {
-        if (!current || !Array.isArray(projects)) return;
-        setOthers(
-          projects.flatMap((project) =>
-            [project.path, project.localPath].filter((path): path is string => typeof path === 'string' && path !== ''),
-          ),
-        );
-      })
-      .catch(() => undefined);
-    return () => {
-      current = false;
-    };
-  }, []);
-  const place = useMemo<Place>(() => ({ folders: [projectPath, ...checkouts], others }), [projectPath, checkouts, others]);
   const rows = useMemo(
-    () => holdStill(withLive(fetched, live, projectId, running, holds, heldFactsAreOld, place), settled.current),
-    [fetched, live, projectId, running, holds, heldFactsAreOld, place],
+    () => holdStill(withLive(fetched, live, running, holds, heldFactsAreOld), settled.current),
+    [fetched, live, running, holds, heldFactsAreOld],
   );
   useEffect(() => {
     settled.current = asSettled(rows);
@@ -819,38 +754,78 @@ export const ChatSidebar = memo(function ChatSidebar({
   const loadGeneration = useRef(0);
   // Which list the last full answer was for. The local answer is only a
   // stand-in until that answer exists; once it does, a later local answer is
-  // a smaller list and would drop every chat only discovery finds (bw-0nie).
+  // laid over it rather than replacing it (withLocal, bw-0nie).
   const fullFor = useRef<string | null>(null);
+  // Which list has had any answer, and which live chats that answer already
+  // spoke for: a chat the server knew of and left out is not asked about again
+  // (unlisted, bw-ljko.1).
+  const answeredFor = useRef<string | null>(null);
+  const asked = useRef(new Set<string>());
+  const liveNow = useRef(live);
+  liveNow.current = live;
+  const listKey = useMemo(() => {
+    const q = new URLSearchParams({ project: projectId, path: projectPath });
+    if (everything) q.set('all', '1');
+    return q.toString();
+  }, [projectId, projectPath, everything]);
+
+  /** The database's answer alone, by the server's one rule for the list. */
+  const askLocal = useCallback(
+    (generation: number) => {
+      const local = new URLSearchParams(listKey);
+      local.set('local', '1');
+      const spokenFor = unlisted([], liveNow.current, projectId);
+      return request(`/api/workbench/restore?${local}`)
+        .then(async (res) => {
+          if (!res.ok) return;
+          const rows = (await res.json()) as RestoreRow[];
+          if (generation !== loadGeneration.current) return;
+          for (const key of spokenFor) asked.current.add(key);
+          answeredFor.current = listKey;
+          setFetched((drawn) => (fullFor.current === listKey ? withLocal(drawn, rows) : rows));
+        })
+        .catch(() => undefined);
+    },
+    [listKey, projectId],
+  );
 
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
-    const q = new URLSearchParams({ project: projectId, path: projectPath });
-    if (everything) q.set('all', '1');
-    const key = q.toString();
-    const local = new URLSearchParams(q);
-    local.set('local', '1');
+    asked.current = new Set();
+    const spokenFor = unlisted([], liveNow.current, projectId);
     // Rows already in the durable store do not wait behind provider process
     // startup or a scan of every external record. Provider discovery still
     // runs on the same load and replaces this local picture when it completes.
-    void request(`/api/workbench/restore?${local}`)
-      .then(async (res) => {
-        if (!res.ok) return;
-        const rows = (await res.json()) as RestoreRow[];
-        if (fullFor.current !== key && generation === loadGeneration.current) setFetched(rows);
-      })
-      .catch(() => undefined);
+    void askLocal(generation);
     try {
-      const res = await request(`/api/workbench/restore?${q}`);
+      const res = await request(`/api/workbench/restore?${listKey}`);
       if (res.ok && generation === loadGeneration.current) {
         const rows = (await res.json()) as RestoreRow[];
         if (generation !== loadGeneration.current) return;
-        fullFor.current = key;
+        for (const key of spokenFor) asked.current.add(key);
+        answeredFor.current = listKey;
+        fullFor.current = listKey;
         setFetched(rows);
       }
     } catch {
       // The workbench may not be running; the board half is unaffected.
     }
-  }, [projectId, projectPath, everything]);
+  }, [listKey, projectId, askLocal]);
+
+  /**
+   * A chat the stream knows in this project and the list does not hold as it
+   * now is — begun a moment ago, here or anywhere, or switched to another
+   * provider — is the server's to place, so the database's answer is asked for
+   * again. Asked once per change: a chat the server leaves out stays out, and
+   * the list is not asked for it again.
+   */
+  useEffect(() => {
+    if (answeredFor.current !== listKey) return;
+    const waiting = unlisted(fetched, live, projectId).filter((key) => !asked.current.has(key));
+    if (waiting.length === 0) return;
+    for (const key of waiting) asked.current.add(key);
+    void askLocal(loadGeneration.current);
+  }, [fetched, live, projectId, listKey, askLocal]);
 
   useEffect(() => {
     void load();

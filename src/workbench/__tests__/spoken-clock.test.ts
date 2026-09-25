@@ -135,3 +135,20 @@ describe('what moves the clock the chat list is ordered by', () => {
     expect(result.current[0]!.lastSpokeAt, 'silence was written down as a time').toBeNull();
   });
 });
+
+describe('a chat started again', () => {
+  it('takes what it is from the server\'s row, and keeps what it is doing', async () => {
+    // A profile switch keeps the chat and puts another provider's
+    // conversation under it; the list asks again when the brand moves
+    // (chat-sidebar.tsx, `unlisted`; bw-ljko.1).
+    const { useLiveSessions } = await freshModule();
+    const { result } = renderHook(() => useLiveSessions());
+    act(() => opened[0].says({ kind: 'snapshot', sessions: [summary()] } as WatchFrame));
+
+    act(() => opened[0].says({ kind: 'opened', session: summary({ brand: 'codex', externalId: null, activity: '' }) } as WatchFrame));
+    expect(result.current).toHaveLength(1);
+    expect(result.current[0]!.brand).toBe('codex');
+    expect(result.current[0]!.externalId).toBeNull();
+    expect(result.current[0]!.activity, 'the row\'s own activity was rubbed out').toBe('Answering');
+  });
+});

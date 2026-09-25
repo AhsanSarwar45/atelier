@@ -595,30 +595,24 @@ describe('the row and the bar say the same thing', () => {
 
   it('a chat already on the list: the row draws the driver\'s word and its clock, as the bar does', () => {
     const session = live();
-    const [row] = withLive([listed()], [session], PROJECT);
+    const [row] = withLive([listed()], [session]);
     expect(fromRow(row!)).toEqual(liveState(session));
     expect(fromRow(row!).word).toBe('Pulling the branch apart');
     expect(fromRow(row!).since).toBe(BEGAN);
     expect(mark(fromRow(row!))).toEqual({ word: 'Pulling the branch apart', moving: true });
   });
 
-  it('a chat that started after the list was fetched: the same, on the row it joins as', () => {
-    const session = live({ id: 's2' });
-    const [row] = withLive([], [session], PROJECT);
-    expect(fromRow(row!)).toEqual(liveState(session));
-  });
-
   for (const state of ['starting', 'thinking', 'streaming', 'running_tool', 'waiting_permission'] as const) {
     it(`${state}: row and bar agree on the word, the clock and whether the mark moves`, () => {
       const session = live({ state, activity: '' });
-      const [row] = withLive([listed()], [session], PROJECT);
+      const [row] = withLive([listed()], [session]);
       expect(fromRow(row!)).toEqual(liveState(session));
     });
   }
 
   it('the driver falls quiet: the row stops counting the moment the bar does', () => {
     const session = live({ state: 'idle', activity: '', busySince: null });
-    const [row] = withLive([listed({ state: 'running_tool' })], [session], PROJECT);
+    const [row] = withLive([listed({ state: 'running_tool' })], [session]);
     expect(fromRow(row!)).toEqual(liveState(session));
     expect(fromRow(row!).since).toBeNull();
     expect(mark(fromRow(row!))).toEqual({ word: 'Ready', moving: false });

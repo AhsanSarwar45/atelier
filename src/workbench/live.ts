@@ -484,10 +484,15 @@ function absorb(frame: WatchFrame): void {
     return;
   }
   if (frame.kind === 'opened') {
-    if (!sessions.some((s) => s.id === frame.session.id)) {
-      sessions = [...sessions, fromSummary(frame.session)];
-      announce();
-    }
+    // The server's row as it stands, read when the chat was started. A chat
+    // already known has been started again, perhaps under another provider — a
+    // profile switch keeps the chat and replaces the conversation under it
+    // (registry.rs, `switch_profile`) — so what it is and where it works are
+    // taken from here; what it is doing still comes from its own events.
+    const { id, brand, externalId, projectId, projectPath, cwd } = fromSummary(frame.session);
+    if (sessions.some((s) => s.id === id)) patch(id, { brand, externalId, projectId, projectPath, cwd });
+    else sessions = [...sessions, fromSummary(frame.session)];
+    announce();
     return;
   }
   const e = frame.event;
