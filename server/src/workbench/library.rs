@@ -635,6 +635,31 @@ mod tests {
         assert!(validate(&library, false).is_err());
     }
     #[test]
+    fn saved_memories_reach_the_pinned_guidance_at_their_own_scope() {
+        use super::super::agent_memory::{save, Memory, Scope};
+        let (data, root) = fixture();
+        let other = tempfile::tempdir().unwrap();
+        let before = resolve(data.path(), Some(root.path())).unwrap();
+        assert!(!before.items.iter().any(|row| row.item.id.starts_with("atelier-memory-")));
+        let fact = |id: &str, body: &str| Memory { id: id.into(), description: format!("About {id}"), kind: "user".into(), body: body.into() };
+        save(data.path(), Scope::Global, None, None, None, &fact("everywhere", "Global fact 日本語")).unwrap();
+        save(data.path(), Scope::Project, Some(root.path()), None, None, &fact("here", "Project fact")).unwrap();
+        let snap = resolve(data.path(), Some(root.path())).unwrap();
+        assert_ne!(snap.revision, before.revision, "a memory change is a new pinned revision");
+        let text = snap.guidance();
+        assert!(text.contains("global instructions — Global memory:"));
+        assert!(text.contains("[everywhere] (user) About everywhere\nGlobal fact 日本語"));
+        assert!(text.contains("project instructions — Project memory:"));
+        assert!(text.contains("Project fact"));
+        let elsewhere = resolve(data.path(), Some(other.path())).unwrap().guidance();
+        assert!(elsewhere.contains("Global fact") && !elsewhere.contains("Project fact"));
+        let global_only = resolve(data.path(), None).unwrap().guidance();
+        assert!(global_only.contains("Global fact") && !global_only.contains("Project fact"));
+        let mut library = Library::default();
+        library.overrides.insert("atelier-memory-global".into(), Override { disabled: true, ..Default::default() });
+        assert!(validate(&library, true).is_err(), "memory cannot be switched off by a project override");
+    }
+    #[test]
     fn size_limit_measures_the_format_that_is_written_and_read() {
         let mut library = Library { items: vec![item("large", Kind::Skill, "Read me")], ..Default::default() };
         let spare = MAX_LIBRARY - serde_json::to_vec(&library).unwrap().len();
@@ -1163,6 +1188,26 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
             description: String::new(), when: Condition::Always, requires: vec![],
             automatic: true, parameters: BTreeMap::new(), resources: BTreeMap::new(), bundle: String::new(),
         }, "global"));
+    }
+    // Atelier memory rides in the snapshot like any instruction, so a chat's
+    // memories are pinned with its connection and reach every provider.
+    let project_root = root.map(|root| super::agent_memory::project_root(data, root).unwrap_or_else(|| root.to_path_buf()));
+    for (scope, source, name) in [
+        (super::agent_memory::Scope::Global, "global", "Global memory"),
+        (super::agent_memory::Scope::Project, "project", "Project memory"),
+    ] {
+        if scope == super::agent_memory::Scope::Project && project_root.is_none() {
+            continue;
+        }
+        let stored = super::agent_memory::list_scope(data, scope, project_root.as_deref()).map(|(stored, _)| stored).unwrap_or_default();
+        if let Some(content) = super::agent_memory::render(scope, &stored) {
+            let id = format!("atelier-memory-{}", scope.name());
+            items.insert(id.clone(), (Item {
+                id, name: name.into(), kind: Kind::Instruction, content,
+                description: String::new(), when: Condition::Always, requires: vec![],
+                automatic: true, parameters: BTreeMap::new(), resources: BTreeMap::new(), bundle: String::new(),
+            }, source));
+        }
     }
     for item in global.items {
         items.insert(item.id.clone(), (item, "global"));

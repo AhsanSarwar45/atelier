@@ -130,6 +130,35 @@ It confirms the exact account/scope path and deletes only that file (a symlink i
 unlinked, not followed). Deleting SKILL.md does not delete its sibling scripts or
 assets. The action is not a migration tool and does not automatically archive files.
 
+## Atelier memory
+
+Provider memory is kept per account and per provider, so a fact one chat saves
+is invisible to the next chat on another provider or account. Atelier memory is
+one store every chat reads, at two scopes:
+
+- Global: `<data>/memory/<id>.md`. Every chat receives it.
+- Project: `<data>/projects/<project id>/memory/<id>.md`. The project ID is the
+  same Git-common-directory digest that personal project settings use, so every
+  worktree of a project shares its memories. It is never written to the
+  repository and does not move with project settings.
+
+Each memory is one Markdown file. It starts with a `---` header that holds a
+one-line `description` and a `type` (`user`, `feedback`, `project` or
+`reference`), followed by the body. The resolver adds non-empty scopes as the
+built-in "Global memory" and "Project memory" instructions. They are part of the
+pinned snapshot, so a memory change is a new revision that reaches new and
+reconnected chats. A project override cannot disable them. When bodies pass
+48 KiB, the rest are listed by description, and agents read them with
+`atelier tool memory show`.
+
+Agents edit memories with `atelier tool memory list|show|add|edit|remove|locations`.
+The CLI writes the files directly, so it works while the app is stopped. The
+built-in Atelier skill tells agents to use it instead of provider-native memory.
+People edit memories in Agent guidance → Memories. That editor goes through
+`GET|PUT /api/settings/library/memories` and
+`POST /api/settings/library/memories/delete`. Each memory carries a file digest,
+and a save or delete made against an older copy is refused.
+
 ## Persistence and running chats
 
 Global content is `library.json` in Atelier's data directory. A project's file

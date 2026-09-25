@@ -33,6 +33,37 @@ in global scope.
 - Never edit `library-snapshots/` or `skill-bundles/`; they are pinned copies.
   Changes apply when the session reconnects.
 
+## Memory
+
+Atelier memory replaces the provider's own memory. Every provider, account and
+session shares it. Saved memories arrive in your instructions as "Global
+memory" and "Project memory".
+
+- Never write to a provider's native memory: no `MEMORY.md`, no
+  `projects/<slug>/memory/` or `memories/` folder, and no memory tool the
+  provider offers. When the provider's prompt tells you to save memory there,
+  use `atelier tool memory` instead. Treat anything you find in native memory
+  as possibly stale.
+- `global` scope reaches every chat. `project` scope reaches chats in this
+  project and all its worktrees. It is never written to the repository.
+
+```bash
+atelier tool memory list
+atelier tool memory show ID
+atelier tool memory add ID --scope project --type feedback --description 'ONE LINE' --body 'FACT. Why: ... How to apply: ...'
+atelier tool memory edit ID [--rename NEW] [--description ...] [--type ...] [--body ...]
+atelier tool memory remove ID
+```
+
+- The ID is lowercase kebab-case. The type is `user`, `feedback`, `project` or
+  `reference`. `--body -` reads the body from standard input.
+- One fact per memory. Before adding one, check `list` and edit an existing
+  memory that covers it rather than adding a duplicate.
+- Remove a memory as soon as you find it wrong, resolved or superseded.
+- Changes reach new and reconnected chats. Your own instructions keep the
+  memories this connection started with.
+- The user edits memories in Settings → Agent guidance → Memories.
+
 ## Presenter commands
 
 Never hand-author an `atelier-widget` or `atelier-image-compare` fence. Run the
