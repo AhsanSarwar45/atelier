@@ -1,5 +1,12 @@
 /**
- * Typing `@` in the composer offers the files of the checkout (bw-gr8y.7).
+ * Typing `@` in the composer offers the files of the checkout (bw-gr8y.7), and
+ * beside them Atelier's own things: cards, chats and skills (bw-mi3s.4).
+ *
+ * One question per keystroke, `/api/workbench/mention`, answers all four kinds
+ * at once from what the server already holds, grouped by kind with the best
+ * group first. Typing `@bead:`, `@chat:` or `@skill:` narrows the menu to that
+ * kind. Picking a card, chat or skill writes `@kind:id`, which the composer
+ * draws at once as the badge the sent message will draw.
  *
  * This is the seam `composer-editor.tsx` left open: a CodeMirror completion
  * source, handed in as `extra`, that turns an `@` into the menu every coding
@@ -44,8 +51,12 @@ import { EditorView, ViewPlugin, keymap, tooltips } from '@codemirror/view';
 
 import { iconForFile, iconForFolder } from '@/components/file-icon';
 import { ICON_FALLBACK, iconUrl } from '@/components/file-icons';
-import { fs, type FsFoundPath } from '@/lib/api';
-import { canBeginReference, formatReference } from '@/workbench/references';
+import { referenceBadgeElement, type Reference } from '@/components/reference-badge';
+import { mention, type FsFoundPath, type MentionOffer, type MentionPlace } from '@/lib/api';
+import type { BeadStatus } from '@/types';
+import type { Brand } from '@/workbench/protocol';
+import { learnChat, learnSkill, setReferenceAsker } from '@/workbench/reference-names';
+import { canBeginReference, formatAtelierReference, formatReference, type AtelierKind } from '@/workbench/references';
 
 /** How many the menu ever shows. Past this nobody is reading, he is typing. */
 const MOST_OFFERED = 20;
@@ -57,7 +68,9 @@ const MOST_OFFERED = 20;
  * a menu behind the cursor. A quote ends it too: `@"a name with spaces"` is a
  * shape the grammar allows but not one anybody types a search into.
  */
-const TYPING = /@[^\s@"'`]*$/;
+// The backtick is written as `\x60` so no scan of this file for quoted words
+// mistakes it for the start of a template string.
+const TYPING = /@[^\s@"'\x60]*$/;
 
 /** The last part of a path, and the folder it sits in. */
 function split(path: string): { name: string; folder: string } {
@@ -90,8 +103,16 @@ function picture(found: FsFoundPath): Node {
   return drawn;
 }
 
+/** The heading over each kind, and where it sits: the server's order. */
+const HEADINGS: Record<MentionOffer['kind'], string> = {
+  file: 'Files',
+  bead: 'Cards',
+  chat: 'Chats',
+  skill: 'Skills',
+};
+
 /** One found path as a line of the menu. */
-function offer(found: FsFoundPath): Completion {
+function offer(found: FsFoundPath, rank = 0): Completion {
   const { name, folder } = split(found.path);
   const folderish = found.kind === 'dir';
   return {
@@ -102,6 +123,7 @@ function offer(found: FsFoundPath): Completion {
     displayLabel: folderish ? `${name}/` : name,
     detail: folder,
     type: folderish ? 'folder' : 'file',
+    section: { name: HEADINGS.file, rank },
     apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
       const insert = formatReference({
         path: found.path,
@@ -120,26 +142,90 @@ function offer(found: FsFoundPath): Completion {
   };
 }
 
+/** What the badge for an offered card, chat or skill draws. */
+function referenceOf(found: MentionOffer): Reference {
+  const kind = found.kind as AtelierKind;
+  if (kind === 'bead') return { kind, id: found.id, status: found.status as BeadStatus | undefined };
+  if (kind === 'chat') {
+    return { kind, id: found.id, name: found.label, brand: found.brand as Brand | undefined, projectId: found.projectId ?? null };
+  }
+  return { kind, id: found.id, name: found.label, description: found.detail };
+}
+
+/** Remember the names the menu has seen, so the badge a pick writes has one. */
+function learn(found: MentionOffer): void {
+  if (found.kind === 'chat' && found.brand) {
+    learnChat(found.id, { name: found.label, brand: found.brand as Brand, projectId: found.projectId ?? null });
+  } else if (found.kind === 'skill') {
+    learnSkill(found.id, { name: found.label, description: found.detail || undefined });
+  }
+}
+
+/**
+ * A card, a chat or a skill as a line of the menu: its badge — the very badge
+ * picking it writes — and, for a card, its title after it.
+ */
+function atelierOffer(found: MentionOffer, rank: number): Completion {
+  const kind = found.kind as AtelierKind;
+  const insert = formatAtelierReference(kind, found.id);
+  return {
+    label: insert,
+    // A card's badge says only its id, so its title is the line's words. A
+    // chat's and a skill's badge already say their name.
+    displayLabel: kind === 'bead' ? found.label : ' ',
+    detail: kind === 'skill' ? found.detail : '',
+    type: kind,
+    section: { name: HEADINGS[kind], rank },
+    apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+      // A space after it, so the badge is finished and drawn the moment it is
+      // picked rather than left as words still being typed.
+      const written = insert + ' ';
+      view.dispatch({ changes: { from, to, insert: written }, selection: { anchor: from + written.length } });
+    },
+  };
+}
+
+/** Everything the server offered, as lines of the menu in its order. */
+function lines(found: readonly MentionOffer[]): Completion[] {
+  const ranks = new Map<string, number>();
+  return found.map((one) => {
+    if (!ranks.has(one.kind)) ranks.set(one.kind, ranks.size);
+    const rank = ranks.get(one.kind)!;
+    learn(one);
+    return one.kind === 'file'
+      ? offer({ path: one.id, kind: one.folder ? 'dir' : 'file' }, rank)
+      : atelierOffer(one, rank);
+  });
+}
+
+/** The badge for a line of the menu, kept on the line itself for drawing. */
+const drawnBadges = new WeakMap<Completion, Reference>();
+
 /**
  * What the menu offers for what has been typed after the `@`.
  *
  * Answers nothing at all unless the cursor really is inside a reference — an
  * `@` that begins one, by the same rule `references.ts` reads text with, so an
  * email address is left alone.
+ *
+ * Each keystroke's question is cancelled as soon as the next keystroke makes it
+ * stale, so a slow answer to `@st` never lands on top of the answer to `@sta`.
  */
-function offering(rootOf: () => string): CompletionSource {
+function offering(placeOf: () => MentionPlace): CompletionSource {
   return async (context: CompletionContext): Promise<CompletionResult | null> => {
     const token = context.matchBefore(TYPING);
     if (!token) return null;
     const before = token.from === 0 ? '' : context.state.sliceDoc(token.from - 1, token.from);
     if (!canBeginReference(before)) return null;
 
-    const root = rootOf();
-    if (!root) return null;
+    const place = placeOf();
+    if (!place.cwd) return null;
 
+    const stale = new AbortController();
+    context.addEventListener('abort', () => stale.abort(), { onDocChange: true });
     let found;
     try {
-      found = await fs.find(root, token.text.slice(1), MOST_OFFERED);
+      found = await mention.search(place, token.text.slice(1), MOST_OFFERED, stale.signal);
     } catch {
       // A checkout that has gone away, or a server that is restarting: the
       // right answer is no menu, not a red line under what he is writing.
@@ -147,12 +233,38 @@ function offering(rootOf: () => string): CompletionSource {
     }
     if (context.aborted) return null;
 
+    const options = lines(found.items);
+    found.items.forEach((one, at) => {
+      if (one.kind !== 'file') drawnBadges.set(options[at]!, referenceOf(one));
+    });
     return {
       from: token.from,
-      options: found.entries.map(offer),
+      options,
       // The server's ranking is the ranking. See the note at the top.
       filter: false,
     };
+  };
+}
+
+/**
+ * Ask the server, a batch at a time, about references a badge was drawn for
+ * before anybody here had seen what they name — a draft restored after a
+ * reload, a chat from another project.
+ */
+function askAboutNames(placeOf: () => MentionPlace): (kind: AtelierKind, id: string) => void {
+  let waiting: string[] = [];
+  return (kind, id) => {
+    waiting.push(kind + ':' + id);
+    if (waiting.length > 1) return;
+    queueMicrotask(() => {
+      const ids = waiting;
+      waiting = [];
+      const place = placeOf();
+      mention
+        .names(place, ids)
+        .then((named) => named.items.forEach(learn))
+        .catch(() => {});
+    });
   };
 }
 
@@ -182,6 +294,19 @@ const menuTheme = EditorView.theme({
     color: 'hsl(var(--accent-foreground))',
   },
   '.cm-fileIcon': { height: '16px', width: '16px', flexShrink: '0' },
+  '.cm-referenceBadge': { flexShrink: '1', minWidth: '0', margin: '0' },
+  // A chat's and a skill's badge is its name, so the line has no words of its own.
+  '.cm-completion-chat .cm-completionLabel, .cm-completion-skill .cm-completionLabel': { display: 'none' },
+  'completion-section': {
+    display: 'block',
+    padding: '0.375rem 0.5rem 0.125rem',
+    fontSize: '11px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    opacity: '0.6',
+    borderBottom: 'none',
+  },
   '.cm-completionLabel': { flexShrink: '0' },
   // The folder, after the name and behind it: enough to tell two files of the
   // same name apart, never enough to read before the name itself.
@@ -254,8 +379,8 @@ const followTheKeyboard = ViewPlugin.fromClass(
 /**
  * The `@` menu, ready to be handed to `ComposerEditor` as `extra`.
  *
- * `rootOf` is asked for the folder to search at every keystroke rather than
- * once — see the note at the top of this file.
+ * `placeOf` is asked where the chat is at every keystroke rather than once —
+ * see the note at the top of this file.
  *
  * The keymap is `Prec.highest` because Enter, Escape and the arrow keys mean
  * something else in the composer: Enter sends, Escape recalls. While a menu is
@@ -263,10 +388,12 @@ const followTheKeyboard = ViewPlugin.fromClass(
  * when it is shut, so the chat gets them back the moment it closes. For this to
  * hold, `composer-editor.tsx` places `extra` ahead of the chat's own keymap.
  */
-export function fileCompletions(rootOf: () => string): Extension {
+export function mentionCompletions(placeOf: () => MentionPlace): Extension {
+  setReferenceAsker(askAboutNames(placeOf));
   return [
     autocompletion({
-      override: [offering(rootOf)],
+      override: [offering(placeOf)],
+      optionClass: (completion: Completion) => 'cm-completion-' + (completion.type ?? 'file'),
       // Ours are drawn by `addToOptions` below; the built-in ones are a font of
       // little letters that say nothing a file icon does not say better.
       icons: false,
@@ -280,6 +407,13 @@ export function fileCompletions(rootOf: () => string): Extension {
         {
           position: 10,
           render: (completion: Completion) => {
+            const badge = drawnBadges.get(completion);
+            if (badge) {
+              const drawn = referenceBadgeElement(badge);
+              drawn.classList.add('cm-referenceBadge');
+              drawn.setAttribute('data-testid', 'mention-option-badge');
+              return drawn;
+            }
             const path = completion.label.slice(1);
             return picture({ path, kind: completion.type === 'folder' ? 'dir' : 'file' });
           },

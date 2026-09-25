@@ -1800,6 +1800,19 @@ fn best(paths: &[Candidate], wanted: &str, limit: usize) -> Vec<FoundPath> {
         .collect()
 }
 
+/// The same answer [`find`] gives, for the `@` menu's own search, which asks
+/// for files beside cards, chats and skills in one question (bw-mi3s.4).
+pub async fn found_paths(root: &str, wanted: &str, limit: usize) -> Result<Vec<FoundPath>, String> {
+    let root = PathBuf::from(root);
+    validate_path_security(&root)?;
+    if !root.is_dir() {
+        return Err("Path is not a directory".into());
+    }
+    let root = root.canonicalize().unwrap_or(root);
+    let listing = listing(&root).await.map_err(|e| format!("Failed to search directory: {e}"))?;
+    Ok(best(&listing.paths, wanted, limit.clamp(1, MOST_FOUND)))
+}
+
 /// GET /api/fs/find?root=/some/checkout&q=git-v&limit=20
 ///
 /// The files and folders of a checkout whose names answer what was typed after

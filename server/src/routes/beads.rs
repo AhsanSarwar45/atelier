@@ -993,6 +993,17 @@ pub async fn card_for_reference(project_path: &str, id: &str) -> Option<serde_js
     serde_json::from_str::<Vec<serde_json::Value>>(json).ok()?.into_iter().next()
 }
 
+/// The cards of a board for the `@` menu, from the same shared read the board
+/// screen uses (bw-mi3s.4). `None` when the board cannot be read; the menu then
+/// offers no cards rather than failing.
+pub async fn board_for_mention(
+    dolt_manager: &Arc<DoltManager>,
+    db: &Arc<Database>,
+    project_path: &str,
+) -> Option<Arc<Vec<Bead>>> {
+    shared_board(dolt_manager, db, project_path).await.ok().map(|(board, _)| board)
+}
+
 /// Everything read of every board is thrown away: a command we did not write
 /// has just run against one of them and we cannot tell which.
 pub fn forget_all_boards() {

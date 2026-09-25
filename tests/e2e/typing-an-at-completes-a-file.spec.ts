@@ -17,7 +17,7 @@ import { discardFixture, makeFixtureProject } from './fixture-board';
  * writing box rather than a path he has to read.
  *
  * The tree is real: a fixture project with real files on disk and a real
- * `.gitignore`, searched through the real `/api/fs/find`. Only the chat is a
+ * `.gitignore`, searched through the real `/api/workbench/mention`. Only the chat is a
  * fixture, because nothing here needs an agent to answer.
  */
 
@@ -101,7 +101,7 @@ test('typing @ offers the checkout’s files and picking one leaves a badge', as
      */
     const typeAndSettle = async (text: string, asking: string) => {
       const settled = page.waitForResponse(
-        (answer) => answer.url().includes(`/api/fs/find?`) && answer.url().includes(`q=${asking}&`),
+        (answer) => answer.url().includes(`/api/workbench/mention?`) && answer.url().includes(`q=${asking}&`),
       );
       await page.keyboard.type(text);
       await settled;
@@ -163,7 +163,7 @@ test('typing @ offers the checkout’s files and picking one leaves a badge', as
     // The menu picking itself up again after the folder goes in is the thing
     // being watched, so the wait is for the search the slash sets off.
     const narrowed = page.waitForResponse(
-      (answer) => answer.url().includes('/api/fs/find?') && answer.url().includes('q=docs%2F&'),
+      (answer) => answer.url().includes('/api/workbench/mention?') && answer.url().includes('q=docs%2F&'),
     );
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('composer')).toHaveValue(

@@ -47,7 +47,7 @@ import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { ChatRightRail, useGitDiff, useGitPanel, useLeftRail, useRightRail, type RailView } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
-import { fileCompletions } from '@/workbench/composer-files';
+import { mentionCompletions } from '@/workbench/composer-files';
 import {
   readUnsentLine,
   useTypedSomething,
@@ -108,6 +108,7 @@ import { useSteadyCallback } from '@/hooks/use-steady-callback';
 import { MemoryBadge } from '@/workbench/memory-badge';
 import { DEFAULT_PANEL_WIDTH, ResizeDivider, rememberedPanelWidth } from '@/workbench/resize-divider';
 import * as api from '@/lib/api';
+import type { MentionPlace } from '@/lib/api';
 import { WhereToWork, folderName, type Where } from '@/workbench/where-to-work';
 
 export { PictureViewer } from '@/workbench/picture-viewer';
@@ -1257,9 +1258,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // (bw-gr8y.7). The composer reads its `extra` once when it builds itself and
   // the facts that say where the chat is arrive after that, so the menu is
   // handed a way to ask rather than an answer.
-  const searchIn = useRef(where.cwd);
-  searchIn.current = where.cwd;
-  const completeFiles = useMemo(() => fileCompletions(() => searchIn.current), []);
+  //
+  // The same menu offers the project's cards, every chat and the library's
+  // skills beside the files (bw-mi3s.4), so it is told the project and the chat
+  // asking as well.
+  const searchIn = useRef<MentionPlace>({ cwd: where.cwd, project: projectPath, projectId, session: sessionId });
+  searchIn.current = { cwd: where.cwd, project: projectPath, projectId, session: sessionId };
+  const completeFiles = useMemo(() => mentionCompletions(() => searchIn.current), []);
 
   // Everything the conversation says, gone through once for the addresses in
   // it, so the answers are already back by the time the reader looks.

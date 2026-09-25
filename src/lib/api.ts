@@ -444,6 +444,55 @@ export const projects = {
     }),
 };
 
+/** One line of the composer's `@` menu (bw-mi3s.4). */
+export interface MentionOffer {
+  kind: 'file' | 'bead' | 'chat' | 'skill';
+  /** What goes after `@kind:` — or, for a file, after `@`. */
+  id: string;
+  /** A file's name, a card's title, a chat's or a skill's name. */
+  label: string;
+  /** Read after it, dimmed: a file's folder, a card's id, a skill's description. */
+  detail?: string;
+  folder?: boolean;
+  status?: string;
+  brand?: string;
+  projectId?: string;
+}
+
+/** Where the `@` is being typed, which decides what it offers. */
+export interface MentionPlace {
+  /** The folder the chat works in: its files and its skills. */
+  cwd: string;
+  /** The project's folder, whose board the cards come from. */
+  project: string | null;
+  projectId: string | null;
+  /** The chat asking, which is not offered to itself. */
+  session: string | null;
+}
+
+function mentionAddress(place: MentionPlace, more: Record<string, string>): string {
+  const query = new URLSearchParams();
+  query.set('cwd', place.cwd);
+  if (place.project) query.set('project', place.project);
+  if (place.projectId) query.set('projectId', place.projectId);
+  if (place.session) query.set('session', place.session);
+  for (const [key, value] of Object.entries(more)) query.set(key, value);
+  return `/api/workbench/mention?${query}`;
+}
+
+export const mention = {
+  /**
+   * Files, cards, chats and skills that answer what was typed after an `@`,
+   * grouped by kind with the best group first. The order is the server's.
+   */
+  search: (place: MentionPlace, q: string, limit = 20, signal?: AbortSignal) =>
+    fetchApi<{ items: MentionOffer[] }>(mentionAddress(place, { q, limit: String(limit) }), signal ? { signal } : undefined),
+
+  /** The names of `kind:id` references nobody here has seen yet. */
+  names: (place: MentionPlace, ids: readonly string[]) =>
+    fetchApi<{ items: MentionOffer[] }>(mentionAddress(place, { ids: ids.join(',') })),
+};
+
 /**
  * Tags API
  */

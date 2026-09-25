@@ -5,30 +5,43 @@
  * almost everything that could go wrong here is wiring: a menu that never
  * opens, one that opens on an email address, one that re-sorts the server's
  * ranking, or one whose Enter is eaten by the chat's Enter-sends. The server
- * itself is answered for by `fs.find`, which is mocked — what it ranks is
- * pinned in `server/src/routes/fs.rs`'s own cases.
+ * itself is answered for by `mention.search`, which is mocked — what it ranks
+ * is pinned in `server/src/routes/fs.rs` and `server/src/workbench/mention.rs`.
+ *
+ * The same menu offers cards, chats and skills beside the files (bw-mi3s.4).
  */
 import { currentCompletions, startCompletion } from '@codemirror/autocomplete';
 import { EditorView } from '@codemirror/view';
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { FsFoundPath } from '@/lib/api';
+import type { FsFoundPath, MentionOffer } from '@/lib/api';
 import { ComposerEditor } from '@/workbench/composer-editor';
-import { fileCompletions } from '@/workbench/composer-files';
+import { mentionCompletions } from '@/workbench/composer-files';
 
-const find = vi.hoisted(() => vi.fn());
+const search = vi.hoisted(() => vi.fn());
+const names = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/api', async (original) => ({
   ...(await original<typeof import('@/lib/api')>()),
-  fs: { find },
+  mention: { search, names },
 }));
 
 const CHECKOUT = '/home/somebody/dev/beads-web';
 
+/** Where the chat is, as the chat tab tells the menu. */
+const place = (cwd: string) => ({ cwd, project: '/home/somebody/dev/beads-web', projectId: 'p1', session: 'me' });
+
 /** What the server would answer, in the order it would answer it. */
-function answers(...entries: FsFoundPath[]) {
-  find.mockResolvedValue({ root: CHECKOUT, entries });
+function answers(...entries: (FsFoundPath | MentionOffer)[]) {
+  search.mockResolvedValue({
+    items: entries.map((entry) =>
+      'path' in entry ? { kind: 'file', id: entry.path, label: entry.path, folder: entry.kind === 'dir' } : entry,
+    ),
+  });
 }
+
+/** What the menu asked the server for. */
+const asked = () => search.mock.calls.map(([where, q, limit]) => [where.cwd, q, limit]);
 
 /** A composer with the `@` menu in it, holding `value`, cursor at the end. */
 async function aComposer(value: string, root = CHECKOUT) {
@@ -38,7 +51,7 @@ async function aComposer(value: string, root = CHECKOUT) {
       onChange={() => {}}
       onKey={() => false}
       onFiles={() => {}}
-      extra={fileCompletions(() => root)}
+      extra={mentionCompletions(() => place(root))}
     />,
   );
   const editor = await waitFor(() => {
@@ -75,7 +88,8 @@ async function menuOf(editor: EditorView, expecting = 1) {
 }
 
 beforeEach(() => {
-  find.mockReset();
+  search.mockReset();
+  names.mockReset().mockResolvedValue({ items: [] });
 });
 
 describe('typing @ in the composer', () => {
@@ -85,7 +99,7 @@ describe('typing @ in the composer', () => {
 
     await menuOf(editor);
 
-    expect(find).toHaveBeenCalledWith(CHECKOUT, 'git-v', 20);
+    expect(asked()).toContainEqual([CHECKOUT, 'git-v', 20]);
   });
 
   it('shows the name, the folder it is in, and the icon the file tree draws', async () => {
@@ -139,7 +153,7 @@ describe('typing @ in the composer', () => {
     const { editor } = await aComposer('mail me@example.com');
 
     expect(await menuOf(editor, 0)).toEqual([]);
-    expect(find).not.toHaveBeenCalled();
+    expect(search).not.toHaveBeenCalled();
   });
 
   it('inserts the reference in our own grammar, and draws it as a badge', async () => {
@@ -185,7 +199,7 @@ describe('typing @ in the composer', () => {
     // The slash is what narrows: the next search is for the place, not a name,
     // and it is asked for without him touching a key.
     answers({ path: 'docs/designs/one.md', kind: 'file' });
-    await waitFor(() => expect(find).toHaveBeenLastCalledWith(CHECKOUT, 'docs/designs/', 20));
+    await waitFor(() => expect(asked().at(-1)).toEqual([CHECKOUT, 'docs/designs/', 20]));
   });
 
   it('offers nothing at all when the chat has no folder to search yet', async () => {
@@ -193,14 +207,85 @@ describe('typing @ in the composer', () => {
     const { editor } = await aComposer('@a', '');
 
     expect(await menuOf(editor, 0)).toEqual([]);
-    expect(find).not.toHaveBeenCalled();
+    expect(search).not.toHaveBeenCalled();
   });
 
   it('leaves the writing alone when the search fails', async () => {
-    find.mockRejectedValue(new Error('no such checkout'));
+    search.mockRejectedValue(new Error('no such checkout'));
     const { editor } = await aComposer('@a');
 
     expect(await menuOf(editor, 0)).toEqual([]);
     expect(editor.state.doc.toString()).toBe('@a');
+  });
+});
+
+describe('typing @ offers Atelier’s own things beside the files', () => {
+  const CHAT = '0b8f6c1e-2d3a-4f5b-9c7d-1e2f3a4b5c6d';
+
+  it('groups them by kind under a heading each, in the order the server sent', async () => {
+    answers(
+      { kind: 'skill', id: 'standup', label: 'Standup', detail: 'Write the standup' },
+      { kind: 'bead', id: 'bw-1', label: 'Fix the login page', detail: 'bw-1', status: 'open' },
+      { path: 'src/standup.ts', kind: 'file' },
+      { kind: 'chat', id: CHAT, label: 'Standup notes', brand: 'claude', projectId: 'p2' },
+    );
+    const { editor } = await aComposer('@stand');
+
+    const menu = await menuOf(editor, 4);
+
+    expect(menu.map((option) => option.label)).toEqual(['@skill:standup', '@bead:bw-1', '@src/standup.ts', `@chat:${CHAT}`]);
+    const sections = menu.map((option) => option.section as { name: string; rank: number });
+    expect(sections.map((section) => section.name)).toEqual(['Skills', 'Cards', 'Files', 'Chats']);
+    expect(sections.map((section) => section.rank)).toEqual([0, 1, 2, 3]);
+    // Each line wears the badge picking it will write.
+    await waitFor(() => expect(document.querySelectorAll('[data-testid="mention-option-badge"]').length).toBe(3));
+    const badges = [...document.querySelectorAll('[data-testid="mention-option-badge"]')];
+    expect(badges.map((badge) => badge.getAttribute('data-reference-kind'))).toEqual(['skill', 'bead', 'chat']);
+    expect(badges[2]!.textContent).toBe('Standup notes');
+  });
+
+  it('asks for only one kind when the kind is typed before a colon', async () => {
+    answers({ kind: 'chat', id: CHAT, label: 'Standup notes', brand: 'claude', projectId: 'p2' });
+    const { editor } = await aComposer('@chat:stan');
+
+    await menuOf(editor);
+
+    // The server narrows it; the menu passes the words through as typed.
+    expect(asked()).toContainEqual([CHECKOUT, 'chat:stan', 20]);
+  });
+
+  it('writes the reference and draws its badge with the name the menu showed', async () => {
+    answers({ kind: 'chat', id: CHAT, label: 'Standup notes', brand: 'codex', projectId: 'p2' });
+    const { editor, container } = await aComposer('Compare with @stan');
+
+    const menu = await menuOf(editor);
+    act(() => {
+      (menu[0]!.apply as (view: EditorView, c: unknown, from: number, to: number) => void)(
+        editor,
+        menu[0]!,
+        'Compare with '.length,
+        editor.state.doc.length,
+      );
+    });
+
+    expect(editor.state.doc.toString()).toBe(`Compare with @chat:${CHAT} `);
+  });
+
+  it('cancels the question a newer keystroke has made stale', async () => {
+    const signals: AbortSignal[] = [];
+    search.mockImplementation((_where, _q, _limit, signal: AbortSignal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    });
+    const { editor } = await aComposer('@st');
+    act(() => {
+      editor.focus();
+      startCompletion(editor);
+    });
+    await waitFor(() => expect(signals.length).toBe(1));
+    act(() => {
+      editor.dispatch({ changes: { from: editor.state.doc.length, insert: 'a' }, selection: { anchor: 4 } });
+    });
+    await waitFor(() => expect(signals[0]!.aborted).toBe(true));
   });
 });

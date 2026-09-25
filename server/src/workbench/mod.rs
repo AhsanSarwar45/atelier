@@ -45,6 +45,7 @@ pub mod provider_defaults;
 pub mod provider_messages;
 pub mod provider_reconciliation;
 pub mod provider_settings;
+pub mod mention;
 pub mod references;
 pub mod registry;
 pub mod screen_check;

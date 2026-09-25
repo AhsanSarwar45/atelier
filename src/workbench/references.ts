@@ -350,7 +350,7 @@ export interface FoundAtelierReference {
  * letter or a digit, so the full stop that ends a sentence is the sentence's.
  */
 const ATELIER_ID = '[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?';
-const ATELIER_AT = new RegExp(`@(bead|chat|skill):(${ATELIER_ID})(?![A-Za-z0-9_])`, 'y');
+const ATELIER_AT = new RegExp('@(' + ATELIER_KINDS.join('|') + '):(' + ATELIER_ID + ')(?![A-Za-z0-9_])', 'y');
 const LEADING_SKILL = new RegExp(`^/skill:(${ATELIER_ID})(?![A-Za-z0-9_])`);
 
 function atelierAt(text: string, at: number): FoundAtelierReference | null {

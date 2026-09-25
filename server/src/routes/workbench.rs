@@ -1075,6 +1075,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/links/session/:id", get(beads_for_chat))
         .route("/history", get(history))
         .route("/chat-text", get(chat_text))
+        .route("/mention", get(mention))
         .route("/events", get(events))
         .route("/present", post(present))
         .route("/screen-check", post(screen_check))
@@ -2690,6 +2691,125 @@ async fn history(
     Ok(Json(
         json!({"items":page.items,"cursor":page.cursor,"hasOlder":page.has_older}),
     ))
+}
+
+#[derive(Deserialize)]
+struct MentionQuery {
+    /// The project's own folder, whose board the cards come from.
+    project: Option<String>,
+    #[serde(rename = "projectId")]
+    project_id: Option<String>,
+    /// The folder the chat works in, whose files and skills are offered.
+    cwd: Option<String>,
+    /// The chat asking, which is not offered to itself.
+    session: Option<String>,
+    q: Option<String>,
+    limit: Option<usize>,
+    /// Instead of a search: the names of these `kind:id` references, for
+    /// badges drawn before anybody here had seen what they name.
+    ids: Option<String>,
+}
+
+static MENTION_CHATS: crate::workbench::mention::Kept<Vec<(crate::workbench::store::Session, String)>> =
+    crate::workbench::mention::Kept::new(std::time::Duration::from_secs(3));
+static MENTION_SKILLS: crate::workbench::mention::Kept<Vec<Value>> =
+    crate::workbench::mention::Kept::new(std::time::Duration::from_secs(10));
+
+async fn mention_chats(
+    database: &crate::workbench::actor::ChatDb,
+) -> Result<Arc<Vec<(crate::workbench::store::Session, String)>>, ApiError> {
+    if let Some(kept) = MENTION_CHATS.get("") {
+        return Ok(kept);
+    }
+    let named = database
+        .list_sessions(None)
+        .await?
+        .into_iter()
+        .map(|session| {
+            let name = crate::workbench::chat_name::name_session(&session);
+            (session, name)
+        })
+        .collect();
+    Ok(MENTION_CHATS.put("", named))
+}
+
+async fn mention_skills(cwd: &str) -> Arc<Vec<Value>> {
+    if let Some(kept) = MENTION_SKILLS.get(cwd) {
+        return kept;
+    }
+    let root = std::path::PathBuf::from(cwd);
+    let listed = tokio::task::spawn_blocking(move || crate::workbench::library::commands_for(&root))
+        .await
+        .unwrap_or_default();
+    MENTION_SKILLS.put(cwd, listed)
+}
+
+/// What the composer's `@` offers for what was typed after it: files, cards,
+/// chats and skills together, grouped by kind, best group first (bw-mi3s.4).
+/// See `workbench::mention` for how each kind is ranked.
+async fn mention(
+    State(state): State<WorkbenchState>,
+    axum::Extension(dolt_manager): axum::Extension<Arc<crate::dolt::DoltManager>>,
+    axum::Extension(db): axum::Extension<Arc<crate::db::Database>>,
+    Query(query): Query<MentionQuery>,
+) -> Result<Json<Value>, ApiError> {
+    use crate::workbench::mention::{self, Kind};
+    let database = state.database();
+    let cwd = query.cwd.clone().unwrap_or_default();
+    if let Some(ids) = query.ids.as_deref() {
+        let mut named = Vec::new();
+        for reference in ids.split(',').filter(|r| !r.is_empty()).take(50) {
+            let Some((kind, id)) = reference.split_once(':') else { continue };
+            let found = match Kind::parse(kind) {
+                Some(Kind::Chat) => mention::chats(&mention_chats(&database).await?, "", None, None, usize::MAX)
+                    .into_iter()
+                    .find(|offer| offer.id == id),
+                Some(Kind::Skill) => mention::skills(&mention_skills(&cwd).await, "", usize::MAX)
+                    .into_iter()
+                    .find(|offer| offer.id == id),
+                _ => None,
+            };
+            named.extend(found);
+        }
+        return Ok(Json(json!({ "items": named })));
+    }
+
+    let typed = query.q.unwrap_or_default();
+    let (only, wanted) = mention::scoped(typed.trim());
+    let limit = query.limit.unwrap_or(20).clamp(1, 50);
+    let share = |kind: Kind| if only.is_some() { limit } else { kind.share() };
+    let mut groups = Vec::new();
+    for kind in Kind::ALL {
+        if only.is_some_and(|only| only != kind) {
+            continue;
+        }
+        let offers = match kind {
+            Kind::File if !cwd.is_empty() => crate::routes::fs::found_paths(&cwd, wanted, share(kind))
+                .await
+                .map(|found| mention::files(found, wanted))
+                .unwrap_or_default(),
+            Kind::Bead => match query.project.as_deref() {
+                Some(project) => crate::routes::beads::board_for_mention(&dolt_manager, &db, project)
+                    .await
+                    .map(|board| mention::cards(&board, wanted, share(kind)))
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            },
+            Kind::Chat => mention::chats(
+                &mention_chats(&database).await?,
+                wanted,
+                query.session.as_deref(),
+                query.project_id.as_deref(),
+                share(kind),
+            ),
+            Kind::Skill if !cwd.is_empty() => mention::skills(&mention_skills(&cwd).await, wanted, share(kind)),
+            _ => Vec::new(),
+        };
+        if !offers.is_empty() {
+            groups.push((kind, offers));
+        }
+    }
+    Ok(Json(json!({ "items": mention::in_order(groups, !wanted.is_empty()) })))
 }
 
 #[derive(Deserialize)]
