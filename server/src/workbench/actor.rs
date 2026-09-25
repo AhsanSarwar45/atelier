@@ -1610,6 +1610,20 @@ mod tests {
         assert_eq!(offered.fields["configOptions"][1]["currentValue"], "reviewer");
         // What the person could type is still listed after a restart (bw-zldt.2).
         assert_eq!(offered.fields["commands"], json!([{"name":"project-only"}]));
+        // A later menu sent before the adapter named its commands changes the
+        // choices and keeps the commands already written.
+        let mut early = menu.clone();
+        early["commands"] = json!([{"name":"skill:review","execution":"shared"}]);
+        early["efforts"] = json!([{"value":"default","displayName":"Default"},{"value":"max","displayName":"Max"}]);
+        store.remember_provider_catalogue("spoke", &early).unwrap();
+        let offered = live_steering_menu(&store, &nothing_live, "stopped").unwrap();
+        assert_eq!(offered.fields["efforts"][1]["value"], "max");
+        assert_eq!(offered.fields["commands"], json!([{"name":"project-only"}]));
+        // One that names them replaces them.
+        early["commands"] = json!([{"name":"compact"}]);
+        store.remember_provider_catalogue("spoke", &early).unwrap();
+        let offered = live_steering_menu(&store, &nothing_live, "stopped").unwrap();
+        assert_eq!(offered.fields["commands"], json!([{"name":"compact"}]));
 
         // Another project may allow its provider different things.
         assert!(live_steering_menu(&store, &nothing_live, "elsewhere").is_none());

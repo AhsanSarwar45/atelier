@@ -2927,16 +2927,17 @@ where
     }
     let waiting = asks
         .lock()
-        .map(|mut asks| asks.finish(key, answer.is_some()))
+        .map(|mut asks| asks.finish(key))
         .unwrap_or_default();
     (answer, waiting)
 }
 
 /// Which providers are being asked for their commands, and by which chats.
+/// Once answered, the catalogue holds the commands and nothing asks again; a
+/// catalogue that lost them is asked for anew.
 #[derive(Default)]
 struct CommandAsks {
     waiting: HashMap<String, Vec<String>>,
-    answered: HashSet<String>,
 }
 
 impl CommandAsks {
@@ -2945,9 +2946,6 @@ impl CommandAsks {
 
     /// Adds a chat to the question for `key`; true when it must be asked now.
     fn join(&mut self, key: &str, session_id: &str) -> bool {
-        if self.answered.contains(key) {
-            return false;
-        }
         if let Some(waiting) = self.waiting.get_mut(key) {
             if !waiting.iter().any(|id| id == session_id) {
                 waiting.push(session_id.to_string());
@@ -2959,10 +2957,7 @@ impl CommandAsks {
     }
 
     /// Ends the question for `key` and returns the chats that were waiting.
-    fn finish(&mut self, key: &str, answered: bool) -> Vec<String> {
-        if answered {
-            self.answered.insert(key.to_string());
-        }
+    fn finish(&mut self, key: &str) -> Vec<String> {
         self.waiting.remove(key).unwrap_or_default()
     }
 }
@@ -3001,8 +2996,8 @@ mod command_asks_tests {
         assert!(!asks.join("claude", "two"));
         assert!(!asks.join("claude", "two"));
         assert!(asks.join("codex", "three"));
-        assert_eq!(asks.finish("claude", true), ["one", "two"]);
-        assert!(!asks.join("claude", "four"), "an answered provider is not asked again");
+        assert_eq!(asks.finish("claude"), ["one", "two"]);
+        assert!(asks.join("claude", "four"), "a catalogue that lost its commands is asked for anew");
     }
 
     #[tokio::test(start_paused = true)]

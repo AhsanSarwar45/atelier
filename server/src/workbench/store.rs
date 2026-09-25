@@ -1477,7 +1477,9 @@ fn held_in_its_project(
     }
 
     /// Write down what a chat's provider just offered, for the stopped chats
-    /// of the same provider account that cannot ask it (bw-y5dc.1).
+    /// of the same provider account that cannot ask it (bw-y5dc.1). A menu
+    /// that names none of the provider's commands -- one sent before the
+    /// adapter announced them -- keeps the ones already written (bw-zldt.2).
     pub fn remember_provider_catalogue(&self, session_id: &str, menu: &Value) -> rusqlite::Result<()> {
         let Some(session) = self.get_session(session_id)? else {
             return Ok(());
@@ -1498,7 +1500,11 @@ fn held_in_its_project(
             "INSERT INTO provider_catalogue (brand, profile, project_id, project_path, at, json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (brand, profile, project_id, project_path)
-             DO UPDATE SET at = excluded.at, json = excluded.json",
+             DO UPDATE SET at = excluded.at, json = CASE
+                 WHEN json_type(excluded.json, '$.commands') IS NULL
+                      AND json_type(provider_catalogue.json, '$.commands') IS NOT NULL
+                 THEN json_set(excluded.json, '$.commands', json(json_extract(provider_catalogue.json, '$.commands')))
+                 ELSE excluded.json END",
             params![
                 session.brand,
                 session.profile.unwrap_or_default(),
