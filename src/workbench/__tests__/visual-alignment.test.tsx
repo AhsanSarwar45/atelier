@@ -10,8 +10,12 @@ import { WhatItRuns } from '@/workbench/what-it-runs';
 
 const source = (name: string) => readFileSync(resolve(__dirname, `../${name}`), 'utf8');
 
-/** The chip's own correction, spelled once in `src/components/ui/badge.tsx`. */
-const SHARED = '[&>span:not([data-slot])]:top-px';
+/**
+ * The chip's own correction, spelled once in `src/components/ui/badge.tsx`: its
+ * label is trimmed to its letters, so the pill centres them in any face
+ * (bw-uzf6.1).
+ */
+const SHARED = '[&>span:not([data-slot])]:[text-box:trim-both_cap_alphabetic]';
 
 describe('compact workbench vertical alignment', () => {
   it('uses the same icon scale and gap on status badges', () => {

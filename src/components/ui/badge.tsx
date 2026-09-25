@@ -64,27 +64,23 @@ const badgeVariants = cva(
   // A chip centres its LINE box, and a line box is not what the eye reads. The
   // visible top of Latin text is the cap height and its visible bottom is the
   // alphabetic baseline, and a font's ascent and descent are not symmetric
-  // about those two; centring the line box therefore lands the letters a pixel
-  // above the middle of the pill while the icon beside them lands dead centre.
-  // Measured on the running app at four times screen density: the letters in a
-  // file chip sat 1.00px above the pill's middle, in both the body font and the
-  // monospace one, at this size (bw-s5op.1).
+  // about those two, so centring the line box lands the letters off the
+  // middle of the pill while the icon beside them lands dead centre.
   //
-  // Five callers had each discovered this and written `relative top-px` on
-  // their own label — so a chip was centred if, and only if, whoever wrote it
-  // had noticed. The correction belongs to the chip, once, which is what this
-  // rule is. `[data-slot]` spares the dot and the button, which are not text.
+  // How far off depends on the font, and the body font is `system-ui`: a
+  // different face on every machine. A fixed `top-px` was measured once
+  // (bw-s5op.1) and was right for the monospace face, but on Noto Sans it left
+  // the letters 1.5px low, and every chip moved onto this one in bw-weih.11
+  // inherited the error (bw-uzf6.1). So the label's box is trimmed to the cap
+  // height and the baseline with `text-box`, and the pill centres the letters
+  // themselves, whatever face draws them. It goes on the label because trim
+  // does not apply through the chip's own flex box (CSS Inline Layout 3 §6.2).
   //
-  // Not `text-box: trim-both cap alphabetic`, which is the standard's own
-  // answer to this and would derive the number from the font rather than fix
-  // it: it "does not apply to, or propagate through, flex, grid, or table
-  // formatting contexts" (CSS Inline Layout 3 §6.2), and a chip is an
-  // inline-flex box — so it would have to go on each label instead. There it
-  // WOULD work, and would then trim the line box down to the cap box, which is
-  // shorter than the letters: every label here is wrapped in `truncate`, whose
-  // hidden overflow would cut the tails off g and y all over again, which is
-  // the fault `sm` and `xs` below were widened twice to fix (bw-96is.20,
-  // bw-jaoz.1). One pixel, written down, costs less than that.
+  // Trimmed, the box is shorter than the letters, and a label wrapped in
+  // `truncate` hides what overflows it, which would cut the tails off g and y
+  // (bw-96is.20, bw-jaoz.1). The equal padding above and below gives the
+  // descenders their room back without moving the centre. `[data-slot]`
+  // spares the dot and the button, which are not text.
   //
   // Inside a chip, a quoted word is drawn by the chip and not by the page. A
   // chip in a message is built from what the reader wrote, and if the label was
@@ -104,7 +100,7 @@ const badgeVariants = cva(
   // resets: it returns family, size, weight and line height to the chip's in
   // one declaration, which is what `size` below spent two comments getting
   // right.
-  'inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:relative [&>span:not([data-slot])]:top-px [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!rounded-none [&_code]:!text-inherit [&_code]:![font:inherit]',
+  'inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:[text-box:trim-both_cap_alphabetic] [&>span:not([data-slot])]:py-[0.3em] [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!rounded-none [&_code]:!text-inherit [&_code]:![font:inherit]',
   {
     variants: {
       variant: {
@@ -154,9 +150,12 @@ const badgeVariants = cva(
       // A chip whose words are an address — a file's path — which can be most
       // of a line by itself. It is let break anywhere and grow as tall as the
       // lines it needs, rather than running out of the message it sits in.
-      // Listed after `size` so it wins that size's fixed height.
+      // Listed after `size` so it wins that size's fixed height. Its floor is
+      // one line, its padding and its border, as tall as it always was: the
+      // label inside is trimmed to its letters (above), so the label alone no
+      // longer says how tall a one-line chip is.
       wrap: {
-        true: 'h-auto max-w-full whitespace-normal break-all py-px',
+        true: 'h-auto min-h-[calc(1lh+4px)] max-w-full whitespace-normal break-all py-px',
       },
     },
     compoundVariants: [
