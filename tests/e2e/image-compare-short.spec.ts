@@ -106,7 +106,7 @@ async function chatShowing(page: Page, request: APIRequestContext, widget: ChatW
     Object.defineProperty(window, 'WebSocket', { value: Socket, configurable: true });
   }, { chat, view: snapshot });
   await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => { if (route.request().method() !== 'GET') return route.continue(); const url = new URL(route.request().url()); url.searchParams.set('include_test', 'true'); await route.continue({ url: url.toString() }); });
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: chat, externalId: chat, brand: 'codex', title, state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: process.cwd(), runningElsewhere: false, held: null, beads: [] }] }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: chat, externalId: chat, brand: 'codex', title, name: title, state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: process.cwd(), runningElsewhere: false, held: null, beads: [] }] }));
   await page.route(new RegExp(`/api/workbench/session/${chat}$`), (route) => route.fulfill({ json: { sessionId: chat, origin: 'terminal', brand: 'codex', externalId: chat, runningElsewhere: false, held: null, title, cwd: process.cwd(), beads: [] } }));
 
   const made = await request.post('/api/projects', { data: { name: title, path: process.cwd(), isTest: true } });

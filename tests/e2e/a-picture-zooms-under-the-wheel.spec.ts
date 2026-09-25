@@ -306,6 +306,25 @@ test('a picture opened from a chat zooms about the pointer and drags too', async
     await page.getByRole('button', { name: 'Zoom in' }).click();
     await expect(page.getByTestId('picture-zoom-level')).toHaveText('150%');
 
+    // A right click lands on the picture itself, which is what makes the
+    // browser offer Copy image. Its native menu cannot be screenshotted, so the
+    // proof is the event: its target is the <img> and nothing swallowed it
+    // (bw-1fhx).
+    await page.evaluate(() => {
+      document.addEventListener('contextmenu', (event) => {
+        const target = event.target as Element;
+        document.body.dataset.menuTarget = target.tagName;
+        document.body.dataset.menuTestid = target.getAttribute('data-testid') ?? '';
+        setTimeout(() => { document.body.dataset.menuBlocked = String(event.defaultPrevented); });
+      }, { once: true, capture: true });
+    });
+    const middle = (await picture.boundingBox())!;
+    await page.mouse.click(middle.x + middle.width / 2, middle.y + middle.height / 2, { button: 'right' });
+    await expect(page.locator('body')).toHaveAttribute('data-menu-blocked', 'false');
+    await expect(page.locator('body')).toHaveAttribute('data-menu-target', 'IMG');
+    await expect(page.locator('body')).toHaveAttribute('data-menu-testid', 'picture-viewer-image');
+    await expect(page.getByTestId('picture-viewer')).toBeVisible();
+
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('picture-viewer')).toHaveCount(0);
   } finally {

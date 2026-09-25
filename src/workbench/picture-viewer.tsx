@@ -99,8 +99,15 @@ function Controls({ transform, onChange }: { transform: ImageTransform; onChange
   );
 }
 
+/**
+ * The picture takes the pointer, so a right click lands on the image itself and
+ * the browser offers Copy image and Save image. It used to be
+ * `pointer-events-none`, which sent the click to the viewport behind it and left
+ * only the page's own menu (bw-1fhx). Panning is unaffected: the press bubbles
+ * to the viewport, and `draggable={false}` stops the browser's own image drag.
+ */
 function Picture({ image, testId }: { image: ImagePayload; testId?: string }) {
-  return <img data-testid={testId} src={attachmentSrc(image)} alt={image.alt} className="pointer-events-none h-full w-full select-none object-contain" draggable={false} />;
+  return <img data-testid={testId} src={attachmentSrc(image)} alt={image.alt} className="h-full w-full select-none object-contain" draggable={false} />;
 }
 
 function Single({ image, transform, onChange }: { image: ImagePayload; transform: ImageTransform; onChange: (value: ImageTransform) => void }) {
@@ -185,7 +192,9 @@ function Wipe({ comparison, transform, onChange }: { comparison: ImageComparison
     <div className="flex min-h-0 w-full flex-1 flex-col gap-3" data-testid="picture-viewer-comparison" data-mode="wipe">
       <ZoomViewport transform={transform} onChange={onChange} testId="comparison-zoom-viewport">
         <TransformLayer transform={transform} testId="comparison-transform-after"><Picture image={comparison.after} /></TransformLayer>
-        <div className="pointer-events-none absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}>
+        {/* The clip also clips hit testing, so a right click left of the line
+            reaches the before picture and one right of it the after picture. */}
+        <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}>
           <TransformLayer transform={transform} testId="comparison-transform-before"><Picture image={comparison.before} /></TransformLayer>
         </div>
         <Split pct={pct} onChange={setPct} />
