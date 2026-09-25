@@ -2738,7 +2738,7 @@ async fn events(
     let since = query.since.unwrap_or(0).max(0);
     let (initial, watermark) = if since == 0 {
         state.reconcile_status(&query.session).await?;
-        let view = snapshot(state.database(), &query.session).await?;
+        let view = snapshot(&state, &query.session).await?;
         let watermark = view["lastSeq"].as_i64().unwrap_or_default();
         (vec![Ok(snapshot_frame(&view))], watermark)
     } else {
@@ -2777,7 +2777,8 @@ async fn events(
     ))
 }
 
-pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Value, String> {
+pub(crate) async fn snapshot(state: &WorkbenchState, session_id: &str) -> Result<Value, String> {
+    let database = state.database();
     let snapshot = database.snapshot(session_id.to_string()).await?;
     let mut view = fold_all(&snapshot.history).view;
     // What a chat can be set to belongs to the installed provider, and it is
@@ -2796,7 +2797,7 @@ pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Valu
     // themselves are unaffected: they ride on `session.pinned`, the chips name
     // them through the app's own words, and the real catalog replaces nothing
     // when the agent supplies it.
-    with_atelier_commands(database, session_id, &mut view["menu"]).await?;
+    with_atelier_commands(state.database(), state.registry(), session_id, &mut view["menu"]).await?;
     view["items"] = json!(snapshot.page.items);
     view["agents"] = json!(snapshot.agents);
     view["lastSeq"] = json!(snapshot.page.newest_seq);
@@ -2816,7 +2817,12 @@ pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Valu
 /// a slash offers the same Atelier rows whether or not it has woken; the
 /// command is expanded from the pinned revision when the prompt wakes it
 /// (bw-zldt.2).
-async fn with_atelier_commands(database: &ChatDb, session_id: &str, menu: &mut Value) -> Result<(), String> {
+async fn with_atelier_commands(
+    database: &ChatDb,
+    registry: &WorkbenchRegistry,
+    session_id: &str,
+    menu: &mut Value,
+) -> Result<(), String> {
     let has_them = menu["commands"]
         .as_array()
         .is_some_and(|commands| commands.iter().any(|command| command["execution"] == "shared"));
@@ -2827,7 +2833,9 @@ async fn with_atelier_commands(database: &ChatDb, session_id: &str, menu: &mut V
     let Some(session) = database.get_session(session_id.to_string()).await? else {
         return Ok(());
     };
-    if native_missing && session.state == "dormant" {
+    // A chat with a driver is told its commands by that driver; one without,
+    // whatever state it stopped in, asks for them (bw-zldt.2).
+    if native_missing && !registry.has_driver(session_id).await {
         ask_provider_for_commands(database, &session);
     }
     if has_them {
@@ -4109,7 +4117,7 @@ mod tests {
         .unwrap();
         state.database().append(started).await.unwrap();
 
-        let view = snapshot(state.database(), &session.id).await.unwrap();
+        let view = snapshot(&state, &session.id).await.unwrap();
         for field in ["models", "permissionModes", "efforts", "collaborationModes"] {
             assert_eq!(
                 view["menu"][field],

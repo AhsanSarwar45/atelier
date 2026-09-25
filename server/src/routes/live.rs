@@ -234,7 +234,7 @@ async fn send_chat_snapshot(
     tx: &mpsc::Sender<Tagged>,
 ) -> Result<i64, String> {
     state.reconcile_status(session_id).await?;
-    let snapshot = workbench::snapshot(state.database(), session_id)
+    let snapshot = workbench::snapshot(state, session_id)
         .await
         .map_err(|error| format!("Could not load this conversation: {error}"))?;
     let watermark = snapshot["lastSeq"].as_i64().unwrap_or_default();

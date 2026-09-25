@@ -1356,16 +1356,16 @@ fn run(
             }
             Command::OfferCatalogue(session_id, menu, shared, reply) => {
                 remember_catalogue(&store, &session_id, &menu);
-                // A chat that woke meanwhile has its own session's menu, and
-                // that is the one it shows. Never made the chat's live menu:
-                // what it is set to stays its own, and what a sent command is
-                // checked against stays its own session's (bw-zldt.2).
-                let asleep = store
-                    .get_session(&session_id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|session| session.state == "dormant");
-                let offered = asleep
+                // A chat whose own session named the provider's commands --
+                // one that woke meanwhile -- already shows them. Any other,
+                // asleep, stopped or failed, is offered these. Never made the
+                // chat's live menu: what it is set to stays its own, and what
+                // a sent command is checked against stays its own session's
+                // (bw-zldt.2).
+                let lacking = live_menus.get(&session_id).is_none_or(|own| {
+                    super::store::native_commands(&serde_json::Value::Object(own.fields.clone())).is_empty()
+                });
+                let offered = lacking
                     .then(|| live_steering_menu(&store, &live_menus, &session_id))
                     .flatten();
                 let result = match offered {
@@ -1663,6 +1663,28 @@ mod tests {
         // Kept, so the next restart does not need to ask.
         let database = { drop(database); ChatDb::open(&directory.path().join("workbench.db")).unwrap() };
         assert_eq!(database.offered_menu("stopped".into()).await.unwrap()["commands"], json!([{"name":"compact"}]));
+
+        // A chat that stopped or failed rather than fell asleep is not awake
+        // either, and is shown the same.
+        for state in ["stopped", "errored"] {
+            let id = format!("left-{state}");
+            database.create_session(Session {
+                id: id.clone(), brand: "claude".into(), external_id: Some(format!("thread-{id}")),
+                project_id: "here".into(), project_path: "/here".into(), cwd: "/here".into(),
+                model: None, permission_mode: "default".into(), effort: None,
+                collaboration_mode: None, profile: None, title: None, state: state.into(),
+                origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
+                last_spoke_at: None, begun_by: None, named_by_owner: false,
+            }).await.unwrap();
+            let mut updates = database.subscribe_session(&id);
+            database.offer_catalogue(
+                id.clone(),
+                menu(&id, json!([{"name":"compact"}])),
+                vec![json!({"name":"skill:demo","execution":"shared"})],
+            ).await.unwrap();
+            let SessionUpdate::Event(shown) = updates.recv().await.unwrap() else { panic!("no menu shown") };
+            assert_eq!(shown.fields["commands"], json!([{"name":"compact"},{"name":"skill:demo","execution":"shared"}]), "{state}");
+        }
     }
 
     /// Everything ever said, in the table the search reads.
