@@ -36,8 +36,13 @@ const rowVariants = cva(
           'hover:bg-accent hover:text-accent-foreground ' +
           'focus-visible:outline-hidden focus-visible:bg-accent focus-visible:text-accent-foreground ' +
           'data-[state=selected]:bg-accent data-[state=selected]:text-accent-foreground',
+        // `min-h-0 min-w-0` turn a touch screen's 44px floor off, as the
+        // `size="inherit"` Button this replaced did: the line keeps its
+        // words' height and reaches the thumb through `data-reach="row"`
+        // instead (globals.css). Without it every tool box on a phone grew
+        // to the floor (bw-4cqv).
         quiet:
-          'hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ' +
+          'min-h-0 min-w-0 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ' +
           'data-[state=selected]:text-foreground',
         // A line in a tree of files: lit a little under the pointer and fully
         // for the open one, in the surface colours the tree sits on rather than

@@ -241,7 +241,7 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
                     data-open={open || undefined}
                     onClick={() => onOpen?.(made)}
                     className={cn(
-                      'flex flex-col gap-0.5 border-l-2',
+                      'flex min-h-0 flex-col gap-0.5 border-l-2',
                       // The one being read is marked twice -- a filled row and
                       // a bar down its edge -- because a change of background
                       // alone is easy to miss against a list this dense.
