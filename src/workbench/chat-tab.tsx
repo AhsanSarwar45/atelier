@@ -1595,7 +1595,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const typing = useRef<ComposerHandle>(null);
   const picker = useRef<HTMLInputElement>(null);
   /** The POST being accepted; Escape waits for it before sending Stop. */
-  const sending = useRef<Promise<{ messageId: string }> | null>(null);
+  const sending = useRef<Promise<{ messageId?: string; held?: HeldMessage }> | null>(null);
   /** Names for drawn-but-unsent rows, which only have to be unique on this page. */
   const sendKeys = useRef(0);
   const [recallable, setRecallable] = useState<RecallablePrompt | null>(null);
@@ -1992,7 +1992,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setAttached([]);
     setSendError(null);
     try {
-      const sent = sendCommand<{ messageId: string }>({
+      const sent = sendCommand<{ messageId?: string; held?: HeldMessage }>({
         type: 'prompt.send',
         sessionId,
         text,
@@ -2001,7 +2001,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         takeover: ownership.kind === 'elsewhere',
       });
       sending.current = sent;
-      await sent;
+      const answer = await sent;
+      if (answer?.held) {
+        // Sent into a turn, so the server is keeping it until that turn has
+        // ended for it (registry.rs, `send_now`). The waiting row draws it
+        // from here; a sent line as well would claim it had been read.
+        setPendingSends((prev) => prev.filter((line) => line.key !== drawnKey));
+        setRecallable(null);
+        recallableNow.current = null;
+        sending.current = null;
+      }
     } catch (e) {
       // The server can refuse this: another program took the conversation over
       // between the box unlocking and the send, or the screen's own copy of who

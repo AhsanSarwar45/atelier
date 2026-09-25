@@ -714,6 +714,11 @@ enum Control {
     Cancel {
         reply: Reply,
     },
+    /// End the running turn and keep the agent: the protocol's own
+    /// `session/cancel`, without the connection going with it.
+    Interrupt {
+        reply: Reply,
+    },
     Mode {
         /// The mode the agent is told to enter.
         value: String,
@@ -2973,6 +2978,18 @@ impl AcpDriver {
                                     );
                                     break;
                                 }
+                                Control::Interrupt { reply } => {
+                                    // Stop's notification without Stop's
+                                    // break. The agent answers the open
+                                    // `session/prompt` with `cancelled`, the
+                                    // turn settles as any other does, and the
+                                    // same connection takes the next prompt.
+                                    let sent = connection
+                                        .send_notification(CancelNotification::new(remote_id.clone()))
+                                        .map(|_| json!({"ok":true}))
+                                        .map_err(|error| error.to_string());
+                                    let _ = reply.send(sent);
+                                }
                                 Control::Steer { content, suppress_echo, reply } => {
                                     if suppress_echo {
                                         normalizer.lock().await.begin_local_prompt();
@@ -3399,6 +3416,13 @@ impl AcpDriver {
                     }
                 }
                 Ok(json!({"ok":true}))
+            }
+            // The spec has a pending question answered as cancelled when its
+            // turn is, so the two brokers go first, exactly as for Stop.
+            CommandKind::SessionInterrupt => {
+                self.permissions.cancel_all().await;
+                self.elicitations.cancel_all().await;
+                self.control(|reply| Control::Interrupt { reply }).await
             }
             CommandKind::SessionStop => {
                 self.permissions.cancel_all().await;
@@ -4280,6 +4304,44 @@ mod tests {
         }));
         // The steered line is a message like any other, and the answer names it.
         assert_eq!(answer["messageId"], recorded_message(&events));
+    }
+
+    /// Sending into a turn ends the turn and keeps the agent: an interrupt is
+    /// the protocol's cancel without Stop's disconnect (bw-fhyi).
+    #[tokio::test]
+    async fn an_interrupt_ends_the_turn_and_keeps_the_agent() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("running_tool");
+        database.create_session(session.clone()).await.unwrap();
+        let (controls, mut requests) = mpsc::unbounded_channel();
+        let (_, ended) = mpsc::unbounded_channel();
+        let mut driver = AcpDriver {
+            shared_library: Default::default(),
+            pending_guidance: None,
+            brand: "claude",
+            database,
+            session,
+            controls,
+            ended,
+            permissions: Arc::new(PermissionBroker::default()),
+            elicitations: Arc::new(ElicitationBroker::default()),
+            carries: Arc::new(AtomicU8::new(Carries::default().packed())),
+            normalizer: Arc::new(Mutex::new(AcpNormalizer::default())),
+            reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
+            in_flight: Default::default(),
+        };
+        let interrupt = Command {
+            kind: CommandKind::SessionInterrupt,
+            fields: serde_json::Map::from_iter([("sessionId".into(), json!("chat-1"))]),
+        };
+        let answered = tokio::spawn(async move { driver.command(&interrupt).await });
+        match requests.recv().await.unwrap() {
+            Control::Interrupt { reply } => reply.send(Ok(json!({"ok":true}))).unwrap(),
+            Control::Cancel { .. } => panic!("an interrupt must not end the agent the way Stop does"),
+            _ => panic!("an interrupt must cancel the turn"),
+        }
+        assert_eq!(answered.await.unwrap().unwrap()["ok"], true);
     }
 
     /// A message sent while the agent is asking a question closes the question

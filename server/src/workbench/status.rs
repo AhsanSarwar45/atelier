@@ -42,6 +42,22 @@ pub fn is_active(state: &str) -> bool {
     ACTIVE_STATES.contains(&state)
 }
 
+/// Every state in which a reply is being written, so a message sent now would
+/// land inside it. The same five the screen calls mid-turn (`isMidTurn` in
+/// use-session.ts): not a chat still starting, which has no turn to end, and
+/// not one waiting only on a task it sent away, whose reply is over.
+pub const MID_TURN_STATES: [&str; 5] = [
+    "thinking",
+    "streaming",
+    "running_tool",
+    "waiting_permission",
+    "summarising",
+];
+
+pub fn is_mid_turn(state: &str) -> bool {
+    MID_TURN_STATES.contains(&state)
+}
+
 /// Membership follows the actual prompt future's lifetime, including failure
 /// to spawn, cancellation and unwinding. It is not a last-event status flag.
 pub type Requests = Arc<std::sync::Mutex<std::collections::HashSet<u64>>>;

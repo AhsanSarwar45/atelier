@@ -164,6 +164,21 @@ fn held_as_prompt(session_id: &str, held: &Value) -> Result<Command, String> {
     .map_err(|error| error.to_string())
 }
 
+/// Note that a message is waiting; `first` when it now leads the queue.
+async fn note_held(
+    database: &ChatDb,
+    session_id: &str,
+    held: &Value,
+    first: bool,
+) -> Result<(), String> {
+    let event = serde_json::from_value(json!({
+        "type":"prompt.held", "sessionId":session_id, "seq":0,
+        "at":chrono::Utc::now().to_rfc3339(), "held":held, "first":first
+    }))
+    .map_err(|error| error.to_string())?;
+    database.append(event).await.map(|_| ())
+}
+
 /// Note that a held message has left the queue, one way or the other.
 async fn note_released(
     database: &ChatDb,
@@ -2083,45 +2098,29 @@ impl WorkbenchRegistry {
             // reader wrote is kept by the app, and every provider gets it as
             // the ordinary prompt it would have got anyway, once its turn is
             // over (bw-r54j.1).
-            CommandKind::PromptHold => {
+            CommandKind::PromptHold => self.hold(command).await,
+            // Sent now, into a turn: held, and then sent now like any waiting
+            // message (`send_now`).
+            CommandKind::PromptSend
+                if self.mid_turn(Self::field(command, "sessionId")?).await? =>
+            {
+                let held = self.hold(command).await?;
                 let session_id = Self::field(command, "sessionId")?;
-                let text = command.at("text").as_str().unwrap_or_default().to_string();
-                let images = match command.at("images") {
-                    Value::Array(images) => Value::Array(images.clone()),
-                    _ => json!([]),
-                };
-                if text.trim().is_empty() && images.as_array().is_some_and(Vec::is_empty) {
-                    return Err("there is nothing in the message to hold".into());
+                let held_id = held["held"]["id"].as_str().unwrap_or_default().to_string();
+                if let Err(error) = self.send_now(session_id, &held_id).await {
+                    // Refused whole, so the box can have its words back: a
+                    // line left waiting as well would be the same words twice.
+                    if self
+                        .database
+                        .drop_held(session_id.to_string(), held_id.clone())
+                        .await?
+                        .is_some()
+                    {
+                        note_released(&self.database, session_id, &held_id, "dropped").await?;
+                    }
+                    return Err(error);
                 }
-                if self.database.get_session(session_id.to_string()).await?.is_none() {
-                    return Err(format!("no session {session_id}"));
-                }
-                let parts = match command.at("parts") {
-                    Value::Array(parts) => Some(Value::Array(parts.clone())),
-                    _ => None,
-                };
-                let held = self
-                    .database
-                    .hold_message(
-                        session_id.to_string(),
-                        format!("held-{}", uuid::Uuid::new_v4()),
-                        text,
-                        images,
-                        parts,
-                        chrono::Utc::now()
-                            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-                    )
-                    .await?;
-                self.database
-                    .append(
-                        serde_json::from_value(json!({
-                            "type":"prompt.held", "sessionId":session_id, "seq":0,
-                            "at":chrono::Utc::now().to_rfc3339(), "held":held
-                        }))
-                        .map_err(|error| error.to_string())?,
-                    )
-                    .await?;
-                Ok(json!({"ok":true,"held":held}))
+                Ok(held)
             }
             CommandKind::PromptDrop => {
                 let session_id = Self::field(command, "sessionId")?;
@@ -2144,6 +2143,20 @@ impl WorkbenchRegistry {
             CommandKind::PromptPush => {
                 let session_id = Self::field(command, "sessionId")?;
                 let held_id = Self::maybe(command, "heldId").map(str::to_string);
+                if self.mid_turn(session_id).await? {
+                    let held_id = match held_id {
+                        Some(id) => id,
+                        None => self
+                            .database
+                            .held_messages(session_id.to_string())
+                            .await?
+                            .first()
+                            .and_then(|held| held["id"].as_str().map(str::to_string))
+                            .ok_or_else(|| "that message is no longer waiting".to_string())?,
+                    };
+                    let held = self.send_now(session_id, &held_id).await?;
+                    return Ok(json!({"ok":true,"held":held}));
+                }
                 let held = self
                     .database
                     .take_held(session_id.to_string(), held_id)
@@ -2239,6 +2252,82 @@ impl WorkbenchRegistry {
             }
             _ => self.driver_command(command).await,
         }
+    }
+
+    /// Keep what the reader wrote, at the back of the queue, until the chat
+    /// can take it.
+    async fn hold(&self, command: &Command) -> Result<Value, String> {
+        let session_id = Self::field(command, "sessionId")?;
+        let text = command.at("text").as_str().unwrap_or_default().to_string();
+        let images = match command.at("images") {
+            Value::Array(images) => Value::Array(images.clone()),
+            _ => json!([]),
+        };
+        if text.trim().is_empty() && images.as_array().is_some_and(Vec::is_empty) {
+            return Err("there is nothing in the message to hold".into());
+        }
+        if self.database.get_session(session_id.to_string()).await?.is_none() {
+            return Err(format!("no session {session_id}"));
+        }
+        let parts = match command.at("parts") {
+            Value::Array(parts) => Some(Value::Array(parts.clone())),
+            _ => None,
+        };
+        let held = self
+            .database
+            .hold_message(
+                session_id.to_string(),
+                format!("held-{}", uuid::Uuid::new_v4()),
+                text,
+                images,
+                parts,
+                chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            )
+            .await?;
+        note_held(&self.database, session_id, &held, false).await?;
+        Ok(json!({"ok":true,"held":held}))
+    }
+
+    /// Whether an attached chat is in the middle of a turn a message would
+    /// land in (`status::is_mid_turn`).
+    async fn mid_turn(&self, session_id: &str) -> Result<bool, String> {
+        if !self.has_driver(session_id).await {
+            return Ok(false);
+        }
+        Ok(self
+            .database
+            .get_session(session_id.to_string())
+            .await?
+            .is_some_and(|session| super::status::is_mid_turn(&session.state)))
+    }
+
+    /**
+     * Send a waiting message now, into a chat in the middle of a turn.
+     *
+     * Nothing is handed to an agent that is busy. A provider given a line
+     * mid-turn only queues it behind what it is running — Claude reads it
+     * once a five-minute command has finished — and a queue inside the
+     * provider dies with the provider: Stop ends the process, and the line
+     * the reader was shown as sent was never read (bw-fhyi).
+     *
+     * So the line stays the app's, first in line, and the turn is ended with
+     * the protocol's own cancel, which stops what is running and keeps the
+     * agent. The turn's end sends it as the next ordinary prompt, through
+     * `drain_held`: the road every waiting message takes, on every provider.
+     */
+    async fn send_now(&self, session_id: &str, held_id: &str) -> Result<Value, String> {
+        let held = self
+            .database
+            .put_first(session_id.to_string(), held_id.to_string())
+            .await?
+            .ok_or_else(|| "that message is no longer waiting".to_string())?;
+        note_held(&self.database, session_id, &held, true).await?;
+        let interrupt = Command {
+            kind: CommandKind::SessionInterrupt,
+            fields: serde_json::Map::from_iter([("sessionId".into(), json!(session_id))]),
+        };
+        self.driver_command(&interrupt).await?;
+        Ok(held)
     }
 
     /// Put a deleted project's chats to sleep, and forget what was said about
@@ -2591,6 +2680,130 @@ mod tests {
             vec!["one more thing".to_string()],
             "the reply is over, so the message goes, though a task it started is still running"
         );
+    }
+
+    /// A driver that writes down every command it was handed, by kind and text.
+    struct KindsDriver {
+        seen: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+    impl ProviderDriver for KindsDriver {
+        fn brand(&self) -> &'static str {
+            "claude"
+        }
+        fn command<'a>(&'a mut self, command: &'a Command) -> DriverFuture<'a> {
+            let text = command.at("text").as_str().unwrap_or_default();
+            self.seen.lock().unwrap().push(
+                format!("{} {text}", json!(command.kind).as_str().unwrap_or_default())
+                    .trim_end()
+                    .to_string(),
+            );
+            Box::pin(async { Ok(json!({"ok":true,"messageId":"message-1"})) })
+        }
+        fn close<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+    }
+
+    async fn kinds_registry(
+        root: &std::path::Path,
+        state: &str,
+    ) -> (WorkbenchRegistry, ChatDb, Arc<std::sync::Mutex<Vec<String>>>) {
+        let database = ChatDb::open(&root.join("workbench.db")).unwrap();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            paths(root),
+            Arc::new(OneDriverFactory {
+                driver: std::sync::Mutex::new(Some(Box::new(KindsDriver { seen: seen.clone() }))),
+            }),
+        );
+        database.create_session(a_chat(state)).await.unwrap();
+        registry
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
+            .await
+            .unwrap();
+        say_state(&database, state).await;
+        seen.lock().unwrap().clear();
+        (registry, database, seen)
+    }
+
+    fn waiting_texts(held: &[Value]) -> Vec<&str> {
+        held.iter().map(|held| held["text"].as_str().unwrap()).collect()
+    }
+
+    /// bw-fhyi: a message sent into a turn is never handed to the busy agent,
+    /// where it would wait behind the running command and die with the
+    /// process. The app keeps it first in line, ends the turn, and the turn's
+    /// end sends it before anything that waited longer.
+    #[tokio::test]
+    async fn a_message_sent_into_a_turn_waits_first_and_ends_the_turn() {
+        let root = tempfile::tempdir().unwrap();
+        let (registry, database, seen) = kinds_registry(root.path(), "running_tool").await;
+        registry
+            .execute(&command(CommandKind::PromptHold, json!({"sessionId":"session-1","text":"when you are done"})))
+            .await
+            .unwrap();
+
+        let answer = registry
+            .execute(&command(CommandKind::PromptSend, json!({"sessionId":"session-1","text":"stop and read this"})))
+            .await
+            .unwrap();
+        assert_eq!(answer["held"]["text"], json!("stop and read this"), "the answer says it is waiting");
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec!["session.interrupt".to_string()],
+            "the turn is ended, and nothing is handed to the agent while it runs"
+        );
+        let waiting = database.held_messages("session-1".into()).await.unwrap();
+        assert_eq!(waiting_texts(&waiting), vec!["stop and read this", "when you are done"]);
+
+        // The interrupted turn settles as Ready, and its end sends the message.
+        say_state(&database, "idle").await;
+        for _ in 0..100 {
+            if seen.lock().unwrap().len() > 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(seen.lock().unwrap()[1], "prompt.send stop and read this");
+    }
+
+    /// bw-fhyi: pushing a waiting message into a turn is the same road — it
+    /// goes to the front and the turn is ended for it.
+    #[tokio::test]
+    async fn a_waiting_message_pushed_into_a_turn_goes_first_and_ends_the_turn() {
+        let root = tempfile::tempdir().unwrap();
+        let (registry, database, seen) = kinds_registry(root.path(), "thinking").await;
+        for text in ["first written", "pushed now"] {
+            registry
+                .execute(&command(CommandKind::PromptHold, json!({"sessionId":"session-1","text":text})))
+                .await
+                .unwrap();
+        }
+        let waiting = database.held_messages("session-1".into()).await.unwrap();
+        let pushed = waiting[1]["id"].clone();
+
+        registry
+            .execute(&command(CommandKind::PromptPush, json!({"sessionId":"session-1","heldId":pushed})))
+            .await
+            .unwrap();
+        assert_eq!(*seen.lock().unwrap(), vec!["session.interrupt".to_string()]);
+        let waiting = database.held_messages("session-1".into()).await.unwrap();
+        assert_eq!(waiting_texts(&waiting), vec!["pushed now", "first written"]);
+    }
+
+    /// bw-fhyi: a chat whose reply is over, waiting only on a task it sent
+    /// away, has no turn to end. A message sent then is simply sent.
+    #[tokio::test]
+    async fn a_message_past_a_finished_reply_is_sent_without_an_interrupt() {
+        let root = tempfile::tempdir().unwrap();
+        let (registry, database, seen) = kinds_registry(root.path(), "waiting_for_agents").await;
+        registry
+            .execute(&command(CommandKind::PromptSend, json!({"sessionId":"session-1","text":"and another thing"})))
+            .await
+            .unwrap();
+        assert_eq!(*seen.lock().unwrap(), vec!["prompt.send and another thing".to_string()]);
+        assert!(database.held_messages("session-1".into()).await.unwrap().is_empty());
     }
 
     /// bw-r54j.3: a provider that refuses the message leaves it waiting, not

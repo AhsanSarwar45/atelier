@@ -1715,6 +1715,26 @@ fn held_in_its_project(
         Ok((taken == 1).then_some(wanted))
     }
 
+    /**
+     * Move a waiting message to the front of its chat's queue, because the
+     * reader asked for it now.
+     *
+     * The turn is being interrupted for this message, so it is the one the
+     * turn's end sends, whatever was waiting before it. None when it is not
+     * waiting any more: already on its way, dropped, or never this chat's.
+     */
+    pub fn put_first(&self, session_id: &str, id: &str) -> rusqlite::Result<Option<Value>> {
+        let moved = self.connection.prepare_cached(
+            "UPDATE held_message
+             SET position = (SELECT MIN(position) - 1 FROM held_message WHERE session_id = ?1)
+             WHERE id = ?2 AND session_id = ?1 AND sending = 0",
+        )?.execute(params![session_id, id])?;
+        if moved == 0 {
+            return Ok(None);
+        }
+        Ok(self.held_messages(session_id)?.into_iter().find(|row| row["id"] == json!(id)))
+    }
+
     /// Put a claimed message back, because the send it was claimed for failed.
     pub fn release_held(&self, id: &str) -> rusqlite::Result<()> {
         self.connection

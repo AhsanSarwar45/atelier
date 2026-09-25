@@ -122,6 +122,7 @@ enum Command {
     HeldMessages(String, Reply<Vec<serde_json::Value>>),
     TakeHeld(String, Option<String>, Reply<Option<serde_json::Value>>),
     ReleaseHeld(String, Reply<()>),
+    PutFirst(String, String, Reply<Option<serde_json::Value>>),
     DropHeld(String, String, Reply<Option<serde_json::Value>>),
     ForgetHeld(String, Reply<()>),
     Shutdown,
@@ -534,6 +535,17 @@ impl ChatDb {
         id: Option<String>,
     ) -> Result<Option<serde_json::Value>, String> {
         self.request(|reply| Command::TakeHeld(session_id, id, reply))
+            .await
+    }
+
+    /// Move a waiting message to the front of the queue; nothing when it is
+    /// no longer waiting.
+    pub async fn put_first(
+        &self,
+        session_id: String,
+        id: String,
+    ) -> Result<Option<serde_json::Value>, String> {
+        self.request(|reply| Command::PutFirst(session_id, id, reply))
             .await
     }
 
@@ -1367,6 +1379,9 @@ fn run(
                 respond(reply, store.take_held(&session_id, id.as_deref()))
             }
             Command::ReleaseHeld(id, reply) => respond(reply, store.release_held(&id)),
+            Command::PutFirst(session_id, id, reply) => {
+                respond(reply, store.put_first(&session_id, &id))
+            }
             Command::DropHeld(session_id, id, reply) => {
                 respond(reply, store.drop_held(&session_id, &id))
             }

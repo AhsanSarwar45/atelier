@@ -543,7 +543,7 @@ export type WbpEvent = EventBase &
     | { type: 'message.completed'; messageId: string }
     /** The user pulled an unanswered, locally echoed prompt back into the composer. */
     | { type: 'message.retracted'; messageId: string }
-    | { type: 'prompt.held'; held: HeldMessage }
+    | { type: 'prompt.held'; held: HeldMessage; first?: boolean }
     | { type: 'prompt.released'; heldId: string; reason: 'sent' | 'dropped' }
     | {
         type: 'tool.started';

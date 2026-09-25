@@ -177,6 +177,13 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     settle(message);
     return;
   }
+  // The spec's own cancel, the one notification this agent answers: the turn
+  // it names ends as `cancelled`, and the agent stays for the next prompt.
+  if (method === 'session/cancel') {
+    const open = openTurns.get(params?.sessionId);
+    if (open !== undefined) endTurn(open, params.sessionId, 'cancelled');
+    return;
+  }
   if (id === undefined) return;
   if (method === 'initialize') {
     say({
@@ -233,6 +240,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     return;
   }
   if (method === 'session/prompt') {
+    openTurns.set(params?.sessionId, id);
     void turn(id, params);
     return;
   }
@@ -305,6 +313,52 @@ async function load(id, params) {
 const QUIET_MS = Number(process.env.BEADS_E2E_ACP_QUIET_MS ?? 20_000);
 let started = 0;
 let asking = 9100;
+
+/**
+ * The turn each session has open, so a cancel can end it the way the spec
+ * asks: the open `session/prompt` answered `cancelled`, and nothing said for
+ * that turn after it (bw-fhyi).
+ */
+const openTurns = new Map();
+function endTurn(id, sessionId, stopReason) {
+  if (openTurns.get(sessionId) !== id) return;
+  openTurns.delete(sessionId);
+  say({ id, result: { stopReason } });
+}
+const stillOpen = (id, sessionId) => openTurns.get(sessionId) === id;
+
+/**
+ * A command that runs for minutes, the way a test suite does, and a line that
+ * is answered at once. The two are what sending a message into a running
+ * command is about: the first is what the message must stop, the second is
+ * how the screen shows the message was read (bw-fhyi).
+ */
+const LONG_COMMAND = 'run the long command';
+const LONG_COMMAND_MS = Number(process.env.BEADS_E2E_ACP_LONG_COMMAND_MS ?? 180_000);
+const SAY_YOU_READ = 'say you read this';
+
+async function longCommand(id, params) {
+  const sessionId = params?.sessionId;
+  const send = (update) => say({ method: 'session/update', params: { sessionId, update } });
+  const toolCallId = `long-command-${id}`;
+  // Its process named, so a case can tell the agent that answers next is this
+  // one and not a fresh one started after Stop's kind of ending.
+  // Each reply carries its own message ID, as the real adapter's do: this
+  // loads a scripted history, not the chat's, so generated IDs would start
+  // again after Stop and draw over the chat's first reply.
+  send({
+    sessionUpdate: 'agent_message_chunk', messageId: `running-${id}-${process.pid}`,
+    content: { type: 'text', text: `Running the tests in agent ${process.pid}.` },
+  });
+  send({
+    sessionUpdate: 'tool_call', toolCallId, title: 'npx playwright test', kind: 'execute',
+    status: 'in_progress', rawInput: { command: 'npx playwright test' },
+  });
+  await new Promise((settle) => setTimeout(settle, LONG_COMMAND_MS));
+  if (!stillOpen(id, sessionId)) return;
+  send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' });
+  endTurn(id, sessionId, 'end_turn');
+}
 const selectedModels = new Map();
 const steered = new Map();
 
@@ -370,7 +424,7 @@ async function fold(id, params, inWords) {
   }
 
   words(' Now a test to hold it.');
-  say({ id, result: { stopReason: 'end_turn' } });
+  endTurn(id, sessionId, 'end_turn');
 }
 
 async function turn(id, params) {
@@ -379,6 +433,24 @@ async function turn(id, params) {
   const asked = (params?.prompt ?? []).map((block) => block?.text ?? '').join('');
   if (asked.includes(FOLD)) {
     await fold(id, params, asked.includes(OLD_WAY));
+    return;
+  }
+  if (asked.includes(LONG_COMMAND)) {
+    await longCommand(id, params);
+    return;
+  }
+  if (asked.includes(SAY_YOU_READ)) {
+    say({
+      method: 'session/update',
+      params: {
+        sessionId: params?.sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk', messageId: `read-${id}-${process.pid}`,
+          content: { type: 'text', text: `Agent ${process.pid} read: ${asked}` },
+        },
+      },
+    });
+    endTurn(id, params?.sessionId, 'end_turn');
     return;
   }
   if (MISSING_CODEX_ROLLOUT) {
@@ -392,7 +464,7 @@ async function turn(id, params) {
         },
       },
     });
-    say({ id, result: { stopReason: 'end_turn' } });
+    endTurn(id, params?.sessionId, 'end_turn');
     return;
   }
   if (await dropOnceWithOwnedProvider(params?.sessionId)) return;
@@ -419,6 +491,7 @@ async function turn(id, params) {
   });
   // Answered, and now away working. Nothing is said for as long as that lasts.
   await new Promise((settle) => setTimeout(settle, QUIET_MS));
+  if (!stillOpen(id, params?.sessionId)) return;
   const chosen = reply.result?.content?.direction ?? reply.result?.action ?? 'nothing';
   say({
     method: 'session/update',
@@ -440,5 +513,5 @@ async function turn(id, params) {
     });
   }
   steered.delete(params?.sessionId);
-  say({ id, result: { stopReason: 'end_turn' } });
+  endTurn(id, params?.sessionId, 'end_turn');
 }

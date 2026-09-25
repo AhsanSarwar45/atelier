@@ -266,6 +266,28 @@ describe('the queue a chat is opened on', () => {
 });
 
 /**
+ * A message sent now, into a turn (bw-fhyi).
+ *
+ * The server keeps it and ends the turn for it, so it is the next thing the
+ * chat reads: the queue draws it at the front, ahead of what waited longer.
+ */
+describe('a message sent now while the chat works', () => {
+  it('leads the queue until the turn it ended is over', async () => {
+    const { asView, reduce } = await import('@/workbench/fold');
+    const opened = asView({ held: [aWaitingMessage('written first'), aWaitingMessage('sent now', 'held-2')] });
+    const pushed = reduce(opened, {
+      type: 'prompt.held',
+      seq: 2,
+      sessionId: 's1',
+      at: '2026-09-19T00:00:01.000Z',
+      held: aWaitingMessage('sent now', 'held-2'),
+      first: true,
+    });
+    expect(pushed.held.map((message) => message.id)).toEqual(['held-2', 'held-1']);
+  });
+});
+
+/**
  * The reply is over and only a task the agent sent away is still going
  * (bw-ekpt.1).
  *
