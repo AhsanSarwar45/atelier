@@ -16,7 +16,7 @@ export function ActiveGuidance({ snapshot }: { snapshot: GuidanceSnapshot }) {
   const inactive = snapshot.items.filter(item => item.state !== 'available');
   const source = (value: string) => value === 'built-in' ? 'Built in' : value === 'global' ? 'Global' : 'Project';
   return <Popover>
-    <PopoverTrigger asChild><Badge asChild appearance="outline" size="sm" shape="circle"><Button variant="ghost" size="sm" aria-label="Active guidance" data-testid="chat-shared-library"><BookOpen className="size-3" aria-hidden="true" /><span>Guidance</span></Button></Badge></PopoverTrigger>
+    <PopoverTrigger asChild><Badge asChild appearance="outline" size="sm" shape="circle" className="hidden shrink-0 md:inline-flex"><Button variant="ghost" size="sm" aria-label="Active guidance" data-testid="chat-shared-library"><BookOpen className="size-3" aria-hidden="true" /><span>Guidance</span></Button></Badge></PopoverTrigger>
     <PopoverContent align="end" side="bottom" aria-label="Active guidance" data-testid="guidance-popover" className="w-96 max-w-[calc(100vw-2rem)] text-xs text-t-secondary">
     <div className="max-h-[min(24rem,60vh)] space-y-4 overflow-auto">
       <h2 className="text-sm font-semibold text-t-primary">Active guidance</h2>

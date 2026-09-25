@@ -165,8 +165,9 @@ for (const brand of ['claude', 'codex'] as const) test(`${brand} chat guidance h
   await page.setViewportSize({ width: 390, height: 844 });
   const scrim = page.getByTestId('chat-right-rail-scrim');
   if (await scrim.isVisible()) await page.getByTestId('chat-right-rail-toggle').click();
-  await badge.click();
-  await expect(guidance).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: join(results, `guidance-badge-mobile-${brand}.png`), animations: 'disabled' });
+  // On a phone the chip steps aside with the other left-side status chips.
+  await expect(badge).toBeHidden();
+  await expect(page.getByTestId('memory-badge')).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
