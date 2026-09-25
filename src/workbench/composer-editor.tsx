@@ -42,6 +42,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
+import { acceptCompletion, closeCompletion, completionStatus, moveCompletionSelection } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { Prec, StateEffect, type EditorState, type Extension } from '@codemirror/state';
 import {
@@ -66,12 +67,26 @@ import { opens as opensIt } from '@/workbench/attachment-look';
 import { drawnMarks } from '@/workbench/drawn-marks';
 import { referenceBadgeElement, type Reference } from '@/components/reference-badge';
 import type { DescribeReference } from '@/workbench/reference-names';
-import { findAtelierReferences, findReferences, referenceLabel } from '@/workbench/references';
+import { findAtelierReferences, findReferences, referenceForAddress, referenceLabel } from '@/workbench/references';
 
 /** What the chat holds this box by: the one thing it ever asks of it. */
 export interface ComposerHandle {
   focus(): void;
   cursor(): number;
+}
+
+/**
+ * A key arriving at the form control while a menu is open is the menu's, the
+ * same as it is in the drawn line: the arrows move through it, Enter and Tab
+ * pick, Escape puts it away. One rule for both doors into the box.
+ */
+function menuKey(view: EditorView | null, key: string, shift: boolean): boolean {
+  if (!view || completionStatus(view.state) !== 'active') return false;
+  if (key === 'ArrowDown') return moveCompletionSelection(true)(view);
+  if (key === 'ArrowUp') return moveCompletionSelection(false)(view);
+  if (key === 'Tab' || (key === 'Enter' && !shift)) return acceptCompletion(view);
+  if (key === 'Escape') return closeCompletion(view);
+  return false;
 }
 
 const RefreshPictures = StateEffect.define<void>();
@@ -383,6 +398,19 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
           // Pictures are taken and the event is left alone, so pasted TEXT still
           // lands in the box the ordinary way.
           paste: (event, editorView) => {
+            // A card or a chat of this app, copied from the address bar, goes in
+            // as the reference it names (bw-mi3s.5).
+            const named = referenceForAddress(event.clipboardData?.getData('text/plain') ?? '', window.location.origin);
+            if (named && !event.clipboardData?.files.length) {
+              const { from, to } = editorView.state.selection.main;
+              const insert = named + ' ';
+              editorView.dispatch({
+                changes: { from, to, insert },
+                selection: { anchor: from + insert.length },
+                userEvent: 'input.paste',
+              });
+              return true;
+            }
             filed.current(Array.from(event.clipboardData?.files ?? []), editorView.state.selection.main.head);
             return false;
           },
@@ -449,9 +477,19 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          if (onKey(e)) e.preventDefault();
+          if (menuKey(view.current, e.key, e.shiftKey) || onKey(e)) e.preventDefault();
         }}
-        onPaste={(e) => onFiles(Array.from(e.clipboardData.files), value.length)}
+        onPaste={(e) => {
+          const named = referenceForAddress(e.clipboardData.getData('text/plain'), window.location.origin);
+          if (named && !e.clipboardData.files.length) {
+            e.preventDefault();
+            const box = e.currentTarget;
+            const insert = named + ' ';
+            onChange(value.slice(0, box.selectionStart) + insert + value.slice(box.selectionEnd));
+            return;
+          }
+          onFiles(Array.from(e.clipboardData.files), value.length);
+        }}
         onDrop={(e) => {
           e.preventDefault();
           onFiles(Array.from(e.dataTransfer.files), value.length);

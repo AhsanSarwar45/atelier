@@ -47,7 +47,7 @@ import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { ChatRightRail, useGitDiff, useGitPanel, useLeftRail, useRightRail, type RailView } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
-import { mentionCompletions } from '@/workbench/composer-files';
+import { commandFeed, mentionCompletions } from '@/workbench/composer-files';
 import {
   readUnsentLine,
   useTypedSomething,
@@ -79,7 +79,7 @@ import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, CommandInfo, HeldMessage, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+import type { Brand, HeldMessage, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
 import type { SessionMenu } from '@/workbench/fold';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
@@ -546,70 +546,6 @@ export function configOptionChoices(option: SessionConfigOption): Array<{ value:
 }
 
 /**
- * The `/` menu: the install's own commands and skills, filtered as he types.
- * Opens on a slash at the start of an empty-of-spaces draft, and picking one
- * writes it into the box — sending is ordinary, because that is how a command is
- * run (§7).
- */
-function CommandMenu({
-  matches,
-  active,
-  onPick,
-  pending,
-}: {
-  matches: CommandInfo[];
-  active: number;
-  onPick: (command: CommandInfo) => void;
-  /** The provider's own commands are still being asked for (bw-zldt.2). */
-  pending: boolean;
-}) {
-  if (!matches.length && !pending) return null;
-  return (
-    <Panel tone="overlay" inset="none" data-testid="command-menu" className="mb-2 max-h-64 overflow-y-auto p-1">
-      {matches.map((c, i) => (
-        <Row
-          key={`${c.kind}:${c.name}`}
-          inset="sm"
-          radius="md"
-          // The one the arrow keys are on, which is not the one the mouse is
-          // over: both light up, and while he is arrowing through the list with
-          // the pointer resting on it he can see both answers.
-          selected={i === active}
-          data-testid="command-option"
-          data-command={c.name}
-          data-kind={c.kind}
-          data-active={i === active}
-          // Down, not click: the box must not lose focus before the pick lands.
-          // And pointer, not mouse: a tap only produces mouse events if the
-          // browser decides to emulate them, and it declines to on a list this
-          // size when it reads the tap as the start of a scroll — so on a phone
-          // picking a command did nothing at all (bw-ad3r.9).
-          onPointerDown={(e) => {
-            e.preventDefault();
-            onPick(c);
-          }}
-          className="flex items-baseline gap-2 text-sm"
-        >
-          <span className="shrink-0 font-mono">/{c.name}</span>
-          {c.argumentHint && <span className="shrink-0 font-mono text-xs text-muted-foreground">{c.argumentHint}</span>}
-          <span className="min-w-0 truncate text-xs text-muted-foreground">{c.description}</span>
-          {c.kind === 'skill' && (
-            <Badge variant="secondary" appearance="light" size="xs" shape="circle" className="ml-auto shrink-0">
-              {c.execution === 'shared' ? 'Atelier' : 'skill'}
-            </Badge>
-          )}
-        </Row>
-      ))}
-      {pending && (
-        <p data-testid="commands-pending" className="px-2 py-1.5 text-xs text-muted-foreground">
-          Loading the provider's commands…
-        </p>
-      )}
-    </Panel>
-  );
-}
-
-/**
  * A picture at full size, over the chat. Escape or a click away closes it.
  *
  * The window is the library's, wearing its full-screen shape: the dim behind
@@ -763,8 +699,6 @@ const ComposerBody = memo(function ComposerBody({
   attached,
   setAttached,
   onLook,
-  commands,
-  commandsPending,
   steerError,
   sendError,
   picker,
@@ -779,8 +713,6 @@ const ComposerBody = memo(function ComposerBody({
   attached: DraftPicture[];
   setAttached: Dispatch<SetStateAction<DraftPicture[]>>;
   onLook: (picture: LookableImage) => void;
-  commands: CommandInfo[];
-  commandsPending: boolean;
   steerError: string | null;
   sendError: string | null;
   picker: RefObject<HTMLInputElement>;
@@ -795,11 +727,6 @@ const ComposerBody = memo(function ComposerBody({
     (next) => writeUnsentLine(sessionId, next),
     [sessionId],
   );
-  /** Which entry the `/` menu has under the cursor. */
-  const [pick, setPick] = useState(0);
-  /** The `/` menu, put away by hand until the next keystroke. */
-  const [shut, setShut] = useState(false);
-
   /**
    * Every file this message carries, attached or typed, in writing order.
    *
@@ -807,60 +734,6 @@ const ComposerBody = memo(function ComposerBody({
    * names, and a second list kept alongside it is a second thing to go stale.
    */
   const tray = useMemo(() => draftFiles(draft, attached, where), [draft, attached, where]);
-
-  /** The `/` menu is open only while the draft is one unfinished word starting with a slash. */
-  const typedCommand = /^\/(\S*)$/.exec(draft)?.[1] ?? null;
-  const found = useMemo(() => {
-    if (typedCommand === null) return [];
-    const wanted = typedCommand.toLowerCase();
-    // An Atelier command is named `skill:<id>`, and a person types the id: `/stand`
-    // finds `/skill:standup`. Unbounded, because the provider's own list can
-    // run past any cap on its own, and the Atelier rows come after it, so a
-    // cap hid every one of them (bw-zldt.1). The panel scrolls.
-    return commands.filter((c) => {
-      const name = c.name.toLowerCase();
-      return name.startsWith(wanted) || (name.startsWith('skill:') && name.slice('skill:'.length).startsWith(wanted));
-    });
-  }, [typedCommand, commands]);
-  // Put away by hand, until the next thing he types. Escape used to empty the
-  // whole box instead, so dismissing the list threw away the line — and a
-  // command he meant to send as it stands could not be (bw-1u1.14).
-  const matches = shut ? [] : found;
-  useEffect(() => setPick(0), [typedCommand]);
-
-  function take(command: CommandInfo) {
-    // Written into the box rather than sent: he may want to add an argument, and
-    // a command is ordinary prompt text either way (§7).
-    setDraft(`/${command.name} `);
-    typing.current?.focus();
-  }
-
-  /**
-   * What a keystroke means to the `/` menu. Anything the menu does not want is
-   * handed up to the chat, which decides what Enter and Escape mean to a
-   * conversation. True means the keystroke has been dealt with.
-   */
-  function composerKey(e: ComposerKey): boolean {
-    if (matches.length) {
-      if (e.key === 'ArrowDown') {
-        setPick((n) => (n + 1) % matches.length);
-        return true;
-      }
-      if (e.key === 'ArrowUp') {
-        setPick((n) => (n - 1 + matches.length) % matches.length);
-        return true;
-      }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
-        take(matches[pick] ?? matches[0]!);
-        return true;
-      }
-      if (e.key === 'Escape') {
-        setShut(true);
-        return true;
-      }
-    }
-    return onKey(e);
-  }
 
   return (
     <>
@@ -883,8 +756,6 @@ const ComposerBody = memo(function ComposerBody({
           ))}
         </div>
       )}
-      {/* His own commands and skills, as this session announced them (§7). */}
-      <CommandMenu matches={matches} active={pick} onPick={take} pending={commandsPending && typedCommand !== null && !shut} />
       {steerError && (
         <Panel asChild tone="danger" className="mb-2 text-xs text-danger">
           <p data-testid="steer-error">{steerError}</p>
@@ -921,7 +792,6 @@ const ComposerBody = memo(function ComposerBody({
         ref={typing}
         value={draft}
         onChange={(text) => {
-          setShut(false);
           setDraft(text);
           // The SAME list back when nothing was taken out of it. A fresh array
           // every keystroke is a fresh value for the chat screen above to
@@ -938,7 +808,7 @@ const ComposerBody = memo(function ComposerBody({
         onFiles={(files, at) => absorb(files, at)}
         pictures={attached}
         onOpenPicture={onLook}
-        onKey={composerKey}
+        onKey={onKey}
         extra={completeFiles}
         describe={describe}
         // No held case here: a held chat draws no box at all, so a disabled
@@ -1264,7 +1134,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // asking as well.
   const searchIn = useRef<MentionPlace>({ cwd: where.cwd, project: projectPath, projectId, session: sessionId });
   searchIn.current = { cwd: where.cwd, project: projectPath, projectId, session: sessionId };
-  const completeFiles = useMemo(() => mentionCompletions(() => searchIn.current), []);
+  // And a slash opens the chat's own commands and skills in the same menu
+  // (bw-mi3s.5), as this session announced them (§7).
+  const commandsNow = useMemo(() => commandFeed(), []);
+  const completeFiles = useMemo(() => mentionCompletions(() => searchIn.current, commandsNow), [commandsNow]);
+  const menuCommands = view.menu.commands;
+  const menuCommandsPending = view.menu.commandsPending === true;
+  useEffect(
+    () => commandsNow.set({ commands: menuCommands, pending: menuCommandsPending }),
+    [commandsNow, menuCommands, menuCommandsPending],
+  );
 
   // Everything the conversation says, gone through once for the addresses in
   // it, so the answers are already back by the time the reader looks.
@@ -3277,8 +3156,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             attached={attached}
             setAttached={setAttached}
             onLook={setLooking}
-            commands={view.menu.commands}
-            commandsPending={view.menu.commandsPending === true}
             steerError={steerError}
             sendError={sendError}
             picker={picker}

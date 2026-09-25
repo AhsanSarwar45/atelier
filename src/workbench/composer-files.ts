@@ -38,8 +38,11 @@
  */
 
 import {
+  acceptCompletion,
   autocompletion,
   completionKeymap,
+  completionStatus,
+  setSelectedCompletion,
   startCompletion,
   type Completion,
   type CompletionContext,
@@ -47,14 +50,14 @@ import {
   type CompletionSource,
 } from '@codemirror/autocomplete';
 import { Prec, type Extension } from '@codemirror/state';
-import { EditorView, ViewPlugin, keymap, tooltips } from '@codemirror/view';
+import { EditorView, ViewPlugin, keymap, tooltips, type ViewUpdate } from '@codemirror/view';
 
 import { iconForFile, iconForFolder } from '@/components/file-icon';
 import { ICON_FALLBACK, iconUrl } from '@/components/file-icons';
 import { referenceBadgeElement, type Reference } from '@/components/reference-badge';
 import { mention, type FsFoundPath, type MentionOffer, type MentionPlace } from '@/lib/api';
 import type { BeadStatus } from '@/types';
-import type { Brand } from '@/workbench/protocol';
+import type { Brand, CommandInfo } from '@/workbench/protocol';
 import { learnChat, learnSkill, setReferenceAsker } from '@/workbench/reference-names';
 import { canBeginReference, formatAtelierReference, formatReference, type AtelierKind } from '@/workbench/references';
 
@@ -268,6 +271,235 @@ function askAboutNames(placeOf: () => MentionPlace): (kind: AtelierKind, id: str
   };
 }
 
+/**
+ * The `/` menu: the install's own commands and skills, on the same engine as
+ * the `@` menu (bw-mi3s.5).
+ *
+ * It opens on a slash at the start of a draft that is one unfinished word, the
+ * rule the menu drawn above the box used to follow, and picking one writes it
+ * into the box — sending is ordinary, because that is how a command is run
+ * (§7). The ranking is fuzzy: what was typed may be the start of the name, the
+ * start of a skill's id (`/stand` finds `/skill:standup`), inside the name, or
+ * its letters in order.
+ */
+export interface CommandsNow {
+  commands: readonly CommandInfo[];
+  /** The provider's own commands are still being asked for (bw-zldt.2). */
+  pending: boolean;
+}
+
+/**
+ * The chat's command list as the menu reads it: what it is now, and word when
+ * it changes, because the provider's own commands arrive a beat after the box
+ * and a menu already open must show them.
+ */
+export interface CommandFeed {
+  now(): CommandsNow;
+  set(next: CommandsNow): void;
+  subscribe(listener: () => void): () => void;
+}
+
+export function commandFeed(): CommandFeed {
+  let current: CommandsNow = { commands: [], pending: false };
+  const listeners = new Set<() => void>();
+  return {
+    now: () => current,
+    set: (next) => {
+      if (next.commands === current.commands && next.pending === current.pending) return;
+      current = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+/** A whole draft that is one word starting with a slash. */
+const SLASH_WORD = /^\/(\S*)$/;
+
+/** How well `typed` answers a command, lower first; null when it does not. */
+function commandFit(command: CommandInfo, typed: string): number | null {
+  if (!typed) return 3;
+  const name = command.name.toLowerCase();
+  const id = name.startsWith('skill:') ? name.slice('skill:'.length) : null;
+  if (name === typed || id === typed) return 0;
+  if (name.startsWith(typed) || id?.startsWith(typed)) return 1;
+  if (name.includes(typed)) return 2;
+  let at = 0;
+  for (const letter of typed) {
+    at = name.indexOf(letter, at);
+    if (at < 0) return null;
+    at += 1;
+  }
+  return 4;
+}
+
+/**
+ * The commands that answer what was typed after the slash, best first, and in
+ * the order the chat announced them among equals. Unbounded, because the
+ * provider's own list can run past any cap on its own, and the Atelier rows
+ * come after it, so a cap hid every one of them (bw-zldt.1). The menu scrolls.
+ */
+export function rankCommands(commands: readonly CommandInfo[], typed: string): CommandInfo[] {
+  const wanted = typed.toLowerCase();
+  return commands
+    .map((command, at) => ({ command, at, fit: commandFit(command, wanted) }))
+    .filter((one): one is { command: CommandInfo; at: number; fit: number } => one.fit !== null)
+    .sort((a, b) => a.fit - b.fit || a.at - b.at)
+    .map((one) => one.command);
+}
+
+/** Which command a line of the menu is, kept for drawing it. */
+const drawnCommands = new WeakMap<Completion, CommandInfo | 'pending'>();
+
+function commandOffer(command: CommandInfo): Completion {
+  const written = '/' + command.name + ' ';
+  const line: Completion = {
+    label: '/' + command.name,
+    type: 'command',
+    apply: (view: EditorView) => {
+      // Written into the box rather than sent: he may want to add an argument,
+      // and a command is ordinary prompt text either way (§7).
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: written },
+        selection: { anchor: written.length },
+      });
+    },
+  };
+  drawnCommands.set(line, command);
+  return line;
+}
+
+/** The line that says more commands are on their way. Picking it does nothing. */
+function pendingLine(): Completion {
+  const line: Completion = { label: '/', type: 'pending', apply: () => {} };
+  drawnCommands.set(line, 'pending');
+  return line;
+}
+
+function commandsOffering(feed: CommandFeed): CompletionSource {
+  return (context: CompletionContext): CompletionResult | null => {
+    const typed = SLASH_WORD.exec(context.state.doc.toString());
+    if (!typed || context.pos !== context.state.doc.length) return null;
+    const { commands, pending } = feed.now();
+    const options = rankCommands(commands, typed[1]!).map(commandOffer);
+    if (pending) options.push(pendingLine());
+    if (!options.length) return null;
+    return { from: 0, options, filter: false };
+  };
+}
+
+/** One command as the menu draws it: the name, its argument, what it does. */
+function drawCommand(command: CommandInfo | 'pending'): HTMLElement {
+  const row = document.createElement('span');
+  if (command === 'pending') {
+    row.setAttribute('data-testid', 'commands-pending');
+    row.className = 'cm-commandPending';
+    row.textContent = "Loading the provider's commands…";
+    return row;
+  }
+  row.setAttribute('data-testid', 'command-option');
+  row.setAttribute('data-command', command.name);
+  row.setAttribute('data-kind', command.kind);
+  row.className = 'cm-commandRow';
+  const name = row.appendChild(document.createElement('span'));
+  name.className = 'cm-commandName';
+  name.textContent = '/' + command.name;
+  if (command.argumentHint) {
+    const hint = row.appendChild(document.createElement('span'));
+    hint.className = 'cm-commandHint';
+    hint.textContent = command.argumentHint;
+  }
+  const said = row.appendChild(document.createElement('span'));
+  said.className = 'cm-commandSays';
+  said.textContent = command.description;
+  if (command.kind === 'skill') {
+    const where = row.appendChild(document.createElement('span'));
+    where.className = 'cm-commandWhere';
+    where.textContent = command.execution === 'shared' ? 'Atelier' : 'skill';
+  }
+  return row;
+}
+
+/**
+ * What a menu line is named for a machine: the `/` menu is the command menu it
+ * always was, so everything that looked for it by name still finds it.
+ */
+function nameTheMenu(line: HTMLElement, name: string): void {
+  queueMicrotask(() => line.closest('.cm-tooltip-autocomplete')?.setAttribute('data-testid', name));
+}
+
+/**
+ * The menu opens for a slash however the slash got into the box.
+ *
+ * CodeMirror opens a menu for a keystroke in its own writing surface. The box
+ * has a second door, the form control a machine types into
+ * (`composer-editor.tsx`), and a draft put back after a reload comes through
+ * neither. A slash word arriving by any of them opens the `/` menu, and so does
+ * the chat's command list changing under an open one — the provider's own
+ * commands arrive a beat after the box does.
+ */
+function slashOpens(feed: CommandFeed) {
+  return ViewPlugin.fromClass(
+    class {
+      private readonly stop: () => void;
+
+      constructor(private readonly view: EditorView) {
+        this.stop = feed.subscribe(() => {
+          if (completionStatus(view.state) === null) return;
+          if (SLASH_WORD.test(view.state.doc.toString())) startCompletion(view);
+        });
+      }
+
+      update(update: ViewUpdate) {
+        if (!update.docChanged) return;
+        if (completionStatus(update.state) !== null) return;
+        if (!SLASH_WORD.test(update.state.doc.toString())) return;
+        queueMicrotask(() => startCompletion(this.view));
+      }
+
+      destroy() {
+        this.stop();
+      }
+    },
+  );
+}
+
+/**
+ * A tap on a line picks it.
+ *
+ * CodeMirror picks on `mousedown`, and a phone only produces mouse events if it
+ * decides to emulate them — which it declines to on a list it reads the tap as
+ * the start of a scroll on, so on a phone picking did nothing at all
+ * (bw-ad3r.9). Pointer events arrive for every kind of pointer, so a touch
+ * or a pen picks on its own `pointerdown`.
+ */
+const tapPicks = ViewPlugin.fromClass(
+  class {
+    private readonly picked = (event: PointerEvent) => {
+      // A mouse is served by CodeMirror's own `mousedown`, which also needs no
+      // pause after the menu opens.
+      if (event.pointerType === 'mouse') return;
+      const line = (event.target as Element | null)?.closest?.('.cm-tooltip-autocomplete li[id]');
+      const at = line ? /-(\d+)$/.exec(line.id) : null;
+      if (!at) return;
+      event.preventDefault();
+      this.view.dispatch({ effects: setSelectedCompletion(Number(at[1])) });
+      acceptCompletion(this.view);
+    };
+
+    constructor(private readonly view: EditorView) {
+      view.dom.addEventListener('pointerdown', this.picked);
+    }
+
+    destroy() {
+      this.view.dom.removeEventListener('pointerdown', this.picked);
+    }
+  },
+);
+
 /** The menu's own look: the app's colours, and room for an icon per line. */
 const menuTheme = EditorView.theme({
   '.cm-tooltip.cm-tooltip-autocomplete': {
@@ -295,6 +527,22 @@ const menuTheme = EditorView.theme({
   },
   '.cm-fileIcon': { height: '16px', width: '16px', flexShrink: '0' },
   '.cm-referenceBadge': { flexShrink: '1', minWidth: '0', margin: '0' },
+  // A command's line is drawn whole by `drawCommand`.
+  '.cm-completion-command .cm-completionLabel, .cm-completion-pending .cm-completionLabel': { display: 'none' },
+  '.cm-commandRow': { display: 'flex', alignItems: 'baseline', gap: '0.5rem', minWidth: '0', width: '100%' },
+  '.cm-commandName': { flexShrink: '0', fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
+  '.cm-commandHint': { flexShrink: '0', fontFamily: 'var(--font-mono, ui-monospace, monospace)', fontSize: '12px', opacity: '0.6' },
+  '.cm-commandSays': { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', opacity: '0.6' },
+  '.cm-commandWhere': {
+    marginLeft: 'auto',
+    flexShrink: '0',
+    borderRadius: '9999px',
+    padding: '0 0.4rem',
+    fontSize: '11px',
+    backgroundColor: 'hsl(var(--secondary))',
+    color: 'hsl(var(--secondary-foreground))',
+  },
+  '.cm-commandPending': { fontSize: '12px', opacity: '0.6' },
   // A chat's and a skill's badge is its name, so the line has no words of its own.
   '.cm-completion-chat .cm-completionLabel, .cm-completion-skill .cm-completionLabel': { display: 'none' },
   'completion-section': {
@@ -388,11 +636,16 @@ const followTheKeyboard = ViewPlugin.fromClass(
  * when it is shut, so the chat gets them back the moment it closes. For this to
  * hold, `composer-editor.tsx` places `extra` ahead of the chat's own keymap.
  */
-export function mentionCompletions(placeOf: () => MentionPlace): Extension {
+export function mentionCompletions(
+  placeOf: () => MentionPlace,
+  commands: CommandFeed = commandFeed(),
+): Extension {
   setReferenceAsker(askAboutNames(placeOf));
   return [
     autocompletion({
-      override: [offering(placeOf)],
+      override: [commandsOffering(commands), offering(placeOf)],
+      // The provider's own list can run past a hundred on its own (bw-zldt.1).
+      maxRenderedOptions: 400,
       optionClass: (completion: Completion) => 'cm-completion-' + (completion.type ?? 'file'),
       // Ours are drawn by `addToOptions` below; the built-in ones are a font of
       // little letters that say nothing a file icon does not say better.
@@ -407,6 +660,12 @@ export function mentionCompletions(placeOf: () => MentionPlace): Extension {
         {
           position: 10,
           render: (completion: Completion) => {
+            const command = drawnCommands.get(completion);
+            if (command) {
+              const drawn = drawCommand(command);
+              nameTheMenu(drawn, 'command-menu');
+              return drawn;
+            }
             const badge = drawnBadges.get(completion);
             if (badge) {
               const drawn = referenceBadgeElement(badge);
@@ -423,6 +682,8 @@ export function mentionCompletions(placeOf: () => MentionPlace): Extension {
     Prec.highest(keymap.of(completionKeymap)),
     tooltips({ tooltipSpace: roomToDrawIn }),
     followTheKeyboard,
+    slashOpens(commands),
+    tapPicks,
     menuTheme,
   ];
 }

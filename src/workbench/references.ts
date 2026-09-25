@@ -383,3 +383,31 @@ export function findAtelierReferences(text: string): FoundAtelierReference[] {
 export function formatAtelierReference(kind: AtelierKind, id: string): string {
   return `@${kind}:${id}`;
 }
+
+/**
+ * The reference a pasted address of this app stands for (bw-mi3s.5).
+ *
+ * A card or a chat copied out of the address bar — `/project?id=…&card=bw-1`
+ * or `…&tab=chat&chat=<id>` — is written as `@bead:bw-1` or `@chat:<id>`, the
+ * reference it names, rather than as a long address the agent cannot open. An
+ * address of anywhere else, or of anything else here, is left as pasted.
+ * `origin` is the app's own, so only this app's addresses are read this way.
+ */
+export function referenceForAddress(pasted: string, origin: string): string | null {
+  const text = pasted.trim();
+  if (!text || /\s/.test(text)) return null;
+  let address: URL;
+  try {
+    address = new URL(text, origin);
+  } catch {
+    return null;
+  }
+  if (address.origin !== origin || address.pathname !== '/project') return null;
+  if (!text.startsWith(origin) && !text.startsWith('/project')) return null;
+  const whole = new RegExp('^' + ATELIER_ID + '$');
+  const card = address.searchParams.get('card');
+  if (card && whole.test(card)) return formatAtelierReference('bead', card);
+  const chat = address.searchParams.get('chat');
+  if (chat && whole.test(chat)) return formatAtelierReference('chat', chat);
+  return null;
+}
