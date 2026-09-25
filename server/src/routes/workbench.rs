@@ -41,11 +41,11 @@ pub type EventStream = Pin<Box<dyn Stream<Item = Result<SseEvent, Infallible>> +
 type ClaudeReaders =
     Arc<tokio::sync::Mutex<HashMap<String, crate::workbench::claude::transport::ClaudeTransport>>>;
 
-/// One Codex app-server per working directory and account directory.
+/// One Codex app-server per account directory.
 type CodexReaders = Arc<
     tokio::sync::Mutex<
         HashMap<
-            (std::path::PathBuf, Option<std::path::PathBuf>),
+            Option<std::path::PathBuf>,
             crate::workbench::codex::transport::CodexTransport,
         >,
     >,
@@ -63,9 +63,8 @@ pub struct WorkbenchState {
     listings: Listings,
     /// One usage connection per Claude account, keyed by profile id.
     claude_usage_readers: ClaudeReaders,
-    /// One Codex app-server per working directory and account. `None` for the
-    /// account the server booted with, which is read with the environment it
-    /// already has.
+    /// One Codex app-server per account. `None` for the account the server
+    /// booted with, which is read with the environment it already has.
     codex_readers: CodexReaders,
     codex_records: Arc<std::sync::Mutex<HashMap<String, std::path::PathBuf>>>,
     claim_sweeps: Arc<tokio::sync::Mutex<HashMap<std::path::PathBuf, std::time::Instant>>>,
@@ -357,25 +356,28 @@ impl WorkbenchState {
         }
     }
 
-    /// One read-only app-server per working directory and account.
+    /// One read-only app-server per account.
     ///
     /// Initializing Codex is expensive; list, metadata and usage reads must
     /// share it just as the former sidecar's reader cache did. The account is
-    /// part of the key because an app-server answers for the `CODEX_HOME` it
-    /// was started with and nothing else: one reader per folder would have
+    /// the key because an app-server answers for the `CODEX_HOME` it was
+    /// started with and nothing else: one reader for every account would have
     /// answered the work account's allowance with the personal account's
-    /// (bw-5ihw.8).
+    /// (bw-5ihw.8). The folder is not: its thread list is every thread of the
+    /// account wherever it was started, and the listing picks a project's out
+    /// itself, so a reader per project folder was another copy of the same
+    /// program for every project ever listed (bw-zoz0.1).
     async fn codex_reader(
         &self,
-        cwd: &std::path::Path,
         home: Option<&std::path::Path>,
     ) -> Result<crate::workbench::codex::transport::CodexTransport, String> {
-        let key = (cwd.to_path_buf(), home.map(std::path::Path::to_path_buf));
+        let key = home.map(std::path::Path::to_path_buf);
         let mut readers = self.codex_readers.lock().await;
         if let Some(reader) = readers.get(&key) {
             return Ok(reader.clone());
         }
-        let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(cwd);
+        let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+        let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(&cwd);
         if let Some(home) = home {
             config
                 .environment
@@ -398,11 +400,10 @@ impl WorkbenchState {
 
     async fn forget_codex_reader(
         &self,
-        cwd: &std::path::Path,
         home: Option<&std::path::Path>,
         failed: &crate::workbench::codex::transport::CodexTransport,
     ) {
-        let key = (cwd.to_path_buf(), home.map(std::path::Path::to_path_buf));
+        let key = home.map(std::path::Path::to_path_buf);
         let removed = {
             let mut readers = self.codex_readers.lock().await;
             if readers
@@ -897,12 +898,10 @@ impl WorkbenchState {
             .then(|| self.registry.profile_directory(brand, profile));
         let at = chrono::Utc::now().to_rfc3339();
         let value = if brand == "codex" {
-            let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-            let transport = self.codex_reader(&cwd, named.as_deref()).await?;
+            let transport = self.codex_reader(named.as_deref()).await?;
             let result = crate::workbench::usage::read_codex(&transport, at).await;
             if result.is_err() {
-                self.forget_codex_reader(&cwd, named.as_deref(), &transport)
-                    .await;
+                self.forget_codex_reader(named.as_deref(), &transport).await;
             }
             serde_json::to_value(result?).map_err(|e| e.to_string())?
         } else if brand == "claude" {
@@ -954,16 +953,8 @@ impl WorkbenchState {
             } else if brand == "codex" {
                 let home = (profile != crate::workbench::profiles::SYSTEM)
                     .then(|| self.registry.profile_directory(brand, profile));
-                let removed: Vec<_> = {
-                    let mut readers = self.codex_readers.lock().await;
-                    let keys: Vec<_> = readers
-                        .keys()
-                        .filter(|(_, at)| *at == home)
-                        .cloned()
-                        .collect();
-                    keys.into_iter().filter_map(|key| readers.remove(&key)).collect()
-                };
-                for reader in removed {
+                let removed = self.codex_readers.lock().await.remove(&home);
+                if let Some(reader) = removed {
                     reader.close().await;
                 }
             }
@@ -1008,8 +999,7 @@ impl WorkbenchState {
             let outcome = if brand == "codex" {
                 let named = (profile != crate::workbench::profiles::SYSTEM)
                     .then(|| self.registry.profile_directory(brand, profile));
-                let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-                let transport = self.codex_reader(&cwd, named.as_deref()).await?;
+                let transport = self.codex_reader(named.as_deref()).await?;
                 crate::workbench::usage::use_codex_reset(&transport, id, attempt).await
             } else if brand == "claude" {
                 let directory = self.registry.profile_directory(brand, profile);
@@ -1905,7 +1895,7 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
     let (claude_acp, codex_acp) = tokio::join!(ask("claude"), ask("codex"));
     let mut rows = Vec::new();
     for (brand, result) in [("claude", claude_acp), ("codex", codex_acp)] {
-        let recorded = recorded_sessions(state, brand, project_path).await;
+        let recorded = recorded_sessions(state, brand).await;
         match result {
             Ok(sessions) => {
                 let mut recorded: std::collections::HashMap<String, Value> = recorded
@@ -2033,11 +2023,7 @@ fn registered_roots(state: &WorkbenchState) -> Vec<std::path::PathBuf> {
 /// Neither scan is narrowed to the project's folder here. A worktree outside
 /// that folder is still the project's, and `provider_sessions` drops what is
 /// held in none of its checkouts once, for every source (bw-ggbj.1).
-async fn recorded_sessions(
-    state: &WorkbenchState,
-    brand: &str,
-    project_path: Option<&std::path::Path>,
-) -> Vec<Value> {
+async fn recorded_sessions(state: &WorkbenchState, brand: &str) -> Vec<Value> {
     if brand == "claude" {
         // Every account's record directory. A chat saved on the work account
         // lives under the work account and was simply missing from this list
@@ -2071,10 +2057,10 @@ async fn recorded_sessions(
         .await
         .unwrap_or_default();
     }
-    let cwd = project_path.unwrap_or_else(|| std::path::Path::new("."));
     // One app-server per account: a thread list answers for the CODEX_HOME it
     // was started with, so the accounts are asked one after another and their
-    // answers put together (bw-5ihw.8).
+    // answers put together (bw-5ihw.8). Every thread of the account, wherever
+    // it was started; the caller keeps the ones in its folder.
     let mut threads: Vec<Value> = Vec::new();
     for home in state.codex_account_homes() {
         let stamp = codex_listing_stamp(home.as_deref());
@@ -2082,7 +2068,7 @@ async fn recorded_sessions(
             threads.extend(listed);
             continue;
         }
-        let Ok(transport) = state.codex_reader(cwd, home.as_deref()).await else {
+        let Ok(transport) = state.codex_reader(home.as_deref()).await else {
             continue;
         };
         // Every source kind, for the same reason as the Claude record above:
@@ -2097,7 +2083,7 @@ async fn recorded_sessions(
             }
             Err(_) => {
                 state
-                    .forget_codex_reader(cwd, home.as_deref(), &transport)
+                    .forget_codex_reader(home.as_deref(), &transport)
                     .await
             }
         }
