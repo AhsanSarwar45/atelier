@@ -59,6 +59,9 @@ pub const PROVIDER_CATALOGUE_FIELDS: &[&str] = &[
 /// types a slash; they are shown, never used to accept a command, which only
 /// the chat's own woken session does. Atelier's rows are left out because they
 /// are read afresh from the library, which may have changed since (bw-zldt.2).
+/// Where a provider catalogue keeps each folder's `/` commands.
+const COMMANDS_BY_FOLDER: &str = "commandsByFolder";
+
 pub fn native_commands(menu: &Value) -> Vec<Value> {
     menu["commands"]
         .as_array()
@@ -1477,9 +1480,12 @@ fn held_in_its_project(
     }
 
     /// Write down what a chat's provider just offered, for the stopped chats
-    /// of the same provider account that cannot ask it (bw-y5dc.1). A menu
-    /// that names none of the provider's commands -- one sent before the
-    /// adapter announced them -- keeps the ones already written (bw-zldt.2).
+    /// of the same provider account that cannot ask it (bw-y5dc.1).
+    ///
+    /// The provider's `/` commands are kept for each folder apart, since a
+    /// project's worktrees can each hold commands of their own, and a menu
+    /// that names none -- one sent before the adapter announced them -- keeps
+    /// the ones already written (bw-zldt.2).
     pub fn remember_provider_catalogue(&self, session_id: &str, menu: &Value) -> rusqlite::Result<()> {
         let Some(session) = self.get_session(session_id)? else {
             return Ok(());
@@ -1491,20 +1497,23 @@ fn held_in_its_project(
             .filter(|(field, _)| PROVIDER_CATALOGUE_FIELDS.contains(&field.as_str()))
             .map(|(field, value)| (field.clone(), value.clone()))
             .collect::<serde_json::Map<_, _>>();
+        let mut folders = self
+            .stored_catalogue(&session)?
+            .and_then(|kept| kept.get(COMMANDS_BY_FOLDER).and_then(Value::as_object).cloned())
+            .unwrap_or_default();
         let commands = native_commands(menu);
         if !commands.is_empty() {
-            catalogue.insert("commands".into(), Value::Array(commands));
+            folders.insert(session.cwd.clone(), Value::Array(commands));
+        }
+        if !folders.is_empty() {
+            catalogue.insert(COMMANDS_BY_FOLDER.into(), Value::Object(folders));
         }
         let at = menu["at"].as_str().map(str::to_string).unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
         self.connection.execute(
             "INSERT INTO provider_catalogue (brand, profile, project_id, project_path, at, json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (brand, profile, project_id, project_path)
-             DO UPDATE SET at = excluded.at, json = CASE
-                 WHEN json_type(excluded.json, '$.commands') IS NULL
-                      AND json_type(provider_catalogue.json, '$.commands') IS NOT NULL
-                 THEN json_set(excluded.json, '$.commands', json(json_extract(provider_catalogue.json, '$.commands')))
-                 ELSE excluded.json END",
+             DO UPDATE SET at = excluded.at, json = excluded.json",
             params![
                 session.brand,
                 session.profile.unwrap_or_default(),
@@ -1517,18 +1526,32 @@ fn held_in_its_project(
         Ok(())
     }
 
-    /// What this chat's provider account last offered in this chat's project.
+    /// What this chat's provider account last offered in this chat's project,
+    /// with the `/` commands it offered in this chat's folder.
     pub fn provider_catalogue(&self, session_id: &str) -> rusqlite::Result<Option<Value>> {
         let Some(session) = self.get_session(session_id)? else {
             return Ok(None);
         };
+        Ok(self.stored_catalogue(&session)?.map(|mut catalogue| {
+            let commands = catalogue
+                .as_object_mut()
+                .and_then(|fields| fields.remove(COMMANDS_BY_FOLDER))
+                .and_then(|mut folders| folders.get_mut(&session.cwd).map(Value::take));
+            if let (Some(commands), Some(fields)) = (commands, catalogue.as_object_mut()) {
+                fields.insert("commands".into(), commands);
+            }
+            catalogue
+        }))
+    }
+
+    fn stored_catalogue(&self, session: &Session) -> rusqlite::Result<Option<Value>> {
         self.connection
             .query_row(
                 "SELECT json FROM provider_catalogue
                  WHERE brand = ?1 AND profile = ?2 AND project_id = ?3 AND project_path = ?4",
                 params![
                     session.brand,
-                    session.profile.unwrap_or_default(),
+                    session.profile.as_deref().unwrap_or_default(),
                     session.project_id,
                     session.project_path,
                 ],

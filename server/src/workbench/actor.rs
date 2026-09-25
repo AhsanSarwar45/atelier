@@ -921,7 +921,13 @@ fn provider_menu(
                 .unwrap_or("")
                 .to_string()
         })
-        .map(|(_, menu)| menu.clone());
+        .map(|(id, menu)| (id.clone(), menu.clone()));
+    // The commands are this chat's folder's, whichever chat lent the rest: a
+    // project's worktrees can each hold commands of their own (bw-zldt.2).
+    let lent_here = borrowed.as_ref().is_some_and(|(lender, _)| {
+        store.get_session(lender).ok().flatten().is_some_and(|lender| lender.cwd == target.cwd)
+    });
+    let borrowed = borrowed.map(|(_, menu)| menu);
     // No chat on this provider has spoken since the app started. What it
     // offered last time is still the best account of it, and a stopped chat
     // with no effort or Fast mode to set could only be changed by waking it
@@ -937,7 +943,17 @@ fn provider_menu(
             serde_json::from_value(serde_json::Value::Object(fields)).ok()?
         }
     };
-    let commands = super::store::native_commands(&serde_json::Value::Object(menu.fields.clone()));
+    let lent = super::store::native_commands(&serde_json::Value::Object(menu.fields.clone()));
+    let commands = if lent_here && !lent.is_empty() {
+        lent
+    } else {
+        store
+            .provider_catalogue(session_id)
+            .ok()
+            .flatten()
+            .map(|catalogue| super::store::native_commands(&catalogue))
+            .unwrap_or_default()
+    };
     menu.fields.retain(|field, _| {
         matches!(field.as_str(), "type" | "sessionId" | "seq" | "at")
             || super::store::PROVIDER_CATALOGUE_FIELDS.contains(&field.as_str())
@@ -1631,6 +1647,51 @@ mod tests {
         // Another account is another provider install as far as this knows.
         assert!(live_steering_menu(&store, &nothing_live, "other-account").is_none());
         assert_eq!(offered_menu(&store, &nothing_live, "stopped")["configOptions"][0]["id"], "fast-mode");
+    }
+
+    /// Worktrees of one project can each hold commands of their own, so a
+    /// stopped chat lists its own folder's and never another's (bw-zldt.2).
+    #[test]
+    fn each_folder_of_a_project_keeps_its_own_provider_commands() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        let session = |id: &str, cwd: &str| Session {
+            id: id.into(), brand: "claude".into(), external_id: Some(format!("thread-{id}")),
+            project_id: "project".into(), project_path: "/repo".into(), cwd: cwd.into(),
+            model: None, permission_mode: "default".into(), effort: None,
+            collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
+            origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
+            last_spoke_at: None, begun_by: None, named_by_owner: false,
+        };
+        for row in [
+            session("main", "/repo"),
+            session("tree", "/repo/worktrees/a"),
+            session("main-stopped", "/repo"),
+            session("tree-stopped", "/repo/worktrees/a"),
+            session("elsewhere", "/repo/worktrees/b"),
+        ] {
+            store.create_session(&row).unwrap();
+        }
+        let menu = |id: &str, command: &str| json!({
+            "type":"session.menu", "sessionId":id, "seq":1, "at":"now",
+            "models":[{"value":"default","displayName":"Default"}],
+            "commands":[{"name":command}]
+        });
+        store.remember_provider_catalogue("main", &menu("main", "main-only")).unwrap();
+        store.remember_provider_catalogue("tree", &menu("tree", "tree-only")).unwrap();
+        drop(store);
+        let store = Store::open(&path).unwrap();
+        let nothing_live = HashMap::new();
+        let listed = |id: &str| live_steering_menu(&store, &nothing_live, id).unwrap().fields.get("commands").cloned();
+        assert_eq!(listed("main-stopped"), Some(json!([{"name":"main-only"}])));
+        assert_eq!(listed("tree-stopped"), Some(json!([{"name":"tree-only"}])));
+        assert_eq!(listed("elsewhere"), None, "a folder never asked lists none, so it asks");
+
+        // A live chat in another folder lends its choices, not its commands.
+        let live = HashMap::from([("tree".to_string(), serde_json::from_value::<Event>(menu("tree", "tree-only")).unwrap())]);
+        let lent = live_steering_menu(&store, &live, "main-stopped").unwrap();
+        assert_eq!(lent.fields["commands"], json!([{"name":"main-only"}]));
     }
 
     /// A catalogue kept before commands were kept says nothing a slash could
