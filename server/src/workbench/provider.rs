@@ -446,9 +446,22 @@ async fn append_import_menu(
     provider: &str,
     value: Value,
 ) -> Result<(), String> {
-    database
-        .append(import_event(session, provider, value)?)
-        .await?;
+    let mut event = import_event(session, provider, value)?;
+    // A menu read off a saved chat is that chat's menu until it wakes, so it
+    // lists Atelier's commands beside the provider's, as a woken one does
+    // (bw-zldt.2). Added after the record's identity is taken: the library
+    // changing is not a different record.
+    let root = std::path::PathBuf::from(&session.cwd);
+    let shared = tokio::task::spawn_blocking(move || super::library::commands_for(&root))
+        .await
+        .map_err(|error| error.to_string())?;
+    if !shared.is_empty() {
+        let mut commands = event.fields.get("commands").and_then(Value::as_array).cloned().unwrap_or_default();
+        commands.retain(|command| command["execution"] != "shared");
+        commands.extend(shared);
+        event.fields.insert("commands".into(), json!(commands));
+    }
+    database.append(event).await?;
     Ok(())
 }
 

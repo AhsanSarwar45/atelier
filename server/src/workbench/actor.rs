@@ -99,6 +99,7 @@ enum Command {
     ViewEvents(String, Reply<Vec<Event>>),
     SteeringMenu(String, Reply<serde_json::Value>),
     OfferedMenu(String, Reply<serde_json::Value>),
+    OfferCatalogue(String, Event, Vec<serde_json::Value>, Reply<()>),
     Snapshot(String, Reply<SnapshotParts>),
     TranscriptItems(String, Option<i64>, usize, Reply<TranscriptItemPage>),
     AgentTranscriptItems(
@@ -480,6 +481,18 @@ impl ChatDb {
 
     /// The choices a chat is offered, including those a stopped chat is
     /// shown from its provider's last menu (bw-y5dc.1).
+    /// Keep what a provider offered when asked on a stopped chat's behalf,
+    /// and show it to that chat while it stays stopped (bw-zldt.2).
+    pub async fn offer_catalogue(
+        &self,
+        session_id: String,
+        menu: Event,
+        shared: Vec<serde_json::Value>,
+    ) -> Result<(), String> {
+        self.request(|reply| Command::OfferCatalogue(session_id, menu, shared, reply))
+            .await
+    }
+
     pub async fn offered_menu(&self, session_id: String) -> Result<serde_json::Value, String> {
         self.request(|reply| Command::OfferedMenu(session_id, reply))
             .await
@@ -857,12 +870,38 @@ fn live_steering_menu(
     live_menus: &HashMap<String, Event>,
     session_id: &str,
 ) -> Option<Event> {
-    if let Some(menu) = live_menus.get(session_id) {
-        return Some(menu.clone());
+    let Some(own) = live_menus.get(session_id) else {
+        return provider_menu(store, live_menus, session_id);
+    };
+    let mut own = own.clone();
+    // A menu of its own that names none of the provider's commands -- one an
+    // import wrote, or one asked for before the adapter announced them -- is
+    // given the ones the provider announced elsewhere, to list (bw-zldt.2).
+    if super::store::native_commands(&serde_json::Value::Object(own.fields.clone())).is_empty() {
+        let known = provider_menu(store, live_menus, session_id)
+            .and_then(|menu| menu.fields.get("commands").cloned())
+            .and_then(|commands| commands.as_array().cloned())
+            .unwrap_or_default();
+        if !known.is_empty() {
+            let mut commands = known;
+            commands.extend(own.fields.get("commands").and_then(serde_json::Value::as_array).cloned().unwrap_or_default());
+            own.fields.insert("commands".into(), serde_json::json!(commands));
+        }
     }
+    Some(own)
+}
+
+/// What the provider of a chat with no menu of its own offers: another live
+/// chat's on the same provider account and project, or the last one kept.
+fn provider_menu(
+    store: &Store,
+    live_menus: &HashMap<String, Event>,
+    session_id: &str,
+) -> Option<Event> {
     let target = store.get_session(session_id).ok().flatten()?;
     let borrowed = live_menus
         .iter()
+        .filter(|(id, _)| id.as_str() != session_id)
         .filter(|(id, _)| {
             store
                 .get_session(id)
@@ -1315,6 +1354,46 @@ fn run(
             Command::OfferedMenu(session_id, reply) => {
                 let _ = reply.send(Ok(offered_menu(&store, &live_menus, &session_id)));
             }
+            Command::OfferCatalogue(session_id, menu, shared, reply) => {
+                remember_catalogue(&store, &session_id, &menu);
+                // A chat that woke meanwhile has its own session's menu, and
+                // that is the one it shows. Never made the chat's live menu:
+                // what it is set to stays its own, and what a sent command is
+                // checked against stays its own session's (bw-zldt.2).
+                let asleep = store
+                    .get_session(&session_id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|session| session.state == "dormant");
+                let offered = asleep
+                    .then(|| live_steering_menu(&store, &live_menus, &session_id))
+                    .flatten();
+                let result = match offered {
+                    None => Ok(()),
+                    Some(mut offered) => {
+                        let mut commands = offered
+                            .fields
+                            .get("commands")
+                            .and_then(serde_json::Value::as_array)
+                            .cloned()
+                            .unwrap_or_default();
+                        if !commands.iter().any(|command| command["execution"] == "shared") {
+                            commands.extend(shared);
+                        }
+                        offered.fields.insert("commands".into(), serde_json::json!(commands));
+                        store
+                            .next_seq(&session_id)
+                            .and_then(|seq| persist_event(&store, &session_id, offered, seq))
+                            .map(|stored| {
+                                if let Some((seq, event)) = stored {
+                                    publish_event(&global, &sessions, session_id, seq, event);
+                                }
+                            })
+                            .map_err(|error| error.to_string())
+                    }
+                };
+                let _ = reply.send(result);
+            }
             Command::Snapshot(session_id, reply) => {
                 let result = (|| {
                     let started = std::time::Instant::now();
@@ -1538,6 +1617,52 @@ mod tests {
         // Another account is another provider install as far as this knows.
         assert!(live_steering_menu(&store, &nothing_live, "other-account").is_none());
         assert_eq!(offered_menu(&store, &nothing_live, "stopped")["configOptions"][0]["id"], "fast-mode");
+    }
+
+    /// A catalogue kept before commands were kept says nothing a slash could
+    /// list. Asking the provider on a stopped chat's behalf fills it, shows the
+    /// stopped chat its commands with Atelier's, and gives them to a stopped
+    /// chat whose own imported menu named none (bw-zldt.2).
+    #[tokio::test]
+    async fn a_catalogue_kept_before_commands_is_filled_by_asking_for_a_stopped_chat() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        for id in ["old", "stopped", "imported"] {
+            database.create_session(Session {
+                id: id.into(), brand: "claude".into(), external_id: Some(format!("thread-{id}")),
+                project_id: "here".into(), project_path: "/here".into(), cwd: "/here".into(),
+                model: None, permission_mode: "default".into(), effort: None,
+                collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
+                origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
+                last_spoke_at: None, begun_by: None, named_by_owner: false,
+            }).await.unwrap();
+        }
+        let menu = |id: &str, commands: serde_json::Value| -> Event {
+            serde_json::from_value(json!({
+                "type":"session.menu", "sessionId":id, "seq":0, "at":"now",
+                "models":[{"value":"default","displayName":"Default"}], "commands":commands
+            })).unwrap()
+        };
+        // The shape a catalogue had before: models and no commands.
+        database.append(menu("old", json!([]))).await.unwrap();
+        database.append(menu("imported", json!([{"name":"skill:demo","execution":"shared"}]))).await.unwrap();
+        // Restarted: nothing live, only what was kept.
+        let database = { drop(database); ChatDb::open(&directory.path().join("workbench.db")).unwrap() };
+        assert!(database.offered_menu("stopped".into()).await.unwrap().get("commands").is_none());
+
+        let mut updates = database.subscribe_session("stopped");
+        database.offer_catalogue(
+            "stopped".into(),
+            menu("stopped", json!([{"name":"compact"},{"name":"skill:stale","execution":"shared"}])),
+            vec![json!({"name":"skill:demo","execution":"shared"})],
+        ).await.unwrap();
+        let SessionUpdate::Event(shown) = updates.recv().await.unwrap() else { panic!("no menu shown") };
+        assert_eq!(shown.fields["commands"], json!([{"name":"compact"},{"name":"skill:demo","execution":"shared"}]));
+        assert_eq!(shown.fields["models"][0]["value"], "default");
+        assert_eq!(database.offered_menu("stopped".into()).await.unwrap()["commands"], json!([{"name":"compact"}]));
+        // Kept, so the next restart does not need to ask.
+        let database = { drop(database); ChatDb::open(&directory.path().join("workbench.db")).unwrap() };
+        assert_eq!(database.offered_menu("stopped".into()).await.unwrap()["commands"], json!([{"name":"compact"}]));
     }
 
     /// Everything ever said, in the table the search reads.

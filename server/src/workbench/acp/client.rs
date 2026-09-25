@@ -602,6 +602,87 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
     database.mark_imported(session.id.clone()).await
 }
 
+/// Ask a provider what it offers, on behalf of a chat that is not awake.
+///
+/// A stopped chat lists the commands its provider last announced, kept beside
+/// the provider's catalogue; one whose provider has never announced any under
+/// this build (a catalogue kept before commands were) listed none until a chat
+/// woke. This opens a throwaway session in the chat's folder, keeps what the
+/// adapter announces, and closes it. The chat itself is not touched: its own
+/// conversation is neither loaded nor resumed, and no prompt is sent
+/// (bw-zldt.2).
+pub async fn offer_provider_catalogue(database: &ChatDb, session: &Session) -> Result<(), String> {
+    if adapter_refused_recently(&session.brand).await {
+        return Err(format!("{} refused this app a moment ago", session.brand));
+    }
+    let config = adapter::launch_config(&session.brand, session.model.as_deref(), session.profile.as_deref())
+        .ok_or_else(|| format!("bundled {} ACP adapter is incomplete or unavailable", session.brand))?;
+    let shared_library = super::super::library::snapshot(Path::new(&session.cwd))?;
+    let policy = session_policy::build_with_library(Path::new(&session.cwd), &shared_library);
+    let meta = session_meta(&session.brand, &policy);
+    let cwd = PathBuf::from(&session.cwd);
+    let announced = Arc::new(Mutex::new(Value::Null));
+    let heard = Arc::new(tokio::sync::Notify::new());
+    let (update_announced, update_heard) = (announced.clone(), heard.clone());
+    let io = ClientIo::new(cwd.clone())?;
+    let client = agent_client_protocol::Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: UntypedMessage, _connection| {
+                let raw = notification.params();
+                if notification.method() == "session/update"
+                    && raw.pointer("/update/sessionUpdate") == Some(&json!("available_commands_update"))
+                {
+                    *update_announced.lock().await = raw["update"]["availableCommands"].clone();
+                    update_heard.notify_one();
+                }
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        );
+    let client = declining_prompts!(serving_client_io!(client, io));
+    let answered = client
+        .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
+            let initialized = connection.send_request(initialize_request(false)?).block_task().await?;
+            agreed_version(&initialized)?;
+            let agent_controls = initialized
+                .pointer("/_meta/atelier/subagentControls")
+                .filter(|controls| controls.is_array())
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            let response = connection
+                .send_request(NewSessionRequest::new(cwd).meta(meta))
+                .block_task()
+                .await?;
+            // The adapters announce their commands a beat after the session
+            // exists; one that says nothing in this time has nothing to add.
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), heard.notified()).await;
+            if initialized.pointer("/agentCapabilities/sessionCapabilities/close").is_some() {
+                let _ = connection
+                    .send_request(CloseSessionRequest::new(response.session_id.clone()))
+                    .block_task()
+                    .await;
+            }
+            Ok((
+                serde_json::to_value(response.modes).map_err(acp_error)?,
+                serde_json::to_value(response.config_options).map_err(acp_error)?,
+                agent_controls,
+            ))
+        })
+        .await
+        .map_err(|error| error.to_string());
+    note_adapter_answer(&session.brand, answered.is_err()).await;
+    let (modes, config_options, agent_controls) = answered?;
+    let mut menu = menu_fields(&session.brand, session.model.as_deref(), &modes, &config_options, &agent_controls, &json!([]));
+    let commands = std::mem::take(&mut *announced.lock().await);
+    if commands.as_array().is_some_and(|list| !list.is_empty()) {
+        menu["commands"] = commands;
+    }
+    database
+        .offer_catalogue(session.id.clone(), menu_event(&session.id, menu)?, shared_library.commands())
+        .await
+}
+
 enum Control {
     Prompt {
         content: Vec<ContentBlock>,

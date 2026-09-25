@@ -2820,12 +2820,19 @@ async fn with_atelier_commands(database: &ChatDb, session_id: &str, menu: &mut V
     let has_them = menu["commands"]
         .as_array()
         .is_some_and(|commands| commands.iter().any(|command| command["execution"] == "shared"));
-    if has_them {
+    let native_missing = crate::workbench::store::native_commands(menu).is_empty();
+    if has_them && !native_missing {
         return Ok(());
     }
     let Some(session) = database.get_session(session_id.to_string()).await? else {
         return Ok(());
     };
+    if native_missing && session.state == "dormant" {
+        ask_provider_for_commands(database, &session);
+    }
+    if has_them {
+        return Ok(());
+    }
     let root = std::path::PathBuf::from(&session.cwd);
     let shared = tokio::task::spawn_blocking(move || crate::workbench::library::commands_for(&root))
         .await
@@ -2840,6 +2847,28 @@ async fn with_atelier_commands(database: &ChatDb, session_id: &str, menu: &mut V
     commands.extend(shared);
     menu["commands"] = Value::Array(commands);
     Ok(())
+}
+
+/// Nothing has told this app what the provider of a stopped chat can run:
+/// no chat on it has spoken since the catalogue began keeping commands. Ask
+/// the provider once, in the background, for each account and folder; the
+/// chat's menu fills in when it answers (bw-zldt.2).
+fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::store::Session) {
+    static ASKED: std::sync::LazyLock<std::sync::Mutex<HashSet<String>>> =
+        std::sync::LazyLock::new(Default::default);
+    if !matches!(session.brand.as_str(), "claude" | "codex") {
+        return;
+    }
+    let key = format!("{}\u{0}{}\u{0}{}", session.brand, session.profile.as_deref().unwrap_or_default(), session.project_path);
+    if !ASKED.lock().map(|mut asked| asked.insert(key)).unwrap_or(false) {
+        return;
+    }
+    let (database, session) = (database.clone(), session.clone());
+    tokio::spawn(async move {
+        if let Err(error) = crate::workbench::acp::client::offer_provider_catalogue(&database, &session).await {
+            tracing::warn!(session_id = %session.id, %error, "could not ask the provider for its commands");
+        }
+    });
 }
 
 async fn command(
