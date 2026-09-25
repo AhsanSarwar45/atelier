@@ -20,9 +20,11 @@ const USAGE: &str = "usage: atelier tool chrome <command>
   env                  eval \"$(atelier tool chrome env)\" -> ATELIER_CHROME_PORT, CDP_URL
   status               running or stopped, port, profile
   down [--wipe]        stop it; --wipe also deletes its profile and state
-  mcp [--cwd DIR] [--headless]
+  mcp [--cwd DIR] [--headed]
                        Chrome DevTools MCP server over stdio for that Chrome;
                        Atelier registers this for every chat. Needs Node (npx).
+                       It starts Chrome headless, so no window opens or takes
+                       focus; a Chrome already started with `up` is used as is.
 
 One Chrome per worktree (per directory outside git). It is never shared with
 another worktree and never stopped by name; `down` stops only the process
@@ -38,12 +40,14 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
     }
     let refused = || USAGE.trim_end().to_string();
     let mut cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    let mut headless = false;
+    // A chat's browser opens no window unless the person asked to watch.
+    let mut headless = command == "mcp";
     let mut wipe = false;
     let mut at = 0;
     while at < flags.len() {
         match (command, flags[at]) {
-            ("up" | "mcp", "--headless") => headless = true,
+            ("up", "--headless") => headless = true,
+            ("mcp", "--headed") => headless = false,
             ("down", "--wipe") => wipe = true,
             ("mcp", "--cwd") => {
                 at += 1;
@@ -639,6 +643,8 @@ mod tests {
             "reuse it for every\n  page that user opens",
             "`background: true`",
             "Close each page with `close_page`",
+            "Chrome starts headless on the first browser tool call",
+            "When the person asks to watch, run\n`atelier tool chrome up` first",
             "run `atelier tool chrome down` when the browser work is\n  finished",
         ] {
             assert!(text.contains(want), "guidance lacks {want:?}");

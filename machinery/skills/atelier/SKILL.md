@@ -155,19 +155,21 @@ All Chrome work goes through Atelier's `chrome` MCP server: opening, checking,
 clicking through, testing, QA, console and network checks, and screenshots.
 Atelier gives it to every chat. It is the Chrome DevTools MCP server, connected
 only to this worktree's private Chrome, which has its own profile and port.
-Chrome starts headed on the first browser tool call, and stops when the last
-chat using it ends.
+Chrome starts headless on the first browser tool call, so no window opens or
+takes focus; screenshots, snapshots and input all work the same. It stops when
+the last chat using it ends. When the person asks to watch, run
+`atelier tool chrome up` first: the server then uses that headed Chrome.
 
 - Give each simulated user their own `isolatedContext` name in `new_page`,
-  so their logins never overwrite each other. Each name opens its own window.
+  so their logins never overwrite each other. Each name opens its own window
+  when Chrome is headed.
   Pick one short name per user (`admin`, `learner-1`) and reuse it for every
   page that user opens; never make a second name for the same user.
-- Open pages with `background: true`, so windows do not jump in front of the
-  person's work.
+- Open pages with `background: true`, so a headed Chrome's windows do not jump
+  in front of the person's work.
 - Clean up as you go. Close each page with `close_page` as soon as you are done
   with it, and run `atelier tool chrome down` when the browser work is
-  finished. Chrome otherwise stays open until the chat ends, and its windows
-  stay on the person's screen.
+  finished. Chrome otherwise stays running until the chat ends.
 - For a script or an end-to-end run, use the same Chrome over CDP:
   `eval "$(atelier tool chrome env)"`, then Playwright
   `chromium.connectOverCDP(process.env.CDP_URL)` with one `browser.newContext()`
@@ -177,8 +179,8 @@ chat using it ends.
 
 | Do | Run |
 |---|---|
-| Start, headed on the person's display | `atelier tool chrome up` |
-| Start without a window, only when asked or no display exists | `atelier tool chrome up --headless` |
+| Start without a window (the default for agent work) | `atelier tool chrome up --headless` |
+| Start headed on the person's display, only when they ask to watch | `atelier tool chrome up` |
 | Put the port into the shell | `eval "$(atelier tool chrome env)"` |
 | Check it | `atelier tool chrome status` |
 | Stop, or stop and delete the profile | `atelier tool chrome down`, `atelier tool chrome down --wipe` |
