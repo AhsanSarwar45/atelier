@@ -53,6 +53,22 @@ pub const PROVIDER_CATALOGUE_FIELDS: &[&str] = &[
     "configOptions",
 ];
 
+/// The provider's own `/` commands in a menu, without Atelier's.
+///
+/// They are kept beside the catalogue so a stopped chat can list them when he
+/// types a slash; they are shown, never used to accept a command, which only
+/// the chat's own woken session does. Atelier's rows are left out because they
+/// are read afresh from the library, which may have changed since (bw-zldt.2).
+pub fn native_commands(menu: &Value) -> Vec<Value> {
+    menu["commands"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["execution"] != "shared" && !c["name"].as_str().is_some_and(|name| name.starts_with("skill:")))
+        .cloned()
+        .collect()
+}
+
 const LEGACY_MIGRATIONS: &[&str] = &[
     r#"CREATE TABLE session (
          id TEXT PRIMARY KEY,
@@ -1466,13 +1482,17 @@ fn held_in_its_project(
         let Some(session) = self.get_session(session_id)? else {
             return Ok(());
         };
-        let catalogue = menu
+        let mut catalogue = menu
             .as_object()
             .into_iter()
             .flatten()
             .filter(|(field, _)| PROVIDER_CATALOGUE_FIELDS.contains(&field.as_str()))
             .map(|(field, value)| (field.clone(), value.clone()))
             .collect::<serde_json::Map<_, _>>();
+        let commands = native_commands(menu);
+        if !commands.is_empty() {
+            catalogue.insert("commands".into(), Value::Array(commands));
+        }
         let at = menu["at"].as_str().map(str::to_string).unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
         self.connection.execute(
             "INSERT INTO provider_catalogue (brand, profile, project_id, project_path, at, json)

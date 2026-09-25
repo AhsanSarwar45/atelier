@@ -2796,6 +2796,7 @@ pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Valu
     // themselves are unaffected: they ride on `session.pinned`, the chips name
     // them through the app's own words, and the real catalog replaces nothing
     // when the agent supplies it.
+    with_atelier_commands(database, session_id, &mut view["menu"]).await?;
     view["items"] = json!(snapshot.page.items);
     view["agents"] = json!(snapshot.agents);
     view["lastSeq"] = json!(snapshot.page.newest_seq);
@@ -2806,6 +2807,39 @@ pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Valu
     // out of the loaded window still opens on every waiting message.
     view["held"] = json!(database.held_messages(session_id.to_string()).await?);
     Ok(view)
+}
+
+/// A chat that is not awake still lists the Atelier commands it can run.
+///
+/// A woken chat's own menu already carries them, from the library its
+/// connection pinned. Any other chat is given the library as it stands now, so
+/// a slash offers the same Atelier rows whether or not it has woken; the
+/// command is expanded from the pinned revision when the prompt wakes it
+/// (bw-zldt.2).
+async fn with_atelier_commands(database: &ChatDb, session_id: &str, menu: &mut Value) -> Result<(), String> {
+    let has_them = menu["commands"]
+        .as_array()
+        .is_some_and(|commands| commands.iter().any(|command| command["execution"] == "shared"));
+    if has_them {
+        return Ok(());
+    }
+    let Some(session) = database.get_session(session_id.to_string()).await? else {
+        return Ok(());
+    };
+    let root = std::path::PathBuf::from(&session.cwd);
+    let shared = tokio::task::spawn_blocking(move || crate::workbench::library::commands_for(&root))
+        .await
+        .map_err(|error| error.to_string())?;
+    if shared.is_empty() {
+        return Ok(());
+    }
+    if !menu.is_object() {
+        *menu = json!({});
+    }
+    let mut commands = menu["commands"].as_array().cloned().unwrap_or_default();
+    commands.extend(shared);
+    menu["commands"] = Value::Array(commands);
+    Ok(())
 }
 
 async fn command(

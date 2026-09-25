@@ -850,8 +850,8 @@ fn view_with_live_menu(mut events: Vec<Event>, live: Option<&Event>) -> Vec<Even
 /// a stopped one to be set from until it wakes (bw-y5dc.1). Reopening a dormant chat used to show no picker until its
 /// first prompt woke that exact session, even when another session on the same
 /// provider had just advertised the current catalogue. Reuse only those
-/// provider-wide choices; commands, skills, agents and config values remain
-/// owned by the session that announced them.
+/// provider-wide choices, and the provider's own `/` commands to list; skills,
+/// agents and config values remain owned by the session that announced them.
 fn live_steering_menu(
     store: &Store,
     live_menus: &HashMap<String, Event>,
@@ -898,10 +898,17 @@ fn live_steering_menu(
             serde_json::from_value(serde_json::Value::Object(fields)).ok()?
         }
     };
+    let commands = super::store::native_commands(&serde_json::Value::Object(menu.fields.clone()));
     menu.fields.retain(|field, _| {
         matches!(field.as_str(), "type" | "sessionId" | "seq" | "at")
             || super::store::PROVIDER_CATALOGUE_FIELDS.contains(&field.as_str())
     });
+    // What he could type is listed too, so a slash in a stopped chat is not
+    // an empty menu. Shown only: the command is accepted or refused by the
+    // chat's own session once the prompt wakes it (bw-zldt.2).
+    if !commands.is_empty() {
+        menu.fields.insert("commands".into(), serde_json::json!(commands));
+    }
     menu.fields.insert("sessionId".into(), serde_json::json!(session_id));
     // The options are the provider's; the values set on them are this chat's.
     let pinned = store.steering_menu(session_id).ok();
@@ -1449,7 +1456,7 @@ mod tests {
             "efforts":[{"value":"high","displayName":"High"}],
             "permissionModes":["on-request","never"],
             "collaborationModes":[{"value":"default","displayName":"Default"}],
-            "commands":[{"name":"project-only"}], "skills":["private"], "sharedLibrary":{"revision":"private"},
+            "commands":[{"name":"project-only"},{"name":"skill:private","execution":"shared"}], "skills":["private"], "sharedLibrary":{"revision":"private"},
             "agentDefinitions":[{"name":"worker"}],
             "configOptions":[{"id":"fast","currentValue":true}]
         })).unwrap();
@@ -1465,9 +1472,12 @@ mod tests {
         assert_eq!(restored.fields["sessionId"], "saved");
         assert_eq!(restored.fields["models"][0]["value"], "gpt-5.6-sol");
         assert_eq!(restored.fields["efforts"][0]["value"], "high");
-        for private in ["commands", "skills", "agentDefinitions", "sharedLibrary"] {
+        for private in ["skills", "agentDefinitions", "sharedLibrary"] {
             assert!(restored.fields.get(private).is_none(), "{private} leaked between chats");
         }
+        // The provider's own commands are listed for a slash; Atelier's are
+        // read afresh from the library, not borrowed (bw-zldt.2).
+        assert_eq!(restored.fields["commands"], json!([{"name":"project-only"}]));
         // The option is the provider's, so a stopped chat can be set with it;
         // the value is the one this chat chose, not the chat it came from.
         assert_eq!(restored.fields["configOptions"], json!([{"id":"fast","currentValue":false}]));
@@ -1501,7 +1511,7 @@ mod tests {
             "type":"session.menu", "sessionId":"spoke", "seq":3, "at":"2026-09-14T01:00:00Z",
             "models":[{"value":"default","displayName":"Default"}],
             "efforts":[{"value":"default","displayName":"Default"},{"value":"high","displayName":"High"}],
-            "commands":[{"name":"project-only"}],
+            "commands":[{"name":"project-only"},{"name":"skill:review","execution":"shared"}],
             "configOptions":[
                 {"id":"fast-mode","name":"Fast mode","type":"boolean","currentValue":true},
                 {"id":"agent","type":"select","currentValue":"default","options":[{"value":"reviewer"}]}
@@ -1519,7 +1529,8 @@ mod tests {
         // shows what its own agent will start at.
         assert_eq!(offered.fields["configOptions"][0]["currentValue"], false);
         assert_eq!(offered.fields["configOptions"][1]["currentValue"], "reviewer");
-        assert!(offered.fields.get("commands").is_none());
+        // What he could type is still listed after a restart (bw-zldt.2).
+        assert_eq!(offered.fields["commands"], json!([{"name":"project-only"}]));
 
         // Another project may allow its provider different things.
         assert!(live_steering_menu(&store, &nothing_live, "elsewhere").is_none());

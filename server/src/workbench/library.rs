@@ -1369,6 +1369,17 @@ impl Snapshot {
         pieces.join("\n\n")
     }
 }
+/// The Atelier commands a chat in `root` can run, read without starting it.
+///
+/// A woken chat's menu carries these from the snapshot its connection pinned;
+/// a stopped one has no connection, and a slash in it listed none (bw-zldt.2).
+/// Nothing is persisted here: the revision is pinned when the chat wakes.
+pub fn commands_for(root: &Path) -> Vec<Value> {
+    data_dir()
+        .and_then(|data| resolve(&data, Some(root)))
+        .map(|snapshot| snapshot.commands())
+        .unwrap_or_default()
+}
 pub fn snapshot(root: &Path) -> Result<Snapshot, String> {
     let data = data_dir()?;
     let snap = resolve(&data, Some(root))?;
