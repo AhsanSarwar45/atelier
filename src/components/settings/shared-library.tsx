@@ -16,17 +16,20 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { request } from '@/lib/api';
 import { buildCustomization, nextEntryName, suggestedItemId } from '@/lib/shared-guidance';
 import { sendCommand } from '@/workbench/use-session';
+import { AgentMemories } from './agent-memories';
 
 type Condition = { op: string; path?: string; text?: string; pattern?: string; pointer?: string; key?: string; value?: unknown; name?: string; conditions?: Condition[]; condition?: Condition };
 type Kind = 'instruction' | 'skill' | 'output_style';
-type Category = Kind | 'command';
+type Category = Kind | 'command' | 'memory';
 interface Item { id: string; name: string; description: string; kind: Kind; content: string; when: Condition; requires: string[]; automatic: boolean; parameters: Record<string, string>; resources: Record<string, string>; bundle: string }
 interface Override { disabled?: boolean; content?: string | null; when?: Condition | null; automatic?: boolean | null; parameters?: Record<string, string> }
 interface Library { general_instructions?: string; items: Item[]; overrides: Record<string, Override>; output_style?: string | null }
 interface Evaluation { matched: boolean | null; reason: string; children: Evaluation[] }
 interface Row { item: Item; source: string; customized: boolean; state: string; evaluation: Evaluation; missing: string[]; folder_source?: string; folder?: { source: string; directory: string; revision: string } }
 interface Answer { library: Library; revision: string; source_revision: string; resolved: { revision: string; items: Row[] }; guidance: string; orphaned?: string[]; inherited: Item[] }
-const names: Record<Category, string> = { instruction: 'Instructions', skill: 'Skills', command: 'Commands', output_style: 'Output styles' };
+const names: Record<Category, string> = { instruction: 'Instructions', skill: 'Skills', command: 'Commands', output_style: 'Output styles', memory: 'Memories' };
+// Memory reaches chats as resolved instructions; it is edited in its own view.
+const memoryItem = (id: string) => id.startsWith('atelier-memory-');
 const descriptions: Record<Kind, string> = { instruction: 'Standing guidance included in every applicable conversation.', skill: 'Reusable procedures agents can discover or you can invoke by name.', output_style: 'Choose how answers are written. Only one shared style applies at a time.' };
 function EditorSection({ step, title, description, children }: { step: string; title: string; description: string; children: ReactNode }) {
   return <Panel inset="none" asChild><section aria-label={title} data-testid="editor-section"><header className="flex gap-3 border-b border-border/40 px-4 py-4"><span className="text-sm font-medium text-t-muted" aria-hidden="true">{step}</span><div><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-t-secondary">{description}</p></div></header><div className="min-w-0 space-y-5 p-4">{children}</div></section></Panel>;
@@ -80,9 +83,11 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   const [notice, setNotice] = useState('');
   const [category, setCategory] = useState<Category>('instruction');
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('guidance') === 'output_style') setCategory('output_style');
+    const asked = new URLSearchParams(window.location.search).get('guidance');
+    if (asked === 'output_style' || asked === 'memory') setCategory(asked);
   }, []);
-  const kind: Kind = category === 'command' ? 'skill' : category;
+  const memoryView = category === 'memory';
+  const kind: Kind = category === 'command' ? 'skill' : category === 'memory' ? 'instruction' : category;
   const projectRules = !!projectPath && kind === 'instruction';
   const itemLabel = category === 'command' ? 'command' : kind === 'output_style' ? 'output style' : kind;
   const [draft, setDraft] = useState<Item>();
@@ -208,21 +213,23 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   const folderEditing = !!editing?.folder_source && !inherited;
   const source = inherited ? answer?.inherited.find(item => item.id === editing?.item.id) : undefined;
   const patch = (change: Partial<Item>) => setDraft(d => d ? { ...d, ...change } : d);
-  const rows = answer?.resolved.items.filter(r => r.item.id !== 'atelier-general-instructions' && r.item.kind === kind && (kind !== 'skill' || (category === 'command' ? !r.item.automatic : r.item.automatic))) ?? [];
+  const rows = answer?.resolved.items.filter(r => r.item.id !== 'atelier-general-instructions' && !memoryItem(r.item.id) && r.item.kind === kind && (kind !== 'skill' || (category === 'command' ? !r.item.automatic : r.item.automatic))) ?? [];
   return <div className="space-y-5" data-testid="shared-library">
-    {!draft && <div><div className="flex items-center gap-2"><BookOpen className="size-5 text-t-muted" /><h2 className="text-lg font-semibold">Agent guidance</h2><Badge>{projectPath ? 'This project' : 'Global'}</Badge></div><p className="mt-2 text-sm text-t-secondary">{projectPath ? 'Manage this project’s instructions, skills, commands and styles.' : 'Manage guidance shared by all projects, across every provider.'}</p></div>}
+    {!draft && <div><div className="flex items-center gap-2"><BookOpen className="size-5 text-t-muted" /><h2 className="text-lg font-semibold">Agent guidance</h2><Badge>{projectPath ? 'This project' : 'Global'}</Badge></div><p className="mt-2 text-sm text-t-secondary">{projectPath ? 'Manage this project’s instructions, skills, commands, styles and memories.' : 'Manage guidance and memories shared by all projects, across every provider.'}</p></div>}
     {error && <Panel role="alert" tone="danger" className="text-sm">{error}<Button variant="ghost" onClick={() => { setDraft(undefined); setEditing(undefined); void load(); }}>Discard draft and reload</Button></Panel>}
     {notice && <p role="status" className="text-sm text-t-secondary">{notice}</p>}
     {!answer && !error && <p>Loading library…</p>}
     {answer && <>
       {answer.orphaned?.map(id => <Panel key={id} tone="attention" className="text-sm">Source removed: {id}. {!projectRules && <Button variant="ghost" disabled={!!draft || saving} onClick={() => { const library = structuredClone(answer.library); delete library.overrides[id]; void persist(library); }}>Forget customization</Button>}</Panel>)}
       {!draft && <><ToggleGroup type="single" size="md" className="flex-wrap gap-1 border-b border-border/60 pb-2" aria-label="Library categories" value={category} onValueChange={id => { setCategory(id as Category); setImports(undefined); }}>{Object.entries(names).map(([id, label]) => <ToggleGroupItem key={id} value={id}>{label}</ToggleGroupItem>)}</ToggleGroup></>}
+      {memoryView && !draft && <AgentMemories projectPath={projectPath} onChange={() => void load()} />}
+      {!memoryView && <>
       <div hidden={!!draft || kind !== 'instruction'} className="space-y-6">{projectPath ? projectInstructions : <><GeneralInstructions saved={answer.library.general_instructions ?? ''} saving={saving} onSave={text => persist({ ...answer.library, general_instructions: text })} /><div className="border-t border-border/60 pt-6"><h3 className="font-semibold">Reusable instructions</h3><p className="mt-1 text-sm text-t-secondary">Create rules here. Their conditions determine which projects receive them.</p></div></>}</div>
       {!draft && !projectRules && <div className="flex flex-wrap items-start justify-between gap-3"><p className="max-w-sm text-sm text-t-secondary">{category === 'command' ? 'Procedures you run explicitly from the chat composer. Commands are never chosen automatically by the agent.' : descriptions[kind]}</p><div className="flex flex-wrap gap-2"><Button onClick={() => create()}><Plus className="mr-1 size-4" />Add {itemLabel}</Button><Button variant="ghost" onClick={() => void importNative()}>Import native file</Button></div></div>}
       {!draft && kind === 'output_style' && <Panel className="space-y-2"><span className="text-sm font-medium">Selected output style</span><Picker label="Selected output style" disabled={saving} value={answer.library.output_style ?? '__inherit'} onChange={value => void persist({ ...answer.library, output_style: value === '__inherit' ? null : value })} choices={[{ value: '__inherit', label: projectPath ? 'Use global selection' : 'No style selected' }, { value: '', label: 'No shared output style' }, ...answer.resolved.items.filter(r => r.item.kind === 'output_style' && (projectPath || r.source !== 'project')).map(r => ({ value: r.item.id, label: r.item.name }))]} /><p className="text-xs text-t-muted">Applies to new and reconnected chats. Shared across providers. Claude’s native output-style selection is ignored in Atelier.</p></Panel>}
       {!draft && projectPath && kind === 'skill' && <Panel className="space-y-2"><h3 className="font-medium">Choose what this project can use</h3><p className="text-sm text-t-secondary">Switch off any {category === 'command' ? 'command' : 'skill'} this project does not need. This keeps its files and customizations, and changes nothing globally or in other projects.</p><p className="text-xs text-t-muted">Applies to new and reconnected chats, including explicit invocations. Switching on still respects conditions and required tools.</p></Panel>}
       {imports && <Panel tone="frame" className="space-y-2"><p className="text-sm">Choose a file to copy into {names[category].toLowerCase()}.</p>{imports.length === 0 && <p className="text-sm">No native files found.</p>}{imports.map(f => <Button key={f.path} variant="ghost" className="h-auto w-full justify-start whitespace-normal text-left" onClick={() => void copyNative(f)}>{f.name} · {f.category}</Button>)}<Button variant="outline" onClick={() => setImports(undefined)}>Cancel import</Button></Panel>}
-      {projectRules ? <ProjectInstructionSummary rows={answer.resolved.items.filter(row => row.item.kind === 'instruction')} /> : draft ? <section className="min-w-0 space-y-6" aria-label="Library item editor" data-testid="library-editor">
+      {projectRules ? <ProjectInstructionSummary rows={answer.resolved.items.filter(row => row.item.kind === 'instruction' && !memoryItem(row.item.id))} /> : draft ? <section className="min-w-0 space-y-6" aria-label="Library item editor" data-testid="library-editor">
         <header className="space-y-3"><Button variant="ghost" size="sm" disabled={saving} onClick={() => setDiscarding(true)}><ArrowLeft className="mr-2 size-4" />Back to {names[category].toLowerCase()}</Button><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-semibold">{inherited ? 'Customize' : editing ? 'Edit' : 'New'} {itemLabel}</h2><Badge>{projectPath ? 'This project only' : 'All projects'}</Badge></div><p className="text-sm text-t-secondary">{inherited ? 'Overrides affect only this project. Unchanged fields keep following the global version.' : projectPath ? 'This guidance belongs to this project and is shared by its providers.' : 'Changes are shared with every project that inherits this item.'}</p></header>
         <EditorSection step="1" title="What it does" description={draft.kind === 'output_style' ? 'Describe how the agent should write its answers.' : 'Give this guidance a clear name and tell the agent what to do.'}>
           <label className="block space-y-2 text-sm"><span className="font-medium">Name{inherited ? ' · inherited' : ''}</span><Input aria-label="Item name" disabled={inherited} value={draft.name} placeholder="e.g. Release check" onChange={e => patch({ name: e.target.value, ...(!editing && !idEdited ? { id: suggestedItemId(e.target.value, answer.resolved.items.map(r => r.item.id)) } : {}) })} /></label>
@@ -257,6 +264,7 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
           {projectPath && row.source === 'global' ? <>{row.item.kind !== 'skill' && <Button variant="ghost" size="sm" disabled={saving} onClick={() => void persist({ ...answer.library, overrides: { ...answer.library.overrides, [row.item.id]: { ...answer.library.overrides[row.item.id], disabled: row.state !== 'disabled' } } })}>{row.state === 'disabled' ? 'Enable here' : 'Disable here'}</Button>}{row.customized && <Button variant="ghost" size="sm" disabled={saving} onClick={() => { const library = structuredClone(answer.library); delete library.overrides[row.item.id]; void persist(library); }}>Reset to global</Button>}</> : <Button variant="destructive" size="sm" disabled={saving} onClick={() => void prepareDelete(row)}>Delete</Button>}
         </div>}
       </Panel>)}</div>}
+      </>}
       {!draft && <Collapsible className="border-t border-border/40 pt-4"><CollapsibleTriggerRow>Preview and diagnostics</CollapsibleTriggerRow><CollapsibleContent className="mt-4 space-y-4">{!projectPath && <div className="space-y-2"><span className="text-sm">Evaluate for project</span><Picker label="Evaluate for project" value={preview} onChange={setPreview} choices={[{ value: '', label: 'Choose a project to explain conditions' }, ...projects.filter(p => !(p.localPath || p.path).startsWith('dolt://')).map(p => ({ value: p.localPath || p.path, label: p.name }))]} /></div>}<h3 className="text-sm font-medium">Saved session preview</h3><p className="break-all text-xs text-t-muted">Revision {answer.resolved.revision}. Instructions and the selected style are included; skills are loaded on use. Current chats retain their connection’s snapshot.</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{answer.guidance}</pre></CollapsibleContent></Collapsible>}
     </>}
     <AlertDialog open={discarding} onOpenChange={setDiscarding}>

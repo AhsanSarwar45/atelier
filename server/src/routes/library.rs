@@ -1,6 +1,6 @@
 //! Shared library settings. Uses the same local-origin protection as other
 //! settings; imports are copies and never remove native provider files.
-use crate::workbench::{library, skill_folders};
+use crate::workbench::{agent_memory, library, skill_folders};
 use axum::{extract::Query, http::StatusCode, middleware, routing::get, Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -144,11 +144,58 @@ async fn delete_skill(Query(scope): Query<SkillScope>, Json(update): Json<Delete
             .map(|archive| json!({"archive": archive}))
     }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
 }
+/// A project scope names the folder the editor opened; memory is keyed by its
+/// project, so a worktree folder and its main checkout edit the same entries.
+fn memory_root(data: &Path, scope: &Scope) -> Result<Option<PathBuf>, String> {
+    Ok(root(scope.path.as_deref())?.map(|path| agent_memory::project_root(data, &path).unwrap_or(path)))
+}
+async fn read_memories(Query(scope): Query<Scope>) -> Result<Json<Value>, Refusal> {
+    tokio::task::spawn_blocking(move || {
+        let data = library::data_dir()?;
+        agent_memory::listing(&data, memory_root(&data, &scope)?.as_deref())
+    }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryUpdate {
+    scope: agent_memory::Scope,
+    memory: agent_memory::Memory,
+    /// The ID being edited; absent when adding.
+    previous_id: Option<String>,
+    revision: Option<String>,
+}
+async fn write_memory(Query(scope): Query<Scope>, Json(update): Json<MemoryUpdate>) -> Result<Json<Value>, Refusal> {
+    tokio::task::spawn_blocking(move || {
+        let data = library::data_dir()?;
+        let root = memory_root(&data, &scope)?;
+        if update.previous_id.is_some() && update.revision.is_none() {
+            return Err("An edit must send the revision it read".into());
+        }
+        agent_memory::save(&data, update.scope, root.as_deref(), update.previous_id.as_deref(), update.revision.as_deref(), &update.memory)?;
+        agent_memory::listing(&data, root.as_deref())
+    }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryDelete {
+    scope: agent_memory::Scope,
+    id: String,
+    revision: String,
+}
+async fn delete_memory(Query(scope): Query<Scope>, Json(update): Json<MemoryDelete>) -> Result<Json<Value>, Refusal> {
+    tokio::task::spawn_blocking(move || {
+        let data = library::data_dir()?;
+        let root = memory_root(&data, &scope)?;
+        agent_memory::remove(&data, update.scope, root.as_deref(), &update.id, Some(&update.revision))?;
+        agent_memory::listing(&data, root.as_deref())
+    }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
+}
 pub fn routes() -> Router<crate::routes::projects::AppState> {
     Router::new()
         .route("/settings/library", get(read).put(write))
         .route("/settings/library/skill", get(read_skill).put(write_skill))
         .route("/settings/library/skill/delete", get(plan_delete_skill).delete(delete_skill))
+        .route("/settings/library/memories", get(read_memories).put(write_memory).delete(delete_memory))
         .layer(middleware::from_fn(crate::local_host::require_local_host))
 }
 
@@ -163,6 +210,7 @@ mod tests {
             "Skill changed in another editor. Reload before saving.",
             "Library changed in another editor. Reload before saving.",
             "Global library changed in another editor. Reload before customizing it.",
+            "Memory tabs changed in another editor. Reload before saving",
         ] {
             assert_eq!(error(message.into()).into_response().status(), StatusCode::CONFLICT);
         }

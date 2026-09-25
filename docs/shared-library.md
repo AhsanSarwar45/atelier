@@ -155,8 +155,8 @@ Agents edit memories with `atelier tool memory list|show|add|edit|remove|locatio
 The CLI writes the files directly, so it works while the app is stopped. The
 built-in Atelier skill tells agents to use it instead of provider-native memory.
 People edit memories in Agent guidance → Memories. That editor goes through
-`GET|PUT /api/settings/library/memories` and
-`POST /api/settings/library/memories/delete`. Each memory carries a file digest,
+`GET`, `PUT` and `DELETE` on `/api/settings/library/memories`, with
+`?path=` for a project. Each memory carries a file digest,
 and a save or delete made against an older copy is refused.
 
 ## Persistence and running chats
