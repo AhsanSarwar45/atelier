@@ -49,13 +49,15 @@ import {
   type CompletionResult,
   type CompletionSource,
 } from '@codemirror/autocomplete';
-import { Prec, type Extension } from '@codemirror/state';
+import { Prec, StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, keymap, tooltips, type ViewUpdate } from '@codemirror/view';
 
 import { iconForFile, iconForFolder } from '@/components/file-icon';
 import { ICON_FALLBACK, iconUrl } from '@/components/file-icons';
 import { referenceBadgeElement, type Reference } from '@/components/reference-badge';
+import { tabsListVariants, tabsTriggerVariants } from '@/components/ui/tabs';
 import { mention, type FsFoundPath, type MentionOffer, type MentionPlace } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import type { BeadStatus } from '@/types';
 import type { Brand, CommandInfo } from '@/workbench/protocol';
 import { learnChat, learnSkill, setReferenceAsker } from '@/workbench/reference-names';
@@ -114,6 +116,140 @@ const HEADINGS: Record<MentionOffer['kind'], string> = {
   skill: 'Skills',
 };
 
+/**
+ * The `@` menu's tabs: everything, or one kind at a time.
+ *
+ * A kind typed after the `@` — `@skill:` — is the tab that is lit, so the typed
+ * grammar and the tabs are one choice rather than two that can disagree. A tab
+ * picked with the mouse or with Tab takes any typed kind back out of the word
+ * and narrows the menu by asking the server for that kind (bw-mydas.1).
+ */
+type Scope = 'all' | MentionOffer['kind'];
+const SCOPES: readonly Scope[] = ['all', 'file', 'bead', 'chat', 'skill'];
+const SCOPE_NAMES: Record<Scope, string> = { all: 'All', ...HEADINGS };
+const TYPED_KIND = /^@(bead|chat|skill):/;
+
+const setScope = StateEffect.define<Scope>();
+
+/** The `@` word the cursor is in, if it really begins a reference. */
+function typedAt(state: EditorState): { from: number; text: string } | null {
+  const head = state.selection.main.head;
+  const line = state.doc.lineAt(head);
+  const found = TYPING.exec(line.text.slice(0, head - line.from));
+  if (!found) return null;
+  const from = line.from + found.index;
+  if (!canBeginReference(from === 0 ? '' : state.sliceDoc(from - 1, from))) return null;
+  return { from, text: found[0] };
+}
+
+/** The tab picked, forgotten as soon as the cursor is out of the `@` word. */
+const pickedScope = StateField.define<Scope>({
+  create: () => 'all',
+  update(value, tr) {
+    for (const effect of tr.effects) if (effect.is(setScope)) return effect.value;
+    if ((tr.docChanged || tr.selection) && !typedAt(tr.state)) return 'all';
+    return value;
+  },
+});
+
+/** The tab that is lit: a kind typed after the `@`, or else the tab picked. */
+function scopeOf(state: EditorState): Scope {
+  const typed = typedAt(state);
+  const kind = typed ? TYPED_KIND.exec(typed.text)?.[1] : undefined;
+  return (kind as Scope | undefined) ?? state.field(pickedScope, false) ?? 'all';
+}
+
+/** Narrow the open `@` menu to one kind, or widen it to everything. */
+function pickScope(view: EditorView, scope: Scope): void {
+  const typed = typedAt(view.state);
+  if (!typed) return;
+  const kind = TYPED_KIND.exec(typed.text);
+  view.dispatch({
+    effects: setScope.of(scope),
+    ...(kind ? { changes: { from: typed.from + 1, to: typed.from + kind[0].length } } : {}),
+  });
+  startCompletion(view);
+}
+
+/**
+ * Tab and Shift-Tab: the next or the last tab of the `@` menu. In the `/` menu
+ * Tab picks, as it always did. With no menu open the key is not ours.
+ */
+function tabKey(step: 1 | -1) {
+  return (view: EditorView): boolean => {
+    if (completionStatus(view.state) !== 'active') return false;
+    if (!typedAt(view.state)) return step === 1 ? acceptCompletion(view) : false;
+    const at = SCOPES.indexOf(scopeOf(view.state));
+    pickScope(view, SCOPES[(at + step + SCOPES.length) % SCOPES.length]!);
+    return true;
+  };
+}
+
+/**
+ * The row of tabs across the top of the `@` menu.
+ *
+ * CodeMirror draws the menu itself and has no place for a header, so the row
+ * is put in as the menu's first child after every update, and put back if the
+ * menu was drawn afresh. The list CodeMirror redraws is appended after it, so
+ * the row stays on top. It is drawn with the app's own tab strip classes.
+ */
+const scopeTabs = ViewPlugin.fromClass(
+  class {
+    constructor(private readonly view: EditorView) {}
+
+    update() {
+      this.view.requestMeasure({ key: this, read: () => null, write: () => this.draw() });
+    }
+
+    private draw() {
+      const menu = this.view.dom.querySelector<HTMLElement>('.cm-tooltip-autocomplete');
+      if (!menu) return;
+      let row = menu.querySelector<HTMLElement>(':scope > .cm-mentionTabs');
+      if (!typedAt(this.view.state)) {
+        row?.remove();
+        return;
+      }
+      if (!row) {
+        row = this.build();
+        menu.prepend(row);
+        // The menu is taller by a row; let the tooltip place itself again.
+        this.view.requestMeasure();
+      }
+      const lit = scopeOf(this.view.state);
+      for (const tab of Array.from(row.children) as HTMLElement[]) {
+        const on = tab.dataset.scope === lit;
+        tab.setAttribute('aria-selected', String(on));
+        tab.dataset.state = on ? 'active' : 'inactive';
+      }
+    }
+
+    private build(): HTMLElement {
+      const row = document.createElement('div');
+      row.className = cn('cm-mentionTabs', tabsListVariants({ variant: 'strip' }));
+      row.setAttribute('role', 'tablist');
+      row.setAttribute('aria-label', 'What to look for');
+      row.setAttribute('data-testid', 'mention-tabs');
+      for (const scope of SCOPES) {
+        const tab = row.appendChild(document.createElement('button'));
+        tab.type = 'button';
+        tab.tabIndex = -1;
+        tab.className = cn(tabsTriggerVariants({ variant: 'strip' }), 'border-r border-r-default');
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('data-testid', 'mention-tab');
+        tab.dataset.scope = scope;
+        tab.textContent = SCOPE_NAMES[scope];
+        // Focus stays in the line being written, so typing carries on.
+        tab.addEventListener('mousedown', (event) => event.preventDefault());
+        tab.addEventListener('pointerdown', (event) => {
+          event.preventDefault();
+          pickScope(this.view, scope);
+        });
+      }
+      return row;
+    }
+  },
+);
+
 /** One found path as a line of the menu. */
 function offer(found: FsFoundPath, rank = 0): Completion {
   const { name, folder } = split(found.path);
@@ -128,12 +264,16 @@ function offer(found: FsFoundPath, rank = 0): Completion {
     type: folderish ? 'folder' : 'file',
     section: { name: HEADINGS.file, rank },
     apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
-      const insert = formatReference({
-        path: found.path,
-        line: null,
-        endLine: null,
-        kind: folderish ? 'folder' : 'file',
-      });
+      // A file is finished like a card, a chat or a skill: a space after it,
+      // so what is typed next is not glued to its name (bw-mydas.1). A folder
+      // is not finished; see below.
+      const insert =
+        formatReference({
+          path: found.path,
+          line: null,
+          endLine: null,
+          kind: folderish ? 'folder' : 'file',
+        }) + (folderish ? '' : ' ');
       view.dispatch({
         changes: { from, to, insert },
         selection: { anchor: from + insert.length },
@@ -188,6 +328,16 @@ function atelierOffer(found: MentionOffer, rank: number): Completion {
   };
 }
 
+/** The one line of a menu that found nothing; picking it changes nothing. */
+function nothingFound(scope: Scope): Completion {
+  return {
+    label: ' ',
+    displayLabel: scope === 'all' ? 'Nothing matches' : `No ${SCOPE_NAMES[scope].toLowerCase()} match`,
+    type: 'nothing',
+    apply: () => {},
+  };
+}
+
 /** Everything the server offered, as lines of the menu in its order. */
 function lines(found: readonly MentionOffer[]): Completion[] {
   const ranks = new Map<string, number>();
@@ -226,9 +376,10 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
 
     const stale = new AbortController();
     context.addEventListener('abort', () => stale.abort(), { onDocChange: true });
+    const picked = TYPED_KIND.test(token.text) ? 'all' : context.state.field(pickedScope, false) ?? 'all';
     let found;
     try {
-      found = await mention.search(place, token.text.slice(1), MOST_OFFERED, stale.signal);
+      found = await mention.search(place, token.text.slice(1), MOST_OFFERED, stale.signal, picked === 'all' ? undefined : picked);
     } catch {
       // A checkout that has gone away, or a server that is restarting: the
       // right answer is no menu, not a red line under what he is writing.
@@ -240,6 +391,9 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
     found.items.forEach((one, at) => {
       if (one.kind !== 'file') drawnBadges.set(options[at]!, referenceOf(one));
     });
+    // A tab with nothing in it still shows its tabs, or there would be no way
+    // back from it but deleting what was typed.
+    if (!options.length) options.push(nothingFound(scopeOf(context.state)));
     return {
       from: token.from,
       options,
@@ -541,8 +695,13 @@ const menuTheme = EditorView.theme({
     backgroundColor: 'hsl(var(--accent))',
     color: 'hsl(var(--accent-foreground))',
   },
+  '.cm-mentionTabs': { borderRadius: '0.5rem 0.5rem 0 0' },
+  '.cm-completion-nothing': { opacity: '0.6', cursor: 'default' },
   '.cm-fileIcon': { height: '16px', width: '16px', flexShrink: '0' },
-  '.cm-referenceBadge': { flexShrink: '1', minWidth: '0', margin: '0' },
+  // The badge is kept whole up to most of the line and the words after it give
+  // way first. It was let shrink as much as the words, so a skill's badge was
+  // squeezed to a few letters wide and broken down the line (bw-mydas.1).
+  '.cm-referenceBadge': { flexShrink: '0', maxWidth: '65%', margin: '0' },
   // A command's line is drawn whole by `drawCommand`.
   '.cm-completion-command .cm-completionLabel, .cm-completion-pending .cm-completionLabel': { display: 'none' },
   '.cm-commandRow': { display: 'flex', alignItems: 'baseline', gap: '0.5rem', minWidth: '0', width: '100%' },
@@ -572,6 +731,23 @@ const menuTheme = EditorView.theme({
     borderBottom: 'none',
   },
   '.cm-completionLabel': { flexShrink: '0' },
+  // A card's title and a skill's description are sentences, read from their
+  // start: cut at the end, unlike a folder, whose end is the part that tells.
+  '.cm-completion-bead .cm-completionLabel': {
+    flexShrink: '1',
+    minWidth: '0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  '.cm-completion-bead .cm-completionDetail, .cm-completion-chat .cm-completionDetail, .cm-completion-skill .cm-completionDetail': {
+    direction: 'ltr',
+    textAlign: 'left',
+    marginLeft: '0',
+    paddingLeft: '0.25rem',
+    flex: '1 1 auto',
+    minWidth: '0',
+  },
   // The folder, after the name and behind it: enough to tell two files of the
   // same name apart, never enough to read before the name itself.
   '.cm-completionDetail': {
@@ -693,13 +869,22 @@ export function mentionCompletions(
               drawn.setAttribute('data-testid', 'mention-option-badge');
               return drawn;
             }
+            if (completion.type === 'nothing') return null;
             const path = completion.label.slice(1);
             return picture({ path, kind: completion.type === 'folder' ? 'dir' : 'file' });
           },
         },
       ],
     }),
-    Prec.highest(keymap.of(completionKeymap)),
+    Prec.highest(
+      keymap.of([
+        ...completionKeymap,
+        { key: 'Tab', run: tabKey(1) },
+        { key: 'Shift-Tab', run: tabKey(-1) },
+      ]),
+    ),
+    pickedScope,
+    scopeTabs,
     tooltips({ tooltipSpace: roomToDrawIn }),
     followTheKeyboard,
     slashOpens(commands),

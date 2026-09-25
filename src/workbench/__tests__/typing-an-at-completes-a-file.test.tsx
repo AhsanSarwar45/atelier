@@ -170,7 +170,7 @@ describe('typing @ in the composer', () => {
       );
     });
 
-    expect(editor.state.doc.toString()).toBe('Look at @src/workbench/git-view.tsx');
+    expect(editor.state.doc.toString()).toBe('Look at @src/workbench/git-view.tsx ');
     // Which is to say: the thing the transcript already draws for the same
     // reference appears the moment it is picked (bw-gr8y.6).
     await waitFor(() =>

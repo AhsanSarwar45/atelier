@@ -290,6 +290,9 @@ export function findReferences(text: string): FoundReference[] {
       from = atelier.end;
       continue;
     }
+    // `@skill:` with its id still to come is a reference being written, not a
+    // file called `skill` (bw-mydas.1).
+    if (KIND_BEGUN.test(text.slice(at, at + 8))) continue;
     const ref = matchAt(text, at);
     if (!ref) continue;
     found.push(ref);
@@ -350,6 +353,7 @@ export interface FoundAtelierReference {
  * letter or a digit, so the full stop that ends a sentence is the sentence's.
  */
 const ATELIER_ID = '[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?';
+const KIND_BEGUN = new RegExp('^@(' + ATELIER_KINDS.join('|') + '):');
 const ATELIER_AT = new RegExp('@(' + ATELIER_KINDS.join('|') + '):(' + ATELIER_ID + ')(?![A-Za-z0-9_])', 'y');
 const LEADING_SKILL = new RegExp(`^/skill:(${ATELIER_ID})(?![A-Za-z0-9_])`);
 

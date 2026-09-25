@@ -54,6 +54,7 @@ import {
   dropCursor,
   keymap,
   placeholder as placeholderText,
+  runScopeHandlers,
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view';
@@ -77,14 +78,19 @@ export interface ComposerHandle {
 
 /**
  * A key arriving at the form control while a menu is open is the menu's, the
- * same as it is in the drawn line: the arrows move through it, Enter and Tab
- * pick, Escape puts it away. One rule for both doors into the box.
+ * same as it is in the drawn line: the arrows move through it, Enter picks,
+ * Tab does what the open menu makes it, Escape puts it away. One rule for both
+ * doors into the box.
  */
-function menuKey(view: EditorView | null, key: string, shift: boolean): boolean {
+function menuKey(view: EditorView | null, event: KeyboardEvent): boolean {
   if (!view || completionStatus(view.state) !== 'active') return false;
+  const { key, shiftKey: shift } = event;
   if (key === 'ArrowDown') return moveCompletionSelection(true)(view);
   if (key === 'ArrowUp') return moveCompletionSelection(false)(view);
-  if (key === 'Tab' || (key === 'Enter' && !shift)) return acceptCompletion(view);
+  // Tab is whatever the open menu makes it, exactly as in the drawn line: in
+  // the `@` menu it moves between the kinds, in the `/` menu it picks.
+  if (key === 'Tab') return runScopeHandlers(view, event, 'editor');
+  if (key === 'Enter' && !shift) return acceptCompletion(view);
   if (key === 'Escape') return closeCompletion(view);
   return false;
 }
@@ -494,7 +500,7 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          if (menuKey(view.current, e.key, e.shiftKey) || onKey(e)) e.preventDefault();
+          if (menuKey(view.current, e.nativeEvent) || onKey(e)) e.preventDefault();
         }}
         onPaste={(e) => {
           const named = referenceForAddress(e.clipboardData.getData('text/plain'), window.location.origin);

@@ -41,6 +41,11 @@ describe('the references in a run of text', () => {
     expect(raws('Ask someone@example.com about it.')).toEqual([]);
   });
 
+  it('leaves a kind still being written alone, rather than calling it a file', () => {
+    expect(findReferences('use @skill:')).toEqual([]);
+    expect(findReferences('see @bead: and @chat:')).toEqual([]);
+  });
+
   it('leaves a lone @ alone', () => {
     expect(raws('Email me @ home about it.')).toEqual([]);
   });

@@ -141,7 +141,7 @@ test('typing @ offers the checkout’s files and picking one leaves a badge', as
     // Enter belongs to the menu while it is open — it picks, it does not send.
     await page.keyboard.press('Enter');
     await expect(menu).toBeHidden();
-    await expect(page.getByTestId('composer')).toHaveValue('Look at @src/workbench/git-view.tsx');
+    await expect(page.getByTestId('composer')).toHaveValue('Look at @src/workbench/git-view.tsx ');
     // And what he is left looking at is a badge, not a path (bw-gr8y.6).
     const badge = page.getByTestId('composer-reference');
     await expect(badge).toHaveCount(1);
@@ -156,7 +156,7 @@ test('typing @ offers the checkout’s files and picking one leaves a badge', as
 
     // A folder is a step rather than an answer: it ends with a slash and the
     // menu comes back, already narrowed into it.
-    await typeAndSettle(' and @docs', 'docs');
+    await typeAndSettle('and @docs', 'docs');
     await expect(menu).toBeVisible();
     await expect(lines.first()).toContainText('docs/');
     await expect(lines.first()).toHaveAttribute('aria-selected', 'true');

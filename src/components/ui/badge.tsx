@@ -155,15 +155,22 @@ const badgeVariants = cva(
       // A chip whose words are an address — a file's path — which can be most
       // of a line by itself. It is let break anywhere and grow as tall as the
       // lines it needs, rather than running out of the message it sits in.
-      // Listed after `size` so it wins that size's fixed height. Its floor is
-      // one line, its padding and its border, as tall as it always was: the
-      // label inside is trimmed to its letters (above), so the label alone no
-      // longer says how tall a one-line chip is.
+      // Listed after `size` so it wins that size's fixed height, but not its
+      // `min-h`: on one line it is exactly as tall as every other chip of its
+      // size. It was a pixel shorter than a card's chip beside it, and in the
+      // `@` menu a skill's chip was squeezed into a column of broken letters
+      // (bw-mydas.1). A chip that names a card, a chat or a skill never wraps;
+      // it ends in an ellipsis instead (`reference-badge.tsx`).
       wrap: {
-        true: 'h-auto min-h-[calc(1lh+4px)] max-w-full whitespace-normal break-all py-px',
+        true: 'h-auto max-w-full whitespace-normal break-all py-px',
       },
     },
     compoundVariants: [
+      /* A chip allowed to wrap is, on one line, exactly its size's height. */
+      { wrap: true, size: 'lg', className: 'min-h-7' },
+      { wrap: true, size: 'md', className: 'min-h-6' },
+      { wrap: true, size: 'sm', className: 'min-h-5' },
+      { wrap: true, size: 'xs', className: 'min-h-4' },
       /* Light */
       {
         variant: 'primary',

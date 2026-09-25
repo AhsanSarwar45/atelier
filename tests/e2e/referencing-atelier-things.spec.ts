@@ -162,6 +162,65 @@ test.describe('referencing Atelier things from the composer', () => {
     await page.getByTestId('composer-frame').screenshot({ path: 'tests/results/bw-mi3s-composer-badges.png' });
   });
 
+  test('the @ menu has a tab per kind, Tab and the mouse both switch it, and every chip is one height', async ({ page, request }) => {
+    const project = await theProject(request, 'tabs');
+    await aChat(request, project);
+    const here = await aChat(request, project);
+    await open(page, project, here);
+    await page.getByTestId('mode-picker').waitFor({ timeout: HELLO_MS });
+
+    const writing = page.getByTestId('composer-frame').locator('.cm-content');
+    const menu = page.locator('.cm-tooltip-autocomplete');
+    const tabs = menu.getByTestId('mention-tab');
+    const chosen = menu.locator('[data-testid="mention-tab"][aria-selected="true"]');
+    await writing.click();
+    await typeAndSettle(page, '@', '');
+    await expect(tabs).toHaveText(['All', 'Files', 'Cards', 'Chats', 'Skills']);
+    await expect(chosen).toHaveText('All');
+
+    // Tab walks the tabs and the list follows; Shift+Tab walks back.
+    const asked = (kind: string) =>
+      page.waitForResponse((answer) => answer.url().includes('/api/workbench/mention?') && answer.url().includes(`kind=${kind}`));
+    let answer = asked('file');
+    await page.keyboard.press('Tab');
+    await answer;
+    await expect(chosen).toHaveText('Files');
+    await expect(menu.locator('completion-section')).toHaveText(['Files']);
+    answer = asked('bead');
+    await page.keyboard.press('Tab');
+    await answer;
+    await expect(menu.locator('completion-section')).toHaveText(['Cards']);
+    await page.keyboard.press('Shift+Tab');
+    await expect(chosen).toHaveText('Files');
+
+    // The mouse picks a tab too, and the writing keeps the caret.
+    answer = asked('skill');
+    await tabs.filter({ hasText: 'Skills' }).click();
+    await answer;
+    await expect(chosen).toHaveText('Skills');
+    await expect(menu.locator('completion-section')).toHaveText(['Skills']);
+    await expect(writing).toBeFocused();
+    await expect(page.getByTestId('composer')).toHaveValue('@');
+
+    // A skill badge in the menu is one line, the height of every other chip.
+    const skill = menu.locator('[data-reference-kind="skill"]').first();
+    await expect(skill).toBeVisible();
+    const heights = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-slot="badge"]')]
+        .filter((el) => (el as HTMLElement).offsetParent !== null)
+        .map((el) => Math.round(el.getBoundingClientRect().height)),
+    );
+    expect(heights.length).toBeGreaterThan(1);
+    expect(new Set(heights), `chip heights ${heights.join(', ')}`).toEqual(new Set([heights[0]]));
+    await page.screenshot({ path: 'tests/results/bw-mydas-at-menu-tabs.png' });
+
+    // Typing a kind lights its tab; writing it never draws a file badge.
+    await page.keyboard.press('Backspace');
+    await typeAndSettle(page, '@chat:', 'chat:');
+    await expect(chosen).toHaveText('Chats');
+    await expect(page.getByTestId('composer-frame').getByTestId('composer-reference')).toHaveCount(0);
+  });
+
   test('a pasted card or chat address becomes its reference', async ({ page, request }) => {
     const project = await theProject(request, 'paste');
     const other = await aChat(request, project);

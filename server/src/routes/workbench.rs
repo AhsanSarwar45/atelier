@@ -2690,6 +2690,8 @@ struct MentionQuery {
     /// The chat asking, which is not offered to itself.
     session: Option<String>,
     q: Option<String>,
+    /// The kind the menu's tab narrows it to, when no kind was typed.
+    kind: Option<String>,
     limit: Option<usize>,
     /// Instead of a search: the names of these `kind:id` references, for
     /// badges drawn before anybody here had seen what they name.
@@ -2761,7 +2763,8 @@ async fn mention(
     }
 
     let typed = query.q.unwrap_or_default();
-    let (only, wanted) = mention::scoped(typed.trim());
+    let (typed_kind, wanted) = mention::scoped(typed.trim());
+    let only = typed_kind.or_else(|| query.kind.as_deref().and_then(Kind::parse));
     let limit = query.limit.unwrap_or(20).clamp(1, 50);
     let share = |kind: Kind| if only.is_some() { limit } else { kind.share() };
     let mut groups = Vec::new();

@@ -485,8 +485,11 @@ export const mention = {
    * Files, cards, chats and skills that answer what was typed after an `@`,
    * grouped by kind with the best group first. The order is the server's.
    */
-  search: (place: MentionPlace, q: string, limit = 20, signal?: AbortSignal) =>
-    fetchApi<{ items: MentionOffer[] }>(mentionAddress(place, { q, limit: String(limit) }), signal ? { signal } : undefined),
+  search: (place: MentionPlace, q: string, limit = 20, signal?: AbortSignal, kind?: MentionOffer['kind']) =>
+    fetchApi<{ items: MentionOffer[] }>(
+      mentionAddress(place, { q, limit: String(limit), ...(kind ? { kind } : {}) }),
+      signal ? { signal } : undefined,
+    ),
 
   /** The names of `kind:id` references nobody here has seen yet. */
   names: (place: MentionPlace, ids: readonly string[]) =>

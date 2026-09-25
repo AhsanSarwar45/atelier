@@ -77,10 +77,17 @@ export function referenceTitle(ref: Reference): string {
   return ref.description ? `Skill · ${ref.description}` : 'Skill';
 }
 
+/*
+ * Every reference is one line at its size's height, like every other chip. A
+ * long chat or skill name ends in an ellipsis; it used to be let wrap, which in
+ * the `@` menu broke a skill's name into a column of letters (bw-mydas.1).
+ */
+const ONE_LINE = 'min-w-0 max-w-full';
+
 function referenceClass(ref: Reference): string {
-  if (ref.kind === 'bead') return cn('shrink-0', classesFor(ref.status).badge);
-  if (ref.kind === 'chat') return cn('shrink-0', ref.brand ? BRAND_COLOR[ref.brand] : classesFor(undefined).badge);
-  return cn('shrink-0', SKILL_COLOR);
+  if (ref.kind === 'bead') return cn(ONE_LINE, classesFor(ref.status).badge);
+  if (ref.kind === 'chat') return cn(ONE_LINE, ref.brand ? BRAND_COLOR[ref.brand] : classesFor(undefined).badge);
+  return cn(ONE_LINE, SKILL_COLOR);
 }
 
 /** The marks every badge carries, whichever way it is drawn. */
@@ -110,15 +117,13 @@ export function ReferenceFace({ reference }: { reference: Reference }) {
   return (
     <>
       {icon}
-      <span>{referenceLabel(reference)}</span>
+      <span className="min-w-0 truncate">{referenceLabel(reference)}</span>
     </>
   );
 }
 
 const BADGE = { variant: 'primary', appearance: 'outline', shape: 'circle' } as const;
 
-/** A card id is short and never breaks; a chat's or a skill's name may be long and does. */
-const wraps = (ref: Reference) => ref.kind !== 'bead';
 
 /**
  * The badge as a drawing: no control, nothing to open. What the composer
@@ -136,7 +141,7 @@ export function ReferenceBadgeLook({
   testId?: string;
 }) {
   return (
-    <Badge asChild {...BADGE} wrap={wraps(reference)} size={size} className={cn(referenceClass(reference), className)}>
+    <Badge asChild {...BADGE} size={size} className={cn(referenceClass(reference), className)}>
       <span data-testid={testId} {...referenceMarks(reference)}>
         <ReferenceFace reference={reference} />
       </span>
@@ -181,7 +186,7 @@ export function ReferenceBadge({
        it. The button is here for what it does — the pointer, the focus ring —
        not for a box of its own (bw-s5op.2). */
     <Tooltip label={title ?? referenceTitle(reference)}>
-      <Badge asChild {...BADGE} wrap={wraps(reference)} size={size} className={cn(referenceClass(reference), className)}>
+      <Badge asChild {...BADGE} size={size} className={cn(referenceClass(reference), className)}>
         <Button
           type="button"
           variant="foreground"
