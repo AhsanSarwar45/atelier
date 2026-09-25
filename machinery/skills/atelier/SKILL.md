@@ -36,8 +36,10 @@ in global scope.
 ## Memory
 
 Atelier memory replaces the provider's own memory. Every provider, account and
-session shares it. Saved memories arrive in your instructions as "Global
-memory" and "Project memory".
+session shares it. Your instructions carry an index of it, "Global memory" and
+"Project memory": one line per memory with its ID, type, description and file.
+When a description bears on the task, read the memory with
+`atelier tool memory show ID` (or its file) before relying on it.
 
 - Never write to a provider's native memory: no `MEMORY.md`, no
   `projects/<slug>/memory/` or `memories/` folder, and no memory tool the
@@ -60,8 +62,8 @@ atelier tool memory remove ID
 - One fact per memory. Before adding one, check `list` and edit an existing
   memory that covers it rather than adding a duplicate.
 - Remove a memory as soon as you find it wrong, resolved or superseded.
-- Changes reach new and reconnected chats. Your own instructions keep the
-  memories this connection started with.
+- The index is pinned for this connection; `show` and `list` read the current
+  store, including changes made since the chat started.
 - The user edits memories in Settings → Agent guidance → Memories.
 
 ## Presenter commands

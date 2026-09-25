@@ -145,11 +145,13 @@ one store every chat reads, at two scopes:
 Each memory is one Markdown file. It starts with a `---` header that holds a
 one-line `description` and a `type` (`user`, `feedback`, `project` or
 `reference`), followed by the body. The resolver adds non-empty scopes as the
-built-in "Global memory" and "Project memory" instructions. They are part of the
-pinned snapshot, so a memory change is a new revision that reaches new and
-reconnected chats. A project override cannot disable them. When bodies pass
-48 KiB, the rest are listed by description, and agents read them with
-`atelier tool memory show`.
+built-in "Global memory" and "Project memory" instructions. Like a provider's own
+memory index, they hold one line per memory (ID, type, description, file path)
+and never the bodies, so a large store costs a chat little context. Agents read a
+body on demand with `atelier tool memory show` or, without a shell, from the
+listed file. The index is part of the pinned snapshot, so adding, renaming or
+re-describing a memory is a new revision for new and reconnected chats, while
+bodies are always read live. A project override cannot disable the index.
 
 Agents edit memories with `atelier tool memory list|show|add|edit|remove|locations`.
 The CLI writes the files directly, so it works while the app is stopped. The

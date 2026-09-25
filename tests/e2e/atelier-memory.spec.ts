@@ -51,14 +51,16 @@ test('a global memory saved in Settings reaches every chat and the CLI', async (
   await page.screenshot({ path: join(results, 'global-memories.png'), animations: 'disabled' });
 
   expect(await guidance(request)).toContain('global instructions — Global memory:');
-  expect(await guidance(request, project.path)).toContain('Write short, plain sentences.');
+  expect(await guidance(request, project.path)).toContain('- plain-prose (feedback): The user wants short plain sentences');
+  expect(await guidance(request)).not.toContain('Write short, plain sentences.');
   expect(memory(worktree, 'show', 'plain-prose')).toContain('Why: the user finds dense prose hard to read.');
 });
 
 test('project memory added from a worktree is edited, guarded and deleted in project settings', async ({ page, request }) => {
   memory(worktree, 'add', 'owner-port', '--scope', 'project', '--type', 'reference', '--description', 'The owner app runs on 3008', '--body', 'Never touch port 3008.');
   expect(await guidance(request, project.path)).toContain('project instructions — Project memory:');
-  expect(await guidance(request)).not.toContain('Never touch port 3008.');
+  expect(await guidance(request, project.path)).toContain('- owner-port (reference): The owner app runs on 3008');
+  expect(await guidance(request)).not.toContain('owner-port');
 
   await page.goto(`/project?id=${project.id}&settings=instructions`);
   await page.getByRole('radio', { name: 'Memories', exact: true }).click();

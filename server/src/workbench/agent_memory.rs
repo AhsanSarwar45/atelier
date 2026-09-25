@@ -21,8 +21,8 @@
 //! body
 //! ```
 //!
-//! The resolver (`library::resolve`) folds them into the pinned snapshot, so a
-//! chat's memories are fixed for its connection like the rest of its guidance.
+//! The resolver (`library::resolve`) folds an index of them (one line per
+//! memory) into the pinned snapshot; agents read a body when it is relevant.
 use super::library::{data_dir, valid_id, WRITES};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -36,9 +36,6 @@ use std::{
 const MAX_BODY: usize = 16 * 1024;
 const MAX_DESCRIPTION: usize = 300;
 const MAX_PER_SCOPE: usize = 500;
-/// Bodies past this share of a chat's instructions are listed by description
-/// only; the agent reads them with `atelier tool memory show`.
-const MAX_INJECTED: usize = 48 * 1024;
 pub const TYPES: [&str; 4] = ["user", "feedback", "project", "reference"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -255,37 +252,25 @@ pub fn remove(data: &Path, scope: Scope, root: Option<&Path>, id: &str, expected
     fs::remove_file(&old.path).map_err(|e| format!("{}: {e}", old.path.display()))
 }
 
-/// The text a chat receives for one scope, or None when it holds nothing.
-/// Bodies are included until the budget runs out; the rest keep their
-/// description so the agent knows to read them.
+/// The index a chat receives for one scope, or None when it holds nothing.
+/// Like a provider's own memory index, only one line per memory rides in
+/// the instructions; the agent reads a body when its description is relevant,
+/// so a large store costs a chat almost nothing. The path lets a worker
+/// without a shell read the body with its file tools.
 pub fn render(scope: Scope, stored: &[Stored]) -> Option<String> {
     if stored.is_empty() {
         return None;
     }
     let mut out = format!(
-        "{} memory saved with `atelier tool memory` ({} {}). Background facts that were true when saved; verify a named file, function or flag before relying on it. Edit or remove an entry that is wrong or stale.",
+        "{} memory index ({} {}), saved with `atelier tool memory`. Read a memory before relying on it or when its description bears on the task: `atelier tool memory show ID --scope {}`, or read its file. Bodies are read live, so they may be newer than this list. Facts were true when saved; verify a named file, function or flag, and edit or remove an entry that is wrong or stale.\n",
         match scope { Scope::Global => "Global", Scope::Project => "Project" },
         stored.len(),
         if stored.len() == 1 { "entry" } else { "entries" },
+        scope.name(),
     );
-    let mut used = 0;
-    let mut skipped = vec![];
     for one in stored {
         let m = &one.memory;
-        if used + m.body.len() > MAX_INJECTED {
-            skipped.push(format!("- {} ({}): {}", m.id, m.kind, m.description));
-            continue;
-        }
-        used += m.body.len();
-        out.push_str(&format!("\n\n[{}] ({}) {}\n{}", m.id, m.kind, m.description, m.body));
-    }
-    if !skipped.is_empty() {
-        out.push_str(&format!(
-            "\n\nMore {} memories, not shown in full; read one with `atelier tool memory show ID --scope {}`:\n{}",
-            scope.name(),
-            scope.name(),
-            skipped.join("\n")
-        ));
+        out.push_str(&format!("\n- {} ({}): {} — {}", m.id, m.kind, m.description, one.path.display()));
     }
     Some(out)
 }
@@ -527,16 +512,17 @@ mod tests {
         assert_eq!(problems.len(), 1);
     }
     #[test]
-    fn rendering_keeps_every_description_when_bodies_exceed_the_budget() {
+    fn a_chat_receives_an_index_of_descriptions_and_paths_not_the_bodies() {
         let data = tempfile::tempdir().unwrap();
-        for id in ["a", "b", "c", "d"] {
-            save(data.path(), Scope::Global, None, None, None, &memory(id, &"x".repeat(MAX_BODY - 10))).unwrap();
+        for id in ["a", "b"] {
+            save(data.path(), Scope::Global, None, None, None, &memory(id, &format!("SECRET-BODY-{id}"))).unwrap();
         }
         let (stored, _) = list_scope(data.path(), Scope::Global, None).unwrap();
         let text = render(Scope::Global, &stored).unwrap();
-        assert!(text.contains("[a] (feedback) About a"));
-        assert!(text.contains("- d (feedback): About d"));
+        assert!(text.contains("Global memory index (2 entries)"));
+        assert!(text.contains(&format!("- a (feedback): About a — {}", data.path().join("memory/a.md").display())));
         assert!(text.contains("atelier tool memory show ID --scope global"));
+        assert!(!text.contains("SECRET-BODY"));
         assert!(render(Scope::Global, &[]).is_none());
     }
 }

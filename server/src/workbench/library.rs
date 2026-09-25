@@ -648,13 +648,14 @@ mod tests {
         assert_ne!(snap.revision, before.revision, "a memory change is a new pinned revision");
         let text = snap.guidance();
         assert!(text.contains("global instructions — Global memory:"));
-        assert!(text.contains("[everywhere] (user) About everywhere\nGlobal fact 日本語"));
+        assert!(text.contains("- everywhere (user): About everywhere"));
+        assert!(!text.contains("Global fact 日本語"), "bodies are read on demand, not injected");
         assert!(text.contains("project instructions — Project memory:"));
-        assert!(text.contains("Project fact"));
+        assert!(text.contains("- here (user): About here"));
         let elsewhere = resolve(data.path(), Some(other.path())).unwrap().guidance();
-        assert!(elsewhere.contains("Global fact") && !elsewhere.contains("Project fact"));
+        assert!(elsewhere.contains("About everywhere") && !elsewhere.contains("About here"));
         let global_only = resolve(data.path(), None).unwrap().guidance();
-        assert!(global_only.contains("Global fact") && !global_only.contains("Project fact"));
+        assert!(global_only.contains("About everywhere") && !global_only.contains("About here"));
         let mut library = Library::default();
         library.overrides.insert("atelier-memory-global".into(), Override { disabled: true, ..Default::default() });
         assert!(validate(&library, true).is_err(), "memory cannot be switched off by a project override");
