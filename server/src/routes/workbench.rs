@@ -1074,6 +1074,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/links/bead/:id", get(chats_for_bead))
         .route("/links/session/:id", get(beads_for_chat))
         .route("/history", get(history))
+        .route("/chat-text", get(chat_text))
         .route("/events", get(events))
         .route("/present", post(present))
         .route("/screen-check", post(screen_check))
@@ -2688,6 +2689,35 @@ async fn history(
     };
     Ok(Json(
         json!({"items":page.items,"cursor":page.cursor,"hasOlder":page.has_older}),
+    ))
+}
+
+#[derive(Deserialize)]
+struct ChatTextQuery {
+    session: String,
+}
+
+/// A whole chat as plain text, for `atelier tool chat read`: which chat it is,
+/// then every message in it (bw-mi3s.3). What an agent handed `@chat:<id>`
+/// reads when it needs the conversation, rather than the conversation being
+/// pasted into its turn.
+async fn chat_text(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<ChatTextQuery>,
+) -> Result<String, ApiError> {
+    let database = state.database();
+    let session = database
+        .get_session(query.session.clone())
+        .await?
+        .ok_or_else(|| ApiError::from(format!("{} is not a chat Atelier knows", query.session)))?;
+    let name = crate::workbench::chat_name::name_session(&session);
+    let text = database.chat_text(query.session.clone()).await?;
+    Ok(format!(
+        "Chat {} — \"{name}\" ({}), in {}\n\n{}\n",
+        session.id,
+        session.brand,
+        session.cwd,
+        if text.is_empty() { "(no messages yet)" } else { &text }
     ))
 }
 

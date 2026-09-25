@@ -1830,6 +1830,29 @@ fn held_in_its_project(
         Ok(kept.join("\n\n"))
     }
 
+    /// Every message of a chat, oldest first, as `User:` and `Assistant:`
+    /// paragraphs: what `atelier tool chat read` prints for an agent handed a
+    /// reference to this chat (bw-mi3s.3). The person's messages are their own
+    /// words, without the blocks Atelier added to them.
+    pub fn chat_text(&self, session_id: &str) -> rusqlite::Result<String> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT role, text FROM message WHERE session_id=?1 AND text<>'' ORDER BY at ASC")?;
+        let lines = statement
+            .query_map([session_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .map(|(role, text)| {
+                if role == "assistant" {
+                    format!("Assistant: {text}")
+                } else {
+                    format!("User: {}", super::metadata::persons_words(&text))
+                }
+            })
+            .collect::<Vec<_>>();
+        Ok(lines.join("\n\n"))
+    }
+
     pub fn save_account_handoff(&self, session_id: &str, context: &str) -> rusqlite::Result<()> {
         self.connection.execute(
             "INSERT INTO session_handoff(session_id, context) VALUES (?1,?2) ON CONFLICT(session_id) DO UPDATE SET context=excluded.context",
@@ -3383,6 +3406,29 @@ mod tests {
                 .id,
             "chat"
         );
+    }
+
+    /// `atelier tool chat read` prints the whole chat in order, and the
+    /// person's turns as they typed them, not with Atelier's blocks (bw-mi3s.3).
+    #[test]
+    fn a_chat_reads_back_in_order_in_the_persons_own_words() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(&root.path().join("workbench.db")).unwrap();
+        store.create_session(&session("chat", "claude", None, "2026-09-25T00:00:00Z")).unwrap();
+        let said = [
+            ("u1", "user", "Look at @bead:bw-1\n\n<atelier_references>\nadded\n</atelier_references>", "2026-09-25T00:00:01Z"),
+            ("a1", "assistant", "It is in progress.", "2026-09-25T00:00:02Z"),
+            ("u2", "user", "Thanks", "2026-09-25T00:00:03Z"),
+        ];
+        for (id, role, text, at) in said {
+            store.open_message("chat", id, role, at).unwrap();
+            store.grow_message("chat", id, text).unwrap();
+        }
+        let text = store.chat_text("chat").unwrap();
+        assert!(!text.contains("atelier_references"), "{text}");
+        assert!(text.starts_with("User: Look at @bead:bw-1"), "{text}");
+        let assistant = text.find("Assistant: It is in progress.").unwrap();
+        assert!(assistant < text.find("User: Thanks").unwrap(), "{text}");
     }
 
     #[test]

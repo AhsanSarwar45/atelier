@@ -161,6 +161,31 @@ pub async fn present(rest: &[String]) -> Result<i32, String> {
     Ok(0)
 }
 
+/// `atelier tool chat read CHAT-ID`: a whole chat, printed from the running
+/// app — what an agent handed `@chat:<id>` runs to read it (bw-mi3s.3).
+pub async fn chat(rest: &[String]) -> Result<i32, String> {
+    let (Some("read"), Some(id), None) = (rest.first().map(String::as_str), rest.get(1), rest.get(2)) else {
+        return Err("usage: atelier tool chat read CHAT-ID".into());
+    };
+    let response = reqwest::Client::new()
+        .get(server_url("/api/workbench/chat-text"))
+        .query(&[("session", id)])
+        .send()
+        .await
+        .map_err(|error| format!("Could not reach Atelier: {error}"))?;
+    let status = response.status();
+    let body = response.text().await.map_err(|error| format!("Invalid response: {error}"))?;
+    if !status.is_success() {
+        let reason = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|value| value["error"].as_str().map(str::to_string))
+            .unwrap_or(body);
+        return Err(reason);
+    }
+    print!("{body}");
+    Ok(0)
+}
+
 pub async fn screen_check(rest: &[String]) -> Result<i32, String> {
     let response = reqwest::Client::new()
         .post(server_url("/api/workbench/screen-check"))

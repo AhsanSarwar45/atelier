@@ -70,6 +70,7 @@ enum Command {
     SessionsForBead(String, Reply<Vec<Session>>),
     Search(String, usize, Reply<Vec<SearchHit>>),
     AccountHandoff(String, Reply<String>),
+    ChatText(String, Reply<String>),
     SaveAccountHandoff(String, String, Reply<()>),
     SavedAccountHandoff(String, Reply<Option<String>>),
     ClearAccountHandoff(String, Reply<()>),
@@ -341,6 +342,9 @@ impl ChatDb {
     }
     pub async fn account_handoff(&self, id: String) -> Result<String, String> {
         self.request(|reply| Command::AccountHandoff(id, reply)).await
+    }
+    pub async fn chat_text(&self, id: String) -> Result<String, String> {
+        self.request(|reply| Command::ChatText(id, reply)).await
     }
     pub async fn save_account_handoff(&self, id: String, context: String) -> Result<(), String> {
         self.request(|reply| Command::SaveAccountHandoff(id, context, reply)).await
@@ -1160,6 +1164,7 @@ fn run(
             Command::SessionsForBead(id, reply) => respond(reply, store.sessions_for_bead(&id)),
             Command::Search(query, limit, reply) => respond(reply, store.search(&query, limit)),
             Command::AccountHandoff(id, reply) => respond(reply, store.account_handoff(&id)),
+            Command::ChatText(id, reply) => respond(reply, store.chat_text(&id)),
             Command::SaveAccountHandoff(id, context, reply) => respond(reply, store.save_account_handoff(&id, &context)),
             Command::SavedAccountHandoff(id, reply) => respond(reply, store.saved_account_handoff(&id)),
             Command::ClearAccountHandoff(id, reply) => respond(reply, store.clear_account_handoff(&id)),

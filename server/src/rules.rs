@@ -573,6 +573,9 @@ pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
     if name == "present" {
         return crate::workbench::cli::present(rest).await;
     }
+    if name == "chat" {
+        return crate::workbench::cli::chat(rest).await;
+    }
     if name == "screen-check" {
         return crate::workbench::cli::screen_check(rest).await;
     }
