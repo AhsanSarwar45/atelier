@@ -567,6 +567,9 @@ pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
     if name == "skills" {
         return crate::workbench::library::cli(rest);
     }
+    if name == "memory" {
+        return crate::workbench::agent_memory::cli(rest);
+    }
     if name == "present" {
         return crate::workbench::cli::present(rest).await;
     }

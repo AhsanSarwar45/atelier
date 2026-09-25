@@ -23,6 +23,7 @@ pub mod hunks;
 pub mod kit_words;
 pub mod leftovers;
 pub mod library;
+pub mod agent_memory;
 pub mod skill_folders;
 pub mod lifecycle;
 pub mod liveness;

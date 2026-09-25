@@ -25,6 +25,7 @@ mod no_node_runtime;
 mod one_version_for_the_whole_product;
 mod skill_folders;
 mod skill_locations;
+mod shared_memory_tool;
 mod the_git_panel_speaks_to_real_git;
 mod the_install_recipe_takes_over_nothing;
 mod the_presenter_and_the_reader_agree;

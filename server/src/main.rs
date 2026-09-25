@@ -191,7 +191,9 @@ async fn run() {
     let asked = command_line::asked(env::args().skip(1));
     let guidance_discovery = matches!(&asked, command_line::Ask::Tool { name, rest }
         if name == "skills" && matches!(rest.first().map(String::as_str),
-            None | Some("locations" | "help" | "--help" | "-h")));
+            None | Some("locations" | "help" | "--help" | "-h"))
+        || name == "memory" && matches!(rest.first().map(String::as_str),
+            None | Some("locations" | "list" | "show" | "help" | "--help" | "-h")));
     // An install made under the earlier name is carried across before anything
     // reads the settings, so a person who upgrades finds their projects where
     // they left them rather than an empty list (bw-8um.3.8).
