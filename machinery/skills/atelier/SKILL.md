@@ -52,7 +52,7 @@ When a description bears on the task, read the memory with
 ```bash
 atelier tool memory list
 atelier tool memory show ID
-atelier tool memory add ID --scope project --type feedback --description 'ONE LINE' --body 'FACT. Why: ... How to apply: ...'
+atelier tool memory add ID --scope project --type feedback --description 'FEW WORDS' --body 'FACT. Why: REASON.'
 atelier tool memory edit ID [--rename NEW] [--description ...] [--type ...] [--body ...]
 atelier tool memory remove ID
 ```
@@ -62,6 +62,30 @@ atelier tool memory remove ID
 - One fact per memory. Before adding one, check `list` and edit an existing
   memory that covers it rather than adding a duplicate.
 - Remove a memory as soon as you find it wrong, resolved or superseded.
+
+### Writing memories
+
+Every chat pays for the index, and a wrong memory is a confident wrong answer.
+Save little, and keep it short.
+
+- Description: a few words, under about 10, naming when the memory matters, for
+  example `Never touch the owner's app port`. Do not restate the body.
+- Body: one to three short sentences. State the fact, then `Why:`. Add
+  `How to apply:` only when it is not obvious. No background, history or
+  examples.
+- Save only what a later chat would get wrong and cannot find in the
+  repository:
+  - the user's decisions and preferences, with the reason;
+  - traps on this machine that can destroy work;
+  - where to find things outside the repository, such as dashboards, tickets
+    and access paths.
+- Never save what goes stale or can be looked up:
+  - code details such as file paths, function names, layouts or designs;
+  - bug post-mortems, measured numbers and work in progress;
+  - versions, limits or flags of other people's tools;
+  - anything in the code, docs, tests or git history.
+- Phrase a memory so it survives a rename. Describe the behaviour or rule, not a
+  file or symbol. Write absolute dates, never "today" or "next week".
 - The index is pinned for this connection; `show` and `list` read the current
   store, including changes made since the chat started.
 - The user edits memories in Settings → Agent guidance → Memories.
