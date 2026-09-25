@@ -957,7 +957,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // `null` is a real address here: it is the chat screen with no chat on it,
   // which is where a launch that failed has to put him back.
   const open = useCallback(
-    (id: string | null) => router.push(addressWith(params, { tab: 'chat', chat: id })),
+    (id: string | null) => router.push(addressWith(params, { tab: 'chat', chat: id, message: null })),
     [router, params],
   );
   /**
@@ -1507,13 +1507,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * transcript, which is once per word while an answer arrives, so reading
    * history meant being dragged back down over and over (bw-n6yh).
    */
-  const { held: atTheEnd, toTheEnd, paneRef, contentRef } = useHeldAtTheEnd(pane);
+  const { held: atTheEnd, toTheEnd, stand, paneRef, contentRef } = useHeldAtTheEnd(pane);
 
-  // Another conversation opens at its own end, not at the place this one was
-  // read to, and before the first frame is drawn.
-  useLayoutEffect(() => {
-    toTheEnd();
-  }, [sessionId, toTheEnd]);
+  // A search's jump is made once and then dropped from the address, so the
+  // history holds the chat and not the match: Back returns to where the chat
+  // was last read, which the transcript remembers, not to where it was found.
+  const target = params.get('message');
+  const arrived = useCallback(() => router.replace(addressWith(params, { message: null })), [router, params]);
 
   /**
    * The reader's place in the conversation, kept across a turn at the diff
@@ -3093,7 +3093,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             onLook={setLooking}
             pane={pane}
             onOlder={view.loadOlder}
-            target={params.get('message')}
+            target={target}
+            onArrived={arrived}
+            toTheEnd={toTheEnd}
+            stand={stand}
           />
           </ChatAccount.Provider>
         )}

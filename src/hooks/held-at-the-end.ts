@@ -33,13 +33,19 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
  */
 
 /** How far from the end still counts as watching it. */
-const NEAR = 64;
+export const NEAR = 64;
 
 export interface HeldAtTheEnd {
   /** Whether the end of the pane is what the reader is watching. */
   held: boolean;
   /** Put the end back in view, and follow it again. */
   toTheEnd: (how?: ScrollBehavior) => void;
+  /**
+   * Let go of the end and keep the pane where `where` says, frame after frame,
+   * while the rows around that place are measured and move it. Hands back how
+   * to stop early.
+   */
+  stand: (where: () => number | undefined) => () => void;
   /** Goes on the pane that scrolls. */
   paneRef: (node: HTMLElement | null) => void;
   /** Goes on the box holding the rows, so what it does to its own height is noticed. */
@@ -61,6 +67,10 @@ export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>
   const gliding = useRef(false);
   /** Where the pane was left standing, and how far its end was then. */
   const left = useRef({ top: 0, end: 0 });
+  /** The frame that next puts the pane back where it is standing, if it is. */
+  const standing = useRef(0);
+  /** Counts every place taken, so stopping one never stops the one after it. */
+  const stood = useRef(0);
   const [box, setBox] = useState<HTMLElement | null>(null);
   const [content, setContent] = useState<HTMLElement | null>(null);
 
@@ -70,10 +80,17 @@ export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>
     setHeld(now);
   }, []);
 
+  const still = useCallback(() => {
+    stood.current += 1;
+    cancelAnimationFrame(standing.current);
+    standing.current = 0;
+  }, []);
+
   const toTheEnd = useCallback(
     (how: ScrollBehavior = 'auto') => {
       const there = pane.current;
       if (!there) return;
+      still();
       hold(true);
       const top = end(there);
       aimed.current = top;
@@ -99,12 +116,61 @@ export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>
         there.scrollTop = top;
       }
     },
-    [pane, hold],
+    [pane, hold, still],
+  );
+
+  // One place for every time the app holds the pane on a row rather than on
+  // the end: the row a search found, the row a chat was left on, the row being
+  // read when older ones arrive above it. Each row arrives as a guess at its
+  // height and is measured a frame or two later, so the place is put back
+  // until it has held three frames running, or for two seconds at most — and
+  // given up the moment anything else takes the pane: the reader, or the way
+  // back to now.
+  const stand = useCallback(
+    (where: () => number | undefined) => {
+      still();
+      const run = stood.current;
+      const stop = () => {
+        if (stood.current === run) still();
+      };
+      const there = pane.current;
+      if (!there) return stop;
+      hold(false);
+      aimed.current = null;
+      gliding.current = false;
+      const until = performance.now() + 2000;
+      let steady = 0;
+      const put = () => {
+        const want = where();
+        if (want === undefined) steady = 0;
+        else if (Math.abs(there.scrollTop - want) > 0.5) {
+          there.scrollTop = want;
+          steady = 0;
+        } else steady += 1;
+        if (steady < 3 && performance.now() <= until) {
+          standing.current = requestAnimationFrame(put);
+          return;
+        }
+        standing.current = 0;
+        hold(end(there) - there.scrollTop <= near);
+      };
+      put();
+      return stop;
+    },
+    [pane, hold, still, near],
   );
 
   const read = useCallback(() => {
     if (!box) return;
     const now = { top: box.scrollTop, end: end(box) };
+    // Held on a row, the pane is the app's however far it goes. The rows around
+    // that row are still being measured, and an end they seem to reach on the
+    // way is not the reader coming back to it; where it stands once they have
+    // been is the answer.
+    if (standing.current) {
+      left.current = now;
+      return;
+    }
     // Where it was aimed, or as far as the pane can go — a move aimed at an
     // end that has come nearer since is over when the pane runs out of room,
     // and waiting for an exact arrival that can never happen would leave the
@@ -171,23 +237,43 @@ export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>
     // back to the bottom by the layout effect above.
     const wheeled = (event: WheelEvent) => {
       his();
+      still();
       if (event.deltaY < 0) hold(false);
     };
     const keyed = (event: KeyboardEvent) => {
       his();
+      still();
       if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) hold(false);
     };
+    // A glide cut short. Rows measured on its way are put right by moving the
+    // pane under it, and a pane moved mid-glide stops wherever it was — which
+    // left the way back to now a little way down a chat opened in its middle,
+    // and never at the end. Wherever it stopped, the end is still where he
+    // asked to be.
+    const ended = () => {
+      if (!gliding.current) return;
+      gliding.current = false;
+      aimed.current = null;
+      if (holding.current) toTheEnd('smooth');
+    };
+    // `touchmove`, not `touchstart`: a finger landing is how every scroll on a
+    // phone begins, including the one that asked for the place being held
+    // (bw-ad3r.15). A drag is the gesture that says he wants to be elsewhere.
     box.addEventListener('scroll', read, { passive: true });
+    box.addEventListener('scrollend', ended, { passive: true });
     box.addEventListener('wheel', wheeled, { passive: true });
     box.addEventListener('touchstart', his, { passive: true });
+    box.addEventListener('touchmove', still, { passive: true });
     box.addEventListener('keydown', keyed);
     return () => {
       box.removeEventListener('scroll', read);
+      box.removeEventListener('scrollend', ended);
       box.removeEventListener('wheel', wheeled);
       box.removeEventListener('touchstart', his);
+      box.removeEventListener('touchmove', still);
       box.removeEventListener('keydown', keyed);
     };
-  }, [box, hold, read]);
+  }, [box, hold, read, still, toTheEnd]);
 
   // Anything that changes how tall the conversation is, or how much of it can be
   // seen at once, without the chat drawing a frame of its own: a picture that
@@ -212,5 +298,5 @@ export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>
   );
   const contentRef = useCallback((node: HTMLElement | null) => setContent(node), []);
 
-  return { held, toTheEnd, paneRef, contentRef };
+  return { held, toTheEnd, stand, paneRef, contentRef };
 }

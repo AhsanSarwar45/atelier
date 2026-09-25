@@ -9,6 +9,7 @@ import {
   HELPER_AGENT,
   HELPER_SAID,
   longChatSaid,
+  raggedChatSaid,
   writeChatWithHelper,
   writeLongChat,
   type LongChat,
@@ -73,7 +74,7 @@ interface Ground {
   /** Where the project itself is, for a fixture that writes its own record. */
   cwd: string;
   /** Writes one more long conversation into this project. */
-  longChat: (held?: number) => LongChat;
+  longChat: (held?: number, said?: (n: number) => string) => LongChat;
   away: () => Promise<void>;
 }
 
@@ -89,8 +90,8 @@ async function makeGround(request: APIRequestContext, name: string): Promise<Gro
   return {
     projectId: listed.id,
     cwd: project,
-    longChat: (held = 120) => {
-      const chat = writeLongChat({ cwd: project, sessionId: randomUUID(), held });
+    longChat: (held = 120, said?: (n: number) => string) => {
+      const chat = writeLongChat({ cwd: project, sessionId: randomUUID(), held, said });
       written.push(chat);
       return chat;
     },
@@ -115,7 +116,7 @@ async function readChat(page: Page, chat: LongChat): Promise<void> {
   await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
   // The last thing said is what a chat opens on, so its arrival is the whole
   // conversation being there to scroll.
-  await expect(page.getByTestId('transcript').getByText(longChatSaid(chat.held - 1)).first()).toBeVisible({
+  await expect(page.getByTestId('transcript').getByText(`Message ${chat.held - 1} of a `).first()).toBeVisible({
     timeout: HELLO_MS,
   });
   await settled(page);
@@ -326,6 +327,29 @@ function neverAwayFromTheEnd(frames: { top: number; end: number }[], what: strin
     console.log(`${what}: ${off.length} of ${deep.length} frames off the end`, JSON.stringify(off.slice(0, 12)));
   }
   expect(worst, `the pane was drawn away from the end of the conversation (${what})`).toBeLessThanOrEqual(AT_THE_END);
+}
+
+/**
+ * Goes where a search result goes: the chat, at one of its messages. Through
+ * the browser's own history, which the app's router follows, so the step lands
+ * in the history exactly as the search panel's own push does.
+ */
+async function jumpTo(page: Page, session: string, n: number): Promise<void> {
+  await page.evaluate(
+    ({ session, message }) => {
+      const q = new URLSearchParams(location.search);
+      q.set('chat', session);
+      q.set('message', message);
+      history.pushState(null, '', `/project?${q.toString()}`);
+    },
+    { session, message: `long-u${n}` },
+  );
+}
+
+/** Opens another chat from the list, and waits for it the way a reader would. */
+async function openOther(page: Page, chat: LongChat): Promise<void> {
+  await readChat(page, chat);
+  expect(await offTheEnd(page), 'a chat never opened before did not open at its end').toBeLessThanOrEqual(AT_THE_END);
 }
 
 test.describe('how a chat scrolls', () => {
@@ -663,6 +687,102 @@ test.describe('how a chat scrolls', () => {
       expect(off.by, `the helper conversation scrolls ${off.by}px sideways; widest is ${off.widest}`).toBe(0);
     } finally {
       written.remove();
+      await kept.away();
+    }
+  });
+
+  /**
+   * A chat already opened comes back where it was left, and one never opened
+   * comes up at its end — whether it is opened from the list or come back to
+   * with Back.
+   */
+  test('comes back where it was left, and a chat never opened opens at its end', async ({ page, request }) => {
+    const kept = await makeGround(request, 'return');
+    try {
+      const first = kept.longChat(120, raggedChatSaid);
+      const second = kept.longChat();
+      const third = kept.longChat();
+      await openChatList(page, kept.projectId);
+      await readChat(page, first);
+      await readerScrolls(page, -2400);
+      await settled(page);
+      const read = await reading(page);
+      expect(read.text, 'nothing was being read at the top of the pane').not.toBe('');
+
+      await openOther(page, second);
+      await page.goBack();
+      await expect.poll(() => stillAt(page, read.text), { timeout: HELLO_MS }).not.toBeNull();
+      await settled(page);
+      expect(
+        Math.abs((await stillAt(page, read.text))! - read.at),
+        'Back did not return the chat to where it was left',
+      ).toBeLessThanOrEqual(STAYED);
+      await expect(page.getByTestId('back-to-now')).toHaveAttribute('data-shown', 'yes');
+      await page.screenshot({ path: `${SHOTS}/chat-scroll-comes-back-where-left.png` });
+
+      // Opened again from the list, it is the same place.
+      await openOther(page, third);
+      const row = page.locator(`[data-testid="restore-row"][data-external-id="${first.sessionId}"]`);
+      await row.getByTestId('row-name').click();
+      await expect.poll(() => stillAt(page, read.text), { timeout: HELLO_MS }).not.toBeNull();
+      await settled(page);
+      expect(
+        Math.abs((await stillAt(page, read.text))! - read.at),
+        'opening the chat again from the list did not return it to where it was left',
+      ).toBeLessThanOrEqual(STAYED);
+    } finally {
+      await kept.away();
+    }
+  });
+
+  /**
+   * A search opens a chat at the message it found, far back in a chat whose
+   * rows below it have never been measured. The way back to now must reach
+   * the end all the same, and the jump itself is not a place in the history:
+   * Back returns the chat to where it was last read, not to the match.
+   */
+  test('a jump to a message is not kept in the history, and the way back from it reaches the end', async ({
+    page,
+    request,
+  }) => {
+    const kept = await makeGround(request, 'jump');
+    try {
+      const chat = kept.longChat(160, raggedChatSaid);
+      const other = kept.longChat();
+      await openChatList(page, kept.projectId);
+      await readChat(page, chat);
+      const session = new URL(page.url()).searchParams.get('chat')!;
+      await readChat(page, other);
+
+      await jumpTo(page, session, 60);
+      const found = page.locator('[data-found]');
+      await expect(found).toContainText('Message 60 of a ragged conversation', { timeout: HELLO_MS });
+      await expect(found).toBeInViewport();
+
+      const back = page.getByTestId('back-to-now');
+      await expect(back).toHaveAttribute('data-shown', 'yes');
+      await back.click();
+      await expect.poll(() => offTheEnd(page), { timeout: 10_000 }).toBeLessThanOrEqual(AT_THE_END);
+      await settled(page);
+      expect(await offTheEnd(page), 'the way back stopped short of the end').toBeLessThanOrEqual(AT_THE_END);
+      await expect(back).toHaveAttribute('data-shown', 'no');
+      await page.screenshot({ path: `${SHOTS}/chat-scroll-back-from-a-jump.png` });
+      await expect(page, 'the match is still in the address, so Back returns to it').not.toHaveURL(/[?&]message=/);
+
+      // Read somewhere else, go to another chat, and come back.
+      await readerScrolls(page, -1500);
+      await settled(page);
+      const read = await reading(page);
+      await openOther(page, other);
+      await page.goBack();
+      await expect.poll(() => stillAt(page, read.text), { timeout: HELLO_MS }).not.toBeNull();
+      await settled(page);
+      expect(
+        Math.abs((await stillAt(page, read.text))! - read.at),
+        'Back returned to the match instead of where the chat was last read',
+      ).toBeLessThanOrEqual(STAYED);
+      await expect(page.locator('[data-found]')).toHaveCount(0);
+    } finally {
       await kept.away();
     }
   });

@@ -15,6 +15,8 @@ import type { LookableImage } from '@/workbench/protocol';
 
 const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id };
 const LOOK = (_image: LookableImage) => {};
+const NOWHERE = () => {};
+const STAND = () => NOWHERE;
 
 function rows(many: number, prefix = 'm'): DrawnRow[] {
   return Array.from({ length: many }, (_, index) => ({
@@ -51,6 +53,8 @@ function chat(given: {
         onLook={LOOK}
         pane={pane}
         onOlder={given.onOlder}
+        toTheEnd={NOWHERE}
+        stand={STAND}
       />
     </div>
   );

@@ -6,6 +6,7 @@
  *
  *   /project?id=<project>&tab=chat|board|files&chat=<sessionId>&card=<cardId>
  *   …&file=<absolute path>&line=<1-based line>
+ *   …&message=<id>                            a search's jump into the chat, dropped once made
  *   …&settings=<section>&ptab=<provider tab>   the project's settings, over the top
  *
  * Design: docs/designs/app-shell.md §1.7.
@@ -25,6 +26,8 @@ export interface Where {
   file: string | null;
   /** The line of that file to scroll to and mark, counted from one. */
   line: number | null;
+  /** The message a search opens the chat at. Dropped once the chat is there. */
+  message: string | null;
   /** The project settings section drawn over the screen, or nothing. */
   settings: string | null;
   /** The provider tab inside a settings section. */
@@ -74,6 +77,7 @@ export function whereFrom(params: URLSearchParams): Where {
     card: params.get('card') ?? params.get(OLD_CARD),
     file,
     line: lineFrom(params.get('line')),
+    message: params.get('message'),
     settings: params.get('settings'),
     ptab: params.get('ptab'),
   };
