@@ -82,7 +82,7 @@ import type { SessionMenu } from '@/workbench/fold';
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
 import { BRAND_DEFAULT_MODEL, newChatId, offeringAtelierAuto, startingChat } from '@/workbench/protocol';
 import { SectionHeading } from '@/workbench/section-heading';
-import { heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
+import { conversationOf, heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
 import { DrawnTranscript } from '@/workbench/drawn-transcript';
@@ -1792,7 +1792,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // The allowance of the account this chat runs on, not of whichever account
   // the server booted with (bw-5ihw.8).
   const plan = usePlanUsage(sessionBrand, view.profile);
-  const externalId = live?.externalId ?? facts?.externalId ?? null;
+  const externalId = conversationOf(live, facts);
   // The stream answers while it spoke last. A running set read on the beat
   // before this chat was opened can name it as somebody else's when the chat
   // was started from here — the process was ours before the server had it

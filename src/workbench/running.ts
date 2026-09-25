@@ -301,3 +301,17 @@ export function streamStillAnswers(runningAt: number | null, factsAt: number | n
   if (runningAt === null || factsAt === null) return true;
   return runningAt >= factsAt;
 }
+
+/**
+ * Which provider conversation a chat runs on. The live store is the one
+ * answer while it holds the chat — its `null` means the conversation was let
+ * go (a profile switch does that) and is not a gap for an older read to fill.
+ * The chat's facts answer only before the stream has named the chat
+ * (bw-ljko.3).
+ */
+export function conversationOf(
+  live: { externalId: string | null } | undefined,
+  facts: { externalId?: string | null } | null | undefined,
+): string | null {
+  return live ? live.externalId : (facts?.externalId ?? null);
+}

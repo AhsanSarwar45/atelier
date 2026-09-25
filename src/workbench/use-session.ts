@@ -162,10 +162,12 @@ export function useSessionFactsRead(sessionId: string | null): SessionFactsRead 
   const [facts, setFacts] = useState<SessionFactsRead | null>(() => sessionId ? factsCache.get(sessionId) ?? null : null);
 
   useEffect(() => {
-    // Cleared first, so the line never names the chat before this one.
+    // Cleared first, so the line never names the chat before this one. What
+    // was read last time is drawn at once and then read again: a chat's facts
+    // change under it — a profile switch lets its conversation go — and a copy
+    // kept for the life of the page went on naming the old one (bw-ljko.3).
     setFacts(sessionId ? factsCache.get(sessionId) ?? null : null);
     if (!sessionId) return;
-    if (factsCache.has(sessionId)) return;
     let live = true;
     void (async () => {
       try {
