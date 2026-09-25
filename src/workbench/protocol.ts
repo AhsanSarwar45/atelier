@@ -1397,7 +1397,7 @@ export interface SessionFacts {
 }
 
 /**
- * One frame of the app-wide stream (`GET /api/workbench/watch`).
+ * One frame of the app-wide stream (the `workbench` feed of `/api/live`).
  *
  * A snapshot first, so a browser that connects in the middle of the day knows
  * every session's state without replaying its whole transcript, then the events

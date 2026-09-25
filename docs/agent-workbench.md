@@ -2103,7 +2103,7 @@ Three decisions worth keeping:
 **Account-wide, so the server owns it and no screen asks.** Every chat on the
 machine spends the same allowance. The sidecar reads it on a beat of its own —
 every thirty seconds, for as long as any page is connected and not once when
-none is — and says it down `/watch` as a `usage` frame. That frame belongs to no
+none is — and says it down the app-wide feed (`/api/live`) as a `usage` frame. That frame belongs to no
 session: it is never written into a chat's transcript, and a page opening is
 told the figure in hand immediately, so two chats cannot disagree about one
 number. `GET /api/workbench/usage` remains for a caller that wants it once.

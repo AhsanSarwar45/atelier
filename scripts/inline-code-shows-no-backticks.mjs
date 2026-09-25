@@ -102,9 +102,6 @@ async function mockBackend(page) {
     if (p.startsWith('/api/workbench/links/bead/')) return json([]);
     if (p.startsWith('/api/workbench/restore')) return json([]);
     if (p.startsWith('/api/projects/') && p.endsWith('/touch')) return json({});
-    if (p.startsWith('/api/workbench/watch')) {
-      return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: ': nothing\n\n' });
-    }
     if (p.startsWith('/api/workbench/events')) {
       const since = Number(url.searchParams.get('since') ?? 0);
       return route.fulfill({

@@ -149,7 +149,7 @@ fn asked(flag: &Option<String>) -> bool {
 }
 
 /// Feed the combined browser connection from the in-process database. This is
-/// the native equivalent of relaying the helper's `/watch` SSE stream.
+/// the one app-wide feed; nothing else streams every chat.
 async fn send_native_watch_snapshot(
     state: &workbench::WorkbenchState,
     tx: &mpsc::Sender<Tagged>,
@@ -831,6 +831,83 @@ mod tests {
         };
         let registry = WorkbenchRegistry::new(database, paths, Arc::new(UnavailableFactory));
         (directory, workbench::WorkbenchState::new(registry))
+    }
+
+    fn a_saved_chat() -> Session {
+        Session {
+            id: "chat-1".into(),
+            brand: "codex".into(),
+            external_id: Some("thread-1".into()),
+            project_id: "project-1".into(),
+            project_path: "/work/project".into(),
+            cwd: "/work/project/tree".into(),
+            model: Some("gpt-5".into()),
+            permission_mode: "default".into(),
+            effort: Some("high".into()),
+            collaboration_mode: None,
+            profile: None,
+            title: Some("The chat that must remain visible".into()),
+            state: "dormant".into(),
+            origin: "app".into(),
+            created_at: "2026-08-30T00:00:00.000Z".into(),
+            last_active_at: "2026-08-30T00:01:00.000Z".into(),
+            last_spoke_at: Some("2026-08-30T00:00:30.000Z".into()),
+            begun_by: None,
+            named_by_owner: false,
+        }
+    }
+
+    /// The app-wide feed opens on every chat as it stands and who holds what,
+    /// before any event, so a window that connects mid-day needs no replay.
+    #[tokio::test]
+    async fn the_app_wide_feed_opens_on_every_chat_and_who_holds_it() {
+        let (_directory, state) = workbench_fixture();
+        state.database().create_session(a_saved_chat()).await.unwrap();
+        let (tx, mut rx) = mpsc::channel(8);
+        tokio::spawn(relay_native_watch(state, tx));
+
+        let snapshot = rx.recv().await.expect("a snapshot").data;
+        assert!(snapshot.contains("\"kind\":\"snapshot\""), "{snapshot}");
+        assert!(snapshot.contains("chat-1"), "{snapshot}");
+        assert!(snapshot.contains("\"beads\":[]"), "{snapshot}");
+        assert!(snapshot.contains("\"activity\":\"\""), "{snapshot}");
+        let running = rx.recv().await.expect("who holds what").data;
+        assert!(running.contains("\"kind\":\"running\""), "{running}");
+    }
+
+    /// A burst the feed cannot keep up with — an imported history — is
+    /// answered with the whole list again, never by skipping what it missed.
+    #[tokio::test]
+    async fn the_app_wide_feed_restates_every_chat_after_a_burst_it_fell_behind() {
+        let (_directory, state) = workbench_fixture();
+        state.database().create_session(a_saved_chat()).await.unwrap();
+        // Two frames of room and nobody reading, while more events land than
+        // the database broadcast holds: the feed's receiver must fall behind.
+        let (tx, mut rx) = mpsc::channel(2);
+        tokio::spawn(relay_native_watch(state.clone(), tx));
+        // Its first snapshot says it is listening; the burst lands after.
+        let first = rx.recv().await.expect("a first snapshot").data;
+        assert!(first.contains("\"kind\":\"snapshot\""), "{first}");
+        for index in 0..1_200 {
+            let event: crate::workbench::protocol::Event = serde_json::from_value(serde_json::json!({
+                "type":"notice", "sessionId":"chat-1", "seq":0,
+                "at":"2026-08-30T00:01:00.000Z", "text":format!("burst {index}")
+            }))
+            .unwrap();
+            state.database().append(event).await.unwrap();
+        }
+
+        let restated = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(frame) = rx.recv().await {
+                if frame.data.contains("\"kind\":\"snapshot\"") {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false);
+        assert!(restated, "the feed fell behind and never restated its chats");
     }
 
     #[test]

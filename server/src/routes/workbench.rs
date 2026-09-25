@@ -1016,7 +1016,6 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/links/session/:id", get(beads_for_chat))
         .route("/history", get(history))
         .route("/events", get(events))
-        .route("/watch", get(watch))
         .route("/present", post(present))
         .route("/screen-check", post(screen_check))
         .route("/command", post(command))
@@ -2809,75 +2808,6 @@ pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Valu
     Ok(view)
 }
 
-fn watch_frame(value: Value) -> SseEvent {
-    SseEvent::default()
-        .json_data(value)
-        .expect("watch frame serializes")
-}
-
-async fn send_watch_snapshot(
-    state: &WorkbenchState,
-    tx: &tokio::sync::mpsc::Sender<Result<SseEvent, Infallible>>,
-) -> Option<Value> {
-    let sessions = session_summaries(state.database(), None).await.ok()?;
-    let holds = serde_json::to_value(state.provider_holds().await).ok()?;
-    for frame in [
-        json!({"kind":"snapshot","sessions":sessions}),
-        json!({"kind":"running","holds":holds}),
-    ] {
-        tx.send(Ok(watch_frame(frame))).await.ok()?;
-    }
-    Some(holds)
-}
-
-async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, ApiError> {
-    let mut receiver = state.database().subscribe_all();
-    let (tx, rx) = tokio::sync::mpsc::channel(100);
-    tokio::spawn(async move {
-        let (mut polls, _poll_lease) = state.watch_poll_subscription().await;
-        let Some(_) = send_watch_snapshot(&state, &tx).await else {
-            return;
-        };
-        loop {
-            tokio::select! {
-                polled=polls.recv()=>match polled {
-                    Ok(frame) => {
-                        if tx.send(Ok(watch_frame(frame))).await.is_err(){return}
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => return,
-                },
-                received=receiver.recv()=>match received{
-                    Ok(update)=>{
-                        if update.batch_from.is_some(){
-                            if send_watch_snapshot(&state,&tx).await.is_none(){return}
-                            continue
-                        }
-                        if update.event.kind==crate::workbench::protocol::EventKind::SessionStarted{
-                            if let Ok(Some(session))=state.database().get_session(update.session_id.clone()).await{
-                                let beads=state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();
-                                let name=crate::workbench::chat_name::name_session(&session);
-                                if tx.send(Ok(watch_frame(json!({"kind":"opened","session":{"id":session.id,"brand":session.brand,"externalId":session.external_id,"projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,"model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,"collaborationMode":session.collaboration_mode,"title":session.title,"name":name,"state":session.state,"origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,"lastSpokeAt":session.last_spoke_at,"activity":"","activityDetail":"","activityCall":Value::Null,"busySince":Value::Null,"beads":beads}})))).await.is_err(){return}
-                            }
-                        }
-                        if tx.send(Ok(watch_frame(json!({"kind":"event","event":update.event})))).await.is_err(){return}
-                    },
-                    Err(broadcast::error::RecvError::Lagged(_))=>{
-                        if send_watch_snapshot(&state,&tx).await.is_none(){return}
-                    },
-                    Err(broadcast::error::RecvError::Closed)=>return
-                }
-            }
-        }
-    });
-    let output: EventStream = Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx));
-    Ok(Sse::new(output).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(30))
-            .text("keep-alive"),
-    ))
-}
-
 async fn command(
     State(state): State<WorkbenchState>,
     Json(command): Json<Command>,
@@ -4428,95 +4358,6 @@ mod tests {
         .unwrap();
         assert_eq!(local[0]["title"], "Canonical provider title");
         assert_eq!(local[0]["lastActiveAt"], provider_clock);
-    }
-
-    #[tokio::test]
-    async fn native_workbench_routes_publish_the_all_chat_snapshot_and_live_tail() {
-        let (_directory, state) = fixture();
-        state
-            .database()
-            .create_session(saved_session())
-            .await
-            .unwrap();
-        let response = router(state)
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri("/watch")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let chunk = first_chunk(response).await;
-        assert!(chunk.contains("snapshot"), "{chunk}");
-        assert!(chunk.contains("chat-1"), "{chunk}");
-        assert!(chunk.contains("\"beads\":[]"), "{chunk}");
-        assert!(chunk.contains("\"activity\":\"\""), "{chunk}");
-    }
-
-    #[tokio::test]
-    async fn native_workbench_watch_can_restate_every_summary_after_a_lag() {
-        let (_directory, state) = fixture();
-        state
-            .database()
-            .create_session(saved_session())
-            .await
-            .unwrap();
-        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
-        let holds = send_watch_snapshot(&state, &tx)
-            .await
-            .expect("a lag recovery snapshot");
-        assert!(holds.is_array());
-        let snapshot = rx.recv().await.unwrap().unwrap();
-        let running = rx.recv().await.unwrap().unwrap();
-        assert!(format!("{snapshot:?}").contains("chat-1"));
-        assert!(format!("{running:?}").contains("running"));
-    }
-
-    #[tokio::test]
-    async fn native_workbench_watch_recovers_instead_of_skipping_a_burst() {
-        let (_directory, state) = fixture();
-        state
-            .database()
-            .create_session(saved_session())
-            .await
-            .unwrap();
-        let response = router(state.clone())
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri("/watch")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        // The route's outgoing queue holds 100 frames and the database
-        // broadcast holds 1,024. Not reading the body while this burst lands
-        // deterministically forces the all-chat receiver to lag.
-        for index in 0..1_200 {
-            let event: Event = serde_json::from_value(json!({
-                "type":"notice", "sessionId":"chat-1", "seq":0,
-                "at":"2026-08-30T00:01:00.000Z", "text":format!("burst {index}")
-            }))
-            .unwrap();
-            state.database().append(event).await.unwrap();
-        }
-
-        let mut body = response.into_body().into_data_stream();
-        let recovered = tokio::time::timeout(Duration::from_secs(5), async {
-            let mut received = String::new();
-            while let Some(chunk) = body.next().await {
-                received.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
-                if received.matches("\"kind\":\"snapshot\"").count() >= 2 {
-                    return true;
-                }
-            }
-            false
-        })
-        .await
-        .unwrap_or(false);
-        assert!(recovered, "the lagged watch never restated its summaries");
     }
 
     #[tokio::test]
