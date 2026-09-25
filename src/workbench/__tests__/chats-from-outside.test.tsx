@@ -157,6 +157,23 @@ describe('a chat begun in another tool', () => {
     )).toBe(false);
   });
 
+  it('opens from anywhere on the row, once, and not from the row\'s own menu', async () => {
+    // A thumb on the second line or the padding used to open nothing
+    // (bw-ljko.2).
+    list = [row({ sessionId: 'tapped', externalId: 'outside-1', state: 'idle' })];
+    const openedChat = vi.fn();
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={openedChat} />);
+
+    const whole = await screen.findByTestId('restore-row');
+    whole.click();
+    expect(openedChat).toHaveBeenCalledTimes(1);
+    screen.getByTestId('row-name').click();
+    expect(openedChat, 'the name and the row both answered one press').toHaveBeenCalledTimes(2);
+    screen.getByTestId('row-menu').click();
+    expect(openedChat, 'the menu button opened the chat').toHaveBeenCalledTimes(2);
+  });
+
   it('persists the provider human clock when an unseen chat gets its local id', async () => {
     list = [row({
       sessionId: null,

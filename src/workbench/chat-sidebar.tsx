@@ -439,6 +439,15 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
       // and its branch, so drawing it here too spent a line of a
       // two-line row saying what the next screen says anyway.
       data-folder={row.folder ?? ''}
+      // The whole row opens the chat, not only its name. A thumb that
+      // landed on the second line, the icon or the padding between rows
+      // used to open nothing, and the reader could not tell a miss from a
+      // slow open (bw-ljko.2). The name stays the button, so the row is
+      // still reached and opened from the keyboard; its click arrives here.
+      // The row's own controls stop their clicks before they reach it.
+      onClick={() => {
+        if (!busy) onEnter(row);
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         onMenu(row, { left: event.clientX, top: event.clientY });
@@ -448,7 +457,7 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
       // on one of those two lines, because a rail this narrow turns
       // a third row into a wall of half-sentences.
       className={cn(
-        'group/row px-3 py-2 text-sm',
+        'group/row cursor-pointer px-3 py-2 text-sm',
         open && 'bg-accent',
       )}
     >
@@ -475,7 +484,6 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
           // line and the row stayed 20px to a thumb (bw-e3dw.18).
           className="min-w-0 flex-1 justify-start p-0 text-left text-foreground"
           disabled={busy}
-          onClick={() => onEnter(row)}
         >
           <span className="truncate">{row.name}</span>
         </Button>
