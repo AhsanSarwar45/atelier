@@ -54,7 +54,6 @@ enum Command {
     ForgetNoticesForProject(String, Reply<usize>),
     GetSession(String, Reply<Option<Session>>),
     SessionByExternalId(String, Reply<Option<Session>>),
-    RememberExternalAlias(String, String, String, Reply<()>),
     UpdateSession(String, SessionPatch, Option<String>, Reply<()>),
     MarkSpoke(String, String, Reply<()>),
     MarkBegunBy(String, String, Reply<()>),
@@ -244,18 +243,6 @@ impl ChatDb {
     ) -> Result<Option<Session>, String> {
         self.request(|reply| Command::SessionByExternalId(external_id, reply))
             .await
-    }
-
-    pub async fn remember_external_alias(
-        &self,
-        session_id: String,
-        brand: String,
-        external_id: String,
-    ) -> Result<(), String> {
-        self.request(|reply| {
-            Command::RememberExternalAlias(session_id, brand, external_id, reply)
-        })
-        .await
     }
 
     pub async fn update_session(
@@ -1058,10 +1045,6 @@ fn run(
             Command::SessionByExternalId(id, reply) => {
                 respond(reply, store.session_by_external_id(&id))
             }
-            Command::RememberExternalAlias(session, brand, external, reply) => respond(
-                reply,
-                store.remember_external_alias(&session, &brand, &external),
-            ),
             Command::UpdateSession(id, patch, touch_at, reply) => {
                 respond(reply, store.update_session(&id, patch, touch_at.as_deref()))
             }

@@ -4361,6 +4361,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_chat_moved_to_another_profile_is_still_one_row() {
+        let (directory, state) = fixture();
+        let left = "5b0e1c52-8a51-4d0c-9f43-2c1f7a0b6e11";
+        let mut session = saved_session();
+        session.brand = "claude".into();
+        session.external_id = Some(left.into());
+        session.begun_by = Some("person".into());
+        state.database().create_session(session).await.unwrap();
+        // The provider keeps the conversation the chat leaves behind.
+        let record = directory
+            .path()
+            .join("claude/projects/-work-project")
+            .join(format!("{left}.jsonl"));
+        std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+        std::fs::write(
+            record,
+            concat!(
+                "{\"type\":\"user\",\"timestamp\":\"2026-09-01T06:00:00Z\",",
+                "\"cwd\":\"/work/project\",",
+                "\"message\":{\"role\":\"user\",\"content\":\"Reply with pong\"}}\n"
+            ),
+        )
+        .unwrap();
+        // What a profile switch writes: asleep, on the new profile, and the
+        // old conversation let go for the next account to replace.
+        state
+            .database()
+            .update_session(
+                "chat-1".into(),
+                crate::workbench::store::SessionPatch {
+                    external_id: Some(None),
+                    state: Some("dormant".into()),
+                    profile: Some(Some("work".into())),
+                    ..crate::workbench::store::SessionPatch::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let app = router(state);
+        for uri in [
+            "/restore?project=project-1&path=%2Fwork%2Fproject",
+            "/restore?project=project-1&path=%2Fwork%2Fproject&local=1",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(axum::http::Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let rows: Vec<Value> = serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            let ids: Vec<&str> = rows.iter().filter_map(|row| row["sessionId"].as_str()).collect();
+            assert_eq!(ids, ["chat-1"], "{uri} listed the left conversation again: {rows:?}");
+        }
+    }
+
+    #[tokio::test]
     async fn native_workbench_routes_execute_provider_independent_commands() {
         let (_directory, state) = fixture();
         let response = router(state)

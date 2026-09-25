@@ -2636,14 +2636,9 @@ impl AcpDriver {
                                         )).mcp_servers(shared_servers.clone()).meta(session_meta.clone()))
                                         .block_task()
                                         .await?;
-                                    task_database
-                                        .remember_external_alias(
-                                            task_session.id.clone(),
-                                            brand.to_string(),
-                                            remote,
-                                        )
-                                        .await
-                                        .map_err(acp_error)?;
+                                    // The conversation it leaves is kept as
+                                    // this chat's when the replacement's id
+                                    // is saved below (`update_session`).
                                     normalizer.lock().await.namespace_generated_ids();
                                     // Said only where there is something to
                                     // lose. A chat that has drawn nothing yet

@@ -502,6 +502,9 @@ impl Store {
         patch: SessionPatch,
         touch_at: Option<&str>,
     ) -> rusqlite::Result<()> {
+        if let Some(next) = patch.external_id.as_ref() {
+            self.keep_the_conversation_it_leaves(id, next.as_deref())?;
+        }
         let mut sets = Vec::new();
         let mut values = Vec::<SqlValue>::new();
         let mut nullable = |column: &str, value: Option<Option<String>>| {
@@ -554,6 +557,32 @@ impl Store {
             params_from_iter(values),
         )?;
         Ok(())
+    }
+
+    /// Remember the conversation a chat is leaving as still being that chat.
+    ///
+    /// Called from `update_session`, the one path that re-points a chat, so
+    /// every way of leaving a conversation keeps it: a profile switch, which
+    /// empties the id before the next account starts a new one, and a provider
+    /// that lost the conversation and was given a replacement. The provider
+    /// still lists the conversation left behind, and without this the next
+    /// full restore would find it owned by no chat and add it to the sidebar
+    /// as a second one (bw-cedp.1).
+    fn keep_the_conversation_it_leaves(&self, id: &str, next: Option<&str>) -> rusqlite::Result<()> {
+        let was: Option<(String, Option<String>)> = self
+            .connection
+            .query_row(
+                "SELECT brand, external_id FROM session WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        match was {
+            Some((brand, Some(left))) if Some(left.as_str()) != next => {
+                self.remember_external_alias(id, &brand, &left)
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Write down when a chat reached a state there is something to say about.
@@ -661,7 +690,7 @@ impl Store {
             .optional()
     }
 
-    pub fn remember_external_alias(
+    fn remember_external_alias(
         &self,
         session_id: &str,
         brand: &str,
@@ -3257,9 +3286,6 @@ mod tests {
                 Some("rollout-gone"),
                 "2026-09-13T00:00:00Z",
             ))
-            .unwrap();
-        store
-            .remember_external_alias("chat", "codex", "rollout-gone")
             .unwrap();
         store
             .update_session(
