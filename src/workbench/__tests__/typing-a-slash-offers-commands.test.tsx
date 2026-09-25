@@ -85,6 +85,29 @@ describe('the / menu', () => {
     expect(document.querySelector('[data-command="skill:standup"]')?.textContent).toContain('Atelier');
   });
 
+  it('opens when the commands come after the slash, unless it was closed on that slash', async () => {
+    const { editor, box, feed } = await aBox('', [], false);
+    fireEvent.change(box, { target: { value: '/' } });
+    await act(() => new Promise((done) => setTimeout(done, 20)));
+    expect(document.querySelector('[data-testid="command-menu"]')).toBeNull();
+    // An answer that is still empty comes first, and the menu that found nothing shuts itself.
+    act(() => feed.set({ commands: [], pending: false }));
+    await act(() => new Promise((done) => setTimeout(done, 20)));
+    act(() => feed.set({ commands: COMMANDS, pending: false }));
+    await waitFor(() => expect(offered(editor)).toEqual(['/compact', '/context', '/status', '/skill:standup']));
+
+    fireEvent.keyDown(box, { key: 'Escape' });
+    await waitFor(() => expect(offered(editor)).toEqual([]));
+    act(() => feed.set({ commands: COMMANDS.slice(1), pending: false }));
+    await act(() => new Promise((done) => setTimeout(done, 20)));
+    expect(offered(editor)).toEqual([]);
+  });
+
+  it('opens for a box that starts out holding a slash', async () => {
+    const { editor } = await aBox('/sta');
+    await waitFor(() => expect(offered(editor)).toEqual(['/status', '/skill:standup']));
+  });
+
   it('stays shut once the draft is more than one word', async () => {
     const { editor, box } = await aBox();
     fireEvent.change(box, { target: { value: '/compact now' } });

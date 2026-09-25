@@ -89,6 +89,18 @@ function menuKey(view: EditorView | null, key: string, shift: boolean): boolean 
   return false;
 }
 
+/**
+ * Whether focus going to `to` leaves the box: not to the line he sees, not to
+ * the form control beside it, not into the menu over it.
+ */
+function leavesTheBox(to: EventTarget | null, view: EditorView): boolean {
+  if (!(to instanceof Element)) return true;
+  // The editor sits in the box's host, beside the form control (below).
+  const box = view.dom.parentElement?.parentElement ?? view.dom;
+  if (box.contains(to)) return false;
+  return to.closest('.cm-tooltip') === null;
+}
+
 const RefreshPictures = StateEffect.define<void>();
 
 /** Where an icon of a given kind is fetched from, already drawn. */
@@ -395,6 +407,11 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
         Prec.highest(keymap.of([{ any: (_view, event) => keyed.current(event) }])),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.domEventHandlers({
+          blur: (event, editorView) => {
+            if (!leavesTheBox(event.relatedTarget, editorView)) return false;
+            closeCompletion(editorView);
+            return false;
+          },
           // Pictures are taken and the event is left alone, so pasted TEXT still
           // lands in the box the ordinary way.
           paste: (event, editorView) => {

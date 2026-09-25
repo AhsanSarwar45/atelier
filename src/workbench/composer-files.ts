@@ -445,17 +445,33 @@ function slashOpens(feed: CommandFeed) {
   return ViewPlugin.fromClass(
     class {
       private readonly stop: () => void;
+      /** The words a person closed the menu on; commands arriving later leave them alone. */
+      private dismissed: string | null = null;
 
       constructor(private readonly view: EditorView) {
+        // Commands can arrive after the slash does: a chat that is not awake
+        // hears what its provider offers only once it wakes. The menu that had
+        // nothing to show then opens with them.
         this.stop = feed.subscribe(() => {
-          if (completionStatus(view.state) === null) return;
-          if (SLASH_WORD.test(view.state.doc.toString())) startCompletion(view);
+          const typed = view.state.doc.toString();
+          if (!SLASH_WORD.test(typed)) return;
+          if (completionStatus(view.state) === null && typed === this.dismissed) return;
+          startCompletion(view);
         });
+        // A box built around a slash already written, as a draft it was handed.
+        if (SLASH_WORD.test(view.state.doc.toString())) queueMicrotask(() => startCompletion(view));
       }
 
       update(update: ViewUpdate) {
+        if (update.docChanged) {
+          this.dismissed = null;
+        } else if (completionStatus(update.startState) === 'active' && completionStatus(update.state) === null) {
+          // Only a menu he saw is one he closed; one that found nothing to show shut itself.
+          this.dismissed = update.state.doc.toString();
+        }
         if (!update.docChanged) return;
-        if (completionStatus(update.state) !== null) return;
+        // Asked again even while it is open: a line the app put there is not
+        // typing, and CodeMirror only asks again for typing.
         if (!SLASH_WORD.test(update.state.doc.toString())) return;
         queueMicrotask(() => startCompletion(this.view));
       }
@@ -655,7 +671,11 @@ export function mentionCompletions(
       // listing it already holds. Filtering the last answer locally instead
       // would use CodeMirror's ranking, which is the one thing this must not do.
       activateOnTyping: true,
-      closeOnBlur: true,
+      // The box has two doors, the line he sees and the form control a machine
+      // types into (composer-editor.tsx), and focus moving from one to the other
+      // is not leaving. The line closes the menu itself when he leaves the box;
+      // the form control, which only a machine ever focuses, closes nothing.
+      closeOnBlur: false,
       addToOptions: [
         {
           position: 10,

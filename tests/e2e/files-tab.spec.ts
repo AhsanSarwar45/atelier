@@ -237,7 +237,7 @@ test('a path in a message opens the file at its line, and lines copied there go 
   }, { chat: CHAT, view: foldAll(events) });
 
   await seeTestProjects(page);
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'claude', title: 'The round trip', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: fixture, runningElsewhere: false, held: null, beads: [] }] }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'claude', title: 'The round trip', name: 'The round trip', origin: 'terminal', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: fixture, runningElsewhere: false, held: null, beads: [] }] }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'The round trip', cwd: fixture, beads: [] } }));
 
   // Every command the app sends the agent, so what "sent" means can be asserted
