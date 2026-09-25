@@ -550,12 +550,15 @@ function CommandMenu({
   matches,
   active,
   onPick,
+  pending,
 }: {
   matches: CommandInfo[];
   active: number;
   onPick: (command: CommandInfo) => void;
+  /** The provider's own commands are still being asked for (bw-zldt.2). */
+  pending: boolean;
 }) {
-  if (!matches.length) return null;
+  if (!matches.length && !pending) return null;
   return (
     <Panel tone="overlay" inset="none" data-testid="command-menu" className="mb-2 max-h-64 overflow-y-auto p-1">
       {matches.map((c, i) => (
@@ -592,6 +595,11 @@ function CommandMenu({
           )}
         </Row>
       ))}
+      {pending && (
+        <p data-testid="commands-pending" className="px-2 py-1.5 text-xs text-muted-foreground">
+          Loading the provider's commands…
+        </p>
+      )}
     </Panel>
   );
 }
@@ -751,6 +759,7 @@ const ComposerBody = memo(function ComposerBody({
   setAttached,
   onLook,
   commands,
+  commandsPending,
   steerError,
   sendError,
   picker,
@@ -765,6 +774,7 @@ const ComposerBody = memo(function ComposerBody({
   setAttached: Dispatch<SetStateAction<DraftPicture[]>>;
   onLook: (picture: LookableImage) => void;
   commands: CommandInfo[];
+  commandsPending: boolean;
   steerError: string | null;
   sendError: string | null;
   picker: RefObject<HTMLInputElement>;
@@ -867,7 +877,7 @@ const ComposerBody = memo(function ComposerBody({
         </div>
       )}
       {/* His own commands and skills, as this session announced them (§7). */}
-      <CommandMenu matches={matches} active={pick} onPick={take} />
+      <CommandMenu matches={matches} active={pick} onPick={take} pending={commandsPending && typedCommand !== null && !shut} />
       {steerError && (
         <Panel asChild tone="danger" className="mb-2 text-xs text-danger">
           <p data-testid="steer-error">{steerError}</p>
@@ -3214,6 +3224,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             setAttached={setAttached}
             onLook={setLooking}
             commands={view.menu.commands}
+            commandsPending={view.menu.commandsPending === true}
             steerError={steerError}
             sendError={sendError}
             picker={picker}

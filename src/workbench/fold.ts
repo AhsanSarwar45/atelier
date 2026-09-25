@@ -438,6 +438,12 @@ export interface SessionMenu {
   agentControls: AgentControl[];
   /** The API endpoints this session's agent reports being pointed at. */
   providers: ApiProvider[];
+  /**
+   * A chat that is not awake whose provider is still being asked what `/`
+   * commands it has: the menu says so rather than looking like it has none
+   * (bw-zldt.2).
+   */
+  commandsPending?: boolean;
 }
 
 const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], efforts: [], permissionModes: [], collaborationModes: [], agentDefinitions: [], agentControls: [], configOptions: [], providers: [] };
@@ -518,6 +524,7 @@ function menuOf(sent: Partial<SessionMenu>): SessionMenu {
     agentControls: list(sent.agentControls, NO_MENU.agentControls),
     configOptions: list(sent.configOptions, NO_MENU.configOptions),
     providers: list(sent.providers, NO_MENU.providers),
+    ...(sent.commandsPending === true ? { commandsPending: true } : {}),
   };
 }
 

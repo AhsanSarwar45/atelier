@@ -2832,8 +2832,13 @@ async fn with_atelier_commands(
     let commands = crate::workbench::store::native_commands(menu);
     // A chat with a driver is told its commands by that driver; one without,
     // whatever state it stopped in, asks for them (bw-zldt.2).
-    if commands.is_empty() {
-        ask_provider_for_commands(database, &session);
+    // Until it answers, the menu says the provider's commands are on their
+    // way rather than that there are none.
+    if commands.is_empty() && ask_provider_for_commands(database, &session) {
+        if !menu.is_object() {
+            *menu = json!({});
+        }
+        menu["commandsPending"] = json!(true);
     }
     let root = std::path::PathBuf::from(&session.cwd);
     let shared = tokio::task::spawn_blocking(move || crate::workbench::library::commands_for(&root))
@@ -2862,14 +2867,19 @@ fn with_library(menu: &mut Value, mut native: Vec<Value>, shared: Vec<Value>) {
 /// and folder; every stopped chat that asked meanwhile is given the answer. A
 /// question that failed is asked again after a pause, a few times, for the
 /// chats already waiting; opening a chat after that starts over (bw-zldt.2).
-fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::store::Session) {
+///
+/// True while the provider is being asked for this chat.
+fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::store::Session) -> bool {
     static ASKS: std::sync::LazyLock<std::sync::Mutex<CommandAsks>> = std::sync::LazyLock::new(Default::default);
     if !matches!(session.brand.as_str(), "claude" | "codex") {
-        return;
+        return false;
     }
     let key = ask_key(session);
-    if !ASKS.lock().map(|mut asks| asks.join(&key, &session.id)).unwrap_or(false) {
-        return;
+    let Ok(first) = ASKS.lock().map(|mut asks| asks.join(&key, &session.id)) else {
+        return false;
+    };
+    if !first {
+        return true;
     }
     let (database, session) = (database.clone(), session.clone());
     tokio::spawn(async move {
@@ -2886,6 +2896,15 @@ fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::stor
         })
         .await;
         let Some((menu, shared)) = answer else {
+            let root = std::path::PathBuf::from(&session.cwd);
+            let shared = tokio::task::spawn_blocking(move || crate::workbench::library::commands_for(&root))
+                .await
+                .unwrap_or_default();
+            for session_id in waiting {
+                if let Err(error) = database.settle_menu(session_id.clone(), shared.clone()).await {
+                    tracing::warn!(%session_id, %error, "could not settle a stopped chat's menu");
+                }
+            }
             return;
         };
         for session_id in waiting {
@@ -2901,6 +2920,7 @@ fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::stor
             }
         }
     });
+    true
 }
 
 /// Which chats one answer serves. The folder is part of the question: the

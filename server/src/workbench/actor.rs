@@ -99,7 +99,7 @@ enum Command {
     ViewEvents(String, Reply<Vec<Event>>),
     SteeringMenu(String, Reply<serde_json::Value>),
     OfferedMenu(String, Reply<serde_json::Value>),
-    OfferCatalogue(String, Event, Vec<serde_json::Value>, Reply<()>),
+    OfferCatalogue(String, Option<Event>, Vec<serde_json::Value>, Reply<()>),
     Snapshot(String, Reply<SnapshotParts>),
     TranscriptItems(String, Option<i64>, usize, Reply<TranscriptItemPage>),
     AgentTranscriptItems(
@@ -489,7 +489,14 @@ impl ChatDb {
         menu: Event,
         shared: Vec<serde_json::Value>,
     ) -> Result<(), String> {
-        self.request(|reply| Command::OfferCatalogue(session_id, menu, shared, reply))
+        self.request(|reply| Command::OfferCatalogue(session_id, Some(menu), shared, reply))
+            .await
+    }
+
+    /// Shows a stopped chat what is known without its provider's answer, once
+    /// asking has given up, so its menu stops saying the answer is on its way.
+    pub async fn settle_menu(&self, session_id: String, shared: Vec<serde_json::Value>) -> Result<(), String> {
+        self.request(|reply| Command::OfferCatalogue(session_id, None, shared, reply))
             .await
     }
 
@@ -1371,7 +1378,10 @@ fn run(
                 let _ = reply.send(Ok(offered_menu(&store, &live_menus, &session_id)));
             }
             Command::OfferCatalogue(session_id, menu, shared, reply) => {
-                remember_catalogue(&store, &session_id, &menu);
+                let answered = menu.is_some();
+                if let Some(menu) = &menu {
+                    remember_catalogue(&store, &session_id, menu);
+                }
                 // A chat whose own session named the provider's commands --
                 // one that woke meanwhile -- already shows them. Any other,
                 // asleep, stopped or failed, is offered these. Never made the
@@ -1382,7 +1392,21 @@ fn run(
                     super::store::native_commands(&serde_json::Value::Object(own.fields.clone())).is_empty()
                 });
                 let offered = lacking
-                    .then(|| live_steering_menu(&store, &live_menus, &session_id))
+                    .then(|| {
+                        live_steering_menu(&store, &live_menus, &session_id).or_else(|| {
+                            // Nothing kept to show but the library: still a menu
+                            // that no longer says it is waiting.
+                            (!answered)
+                                .then(|| {
+                                    serde_json::from_value(serde_json::json!({
+                                        "type":"session.menu", "sessionId":session_id, "seq":0,
+                                        "at":chrono::Utc::now().to_rfc3339(), "commands":[]
+                                    }))
+                                    .ok()
+                                })
+                                .flatten()
+                        })
+                    })
                     .flatten();
                 let result = match offered {
                     None => Ok(()),
@@ -1760,6 +1784,24 @@ mod tests {
             let SessionUpdate::Event(shown) = updates.recv().await.unwrap() else { panic!("no menu shown") };
             assert_eq!(shown.fields["commands"], json!([{"name":"compact"},{"name":"skill:demo","execution":"shared"}]), "{state}");
         }
+
+        // Asking gave up, and nothing was ever kept for this folder: the chat
+        // is still shown a menu, with the library, that no longer waits.
+        database.create_session(Session {
+            id: "never-answered".into(), brand: "claude".into(), external_id: None,
+            project_id: "nowhere".into(), project_path: "/nowhere".into(), cwd: "/nowhere".into(),
+            model: None, permission_mode: "default".into(), effort: None,
+            collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
+            origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
+            last_spoke_at: None, begun_by: None, named_by_owner: false,
+        }).await.unwrap();
+        let mut updates = database.subscribe_session("never-answered");
+        database.settle_menu("never-answered".into(), vec![json!({"name":"skill:demo","execution":"shared"})]).await.unwrap();
+        let SessionUpdate::Event(shown) = updates.recv().await.unwrap() else { panic!("no menu shown") };
+        assert_eq!(shown.kind, EventKind::SessionMenu);
+        assert_eq!(shown.fields["commands"], json!([{"name":"skill:demo","execution":"shared"}]));
+        assert!(shown.fields.get("commandsPending").is_none());
+        assert!(database.offered_menu("never-answered".into()).await.unwrap().get("models").is_none(), "nothing was kept");
     }
 
     /// Everything ever said, in the table the search reads.
