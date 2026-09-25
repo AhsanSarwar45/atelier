@@ -50,6 +50,8 @@ fn strip_opening(mut text: String) -> String {
 /// message, so its record holds them there too.
 pub const GUIDANCE: &str = "atelier_connection_guidance";
 pub const HANDOFF: &str = "account_handoff";
+/// The instructions of an Atelier command, sent after the line that ran it.
+pub const COMMAND: &str = "atelier_command";
 
 /// One block Atelier adds to a message, in the form `persons_words` removes.
 pub fn added_by_atelier(tag: &str, body: &str) -> String {
@@ -59,7 +61,7 @@ pub fn added_by_atelier(tag: &str, body: &str) -> String {
 /// A message as the person wrote it: every block Atelier added taken out.
 pub fn persons_words(message: &str) -> String {
     let mut rest = message.to_string();
-    for tag in [GUIDANCE, HANDOFF] {
+    for tag in [GUIDANCE, HANDOFF, COMMAND] {
         let (opening, closing) = (format!("<{tag}>"), format!("</{tag}>"));
         while let Some(start) = rest.find(&opening) {
             let end = rest[start..]
@@ -76,7 +78,13 @@ pub fn persons_words(message: &str) -> String {
 /// Named from the person's words alone: a title made from the guidance
 /// Atelier put in front of them names every chat the same (bw-8yln.1).
 pub fn conversation_title(prompt: &str) -> Option<String> {
+    // `/skill:standup` is named `/standup`: the prefix says where the command
+    // lives, not what the chat is about.
     let prompt = persons_words(prompt);
+    let prompt = match prompt.strip_prefix("/skill:") {
+        Some(rest) => format!("/{rest}"),
+        None => prompt,
+    };
     let mut plain = String::new();
     let mut tag = false;
     for ch in prompt.chars() {
@@ -171,6 +179,10 @@ mod tests {
             Some("Investigate Why Export Button Working Safari")
         );
         assert_eq!(conversation_title(" <context></context> "), None);
+        assert_eq!(
+            conversation_title("/skill:standup\n\n<atelier_command>\nUse the following shared skill\n</atelier_command>").as_deref(),
+            Some("/standup")
+        );
     }
 
     #[test]

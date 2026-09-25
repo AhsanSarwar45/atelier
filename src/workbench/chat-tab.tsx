@@ -587,7 +587,7 @@ function CommandMenu({
           <span className="min-w-0 truncate text-xs text-muted-foreground">{c.description}</span>
           {c.kind === 'skill' && (
             <Badge variant="secondary" appearance="light" size="xs" shape="circle" className="ml-auto shrink-0">
-              skill
+              {c.execution === 'shared' ? 'Atelier' : 'skill'}
             </Badge>
           )}
         </Row>
@@ -796,7 +796,14 @@ const ComposerBody = memo(function ComposerBody({
   const found = useMemo(() => {
     if (typedCommand === null) return [];
     const wanted = typedCommand.toLowerCase();
-    return commands.filter((c) => c.name.toLowerCase().startsWith(wanted)).slice(0, 40);
+    // An Atelier command is named `skill:<id>`, and he types the id: `/stand`
+    // finds `/skill:standup`. Unbounded, because the provider's own list can
+    // run past any cap on its own, and the Atelier rows come after it, so a
+    // cap hid every one of them (bw-zldt.1). The panel scrolls.
+    return commands.filter((c) => {
+      const name = c.name.toLowerCase();
+      return name.startsWith(wanted) || (name.startsWith('skill:') && name.slice('skill:'.length).startsWith(wanted));
+    });
   }, [typedCommand, commands]);
   // Put away by hand, until the next thing he types. Escape used to empty the
   // whole box instead, so dismissing the list threw away the line — and a

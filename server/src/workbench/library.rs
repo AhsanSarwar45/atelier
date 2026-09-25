@@ -730,6 +730,11 @@ mod tests {
         let expanded = snap.expand("/skill:manual `literal`\nsecond line").unwrap().unwrap();
         assert!(expanded.contains("{{two}} $(touch should-not-exist) {{unknown}}"));
         assert!(expanded.contains("`literal`\nsecond line"));
+        // His line is what he typed; the instructions are Atelier's, told as a
+        // command to carry out, and left out of his words (bw-zldt.1).
+        assert!(expanded.starts_with("/skill:manual `literal`\nsecond line\n\n<atelier_command>"));
+        assert!(expanded.contains("Carry out the instructions below now"));
+        assert_eq!(super::super::metadata::persons_words(&expanded), "/skill:manual `literal`\nsecond line");
         assert!(!expanded.contains("MUST NOT EXPAND"));
         assert!(snap.read_skill("manual", Some("references/deep/check.md")).unwrap().contains("日本語 🧪"));
         assert!(snap.expand("/skill:missing").is_err());
@@ -1310,13 +1315,20 @@ impl Snapshot {
             return Ok(None);
         };
         let (id, arguments) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-        Ok(Some(format!(
-            "Use the following shared skill ({}; revision {}).\n\n{}\n\nUser arguments:\n{}",
-            id,
+        // What he typed stays first and stays his: the instructions ride in a
+        // block Atelier added, which the chat's title and transcript leave out.
+        // The block says outright that this is a command he ran, so the
+        // provider carries it out the way it would one of its own slash
+        // commands rather than reading a pasted skill as background (bw-zldt.1).
+        let arguments = arguments.trim();
+        let typed = format!("/skill:{id}{}{arguments}", if arguments.is_empty() { "" } else { " " });
+        let body = format!(
+            "The user ran the Atelier command /skill:{id} (shared skill {id}, revision {}). Carry out the instructions below now, as you would a slash command the user typed. The user's arguments are: {}\n\n{}",
             self.revision,
+            if arguments.is_empty() { "(none)" } else { arguments },
             self.read_skill(id, None)?,
-            arguments.trim()
-        )))
+        );
+        Ok(Some(format!("{typed}\n\n{}", super::metadata::added_by_atelier(super::metadata::COMMAND, &body))))
     }
     pub fn guidance(&self) -> String {
         // Native resume can retain older instruction blocks. The connector
