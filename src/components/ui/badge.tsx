@@ -61,32 +61,24 @@ const badgeVariants = cva(
   // text's own middle does not depend on the icon at all. Everywhere else a chip
   // sits inside a flex row, where vertical-align is not read.
   //
-  // A chip centres its LINE box, and a line box is not what the eye reads. The
-  // visible top of Latin text is the cap height and its visible bottom is the
-  // alphabetic baseline, and a font's ascent and descent are not symmetric
-  // about those two, so centring the line box lands the letters off the
-  // middle of the pill while the icon beside them lands dead centre.
+  // A chip centres its LINE box, and a line box is not what the eye reads. A
+  // font's ascent and descent are not symmetric about its letters, so centring
+  // the line box lands the letters off the middle of the pill while the icon
+  // beside them lands dead centre.
   //
-  // How far off depends on the font, and the body font is `system-ui`: a
-  // different face on every machine. A fixed `top-px` was measured once
-  // (bw-s5op.1) and was right for the monospace face, but on Noto Sans it left
-  // the letters 1.5px low, and every chip moved onto this one in bw-weih.11
-  // inherited the error (bw-uzf6.1). So the label's box is trimmed to the cap
-  // height and the baseline with `text-box`, and the pill centres the letters
-  // themselves, whatever face draws them. It goes on the label because trim
-  // does not apply through the chip's own flex box (CSS Inline Layout 3 §6.2).
+  // What the eye reads in a chip is its lowercase letters, the band from the
+  // top of an x to the baseline: nearly every label is lowercase, and centring
+  // the capitals, or the whole of the letters from the top of a d to the
+  // bottom of a g, left them reading low or high (bw-uzf6.1, bw-81xy8.1). So
+  // the label's box is trimmed to exactly that band with `text-box`, taken
+  // from the font itself, and the pill centres it with no number written down
+  // (bw-ytwt9.1). It goes on the label because trim does not apply through
+  // the chip's own flex box (CSS Inline Layout 3 §6.2).
   //
   // Trimmed, the box is shorter than the letters, and a label wrapped in
-  // `truncate` hides what overflows it, which would cut the tails off g and y
-  // (bw-96is.20, bw-jaoz.1). The padding gives the descenders their room back.
-  //
-  // It is not equal, because the eye centres the whole of the letters, from
-  // the top of a d to the bottom of a g, and not the capitals alone: a label
-  // such as "beads-web" or "main" hangs its tails below the capitals' band,
-  // so a chip centred on capitals read as sitting low. Measured on the running
-  // app, the whole of the letters sat 0.92px below the middle of the pill; the
-  // 0.09em more below than above lifts them onto it (bw-81xy8.1). It is one
-  // number because every chip is drawn in one face (below). `[data-slot]`
+  // `truncate` hides what overflows it, which would cut off the tops of d and
+  // l and the tails of g and y (bw-96is.20, bw-jaoz.1). The equal padding
+  // gives both their room back without moving the centre. `[data-slot]`
   // spares the dot and the button, which are not text.
   //
   // Every chip is drawn in the body face, and so is everything inside it. A
@@ -113,7 +105,7 @@ const badgeVariants = cva(
   // resets: it returns family, size, weight and line height to the chip's in
   // one declaration, which is what `size` below spent two comments getting
   // right.
-  '![font-family:var(--font-body)] [&_*]:![font-family:inherit] inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:[text-box:trim-both_cap_alphabetic] [&>span:not([data-slot])]:pt-[0.21em] [&>span:not([data-slot])]:pb-[0.39em] [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!rounded-none [&_code]:!text-inherit [&_code]:![font:inherit]',
+  '![font-family:var(--font-body)] [&_*]:![font-family:inherit] inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:[text-box:trim-both_ex_alphabetic] [&>span:not([data-slot])]:py-[0.35em] [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!rounded-none [&_code]:!text-inherit [&_code]:![font:inherit]',
   {
     variants: {
       variant: {

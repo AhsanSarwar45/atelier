@@ -12,10 +12,10 @@ const source = (name: string) => readFileSync(resolve(__dirname, `../${name}`), 
 
 /**
  * The chip's own correction, spelled once in `src/components/ui/badge.tsx`: its
- * label is trimmed to its letters, so the pill centres them in any face
- * (bw-uzf6.1).
+ * label is trimmed to its lowercase letters, so the pill centres them
+ * (bw-ytwt9.1).
  */
-const SHARED = '[&>span:not([data-slot])]:[text-box:trim-both_cap_alphabetic]';
+const SHARED = '[&>span:not([data-slot])]:[text-box:trim-both_ex_alphabetic]';
 
 describe('compact workbench vertical alignment', () => {
   it('uses the same icon scale and gap on status badges', () => {
