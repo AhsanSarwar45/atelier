@@ -2853,33 +2853,33 @@ async fn with_atelier_commands(database: &ChatDb, session_id: &str, menu: &mut V
 /// no chat on it has spoken since the catalogue began keeping commands. Ask
 /// the provider in the background, once at a time for each account and
 /// folder; every stopped chat that asked meanwhile is given the answer. A
-/// question that failed is asked again after a pause (bw-zldt.2).
+/// question that failed is asked again after a pause, a few times, for the
+/// chats already waiting; opening a chat after that starts over (bw-zldt.2).
 fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::store::Session) {
     static ASKS: std::sync::LazyLock<std::sync::Mutex<CommandAsks>> = std::sync::LazyLock::new(Default::default);
     if !matches!(session.brand.as_str(), "claude" | "codex") {
         return;
     }
     let key = format!("{}\u{0}{}\u{0}{}", session.brand, session.profile.as_deref().unwrap_or_default(), session.project_path);
-    let first = ASKS
-        .lock()
-        .map(|mut asks| asks.join(&key, &session.id, std::time::Instant::now()))
-        .unwrap_or(false);
-    if !first {
+    if !ASKS.lock().map(|mut asks| asks.join(&key, &session.id)).unwrap_or(false) {
         return;
     }
     let (database, session) = (database.clone(), session.clone());
     tokio::spawn(async move {
-        let answer = crate::workbench::acp::client::ask_provider_catalogue(&session).await;
-        let waiting = ASKS
-            .lock()
-            .map(|mut asks| asks.finish(&key, answer.is_ok(), std::time::Instant::now()))
-            .unwrap_or_default();
-        let (menu, shared) = match answer {
-            Ok(answer) => answer,
-            Err(error) => {
-                tracing::warn!(session_id = %session.id, %error, "could not ask the provider for its commands");
-                return;
+        let asked = session.clone();
+        let (answer, waiting) = ask_until_answered(&ASKS, &key, CommandAsks::RETRY_AFTER, move || {
+            let session = asked.clone();
+            async move {
+                let answer = crate::workbench::acp::client::ask_provider_catalogue(&session).await;
+                if let Err(error) = &answer {
+                    tracing::warn!(session_id = %session.id, %error, "could not ask the provider for its commands");
+                }
+                answer
             }
+        })
+        .await;
+        let Some((menu, shared)) = answer else {
+            return;
         };
         for session_id in waiting {
             if let Err(error) = crate::workbench::acp::client::offer_provider_catalogue(
@@ -2896,19 +2896,48 @@ fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::stor
     });
 }
 
+/// Asks until an answer comes or the tries run out, pausing longer after each
+/// failure, and returns the answer with every chat that waited for it.
+async fn ask_until_answered<T, E, F, Fut>(
+    asks: &std::sync::Mutex<CommandAsks>,
+    key: &str,
+    pause: Duration,
+    mut ask: F,
+) -> (Option<T>, Vec<String>)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+{
+    let mut answer = None;
+    for attempt in 0..CommandAsks::TRIES {
+        if let Ok(answered) = ask().await {
+            answer = Some(answered);
+            break;
+        }
+        if attempt + 1 < CommandAsks::TRIES {
+            tokio::time::sleep(pause * 2u32.pow(attempt)).await;
+        }
+    }
+    let waiting = asks
+        .lock()
+        .map(|mut asks| asks.finish(key, answer.is_some()))
+        .unwrap_or_default();
+    (answer, waiting)
+}
+
 /// Which providers are being asked for their commands, and by which chats.
 #[derive(Default)]
 struct CommandAsks {
     waiting: HashMap<String, Vec<String>>,
     answered: HashSet<String>,
-    failed: HashMap<String, std::time::Instant>,
 }
 
 impl CommandAsks {
     const RETRY_AFTER: Duration = Duration::from_secs(60);
+    const TRIES: u32 = 5;
 
     /// Adds a chat to the question for `key`; true when it must be asked now.
-    fn join(&mut self, key: &str, session_id: &str, now: std::time::Instant) -> bool {
+    fn join(&mut self, key: &str, session_id: &str) -> bool {
         if self.answered.contains(key) {
             return false;
         }
@@ -2918,20 +2947,14 @@ impl CommandAsks {
             }
             return false;
         }
-        if self.failed.get(key).is_some_and(|at| now.duration_since(*at) < Self::RETRY_AFTER) {
-            return false;
-        }
         self.waiting.insert(key.to_string(), vec![session_id.to_string()]);
         true
     }
 
     /// Ends the question for `key` and returns the chats that were waiting.
-    fn finish(&mut self, key: &str, answered: bool, now: std::time::Instant) -> Vec<String> {
+    fn finish(&mut self, key: &str, answered: bool) -> Vec<String> {
         if answered {
-            self.failed.remove(key);
             self.answered.insert(key.to_string());
-        } else {
-            self.failed.insert(key.to_string(), now);
         }
         self.waiting.remove(key).unwrap_or_default()
     }
@@ -2939,30 +2962,61 @@ impl CommandAsks {
 
 #[cfg(test)]
 mod command_asks_tests {
-    use super::CommandAsks;
-    use std::time::{Duration, Instant};
+    use super::{ask_until_answered, CommandAsks};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     #[test]
     fn every_chat_that_asked_meanwhile_is_given_the_answer() {
-        let (mut asks, now) = (CommandAsks::default(), Instant::now());
-        assert!(asks.join("claude", "one", now));
-        assert!(!asks.join("claude", "two", now));
-        assert!(!asks.join("claude", "two", now));
-        assert!(asks.join("codex", "three", now));
-        assert_eq!(asks.finish("claude", true, now), ["one", "two"]);
-        assert!(!asks.join("claude", "four", now), "an answered provider is not asked again");
+        let mut asks = CommandAsks::default();
+        assert!(asks.join("claude", "one"));
+        assert!(!asks.join("claude", "two"));
+        assert!(!asks.join("claude", "two"));
+        assert!(asks.join("codex", "three"));
+        assert_eq!(asks.finish("claude", true), ["one", "two"]);
+        assert!(!asks.join("claude", "four"), "an answered provider is not asked again");
     }
 
-    #[test]
-    fn a_question_that_failed_is_asked_again_after_a_pause() {
-        let (mut asks, now) = (CommandAsks::default(), Instant::now());
-        assert!(asks.join("claude", "one", now));
-        assert_eq!(asks.finish("claude", false, now), ["one"]);
-        assert!(!asks.join("claude", "one", now + Duration::from_secs(5)));
-        let later = now + CommandAsks::RETRY_AFTER;
-        assert!(asks.join("claude", "one", later));
-        assert_eq!(asks.finish("claude", true, later), ["one"]);
-        assert!(!asks.join("claude", "two", later + CommandAsks::RETRY_AFTER));
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_question_is_asked_again_for_the_chats_already_waiting() {
+        let asks = Arc::new(Mutex::new(CommandAsks::default()));
+        assert!(asks.lock().unwrap().join("claude", "open"));
+        let tries = Arc::new(AtomicU32::new(0));
+        let counted = tries.clone();
+        let asking = {
+            let asks = asks.clone();
+            tokio::spawn(async move {
+                ask_until_answered(&asks, "claude", Duration::from_secs(60), move || {
+                    let tries = counted.clone();
+                    async move {
+                        match tries.fetch_add(1, Ordering::SeqCst) {
+                            0 | 1 => Err("adapter did not answer"),
+                            _ => Ok("menu"),
+                        }
+                    }
+                })
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(tries.load(Ordering::SeqCst), 1);
+        assert!(!asks.lock().unwrap().join("claude", "opened-while-waiting"));
+        let (answer, waiting) = asking.await.unwrap();
+        assert_eq!(answer, Some("menu"));
+        assert_eq!(tries.load(Ordering::SeqCst), 3);
+        assert_eq!(waiting, ["open", "opened-while-waiting"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_question_that_keeps_failing_stops_and_the_next_chat_starts_over() {
+        let asks = Mutex::new(CommandAsks::default());
+        assert!(asks.lock().unwrap().join("claude", "open"));
+        let (answer, waiting) =
+            ask_until_answered(&asks, "claude", Duration::from_secs(60), || async { Err::<(), _>("no") }).await;
+        assert_eq!(answer, None);
+        assert_eq!(waiting, ["open"]);
+        assert!(asks.lock().unwrap().join("claude", "open"));
     }
 }
 
