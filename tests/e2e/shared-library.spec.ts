@@ -22,7 +22,7 @@ async function add(page: Page, kind: 'instruction' | 'skill' | 'output style', i
   await page.getByLabel('Item content', { exact: true }).fill(content);
 }
 async function saved(page: Page) {
-  await page.getByRole('button', { name: 'Save item', exact: true }).click();
+  await page.getByTestId('library-editor').getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByTestId('library-editor')).toHaveCount(0);
 }
 async function choose(page: Page, label: string, option: string) {
@@ -63,12 +63,11 @@ test('global and project editors persist conditional skills, instructions and ex
   await page.getByLabel('Resources name').fill('checklist.md');
   await page.getByLabel('Resources value').fill('The proof code is RESOURCE-READY.');
   await saved(page);
-  await page.getByText('Preview and diagnostics', { exact: true }).click();
-  await choose(page, 'Evaluate for project', 'Shared guidance demo');
+  await choose(page, 'Preview for project', 'Shared guidance demo');
   const row = page.getByTestId('library-item-frontend-review');
   await expect(row).toContainText('Available');
-  await row.getByText('Why? · Inspect content').click();
-  await expect(row).toContainText('package.json declares dependency next');
+  await row.getByRole('button').first().click();
+  await expect(page.getByTestId('library-detail')).toContainText('package.json declares dependency next');
   await page.screenshot({ path: join(results, 'global-skills.png') });
   if (process.env.LIBRARY_VISUAL_PROOF === '1') {
     const env = { ...process.env };
@@ -82,7 +81,7 @@ test('global and project editors persist conditional skills, instructions and ex
   await add(page, 'output style', 'concise', 'Concise', 'Use short paragraphs. When asked for library proof, include STYLE-READY.');
   await saved(page);
   await choose(page, 'Selected output style', 'Concise');
-  await expect(page.getByTestId('library-item-concise')).toContainText('Available');
+  await expect(page.getByTestId('library-item-concise')).toContainText('Active');
   await page.reload();
   await page.getByRole('radio', { name: 'Output styles', exact: true }).click();
   await expect(page.getByRole('combobox', { name: 'Selected output style' })).toContainText('Concise');
@@ -92,14 +91,15 @@ test('global and project editors persist conditional skills, instructions and ex
   await page.getByRole('button', { name: 'Save project instructions' }).click();
   await expect(page.getByRole('button', { name: 'Save project instructions' })).toBeDisabled();
   await page.getByRole('radio', { name: 'Skills', exact: true }).click();
-  await page.getByTestId('library-item-frontend-review').getByRole('button', { name: 'Customize', exact: true }).click();
+  await page.getByTestId('library-item-frontend-review').getByRole('button').first().click();
+  await page.getByTestId('library-detail').getByRole('button', { name: 'Customize', exact: true }).click();
   await page.getByTestId('editor-support').getByRole('button').first().click();
   await page.getByLabel('Parameters value').fill('PROJECT-NEXT');
   await saved(page);
   await page.getByTestId('library-item-frontend-review').getByRole('switch', { name: 'Enable Frontend review for this project', exact: true }).click();
-  await expect(page.getByTestId('library-item-frontend-review')).toContainText('Disabled here');
+  await expect(page.getByTestId('library-item-frontend-review')).toContainText('Disabled');
   await page.reload(); await page.getByRole('radio', { name: 'Skills', exact: true }).click();
-  await expect(page.getByTestId('library-item-frontend-review')).toContainText('Disabled here');
+  await expect(page.getByTestId('library-item-frontend-review')).toContainText('Disabled');
   await page.getByTestId('library-item-frontend-review').getByRole('switch', { name: 'Enable Frontend review for this project', exact: true }).click();
   await expect(page.getByTestId('library-item-frontend-review')).toContainText('Available');
   const held = await (await request.get(`${api}?path=${encodeURIComponent(project.path)}`)).json();
@@ -107,14 +107,14 @@ test('global and project editors persist conditional skills, instructions and ex
   expect(held.guidance).toContain('GLOBAL-READY'); expect((await (await request.get(`/api/projects/${project.id}/settings`)).json()).instructions).toContain('PROJECT-READY'); expect(held.guidance).toContain('STYLE-READY');
   expect(held.guidance).not.toContain('RESOURCE-READY');
   await page.getByRole('radio', { name: 'Output styles', exact: true }).click();
-  await choose(page, 'Selected output style', 'No shared output style');
+  await choose(page, 'Selected output style', 'None');
   await expect(page.getByTestId('library-item-concise')).toContainText('Not selected');
-  await choose(page, 'Selected output style', 'Use global selection');
-  await expect(page.getByTestId('library-item-concise')).toContainText('Available');
+  await choose(page, 'Selected output style', 'Use global setting');
+  await expect(page.getByTestId('library-item-concise')).toContainText('Active');
   await page.screenshot({ path: join(results, 'project-style.png') });
   writeFileSync(join(project.path, 'CLAUDE.md'), 'Keep documentation examples short.');
   await page.getByRole('radio', { name: 'Skills', exact: true }).click();
-  await page.getByRole('button', { name: 'Import native file', exact: true }).click();
+  await page.getByRole('button', { name: 'Import', exact: true }).click();
   await page.getByRole('button', { name: 'CLAUDE.md · instructions', exact: true }).click();
   await expect(page.getByLabel('Item content')).toHaveValue('Keep documentation examples short.');
   await page.getByTestId('editor-advanced').getByRole('button').first().click();

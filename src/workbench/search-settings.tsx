@@ -116,7 +116,7 @@ export function SearchSettings() {
 
   const hosted = held.provider === 'claude' || held.provider === 'codex';
   return (
-    <SettingsGroup title="AI search" data-testid="search-settings">
+    <SettingsGroup data-testid="search-settings">
       <SettingRow label="Provider" description="Agent used to answer AI search questions" htmlFor="search-provider">
         <Choose
           id="search-provider"

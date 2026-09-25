@@ -12,10 +12,11 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 
 import { useRouter } from 'next/navigation';
 
-import { Archive, ArchiveRestore, FolderSearch, GitBranch, NotebookPen, ScrollText, Settings2, ShieldCheck, Tag, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, FolderSearch, GitBranch, NotebookPen, Save, ScrollText, Settings2, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { SharedLibrary } from '@/components/settings/shared-library';
+import { DetailHeader, StateDot } from '@/components/settings/library-list';
 import { FolderBrowser } from '@/components/folder-browser';
 import { BranchSelect, BranchesPicker } from '@/components/settings/branch-picker';
 import { ChatNameEditor } from '@/components/settings/chat-name-editor';
@@ -301,12 +302,13 @@ export function ProjectSettingsScreen({
       sections={PROJECT_SETTINGS_SECTIONS}
       section={section === 'instructions' ? 'library' : section}
       onOpen={onOpen}
-      wide={open === 'files'}
+      wide={open === 'library'}
+      fill={open === 'files'}
       bar={dirty || saving ? saveButton : null}
     >
       {open === 'project' && (
         <>
-          <SettingsGroup title="Project" data-testid="project-general">
+          <SettingsGroup data-testid="project-general">
             <SettingRow label="Name" htmlFor="settings-name">
               <Input id="settings-name" value={name} onChange={(e) => setName(e.target.value)} className="w-full sm:w-72" />
             </SettingRow>
@@ -374,7 +376,7 @@ export function ProjectSettingsScreen({
       )}
 
       {open === 'workflow' && manifest && (
-        <SettingsGroup title="Workflow">
+        <SettingsGroup>
           <SettingRow label="Summary" htmlFor="settings-summary" stack>
             <Input id="settings-summary" aria-label="Project summary" value={manifest.project.summary} onChange={(e) => patch('project', { summary: e.target.value })} />
           </SettingRow>
@@ -409,7 +411,7 @@ export function ProjectSettingsScreen({
       )}
 
       {open === 'review' && manifest && (
-        <SettingsGroup title="Review">
+        <SettingsGroup>
           <SettingRow label="External review" htmlFor="settings-review">
             <Select value={manifest.review.external_review} onValueChange={(v) => patch('review', { external_review: v as ProjectManifest['review']['external_review'] })}>
               <SelectTrigger id="settings-review" aria-label="External review" className="w-full sm:w-56">
@@ -430,7 +432,7 @@ export function ProjectSettingsScreen({
 
 
       {open === 'chat-names' && manifest && (
-        <SettingsGroup title="Chat names" data-testid="project-chat-names">
+        <SettingsGroup data-testid="project-chat-names">
           <SettingRow label="Name template" stack>
             <ChatNameEditor
               projectId={projectId}
@@ -447,10 +449,10 @@ export function ProjectSettingsScreen({
       )}
 
       {open === 'claude' && provider('claude')}
-      {open === 'library' && (folder.startsWith('dolt://') ? <p className="text-sm">Choose a local project folder to configure agent guidance.</p> : manifest ? <SharedLibrary projectPath={folder} projectInstructions={<section aria-label="Project instructions" className="space-y-3"><h3 className="font-semibold">Project instructions</h3><p className="text-sm text-t-secondary">Your shared CLAUDE.md / AGENTS.md guidance. Included in every conversation for this project, across providers. Existing project instructions are preserved here.</p><label className="block"><span className="sr-only">Project instructions</span><Textarea id="settings-instructions" className="min-h-64 font-mono text-sm" value={instructions} onChange={e => setInstructions(e.target.value)} /></label><Button disabled={!dirty || saving} onClick={() => void save()}>Save project instructions</Button></section>} /> : <p className="text-sm">Loading project settings…</p>)}
+      {open === 'library' && (folder.startsWith('dolt://') ? <p className="text-sm">Choose a local project folder to configure agent guidance.</p> : manifest ? <SharedLibrary projectPath={folder} projectInstructions={<section aria-label="Project instructions" className="min-w-0"><DetailHeader title="Project instructions" meta={<><span className="inline-flex items-center gap-1.5"><StateDot tone="good" />Always active</span><span>Shared by all chats in this project</span></>} actions={<Button size="sm" disabled={!dirty || saving} onClick={() => void save()}><Save className="size-3.5" /><span aria-hidden="true" className="max-sm:hidden">Save</span><span className="sr-only">Save project instructions</span></Button>} /><label className="mt-4 block"><span className="sr-only">Project instructions</span><Textarea id="settings-instructions" className="min-h-[max(24rem,calc(100dvh-22rem))] font-mono text-sm leading-relaxed" value={instructions} onChange={e => setInstructions(e.target.value)} /></label></section>} /> : <p className="text-sm">Loading project settings…</p>)}
       {open === 'codex' && provider('codex')}
       {open === 'files' && (
-        <div className="-m-4 flex h-[calc(100dvh-3rem)] flex-col sm:-m-6">
+        <div className="flex h-full flex-col">
           <AgentFilesBrowser projectPath={folder} />
         </div>
       )}

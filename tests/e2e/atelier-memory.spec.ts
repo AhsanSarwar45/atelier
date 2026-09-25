@@ -33,6 +33,7 @@ test.beforeAll(async ({ request }) => {
 test.afterAll(async ({ request }) => { if (project) await request.delete(`/api/projects/${project.id}`); });
 
 test('a global memory saved in Settings reaches every chat and the CLI', async ({ page, request }) => {
+  const save = () => page.getByTestId('memory-editor').getByRole('button', { name: 'Save', exact: true }).click();
   await page.goto('/settings?section=library');
   await page.getByRole('radio', { name: 'Memories', exact: true }).click();
   await expect(page.getByText('No global memories yet.')).toBeVisible();
@@ -40,14 +41,15 @@ test('a global memory saved in Settings reaches every chat and the CLI', async (
   await page.getByLabel('Memory ID').fill('plain-prose');
   await page.getByLabel('Memory description').fill('The user wants short plain sentences');
   await page.getByLabel('Memory body').fill('Write short, plain sentences.\nWhy: the user finds dense prose hard to read.');
-  await page.getByRole('button', { name: 'Save memory' }).click();
+  await save();
   await expect(page.getByTestId('memory-global-plain-prose')).toContainText('The user wants short plain sentences');
-  await expect(page.getByRole('status')).toContainText('New and reconnected chats receive this change.');
+  await expect(page.getByRole('status')).toContainText('Saved plain-prose.');
   // The Instructions list does not show memory as an editable instruction.
   await page.getByRole('radio', { name: 'Instructions', exact: true }).click();
   await expect(page.getByTestId('library-item-atelier-memory-global')).toHaveCount(0);
   await page.getByRole('radio', { name: 'Memories', exact: true }).click();
-  await page.getByTestId('memory-global-plain-prose').getByText('View memory').click();
+  await page.getByTestId('memory-global-plain-prose').getByRole('button').first().click();
+  await expect(page.getByTestId('memory-detail')).toContainText('Write short, plain sentences.');
   await page.screenshot({ path: join(results, 'global-memories.png'), animations: 'disabled' });
 
   expect(await guidance(request)).toContain('global instructions — Global memory:');
@@ -57,6 +59,8 @@ test('a global memory saved in Settings reaches every chat and the CLI', async (
 });
 
 test('project memory added from a worktree is edited, guarded and deleted in project settings', async ({ page, request }) => {
+  const save = () => page.getByTestId('memory-editor').getByRole('button', { name: 'Save', exact: true }).click();
+  const detail = page.getByTestId('memory-detail');
   memory(worktree, 'add', 'owner-port', '--scope', 'project', '--type', 'reference', '--description', 'The owner app runs on 3008', '--body', 'Never touch port 3008.');
   expect(await guidance(request, project.path)).toContain('project instructions — Project memory:');
   expect(await guidance(request, project.path)).toContain('- owner-port (reference): The owner app runs on 3008');
@@ -69,28 +73,33 @@ test('project memory added from a worktree is edited, guarded and deleted in pro
   await expect(card).toContainText('Reference');
   const inherited = page.getByTestId('memory-global-plain-prose');
   await expect(inherited).toBeVisible();
-  await expect(inherited.getByRole('button', { name: 'Edit' })).toHaveCount(0);
+  await inherited.getByRole('button').first().click();
+  await expect(detail).toContainText('Read-only');
+  await expect(detail.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+  await expect(detail.getByRole('link', { name: 'Edit global memory' })).toBeVisible();
   await expect(page.getByTestId('library-item-atelier-memory-project')).toHaveCount(0);
   await page.screenshot({ path: join(results, 'project-memories.png'), animations: 'disabled', fullPage: true });
 
-  await card.getByRole('button', { name: 'Edit' }).click();
+  await card.getByRole('button').first().click();
+  await detail.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.getByLabel('Memory body').fill('Never touch port 3008 or its data.');
   await page.screenshot({ path: join(results, 'project-memory-editor.png'), animations: 'disabled' });
-  await page.getByRole('button', { name: 'Save memory' }).click();
+  await save();
   await expect(page.getByRole('status')).toContainText('Saved owner-port.');
   expect(memory(project.path, 'show', 'owner-port')).toContain('Never touch port 3008 or its data.');
 
   // An agent edits the memory while the page still holds the older copy.
   memory(worktree, 'edit', 'owner-port', '--body', 'Changed by an agent.');
-  await page.getByTestId('memory-project-owner-port').getByRole('button', { name: 'Edit' }).click();
+  await detail.getByRole('button', { name: 'Edit', exact: true }).click();
   await page.getByLabel('Memory description').fill('A stale edit');
-  await page.getByRole('button', { name: 'Save memory' }).click();
+  await save();
   await expect(page.getByRole('alert')).toContainText('changed in another editor');
   expect(memory(project.path, 'show', 'owner-port')).toContain('Changed by an agent.');
-  await page.getByRole('button', { name: 'Discard draft and reload' }).click();
+  await page.getByRole('alert').getByRole('button', { name: 'Reload', exact: true }).click();
 
-  await page.getByTestId('memory-project-owner-port').getByRole('button', { name: 'Delete' }).click();
-  await page.getByRole('button', { name: 'Delete memory' }).click();
+  await page.getByTestId('memory-project-owner-port').getByRole('button').first().click();
+  await detail.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(page.getByTestId('memory-project-owner-port')).toHaveCount(0);
   expect(memory(worktree, 'list')).not.toContain('owner-port');
   expect(await guidance(request, project.path)).not.toContain('Project memory:');

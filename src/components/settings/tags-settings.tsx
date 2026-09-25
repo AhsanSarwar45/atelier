@@ -81,7 +81,6 @@ export function TagsSettings() {
 
   return (
     <SettingsGroup
-      title="Tags"
       actions={
         !adding && (
           <Button size="sm" onClick={() => setAdding(true)}>

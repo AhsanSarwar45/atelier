@@ -317,7 +317,7 @@ export function RemoteAccessSettings() {
   const flipping = saving?.startsWith("Turning") ? saving : null;
 
   return (
-    <SettingsGroup title="Remote access" data-testid="remote-access">
+    <SettingsGroup data-testid="remote-access">
       <SettingRow
         label="Tailscale"
         description="Open Atelier from your own devices"

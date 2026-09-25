@@ -108,13 +108,14 @@ function Settings() {
       sections={SECTIONS}
       section={known}
       onOpen={open}
-      wide={known === 'files'}
+      wide={known === 'library'}
+      fill={known === 'files'}
     >
       {(known ?? 'appearance') === 'appearance' && <AppearanceSettings />}
       {known === 'notifications' && <NotificationSettings />}
       {known === 'library' && <SharedLibrary />}
       {known === 'accounts' && (
-        <SettingsGroup title="Accounts">
+        <SettingsGroup>
           <div className="p-3">
             <AccountsSettings />
           </div>
@@ -130,7 +131,7 @@ function Settings() {
         />
       )}
       {known === 'files' && (
-        <div className="-m-4 flex h-[calc(100dvh-3rem)] flex-col sm:-m-6">
+        <div className="flex h-full flex-col">
           <div className="flex items-center gap-3 px-4 py-2">
             <span className="text-xs font-medium text-t-tertiary">Account</span>
             <Select value={filesAccount.id} onValueChange={(id) => set('account', id === SYSTEM_PROFILE ? null : id)}>
@@ -152,7 +153,7 @@ function Settings() {
       {known === 'search' && <SearchSettings />}
       {known === 'memory' && <MemorySettings />}
       {known === 'terminal' && (
-        <SettingsGroup title="Terminal">
+        <SettingsGroup>
           <div className="p-3">
             <TerminalSettings />
           </div>
@@ -163,7 +164,7 @@ function Settings() {
       )}
       {known === 'about' && <AboutSettings />}
       {known === 'dependencies' && (
-        <SettingsGroup title="Dependencies">
+        <SettingsGroup>
           <div className="p-3">
             <DependenciesSettings />
           </div>

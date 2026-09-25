@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { ArrowLeft, BookOpen, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ArrowLeft, Check, CircleHelp, Eye, FileDown, Pencil, Pin, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -9,14 +9,19 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Panel } from '@/components/ui/panel';
 import { Picker } from '@/components/ui/picker';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger, CollapsibleTriggerRow } from '@/components/ui/collapsible';
+import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { request } from '@/lib/api';
 import { buildCustomization, nextEntryName, suggestedItemId } from '@/lib/shared-guidance';
+import { cn } from '@/lib/utils';
 import { sendCommand } from '@/workbench/use-session';
 import { AgentMemories } from './agent-memories';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { ActionBar, BackToList, DetailEmpty, DetailHeader, Document, Fact, Label, ListEmpty, ListGroup, ListHeader, ListRow, MasterDetail, MoreMenu, StateDot, type Action, type Tone } from './library-list';
 
 type Condition = { op: string; path?: string; text?: string; pattern?: string; pointer?: string; key?: string; value?: unknown; name?: string; conditions?: Condition[]; condition?: Condition };
 type Kind = 'instruction' | 'skill' | 'output_style';
@@ -30,12 +35,12 @@ interface Answer { library: Library; revision: string; source_revision: string; 
 const names: Record<Category, string> = { instruction: 'Instructions', skill: 'Skills', command: 'Commands', output_style: 'Output styles', memory: 'Memories' };
 // Memory reaches chats as resolved instructions; it is edited in its own view.
 const memoryItem = (id: string) => id.startsWith('atelier-memory-');
-const descriptions: Record<Kind, string> = { instruction: 'Standing guidance included in every applicable conversation.', skill: 'Reusable procedures agents can discover or you can invoke by name.', output_style: 'Choose how answers are written. Only one shared style applies at a time.' };
-function EditorSection({ step, title, description, children }: { step: string; title: string; description: string; children: ReactNode }) {
-  return <Panel inset="none" asChild><section aria-label={title} data-testid="editor-section"><header className="flex gap-3 border-b border-border/40 px-4 py-4"><span className="text-sm font-medium text-t-muted" aria-hidden="true">{step}</span><div><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-t-secondary">{description}</p></div></header><div className="min-w-0 space-y-5 p-4">{children}</div></section></Panel>;
-}
-const states: Record<string, string> = { available: 'Available', not_applicable: 'Does not apply', unknown: 'Needs evaluation', unavailable: 'Missing requirements', invalid: 'Invalid folder', disabled: 'Disabled here', not_selected: 'Not selected', conflict: 'ID conflict' };
-const conditionNames: Record<string, string> = { always: 'Always', all: 'All conditions', any: 'Any condition', not: 'Not', file_exists: 'File exists', folder_exists: 'Folder exists', file_contains: 'File contains text', file_matches: 'Filename matches pattern', file_regex: 'File matches regular expression', within: 'In the folder of any matching file', dependency: 'Package declares dependency', json_exists: 'JSON value exists', json_equals: 'JSON value equals', toml_equals: 'TOML value equals', yaml_equals: 'YAML value equals', project_beads: 'Project has a board' };
+const states: Record<string, string> = { available: 'Available', not_applicable: 'Inactive', unknown: 'Unknown', unavailable: 'Missing requirements', invalid: 'Invalid', disabled: 'Disabled', not_selected: 'Not selected', conflict: 'ID conflict' };
+const tones: Record<string, Tone> = { available: 'good', not_applicable: 'quiet', unknown: 'warn', unavailable: 'warn', invalid: 'bad', disabled: 'quiet', not_selected: 'quiet', conflict: 'bad' };
+const sources: Record<string, string> = { global: 'Global', project: 'This project', 'built-in': 'Built-in' };
+/** Pinned entries that are not library items: the always-on instruction text. */
+const GENERAL = '__general';
+const conditionNames: Record<string, string> = { always: 'Always', all: 'All conditions', any: 'Any condition', not: 'Not', file_exists: 'File exists', folder_exists: 'Folder exists', file_contains: 'File contains text', file_matches: 'Filename matches pattern', file_regex: 'File matches regular expression', within: 'Inside folder of matching file', dependency: 'Package declares dependency', json_exists: 'JSON value exists', json_equals: 'JSON value equals', toml_equals: 'TOML value equals', yaml_equals: 'YAML value equals', project_beads: 'Project has a board' };
 function newCondition(op: string): Condition {
   if (op === 'file_matches') return { op, pattern: '**/*.rs' };
   if (op === 'file_regex') return { op, path: '', pattern: '' };
@@ -52,21 +57,26 @@ function newCondition(op: string): Condition {
 }
 function Conditions({ value, onChange, depth = 0 }: { value: Condition; onChange: (v: Condition) => void; depth?: number }) {
   const patch = (p: Partial<Condition>) => onChange({ ...value, ...p });
-  return <div className="min-w-0 space-y-3" data-testid="condition-builder">
+  return <div className="min-w-0 space-y-2" data-testid="condition-builder">
     <Picker className="min-w-0 [&>span]:truncate" label="Condition" value={value.op} onChange={op => onChange(newCondition(op))} choices={Object.entries(conditionNames).filter(([op]) => depth < 7 || !['all', 'any', 'not', 'within'].includes(op)).map(([value, label]) => ({ value, label }))} />
     {'pattern' in value && <Input aria-label="Match pattern" value={value.pattern} onChange={e => patch({ pattern: e.target.value })} />}
-    {'path' in value && <Input aria-label="Condition path" placeholder="Relative to this checkout, e.g. package.json" value={value.path} onChange={e => patch({ path: e.target.value })} />}
-    {'text' in value && <Input aria-label="Containing text" value={value.text} onChange={e => patch({ text: e.target.value })} />}
+    {'path' in value && <Input aria-label="Condition path" placeholder="e.g. package.json" value={value.path} onChange={e => patch({ path: e.target.value })} />}
+    {'text' in value && <Input aria-label="Containing text" placeholder="Text to find" value={value.text} onChange={e => patch({ text: e.target.value })} />}
     {'name' in value && <Input aria-label="Dependency name" placeholder="e.g. next" value={value.name} onChange={e => patch({ name: e.target.value })} />}
     {'pointer' in value && <Input aria-label="JSON pointer" placeholder="e.g. /scripts/test" value={value.pointer} onChange={e => patch({ pointer: e.target.value })} />}
     {'key' in value && <Input aria-label="TOML key" placeholder="e.g. package.name" value={value.key} onChange={e => patch({ key: e.target.value })} />}
     {'value' in value && <Input aria-label="Expected value" placeholder="Text, number, true or false" value={typeof value.value === 'string' ? value.value : JSON.stringify(value.value)} onChange={e => { let v: unknown = e.target.value; try { v = JSON.parse(e.target.value); } catch { /* plain text */ } patch({ value: v }); }} />}
     {value.condition && <div className="min-w-0 border-l border-border/60 pl-3"><Conditions value={value.condition} depth={depth + 1} onChange={condition => patch({ condition })} /></div>}
-    {value.conditions && <div className="min-w-0 space-y-4 border-l border-border/60 pl-3">{value.conditions.map((condition, index) => <div key={index} className="min-w-0 space-y-2"><div className="flex items-center justify-between gap-2"><span className="text-xs text-t-muted">Condition {index + 1}</span><Button variant="ghost" size="icon" aria-label="Remove condition" disabled={value.conditions!.length === 1} onClick={() => patch({ conditions: value.conditions!.filter((_, i) => i !== index) })}><Trash2 className="size-4" /></Button></div><Conditions value={condition} depth={depth + 1} onChange={changed => patch({ conditions: value.conditions!.map((c, i) => i === index ? changed : c) })} /></div>)}<Button variant="ghost" size="sm" onClick={() => patch({ conditions: [...value.conditions!, { op: 'file_exists', path: '' }] })}><Plus className="mr-1 size-4" />Add condition</Button></div>}
+    {value.conditions && <div className="min-w-0 space-y-3 border-l border-border/60 pl-3">{value.conditions.map((condition, index) => <div key={index} className="min-w-0 space-y-2"><div className="flex items-center justify-between gap-2"><span className="text-xs text-t-muted">Condition {index + 1}</span><Button variant="ghost" size="icon" aria-label="Remove condition" disabled={value.conditions!.length === 1} onClick={() => patch({ conditions: value.conditions!.filter((_, i) => i !== index) })}><Trash2 className="size-4" /></Button></div><Conditions value={condition} depth={depth + 1} onChange={changed => patch({ conditions: value.conditions!.map((c, i) => i === index ? changed : c) })} /></div>)}<Button variant="ghost" size="sm" onClick={() => patch({ conditions: [...value.conditions!, { op: 'file_exists', path: '' }] })}><Plus className="size-4" />Add condition</Button></div>}
   </div>;
 }
+/** Why an item does or does not apply, one line per condition that decided it. */
 function Evidence({ value }: { value: Evaluation }) {
-  return <div className="text-xs text-t-secondary"><span>{value.matched === null ? '?' : value.matched ? '✓' : '—'} {value.reason}</span>{value.children.map((child, i) => <div key={i} className="ml-3 mt-1 border-l border-border pl-2"><Evidence value={child} /></div>)}</div>;
+  const Icon = value.matched === null ? CircleHelp : value.matched ? Check : X;
+  return <div className="min-w-0 text-sm">
+    <span className="flex items-start gap-1.5"><Icon aria-hidden="true" className={cn('mt-0.5 size-3.5 shrink-0', value.matched === null ? 'text-[var(--color-warning-accent)]' : value.matched ? 'text-[var(--color-success-accent)]' : 'text-t-muted')} /><span className="min-w-0 break-words">{value.reason}</span></span>
+    {value.children.length > 0 && <div className="ml-1.5 mt-1 space-y-1 border-l border-border/60 pl-3">{value.children.map((child, i) => <Evidence key={i} value={child} />)}</div>}
+  </div>;
 }
 function Entries({ label, value, onChange, defaults = {} }: { label: string; value: Record<string, string>; onChange: (v: Record<string, string>) => void; defaults?: Record<string, string> }) {
   const entries = Object.entries(value);
@@ -74,8 +84,15 @@ function Entries({ label, value, onChange, defaults = {} }: { label: string; val
     if (entries.some(([existing], i) => i !== index && existing === key)) return;
     onChange(Object.fromEntries(entries.map((pair, i) => i === index ? [key, text] : pair)));
   };
-  return <fieldset className="min-w-0 space-y-3"><legend className="mb-2 text-sm font-medium">{label}</legend><div className="space-y-4">{entries.map(([key, text], i) => <div key={i} className="min-w-0 space-y-2 border-b border-border/40 pb-4" data-testid="library-entry"><div className="flex min-w-0 items-center gap-2"><Input className="min-w-0 flex-1" aria-label={`${label} name`} disabled={Object.hasOwn(defaults, key)} value={key} onChange={e => update(i, e.target.value, text)} /><Button variant="ghost" size="icon" className="shrink-0" aria-label={Object.hasOwn(defaults, key) ? `Reset ${label.toLowerCase()} to global` : `Remove ${label.toLowerCase()}`} disabled={Object.hasOwn(defaults, key) && defaults[key] === text} onClick={() => Object.hasOwn(defaults, key) ? update(i, key, defaults[key]) : onChange(Object.fromEntries(entries.filter((_, n) => i !== n)))}>{Object.hasOwn(defaults, key) ? <RotateCcw className="size-4" /> : <Trash2 className="size-4" />}</Button></div><Textarea aria-label={`${label} value`} value={text} onChange={e => update(i, key, e.target.value)} /></div>)}</div><Button variant="ghost" size="sm" onClick={() => onChange({ ...value, [nextEntryName(value)]: '' })}><Plus className="mr-1 size-4" />Add {label.toLowerCase()}</Button></fieldset>;
+  return <fieldset className="min-w-0 space-y-2"><legend className="mb-1 text-sm font-medium">{label}</legend>{entries.map(([key, text], i) => <Panel key={i} tone="frame" inset="none" className="min-w-0 space-y-1.5 p-2" data-testid="library-entry"><div className="flex min-w-0 items-center gap-1.5"><Input size="sm" className="min-w-0 flex-1 font-mono" aria-label={`${label} name`} disabled={Object.hasOwn(defaults, key)} value={key} onChange={e => update(i, e.target.value, text)} /><Button variant="ghost" size="icon" className="shrink-0" aria-label={Object.hasOwn(defaults, key) ? `Reset ${label.toLowerCase()} to global` : `Remove ${label.toLowerCase()}`} disabled={Object.hasOwn(defaults, key) && defaults[key] === text} onClick={() => Object.hasOwn(defaults, key) ? update(i, key, defaults[key]) : onChange(Object.fromEntries(entries.filter((_, n) => i !== n)))}>{Object.hasOwn(defaults, key) ? <RotateCcw className="size-4" /> : <Trash2 className="size-4" />}</Button></div><Textarea aria-label={`${label} value`} className="min-h-16 font-mono text-xs" value={text} onChange={e => update(i, key, e.target.value)} /></Panel>)}<Button variant="ghost" size="sm" onClick={() => onChange({ ...value, [nextEntryName(value)]: '' })}><Plus className="size-4" />Add {label.toLowerCase()}</Button></fieldset>;
 }
+function EditorSection({ label, children }: { label: string; children: ReactNode }) {
+  return <section aria-label={label} data-testid="editor-section" className="min-w-0 space-y-4">{children}</section>;
+}
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return <label className="block space-y-1.5 text-sm"><span className="font-medium">{label}</span>{children}{hint && <span className="block text-xs text-t-muted">{hint}</span>}</label>;
+}
+const matches = (query: string, ...text: string[]) => !query.trim() || text.some(t => t.toLowerCase().includes(query.trim().toLowerCase()));
 
 export function SharedLibrary({ projectPath, projectInstructions }: { projectPath?: string; projectInstructions?: ReactNode }) {
   const [answer, setAnswer] = useState<Answer>();
@@ -100,8 +117,15 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   const [discarding, setDiscarding] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [preview, setPreview] = useState('');
+  const [previewing, setPreviewing] = useState(false);
   const [projects, setProjects] = useState<{ name: string; path: string; localPath?: string }[]>([]);
   const [imports, setImports] = useState<{ name: string; path: string; category: string }[]>();
+  // The entry each tab has open, so coming back to a tab finds it where it was.
+  const [chosen, setChosen] = useState<Partial<Record<Category, string>>>({});
+  // On a phone the list and the document take turns; this is the document's turn.
+  const [opened, setOpened] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const url = `/api/settings/library?${new URLSearchParams(projectPath ? { path: projectPath } : preview ? { preview } : {})}`;
   const load = useCallback(async (signal?: AbortSignal) => {
     try { const response = await request(url, { signal }); if (!response.ok) throw new Error(await response.text()); const next = await response.json(); if (!signal?.aborted) { setAnswer(next); setError(''); } }
@@ -114,13 +138,20 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
     window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
   }, [draft]);
+  function choose(next: Category) { setCategory(next); setImports(undefined); setQuery(''); setOpened(false); setMemoryOpen(false); }
+  function select(key: string) { setChosen(c => ({ ...c, [category]: key })); setImports(undefined); setOpened(true); }
   async function persist(library: Library) {
     if (!answer) return;
     setSaving(true); setError(''); setNotice('');
     try {
       const response = await request(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ library, revision: answer.revision, source_revision: answer.source_revision }) });
       if (!response.ok) throw new Error(await response.text());
-      setAnswer(await response.json()); if (draft?.kind === 'skill') setCategory(draft.automatic ? 'skill' : 'command'); setDraft(undefined); setEditing(undefined); setNotice('Saved. New and reconnected chats receive these changes.');
+      setAnswer(await response.json());
+      if (draft) {
+        const home: Category = draft.kind === 'skill' ? draft.automatic ? 'skill' : 'command' : draft.kind;
+        setCategory(home); setChosen(c => ({ ...c, [home]: draft.id }));
+      }
+      setDraft(undefined); setEditing(undefined); setNotice('Saved. New chats will use the changes.');
     } catch (e) { setError(String(e)); } finally { setSaving(false); }
   }
   function folderUrl(id: string) {
@@ -163,8 +194,8 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
         if (!response.ok) throw new Error(await response.text());
         setAnswer(await response.json());
       }
-      setDeleting(undefined);
-      setNotice(`Deleted ${row.item.name}. ${archive ? `Recoverable folder archive: ${archive}. ` : ''}New and reconnected chats receive this change; existing snapshots retain their copy.`);
+      setDeleting(undefined); setOpened(false);
+      setNotice(`Deleted ${row.item.name}.${archive ? ` Archived to ${archive}.` : ''}`);
     } catch (e) { setDeleteError(String(e)); } finally { setSaving(false); }
   }
   async function edit(row: Row) {
@@ -187,8 +218,9 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
     try {
       const response = await request(folderUrl(draft.id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item: draft, revision: folderRevision }) });
       if (!response.ok) throw new Error(await response.text());
-      setCategory(draft.automatic ? 'skill' : 'command'); setDraft(undefined); setEditing(undefined); setFolderRevision(undefined);
-      await load(); setNotice('Saved. Supporting files were preserved. New and reconnected chats receive these changes.');
+      const home: Category = draft.automatic ? 'skill' : 'command';
+      setCategory(home); setChosen(c => ({ ...c, [home]: draft.id })); setDraft(undefined); setEditing(undefined); setFolderRevision(undefined);
+      await load(); setNotice('Saved. New chats will use the changes.');
     } catch (e) { setError(String(e)); } finally { setSaving(false); }
   }
   function create(content = '', name = '') {
@@ -198,7 +230,7 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   async function importNative() {
     try {
       const result = await sendCommand<{ files: { name: string; path: string; category: string }[] }>({ type: 'agent-files.list', ...(projectPath ? { projectPath } : {}) });
-      setImports(result.files.filter(f => ['instructions', 'skills', 'commands', 'output-styles', 'rules'].includes(f.category)));
+      setImports(result.files.filter(f => ['instructions', 'skills', 'commands', 'output-styles', 'rules'].includes(f.category))); setOpened(true);
     } catch (e) { setError(String(e)); }
   }
   async function copyNative(file: { name: string; path: string; category: string }) {
@@ -206,84 +238,190 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
       const result = await sendCommand<{ content: string; truncated?: boolean }>({ type: 'agent-files.read', path: file.path, ...(projectPath ? { projectPath } : {}) });
       if (result.truncated) throw new Error('This file is too large to import completely.');
       create(result.content, file.name);
-      setNotice('Imported a copy. The native original still loads independently; review and retire it yourself after migration. Supporting files must be added under Resources.');
+      setNotice('Imported.');
     } catch (e) { setError(String(e)); }
   }
   const inherited = editing?.source === 'global' && !!projectPath;
   const folderEditing = !!editing?.folder_source && !inherited;
   const source = inherited ? answer?.inherited.find(item => item.id === editing?.item.id) : undefined;
   const patch = (change: Partial<Item>) => setDraft(d => d ? { ...d, ...change } : d);
-  const rows = answer?.resolved.items.filter(r => r.item.id !== 'atelier-general-instructions' && !memoryItem(r.item.id) && r.item.kind === kind && (kind !== 'skill' || (category === 'command' ? !r.item.automatic : r.item.automatic))) ?? [];
-  return <div className="space-y-5" data-testid="shared-library">
-    {!draft && <div><div className="flex items-center gap-2"><BookOpen className="size-5 text-t-muted" /><h2 className="text-lg font-semibold">Agent guidance</h2><Badge>{projectPath ? 'This project' : 'Global'}</Badge></div><p className="mt-2 text-sm text-t-secondary">{projectPath ? 'Manage this project’s instructions, skills, commands, styles and memories.' : 'Manage guidance and memories shared by all projects, across every provider.'}</p></div>}
-    {error && <Panel role="alert" tone="danger" className="text-sm">{error}<Button variant="ghost" onClick={() => { setDraft(undefined); setEditing(undefined); void load(); }}>Discard draft and reload</Button></Panel>}
-    {notice && <p role="status" className="text-sm text-t-secondary">{notice}</p>}
-    {!answer && !error && <p>Loading library…</p>}
-    {answer && <>
-      {answer.orphaned?.map(id => <Panel key={id} tone="attention" className="text-sm">Source removed: {id}. {!projectRules && <Button variant="ghost" disabled={!!draft || saving} onClick={() => { const library = structuredClone(answer.library); delete library.overrides[id]; void persist(library); }}>Forget customization</Button>}</Panel>)}
-      {!draft && <><ToggleGroup type="single" size="md" className="flex-wrap gap-1 border-b border-border/60 pb-2" aria-label="Library categories" value={category} onValueChange={id => { setCategory(id as Category); setImports(undefined); }}>{Object.entries(names).map(([id, label]) => <ToggleGroupItem key={id} value={id}>{label}</ToggleGroupItem>)}</ToggleGroup></>}
-      {memoryView && !draft && <AgentMemories projectPath={projectPath} onChange={() => void load()} />}
-      {!memoryView && <>
-      <div hidden={!!draft || kind !== 'instruction'} className="space-y-6">{projectPath ? projectInstructions : <><GeneralInstructions saved={answer.library.general_instructions ?? ''} saving={saving} onSave={text => persist({ ...answer.library, general_instructions: text })} /><div className="border-t border-border/60 pt-6"><h3 className="font-semibold">Reusable instructions</h3><p className="mt-1 text-sm text-t-secondary">Create rules here. Their conditions determine which projects receive them.</p></div></>}</div>
-      {!draft && !projectRules && <div className="flex flex-wrap items-start justify-between gap-3"><p className="max-w-sm text-sm text-t-secondary">{category === 'command' ? 'Procedures you run explicitly from the chat composer. Commands are never chosen automatically by the agent.' : descriptions[kind]}</p><div className="flex flex-wrap gap-2"><Button onClick={() => create()}><Plus className="mr-1 size-4" />Add {itemLabel}</Button><Button variant="ghost" onClick={() => void importNative()}>Import native file</Button></div></div>}
-      {!draft && kind === 'output_style' && <Panel className="space-y-2"><span className="text-sm font-medium">Selected output style</span><Picker label="Selected output style" disabled={saving} value={answer.library.output_style ?? '__inherit'} onChange={value => void persist({ ...answer.library, output_style: value === '__inherit' ? null : value })} choices={[{ value: '__inherit', label: projectPath ? 'Use global selection' : 'No style selected' }, { value: '', label: 'No shared output style' }, ...answer.resolved.items.filter(r => r.item.kind === 'output_style' && (projectPath || r.source !== 'project')).map(r => ({ value: r.item.id, label: r.item.name }))]} /><p className="text-xs text-t-muted">Applies to new and reconnected chats. Shared across providers. Claude’s native output-style selection is ignored in Atelier.</p></Panel>}
-      {!draft && projectPath && kind === 'skill' && <Panel className="space-y-2"><h3 className="font-medium">Choose what this project can use</h3><p className="text-sm text-t-secondary">Switch off any {category === 'command' ? 'command' : 'skill'} this project does not need. This keeps its files and customizations, and changes nothing globally or in other projects.</p><p className="text-xs text-t-muted">Applies to new and reconnected chats, including explicit invocations. Switching on still respects conditions and required tools.</p></Panel>}
-      {imports && <Panel tone="frame" className="space-y-2"><p className="text-sm">Choose a file to copy into {names[category].toLowerCase()}.</p>{imports.length === 0 && <p className="text-sm">No native files found.</p>}{imports.map(f => <Button key={f.path} variant="ghost" className="h-auto w-full justify-start whitespace-normal text-left" onClick={() => void copyNative(f)}>{f.name} · {f.category}</Button>)}<Button variant="outline" onClick={() => setImports(undefined)}>Cancel import</Button></Panel>}
-      {projectRules ? <ProjectInstructionSummary rows={answer.resolved.items.filter(row => row.item.kind === 'instruction' && !memoryItem(row.item.id))} /> : draft ? <section className="min-w-0 space-y-6" aria-label="Library item editor" data-testid="library-editor">
-        <header className="space-y-3"><Button variant="ghost" size="sm" disabled={saving} onClick={() => setDiscarding(true)}><ArrowLeft className="mr-2 size-4" />Back to {names[category].toLowerCase()}</Button><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-semibold">{inherited ? 'Customize' : editing ? 'Edit' : 'New'} {itemLabel}</h2><Badge>{projectPath ? 'This project only' : 'All projects'}</Badge></div><p className="text-sm text-t-secondary">{inherited ? 'Overrides affect only this project. Unchanged fields keep following the global version.' : projectPath ? 'This guidance belongs to this project and is shared by its providers.' : 'Changes are shared with every project that inherits this item.'}</p></header>
-        <EditorSection step="1" title="What it does" description={draft.kind === 'output_style' ? 'Describe how the agent should write its answers.' : 'Give this guidance a clear name and tell the agent what to do.'}>
-          <label className="block space-y-2 text-sm"><span className="font-medium">Name{inherited ? ' · inherited' : ''}</span><Input aria-label="Item name" disabled={inherited} value={draft.name} placeholder="e.g. Release check" onChange={e => patch({ name: e.target.value, ...(!editing && !idEdited ? { id: suggestedItemId(e.target.value, answer.resolved.items.map(r => r.item.id)) } : {}) })} /></label>
-          <label className="block space-y-2 text-sm"><span className="font-medium">{draft.kind === 'skill' && draft.automatic ? 'When should the agent choose this skill?' : 'Short description'}{inherited ? ' · inherited' : ''}</span><Input aria-label="Item description" disabled={inherited} value={draft.description} placeholder={draft.kind === 'skill' ? 'e.g. Before releasing a package' : 'Optional summary for the library'} onChange={e => patch({ description: e.target.value })} /></label>
-          <label className="block space-y-2 text-sm"><span className="font-medium">{draft.kind === 'output_style' ? 'Writing guidelines' : 'Instructions'}</span><Textarea aria-label="Item content" className="min-h-40 font-mono text-sm" value={draft.content} onChange={e => patch({ content: e.target.value })} />{inherited && <span className="block text-xs text-t-muted">Editing replaces the global instructions for this project.</span>}</label>
-        </EditorSection>
-        <EditorSection step="2" title="When it applies" description="Limit where this guidance is available. Conditions are evaluated for each project.">
-          {draft.kind === 'skill' && <div className="space-y-2"><label className="flex items-start gap-3 text-sm"><Checkbox className="mt-0.5 shrink-0" checked={draft.automatic} onCheckedChange={checked => patch({ automatic: checked === true })} /><span className="font-medium">Allow automatic selection by the agent</span></label><p className="pl-7 text-xs text-t-secondary">{draft.automatic ? 'The agent can discover this skill from its description. You can also invoke it directly.' : 'Manual only. Invoke this skill directly from the chat composer.'}</p><p className="break-all pl-7 font-mono text-xs text-t-muted">/skill:{draft.id}</p></div>}
-          <fieldset className="min-w-0 space-y-2"><legend className="mb-2 text-sm font-medium">Available when</legend><Conditions value={draft.when} onChange={when => patch({ when })} /></fieldset>
-        </EditorSection>
-        <Panel inset="none" asChild><Collapsible data-testid="editor-support"><CollapsibleTrigger className="block w-full cursor-pointer px-4 py-4 text-left"><span className="ml-1 font-semibold">3 · Supporting material</span><span className="mt-1 block text-sm text-t-secondary">{Object.keys(draft.parameters).length} parameters{folderEditing ? ' · Scripts and assets preserved' : draft.kind === 'skill' ? ` · ${Object.keys(draft.resources).length} resources` : ''} · Optional</span></CollapsibleTrigger><CollapsibleContent className="min-w-0 space-y-6 border-t border-border/40 p-4"><p className="text-sm text-t-secondary">Use {'{{parameter-name}}'} in instructions to insert a reusable value.{inherited ? ' Reset inherited values to global defaults, or add project-only values.' : ''}</p><Entries label="Parameters" value={draft.parameters} defaults={source?.parameters} onChange={parameters => patch({ parameters })} />{draft.kind === 'skill' && (folderEditing ? <div className="space-y-2"><h4 className="text-sm font-medium">Scripts and assets</h4><p className="text-sm text-t-secondary">Saving preserves every supporting file. To edit scripts, references or binary assets, use the skill folder.</p><p className="break-all font-mono text-xs">{editing?.folder_source}</p></div> : !inherited ? <div className="space-y-3"><p className="text-sm text-t-secondary">Resources are supporting text files the agent reads on demand.</p><Entries label="Resources" value={draft.resources} onChange={resources => patch({ resources })} /></div> : <div className="space-y-2"><h4 className="text-sm font-medium">Resources · inherited</h4><p className="text-xs text-t-secondary">Edit resource files in the global library.</p>{Object.keys(draft.resources).map(name => <p key={name} className="break-all font-mono text-xs">{name}</p>)}</div>)}</CollapsibleContent></Collapsible></Panel>
-        <Panel inset="none" asChild><Collapsible data-testid="editor-advanced"><CollapsibleTrigger className="block w-full cursor-pointer px-4 py-4 text-left"><span className="ml-1 font-semibold">4 · Advanced settings</span><span className="mt-1 block text-sm text-t-secondary">{folderEditing ? 'Identifier and required tools' : 'Identifier, required tools, and bundle'}</span></CollapsibleTrigger><CollapsibleContent className="space-y-5 border-t border-border/40 p-4"><label className="block space-y-2 text-sm"><span className="font-medium">Identifier</span><Input aria-label="Item ID" disabled={!!editing} value={draft.id} onChange={e => { setIdEdited(true); patch({ id: e.target.value }); }} /><span className="block text-xs text-t-muted">Generated from the name. Used in shortcuts and project overrides; fixed after saving.</span></label><label className="block space-y-2 text-sm"><span className="font-medium">Required tools{inherited ? ' · inherited' : ''}</span><Input aria-label="Required executables" disabled={inherited} placeholder="e.g. git, npm" value={draft.requires.join(', ')} onChange={e => patch({ requires: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} /><span className="block text-xs text-t-muted">Comma-separated executables. Missing tools make this item unavailable.</span></label>{!folderEditing && <label className="block space-y-2 text-sm"><span className="font-medium">Bundle{inherited ? ' · inherited' : ''}</span><Input aria-label="Bundle" disabled={inherited} placeholder="Optional grouping name" value={draft.bundle} onChange={e => patch({ bundle: e.target.value })} /></label>}</CollapsibleContent></Collapsible></Panel>
-        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4"><p className="text-xs text-t-muted">Applies to new and reconnected chats.</p><div className="flex gap-2"><Button variant="outline" disabled={saving} onClick={() => { setDraft(undefined); setEditing(undefined); }}>Cancel</Button><Button disabled={saving || !draft.id || !draft.name.trim()} onClick={() => {
+  const all = useMemo(() => answer?.resolved.items.filter(r => r.item.id !== 'atelier-general-instructions' && !memoryItem(r.item.id)) ?? [], [answer]);
+  const inCategory = (r: Row, c: Category) => c === 'command' ? r.item.kind === 'skill' && !r.item.automatic : c === 'skill' ? r.item.kind === 'skill' && r.item.automatic : r.item.kind === c;
+  const counts = Object.fromEntries((Object.keys(names) as Category[]).map(c => [c, all.filter(r => inCategory(r, c)).length])) as Record<Category, number>;
+  const rows = all.filter(r => inCategory(r, category));
+
+  if (draft && answer) return <div className="mx-auto max-w-6xl" data-testid="shared-library">
+    {error && <Panel role="alert" tone="danger" className="mb-4 space-y-2 text-sm"><p>{error}</p><Button variant="outline" size="sm" onClick={() => { setDraft(undefined); setEditing(undefined); void load(); }}>Reload</Button></Panel>}
+    {notice && <p role="status" className="mb-4 text-sm text-t-secondary">{notice}</p>}
+    <section className="min-w-0" aria-label="Library item editor" data-testid="library-editor">
+      <header className="sticky -top-4 z-10 -mx-4 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-border/40 bg-surface-base/95 px-4 py-3 backdrop-blur sm:-top-6 sm:-mx-6 sm:px-6">
+        <div className="flex min-w-0 items-center gap-2">
+          <Button variant="ghost" size="icon" aria-label={`Back to ${names[category].toLowerCase()}`} disabled={saving} onClick={() => setDiscarding(true)}><ArrowLeft className="size-4" /></Button>
+          <h2 className="truncate text-base font-semibold">{inherited ? 'Customize' : editing ? 'Edit' : 'New'} {itemLabel}</h2>
+          <Badge variant="outline" size="sm">{projectPath ? 'This project only' : 'All projects'}</Badge>
+        </div>
+        <div className="flex gap-2"><Button variant="ghost" disabled={saving} onClick={() => { setDraft(undefined); setEditing(undefined); }}><X className="size-4 sm:hidden" /><Label>Cancel</Label></Button><Button disabled={saving || !draft.id || !draft.name.trim()} onClick={() => {
           if (folderEditing) { void persistFolder(); return; }
-          if (!editing && answer.library.items.some(item => item.id === draft.id)) { setError('This ID already exists. Choose a different ID or edit the existing item.'); return; }
+          if (!editing && answer.library.items.some(item => item.id === draft.id)) { setError('This ID is already in use.'); return; }
           const library = structuredClone(answer.library);
           if (inherited) {
-            if (!source) { setError('The global source has changed. Reload before customizing it.'); return; }
+            if (!source) { setError('The global item has changed. Reload and try again.'); return; }
             const prior = library.overrides[draft.id] ?? {};
             library.overrides[draft.id] = buildCustomization(draft, source, prior.disabled);
           } else { library.items = [...library.items.filter(i => i.id !== draft.id), draft]; }
           void persist(library);
-        }}><Save className="mr-1 size-4" />{saving ? 'Saving…' : 'Save item'}</Button></div></footer>
-      </section> : <div className="space-y-3">{rows.length === 0 && <Panel tone="frame" className="text-sm text-t-secondary">No {names[category].toLowerCase()} yet. Add one to share it across providers.</Panel>}{rows.map(row => <Panel key={row.item.id} tone="frame" className="space-y-2" data-testid={`library-item-${row.item.id}`}>
-        <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-medium">{row.item.name}</h3><p className="text-xs text-t-muted">{row.source}{row.customized ? ' · customized here' : ''}{row.item.bundle ? ` · ${row.item.bundle}` : ''}{row.item.kind === 'skill' ? ` · /skill:${row.item.id}` : ''}</p></div><Badge>{states[row.state] ?? row.state}</Badge></div>
-        {projectPath && row.item.kind === 'skill' && row.source !== 'built-in' && <label className="inline-flex items-center gap-2 text-sm"><Switch checked={!answer.library.overrides[row.item.id]?.disabled} aria-label={`Enable ${row.item.name} for this project`} disabled={saving} onCheckedChange={on => setProjectSkillEnabled(row.item.id, on)} /><span aria-hidden="true">{answer.library.overrides[row.item.id]?.disabled ? 'Off for this project' : 'On for this project'}</span></label>}
-        {row.item.description && <p className="text-sm text-t-secondary">{row.item.description}</p>}
-        {row.folder_source && <p className="break-all text-xs text-t-secondary">Folder-backed skill. Edit instructions and settings here; scripts and assets stay in <code>{row.folder_source}</code>.</p>}
-        <Collapsible><CollapsibleTriggerRow size="sm">Why? · Inspect content</CollapsibleTriggerRow><CollapsibleContent className="mt-2 space-y-2"><Evidence value={row.evaluation} />{row.missing.length > 0 && <p className="text-xs">Missing: {row.missing.join(', ')}</p>}<pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded bg-surface-overlay p-3 text-xs">{row.item.content}</pre></CollapsibleContent></Collapsible>
-        {row.source !== 'built-in' && !(row.source === 'project' && !projectPath) && <div className="flex flex-wrap gap-2">
-          {(!row.folder_source || row.state !== 'invalid') && <Button variant="outline" size="sm" disabled={saving} onClick={() => void edit(row)}>{projectPath && row.source === 'global' ? 'Customize' : 'Edit'}</Button>}
-          {projectPath && row.source === 'global' ? <>{row.item.kind !== 'skill' && <Button variant="ghost" size="sm" disabled={saving} onClick={() => void persist({ ...answer.library, overrides: { ...answer.library.overrides, [row.item.id]: { ...answer.library.overrides[row.item.id], disabled: row.state !== 'disabled' } } })}>{row.state === 'disabled' ? 'Enable here' : 'Disable here'}</Button>}{row.customized && <Button variant="ghost" size="sm" disabled={saving} onClick={() => { const library = structuredClone(answer.library); delete library.overrides[row.item.id]; void persist(library); }}>Reset to global</Button>}</> : <Button variant="destructive" size="sm" disabled={saving} onClick={() => void prepareDelete(row)}>Delete</Button>}
-        </div>}
-      </Panel>)}</div>}
-      </>}
-      {!draft && <Collapsible className="border-t border-border/40 pt-4"><CollapsibleTriggerRow>Preview and diagnostics</CollapsibleTriggerRow><CollapsibleContent className="mt-4 space-y-4">{!projectPath && <div className="space-y-2"><span className="text-sm">Evaluate for project</span><Picker label="Evaluate for project" value={preview} onChange={setPreview} choices={[{ value: '', label: 'Choose a project to explain conditions' }, ...projects.filter(p => !(p.localPath || p.path).startsWith('dolt://')).map(p => ({ value: p.localPath || p.path, label: p.name }))]} /></div>}<h3 className="text-sm font-medium">Saved session preview</h3><p className="break-all text-xs text-t-muted">Revision {answer.resolved.revision}. Instructions and the selected style are included; skills are loaded on use. Current chats retain their connection’s snapshot.</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{answer.guidance}</pre></CollapsibleContent></Collapsible>}
-    </>}
+        }}><Save className="size-4" /><Label>{saving ? 'Saving…' : 'Save'}</Label></Button></div>
+      </header>
+      {inherited && <p className="mb-6 text-sm text-t-secondary">Overrides the global version for this project only.</p>}
+      <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <EditorSection label="Details">
+          <Field label={`Name${inherited ? ' (inherited)' : ''}`}><Input aria-label="Item name" disabled={inherited} value={draft.name} placeholder="e.g. Release check" onChange={e => patch({ name: e.target.value, ...(!editing && !idEdited ? { id: suggestedItemId(e.target.value, answer.resolved.items.map(r => r.item.id)) } : {}) })} /></Field>
+          <Field label={`Description${inherited ? ' (inherited)' : ''}`}><Textarea aria-label="Item description" rows={2} className="min-h-0 resize-y" disabled={inherited} value={draft.description} placeholder={draft.kind === 'skill' && draft.automatic ? 'When to use this skill' : 'Optional'} onChange={e => patch({ description: e.target.value })} /></Field>
+          <Field label="Content" hint={inherited ? 'Overrides the global content for this project.' : undefined}><Textarea aria-label="Item content" className="min-h-[max(20rem,calc(100dvh-26rem))] font-mono text-sm leading-relaxed" value={draft.content} onChange={e => patch({ content: e.target.value })} /></Field>
+        </EditorSection>
+        <div className="min-w-0 space-y-6 xl:border-l xl:border-border/40 xl:pl-6">
+          <EditorSection label="Settings">
+            {draft.kind === 'skill' && <div className="space-y-1.5"><label className="flex items-start gap-2.5 text-sm"><Checkbox className="mt-0.5 shrink-0" checked={draft.automatic} onCheckedChange={checked => patch({ automatic: checked === true })} /><span className="font-medium">Use automatically</span></label><p className="pl-[1.625rem] text-xs text-t-muted">{draft.automatic ? 'Or run it manually with ' : 'Run it manually with '}<code className="break-all">/skill:{draft.id}</code></p></div>}
+            <fieldset className="min-w-0 space-y-1.5"><legend className="mb-1.5 text-sm font-medium">Condition</legend><Conditions value={draft.when} onChange={when => patch({ when })} /></fieldset>
+          </EditorSection>
+          <Collapsible data-testid="editor-support" className="min-w-0 border-t border-border/40 pt-4"><CollapsibleTriggerRow className="w-full">Parameters and files<span className="ml-auto text-xs font-normal text-t-muted">{Object.keys(draft.parameters).length + (folderEditing ? 0 : Object.keys(draft.resources).length) || 'None'}</span></CollapsibleTriggerRow><CollapsibleContent className="min-w-0 space-y-5 pt-4"><p className="text-xs text-t-muted">Use {'{{name}}'} in the content to insert a parameter.</p><Entries label="Parameters" value={draft.parameters} defaults={source?.parameters} onChange={parameters => patch({ parameters })} />{draft.kind === 'skill' && (folderEditing ? <div className="space-y-1"><h4 className="text-sm font-medium">Scripts and assets</h4><p className="text-xs text-t-muted">Edit these in the skill folder:</p><p className="break-all font-mono text-xs">{editing?.folder_source}</p></div> : !inherited ? <div className="space-y-1.5"><Entries label="Resources" value={draft.resources} onChange={resources => patch({ resources })} /></div> : <div className="space-y-1"><h4 className="text-sm font-medium">Resources (inherited)</h4><p className="text-xs text-t-muted">Edit these in the global library.</p>{Object.keys(draft.resources).map(name => <p key={name} className="break-all font-mono text-xs">{name}</p>)}</div>)}</CollapsibleContent></Collapsible>
+          <Collapsible data-testid="editor-advanced" className="min-w-0 border-t border-border/40 pt-4"><CollapsibleTriggerRow className="w-full">Advanced</CollapsibleTriggerRow><CollapsibleContent className="space-y-4 pt-4"><Field label="ID" hint="Can’t be changed after saving."><Input aria-label="Item ID" className="font-mono" disabled={!!editing} value={draft.id} onChange={e => { setIdEdited(true); patch({ id: e.target.value }); }} /></Field><Field label={`Required tools${inherited ? ' (inherited)' : ''}`} hint="Comma-separated"><Input aria-label="Required executables" disabled={inherited} placeholder="e.g. git, npm" value={draft.requires.join(', ')} onChange={e => patch({ requires: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} /></Field>{!folderEditing && <Field label={`Bundle${inherited ? ' (inherited)' : ''}`}><Input aria-label="Bundle" disabled={inherited} placeholder="Optional" value={draft.bundle} onChange={e => patch({ bundle: e.target.value })} /></Field>}</CollapsibleContent></Collapsible>
+        </div>
+      </div>
+    </section>
     <AlertDialog open={discarding} onOpenChange={setDiscarding}>
       <AlertDialogContent>
-        <AlertDialogTitle>Discard this draft?</AlertDialogTitle>
-        <AlertDialogDescription>Discard this draft and return to the library?</AlertDialogDescription>
+        <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+        <AlertDialogDescription>Your changes will be lost.</AlertDialogDescription>
         <AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction onClick={() => { setDraft(undefined); setEditing(undefined); }}>Discard</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  </div>;
+
+  const general = !projectPath && answer ? <GeneralInstructions saved={answer.library.general_instructions ?? ''} saving={saving} onSave={text => persist({ ...answer.library, general_instructions: text })} /> : projectInstructions;
+  const owned = (row: Row) => row.source !== 'built-in' && !(row.source === 'project' && !projectPath);
+  const actions = (row: Row) => {
+    if (!answer || !owned(row)) return undefined;
+    const primary: Action | undefined = !row.folder_source || row.state !== 'invalid' ? { label: projectPath && row.source === 'global' ? 'Customize' : 'Edit', icon: <Pencil className="size-3.5" />, run: () => void edit(row) } : undefined;
+    const rest: Action[] = [];
+    if (projectPath && row.source === 'global') {
+      if (row.item.kind !== 'skill') rest.push({ label: row.state === 'disabled' ? 'Enable' : 'Disable', run: () => void persist({ ...answer.library, overrides: { ...answer.library.overrides, [row.item.id]: { ...answer.library.overrides[row.item.id], disabled: row.state !== 'disabled' } } }) });
+      if (row.customized) rest.push({ label: 'Reset', icon: <RotateCcw className="size-3.5" />, run: () => { const library = structuredClone(answer.library); delete library.overrides[row.item.id]; void persist(library); } });
+    } else rest.push({ label: 'Delete', icon: <Trash2 className="size-3.5" />, destructive: true, run: () => void prepareDelete(row) });
+    return <ActionBar primary={primary} rest={rest} disabled={saving} />;
+  };
+  // With no project to check against, a condition has nothing to be true of yet:
+  // that is the normal case on the global screen, not a warning.
+  const unchecked = (row: Row) => !projectPath && !preview && row.state === 'unknown';
+  const stateOf = (row: Row) => unchecked(row) ? 'Conditional' : projectRules && row.state === 'available' ? 'Active' : kind === 'output_style' && row.state === 'available' ? 'Active' : states[row.state] ?? row.state;
+  const toneOf = (row: Row): Tone => unchecked(row) ? 'quiet' : tones[row.state] ?? 'quiet';
+  const rowDetail = (row: Row) => <article className="min-w-0" data-testid="library-detail" data-item={row.item.id}>
+    <DetailHeader title={row.item.name} actions={projectRules ? undefined : actions(row)} meta={<>
+      <span className="inline-flex items-center gap-1.5"><StateDot tone={toneOf(row)} />{stateOf(row)}</span>
+      <span>{sources[row.source] ?? row.source}</span>
+      {row.customized && <span>Customized</span>}
+      {row.item.kind === 'skill' && <code className="text-t-secondary">/skill:{row.item.id}</code>}
+      {row.item.bundle && <span>{row.item.bundle}</span>}
+    </>} />
+    <div className="space-y-5 pt-4">
+      {row.item.description && <p className="text-sm text-t-secondary">{row.item.description}</p>}
+      <dl className="space-y-3">
+        <Fact label="Conditions"><Evidence value={row.evaluation} /></Fact>
+        {row.missing.length > 0 && <Fact label="Missing"><span className="font-mono text-xs">{row.missing.join(', ')}</span></Fact>}
+        {row.folder_source && <Fact label="Folder"><span className="block break-all font-mono text-xs text-t-secondary">{row.folder_source}</span></Fact>}
+        {projectRules && row.customized && <Fact label="Override"><span className="text-xs text-t-muted">This project has a saved override.</span></Fact>}
+      </dl>
+      <Document label={`${row.item.name} content`}>{row.item.content}</Document>
+      {projectRules && row.source === 'global' && <p className="text-sm"><Button mode="link" underlined="solid" size="inherit" asChild><a href="/settings?section=library">Edit global instructions</a></Button></p>}
+    </div>
+  </article>;
+
+  // The list: what the tab holds, grouped by where each entry comes from.
+  const visible = rows.filter(r => matches(query, r.item.name, r.item.id, r.item.description));
+  const bySource = (list: Row[]) => (['project', 'global', 'built-in'] as const).map(s => ({ key: s, title: s === 'global' ? (projectPath ? 'Global' : 'Custom') : sources[s], rows: list.filter(r => r.source === s) })).filter(g => g.rows.length);
+  const projectGroups = projectRules ? (() => {
+    const globals = visible.filter(r => r.source === 'global');
+    const applied = globals.filter(r => r.state === 'available'), inactive = globals.filter(r => r.state !== 'available');
+    const older = visible.filter(r => r.source === 'project'), builtins = visible.filter(r => r.source === 'built-in');
+    return [{ key: 'applied', title: 'Active', rows: applied }, { key: 'inactive', title: `Inactive · ${inactive.length}`, rows: inactive }, { key: 'older', title: `Legacy project rules · ${older.length}`, rows: older }, { key: 'built-in', title: 'Built-in', rows: builtins }].filter(g => g.rows.length);
+  })() : [];
+  const groups = projectRules ? projectGroups : bySource(visible);
+  const pinned = kind === 'instruction' && !!general && matches(query, projectPath ? 'Project instructions' : 'Global instructions');
+  const keys = [...(pinned ? [GENERAL] : []), ...groups.flatMap(g => g.rows.map(r => r.item.id))];
+  const current = keys.includes(chosen[category] ?? '') ? chosen[category]! : keys[0];
+  const currentRow = rows.find(r => r.item.id === current);
+  const override = (id: string) => answer?.library.overrides[id];
+  const list = <>
+    <ListHeader query={query} onQuery={setQuery} placeholder={`Search ${names[category].toLowerCase()}`}>
+      {!projectRules && <>
+        <Button variant="ghost" size="icon" className="max-sm:hidden" aria-label="Import" title="Import CLAUDE.md, AGENTS.md or skill files" onClick={() => void importNative()}><FileDown className="size-4" /></Button>
+        <Button size="sm" aria-label={`Add ${itemLabel}`} onClick={() => create()}><Plus className="size-3.5" /><Label>New</Label></Button>
+      </>}
+    </ListHeader>
+    {kind === 'output_style' && answer && <Panel tone="frame" inset="none" className="mb-3 space-y-1.5 p-2.5"><span className="text-xs font-medium text-t-muted">Active style</span><Picker label="Selected output style" disabled={saving} value={answer.library.output_style ?? (projectPath ? '__inherit' : '')} onChange={value => void persist({ ...answer.library, output_style: value === '__inherit' ? null : value })} choices={[...(projectPath ? [{ value: '__inherit', label: 'Use global setting' }] : []), { value: '', label: 'None' }, ...answer.resolved.items.filter(r => r.item.kind === 'output_style' && (projectPath || r.source !== 'project')).map(r => ({ value: r.item.id, label: r.item.name }))]} /></Panel>}
+        {pinned && <ListGroup><ListRow testId="library-item-general" title={projectPath ? 'Project instructions' : 'Global instructions'} subtitle={projectPath ? 'This project only' : 'Shared by all projects'} tone="good" stateLabel="Always active" icon={<Pin aria-hidden="true" className="size-3 shrink-0 text-t-muted" />} selected={current === GENERAL} onSelect={() => select(GENERAL)} /></ListGroup>}
+    <div data-testid={projectRules ? 'project-instruction-summary' : undefined}>
+      {groups.map(g => <ListGroup key={g.key} title={groups.length > 1 || pinned || projectRules ? g.title : undefined}>{g.rows.map(row => <ListRow key={row.item.id} testId={`library-item-${row.item.id}`} title={row.item.name} subtitle={row.item.description || (row.item.kind === 'skill' ? `/skill:${row.item.id}` : undefined)} tone={toneOf(row)} stateLabel={stateOf(row) + (row.customized ? ' · Customized' : '')} showState={row.state !== 'available' || kind === 'output_style'} selected={current === row.item.id} onSelect={() => select(row.item.id)}
+        trailing={projectPath && row.item.kind === 'skill' && row.source !== 'built-in' ? <Switch checked={!override(row.item.id)?.disabled} aria-label={`Enable ${row.item.name} for this project`} disabled={saving} onCheckedChange={on => setProjectSkillEnabled(row.item.id, on)} /> : undefined} />)}</ListGroup>)}
+    </div>
+    {!pinned && !groups.length && <ListEmpty>{query ? 'No results' : `No ${names[category].toLowerCase()} yet.`}</ListEmpty>}
+  </>;
+  const importer = imports && <section className="min-w-0" aria-label="Import">
+    <DetailHeader title="Import" meta={<span>Creates a copy. The original file stays where it is.</span>} actions={<Button variant="ghost" size="sm" onClick={() => setImports(undefined)}>Cancel</Button>} />
+    <div className="pt-3">{imports.length === 0 ? <p className="py-6 text-center text-sm text-t-muted">No files found</p> : <ul className="space-y-px">{imports.map(f => <li key={f.path}><Button variant="ghost" className="h-auto w-full justify-start whitespace-normal py-2 text-left" onClick={() => void copyNative(f)}>{f.name} · {f.category}</Button></li>)}</ul>}</div>
+  </section>;
+  const detail = <>
+    <BackToList onBack={() => { setOpened(false); setImports(undefined); }} label={names[category]} />
+    {importer}
+    {/* Kept mounted in every category, so an unsaved draft survives a switch. */}
+    {general && <div hidden={kind !== 'instruction' || !!imports || current !== GENERAL} className="min-w-0">{general}</div>}
+    {!imports && currentRow && rowDetail(currentRow)}
+    {!imports && !currentRow && current !== GENERAL && <DetailEmpty>{rows.length ? 'Select an item' : `No ${names[category].toLowerCase()} yet`}</DetailEmpty>}
+  </>;
+
+  const focused = memoryView ? memoryOpen : opened;
+  return <div className="mx-auto flex max-w-6xl flex-col gap-5 max-sm:gap-3" data-testid="shared-library">
+    {error && <Panel role="alert" tone="danger" className="space-y-2 text-sm"><p>{error}</p><Button variant="outline" size="sm" onClick={() => { setDraft(undefined); setEditing(undefined); void load(); }}>Reload</Button></Panel>}
+    {notice && <p role="status" className="text-sm text-t-secondary">{notice}</p>}
+    {!answer && !error && <p className="text-sm text-t-muted">Loading…</p>}
+    {answer && <>
+      {answer.orphaned?.map(id => <Panel key={id} tone="attention" className="flex flex-wrap items-center justify-between gap-2 text-sm"><span>Global item deleted: <code>{id}</code></span>{!projectRules && <Button variant="ghost" size="sm" disabled={saving} onClick={() => { const library = structuredClone(answer.library); delete library.overrides[id]; void persist(library); }}>Remove override</Button>}</Panel>)}
+      {/* A phone has no room for five tabs or the page heading the top bar
+          already shows, so there it is one picker naming the open list. While
+          an item is open the item gets the whole screen. */}
+      <div className={cn('flex items-center gap-2 sm:hidden', focused && 'hidden')}>
+        <Select value={category} onValueChange={id => choose(id as Category)}>
+          <SelectTrigger className="min-w-0 flex-1" aria-label="Category"><SelectValue /></SelectTrigger>
+          <SelectContent>{(Object.keys(names) as Category[]).map(id => <SelectItem key={id} value={id}>{names[id]}</SelectItem>)}</SelectContent>
+        </Select>
+        <MoreMenu><DropdownMenuItem onSelect={() => setPreviewing(true)}><Eye className="size-4" />View prompt</DropdownMenuItem>{!memoryView && !projectRules && <DropdownMenuItem onSelect={() => void importNative()}><FileDown className="size-4" />Import</DropdownMenuItem>}</MoreMenu>
+      </div>
+      {/* The screen heads the page, so the tabs and the page's tools share one row. */}
+      <div className={cn('flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2 max-sm:hidden', focused && 'max-lg:hidden')}>
+        <ToggleGroup type="single" size="sm" className="flex-wrap justify-start gap-1" aria-label="Library categories" value={category} onValueChange={id => { if (id) choose(id as Category); }}>{(Object.keys(names) as Category[]).map(id => <ToggleGroupItem key={id} value={id} aria-label={names[id]} className="gap-1.5">{names[id]}{id !== 'memory' && counts[id] + (id === 'instruction' && general ? 1 : 0) > 0 && <span aria-hidden="true" className="text-[0.6875rem] tabular-nums text-t-muted">{counts[id] + (id === 'instruction' && general ? 1 : 0)}</span>}</ToggleGroupItem>)}</ToggleGroup>
+        <div className="flex min-h-9 flex-wrap items-center gap-2">
+        {!projectPath && !memoryView && <Picker className="w-56 [&>span]:truncate" label="Preview for project" value={preview} onChange={setPreview} choices={[{ value: '', label: 'Preview for project…' }, ...projects.filter(p => !(p.localPath || p.path).startsWith('dolt://')).map(p => ({ value: p.localPath || p.path, label: p.name }))]} />}
+        <Button variant="outline" size="sm" onClick={() => setPreviewing(true)}><Eye className="size-4" />View prompt</Button>
+        </div>
+      </div>
+      {memoryView ? <AgentMemories projectPath={projectPath} onChange={() => void load()} onOpenChange={setMemoryOpen} /> : <MasterDetail label={names[category]} open={opened} list={list} detail={detail} />}
+    </>}
+    <Dialog open={previewing} onOpenChange={setPreviewing}>
+      <DialogContent className="sm:max-w-3xl" data-testid="library-preview">
+        <DialogTitle>Prompt preview</DialogTitle>
+        <DialogDescription>What a new chat starts with. Skills load when used.</DialogDescription>
+        {answer && <><p className="break-all text-xs text-t-muted">Revision {answer.resolved.revision}</p><Panel asChild inset="none" className="max-h-[60vh] overflow-auto p-4"><pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{answer.guidance}</pre></Panel></>}
+      </DialogContent>
+    </Dialog>
     <AlertDialog open={!!deleting} onOpenChange={open => { if (!open && !saving) setDeleting(undefined); }}>
       <AlertDialogContent>
         <AlertDialogTitle>Delete {deleting?.row.item.name}?</AlertDialogTitle>
         <AlertDialogDescription>
-          {projectPath ? 'This removes the item owned by this project.' : 'This removes the global item for every project that inherits it.'}
-          {deleting?.row.folder_source ? <><span className="mt-2 block">The entire skill folder, including scripts and assets, will move to a recoverable archive outside the active library.</span><span className="mt-2 block break-all font-mono text-xs">{deleting.source ?? deleting.row.folder_source}</span>{deleting.files !== undefined && <span className="mt-1 block">{deleting.files} files or links included.</span>}</> : <span className="mt-2 block">This deletes the saved library entry. There is no undo button.</span>}
-          <span className="mt-2 block">Existing chat snapshots retain their copy until reconnected.</span>
+          {projectPath ? 'It will be removed from this project.' : 'It will be removed from all projects.'}
+          {deleting?.row.folder_source ? <><span className="mt-2 block">The skill folder will be moved to the archive.</span><span className="mt-2 block break-all font-mono text-xs">{deleting.source ?? deleting.row.folder_source}</span>{deleting.files !== undefined && <span className="mt-1 block">{deleting.files} files</span>}</> : <span className="mt-2 block">This can’t be undone.</span>}
         </AlertDialogDescription>
         {deleteError && <div role="alert" className="text-sm text-danger"><p>{deleteError}</p><Button variant="ghost" disabled={saving} onClick={() => { setDeleting(undefined); void load(); }}>Reload settings</Button></div>}
-        <AlertDialogFooter><AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel><Button variant="destructive" disabled={saving || !!deleteError || (!!deleting?.row.folder_source && !deleting.revision)} onClick={() => void deleteItem()}>{saving ? 'Please wait…' : `Delete ${deleting?.row.item.kind === 'skill' ? deleting.row.item.automatic ? 'skill' : 'command' : deleting?.row.item.kind === 'output_style' ? 'output style' : 'instruction'}`}</Button></AlertDialogFooter>
+        <AlertDialogFooter><AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel><Button variant="destructive" disabled={saving || !!deleteError || (!!deleting?.row.folder_source && !deleting.revision)} onClick={() => void deleteItem()}>{saving ? 'Deleting…' : `Delete ${deleting?.row.item.kind === 'skill' ? deleting.row.item.automatic ? 'skill' : 'command' : deleting?.row.item.kind === 'output_style' ? 'output style' : 'instruction'}`}</Button></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
   </div>;
@@ -298,27 +436,8 @@ function GeneralInstructions({ saved, saving, onSave }: { saved: string; saving:
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [text, saved]);
-  return <section aria-label="Global instructions" className="space-y-3"><h3 className="font-semibold">Global instructions</h3><p className="text-sm text-t-secondary">Your shared CLAUDE.md / AGENTS.md guidance for all projects and providers. Included automatically, alongside each project's instructions.</p><label className="block"><span className="sr-only">Global instructions</span><Textarea className="min-h-48 font-mono text-sm" value={text} onChange={event => setText(event.target.value)} /></label><Button disabled={saving || text === saved} onClick={() => void onSave(text)}>Save global instructions</Button></section>;
-}
-
-function ProjectInstructionSummary({ rows }: { rows: Row[] }) {
-  const globals = rows.filter(row => row.source === 'global');
-  const applied = globals.filter(row => row.state === 'available');
-  const inactive = globals.filter(row => row.state !== 'available');
-  const existing = rows.filter(row => row.source === 'project');
-  const builtins = rows.filter(row => row.source === 'built-in');
-  const list = (items: Row[]) => items.map(row => <div key={row.item.id} className="space-y-2 border-b border-border/40 py-3 last:border-0" data-testid={`library-item-${row.item.id}`}>
-    <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="text-sm font-medium">{row.item.name}</h4><Badge>{row.state === 'available' ? 'Included' : states[row.state] ?? row.state}</Badge></div>
-    <Evidence value={row.evaluation} />
-    {row.customized && <p className="text-xs text-t-muted">A previously saved project override is preserved for this rule.</p>}
-    {row.missing.length > 0 && <p className="text-xs">Missing: {row.missing.join(', ')}</p>}
-    <Collapsible><CollapsibleTriggerRow size="sm">View instructions</CollapsibleTriggerRow><CollapsibleContent asChild><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs">{row.item.content}</pre></CollapsibleContent></Collapsible>
-  </div>);
-  return <section className="space-y-4 border-t border-border/60 pt-6" aria-label="Applied global guidance" data-testid="project-instruction-summary">
-    <div><h3 className="font-semibold">Applied global guidance</h3><p className="mt-1 text-sm text-t-secondary">Read-only. Global rules apply according to their conditions. Create and edit them in global settings.</p><p className="mt-2 text-sm"><Button mode="link" underlined="solid" size="inherit" asChild><a href="/settings?section=library">Manage global instructions</a></Button></p></div>
-    {applied.length ? <div>{list(applied)}</div> : <p className="text-sm text-t-muted">No global instructions apply to this project.</p>}
-    {inactive.length > 0 && <Collapsible><CollapsibleTriggerRow className="font-normal">Not applied · {inactive.length}</CollapsibleTriggerRow><CollapsibleContent>{list(inactive)}</CollapsibleContent></Collapsible>}
-    {existing.length > 0 && <Collapsible><CollapsibleTriggerRow className="font-normal">Previously saved project rules · {existing.length}</CollapsibleTriggerRow><CollapsibleContent><p className="mt-2 text-xs text-t-secondary">These older rules are preserved, including their conditions. New project guidance belongs in Project instructions above.</p>{list(existing)}</CollapsibleContent></Collapsible>}
-    {builtins.length > 0 && <Collapsible><CollapsibleTriggerRow className="font-normal">Built-in guidance</CollapsibleTriggerRow><CollapsibleContent>{list(builtins)}</CollapsibleContent></Collapsible>}
+  return <section aria-label="Global instructions" className="min-w-0">
+    <DetailHeader title="Global instructions" meta={<><span className="inline-flex items-center gap-1.5"><StateDot tone="good" />Always active</span><span>Shared by all projects</span></>} actions={<Button size="sm" disabled={saving || text === saved} onClick={() => void onSave(text)}><Save className="size-3.5" /><span aria-hidden="true" className="max-sm:hidden">Save</span><span className="sr-only">Save global instructions</span></Button>} />
+    <label className="mt-4 block"><span className="sr-only">Global instructions</span><Textarea className="min-h-[max(24rem,calc(100dvh-22rem))] font-mono text-sm leading-relaxed" value={text} onChange={event => setText(event.target.value)} /></label>
   </section>;
 }

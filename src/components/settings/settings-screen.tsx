@@ -46,12 +46,15 @@ export function SettingsScreen({
   bar,
   backSteps,
   wide,
+  fill,
 }: {
   title: string;
   /** How many history entries the arrow steps over; see BackLink. */
   backSteps?: number | (() => number);
   /** The open section fills the body instead of a reading column (the file browser). */
   wide?: boolean;
+  /** The open section fills the body edge to edge and scrolls itself (the file browser). */
+  fill?: boolean;
   /** Where the bar's arrow goes when nothing of ours is behind this screen. */
   backHref: string;
   sections: SettingsSectionDef[];
@@ -129,7 +132,21 @@ export function SettingsScreen({
           data-testid="settings-body"
           className={cn('min-h-0 min-w-0 flex-1 overflow-y-auto', phone && !open && 'hidden')}
         >
-          {open && <div className={cn('mx-auto p-4 sm:p-6', !wide && 'max-w-3xl')}>{children}</div>}
+          {/* The one heading a section gets. A phone already names it in the
+              bar, so there it is not drawn twice; a section never heads itself
+              with its own name. */}
+          {open && fill && (
+            <div className="flex h-full min-h-0 flex-col">
+              {!phone && <h2 className="shrink-0 px-4 pb-2 pt-6 text-lg font-semibold text-t-primary">{open.label}</h2>}
+              <div className="min-h-0 flex-1">{children}</div>
+            </div>
+          )}
+          {open && !fill && (
+            <div className={cn('mx-auto p-4 sm:p-6', !wide && 'max-w-3xl')}>
+              {!phone && <h2 className="mb-5 text-lg font-semibold text-t-primary">{open.label}</h2>}
+              {children}
+            </div>
+          )}
         </main>
       </div>
     </div>

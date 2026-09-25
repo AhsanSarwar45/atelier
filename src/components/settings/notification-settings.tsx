@@ -63,7 +63,7 @@ export function NotificationSettings() {
         : 'Show outside the Atelier window';
 
   return <>
-    <SettingsGroup title="Notifications">
+    <SettingsGroup>
       <SettingRow label="Needs action" description="Permission requests and errors" htmlFor="notify-action">
         <Checkbox id="notify-action" checked={preferences.needsAction} onCheckedChange={(v) => choose('needsAction', v === true)} />
       </SettingRow>

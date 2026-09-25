@@ -38,9 +38,10 @@ test('project switches preserve shared and local skills across reloads', async (
     const globalBefore = (await (await request.get(api)).json()).library;
     const folderBefore = readFileSync(join(globalFolder, 'SKILL.md'), 'utf8');
     const customRow = page.getByTestId('library-item-switch-global-json');
-    await customRow.getByRole('button', { name: 'Customize', exact: true }).click();
+    await customRow.getByRole('button').first().click();
+    await page.getByTestId('library-detail').getByRole('button', { name: 'Customize', exact: true }).click();
     await page.getByLabel('Item content', { exact: true }).fill('Keep this project customization.');
-    await page.getByRole('button', { name: 'Save item', exact: true }).click();
+    await page.getByTestId('library-editor').getByRole('button', { name: 'Save', exact: true }).click();
     for (const [id, name] of [['switch-global-folder', 'Shared folder skill'], ['switch-global-json', 'Shared text skill'], ['switch-local-folder', 'Project folder skill'], ['switch-local-json', 'Project text skill']]) {
       const row = page.getByTestId(`library-item-${id}`);
       const toggle = row.getByRole('switch', { name: `Enable ${name} for this project` });
@@ -73,9 +74,14 @@ test('project switches preserve shared and local skills across reloads', async (
     expect((await (await request.get(projectApi)).json()).library.overrides['switch-global-json'].content).toBe('Newer external customization.');
     await page.reload();
     await page.getByRole('radio', { name: 'Skills', exact: true }).click();
-    await customRow.getByRole('button', { name: 'Reset to global', exact: true }).click();
-    await expect(customRow.getByRole('button', { name: 'Reset to global', exact: true })).toHaveCount(0);
+    await customRow.getByRole('button').first().click();
+    const detail = page.getByTestId('library-detail');
+    await detail.getByRole('button', { name: 'Reset', exact: true }).click();
+    await expect(detail.getByRole('button', { name: 'Reset', exact: true })).toHaveCount(0);
     expect((await (await request.get(projectApi)).json()).library.overrides['switch-global-json']).toBeUndefined();
+    // A phone shows the list or the open item; start from the list.
+    await page.reload();
+    await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     for (const [width, height] of [[390, 844], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
       await page.setViewportSize({ width, height });
       await expect(page.getByRole('switch', { name: 'Enable Shared text skill for this project' })).toBeVisible();
@@ -137,7 +143,8 @@ test('migrated project guidance is discovered without native provider files', as
     await expect(page.getByRole('textbox', { name: 'Project instructions', exact: true })).toHaveValue(instructions);
     await page.getByRole('radio', { name: 'Skills', exact: true }).click();
     await expect(page.getByTestId('library-item-beads')).toContainText('Available');
-    await expect(page.getByTestId('library-item-beads').getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+    await page.getByTestId('library-item-beads').getByRole('button').first().click();
+    await expect(page.getByTestId('library-detail').getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
     await page.screenshot({ path: 'tests/results/project-skill-enablement/migrated-project.png', animations: 'disabled' });
   } finally {
     await request.delete(`/api/projects/${project.id}`);

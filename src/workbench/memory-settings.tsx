@@ -80,7 +80,7 @@ export function MemorySettings() {
   if (!held) return null;
 
   return (
-    <SettingsGroup title="Memory" data-testid="memory-settings">
+    <SettingsGroup data-testid="memory-settings">
       <SettingRow
         label="Chat memory limit"
         description="A chat over this is stopped and restarted. Empty is no limit."
