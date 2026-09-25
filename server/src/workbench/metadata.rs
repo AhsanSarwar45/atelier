@@ -71,7 +71,16 @@ pub fn added_by_atelier(tag: &str, body: &str) -> String {
 /// A message as the person wrote it: every block Atelier added taken out.
 pub fn persons_words(message: &str) -> String {
     let mut rest = message.to_string();
-    for tag in [GUIDANCE, HANDOFF, COMMAND] {
+    // A command's instructions are added after what the person typed, and
+    // their own tags inside it are escaped, so the last opening is Atelier's;
+    // one the person typed in front of it is theirs (bw-zldt.1).
+    let (opening, closing) = (format!("<{COMMAND}>"), format!("</{COMMAND}>"));
+    if let Some(start) = rest.rfind(&opening) {
+        if let Some(at) = rest[start..].find(&closing) {
+            rest.replace_range(start..start + at + closing.len(), "");
+        }
+    }
+    for tag in [GUIDANCE, HANDOFF] {
         let (opening, closing) = (format!("<{tag}>"), format!("</{tag}>"));
         while let Some(start) = rest.find(&opening) {
             let end = rest[start..]

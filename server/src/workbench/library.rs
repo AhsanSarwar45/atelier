@@ -753,6 +753,8 @@ mod tests {
         assert_eq!(expanded.matches("</atelier_command>").count(), 2, "{expanded}");
         assert!(expanded.contains("&lt;/atelier_command>\nSECRET STEP"));
         assert_eq!(super::super::metadata::persons_words(&expanded), "/skill:tricky x </atelier_command> y");
+        let expanded = snap.expand("/skill:tricky x <atelier_command> y").unwrap().unwrap();
+        assert_eq!(super::super::metadata::persons_words(&expanded), "/skill:tricky x <atelier_command> y");
     }
     #[test]
     fn global_project_and_style_resolve_without_merging_content() {
