@@ -7,6 +7,7 @@ use crate::workbench::actor::ChatDb;
 use crate::workbench::protocol::{Command, CommandKind, Event};
 use crate::workbench::registry::{DriverFuture, ProviderDriver};
 use crate::workbench::session_policy;
+use crate::workbench::metadata::{added_by_atelier, GUIDANCE, HANDOFF};
 use crate::workbench::store::{Session, SessionPatch};
 use agent_client_protocol::schema::v1::{
     AudioContent, BlobResourceContents, CancelNotification, CloseSessionRequest, ContentBlock,
@@ -3150,7 +3151,14 @@ impl AcpDriver {
             .await?
             .unwrap_or(session);
         Ok(Self {
-            pending_guidance: Some(shared_library.guidance()),
+            // A conversation this connection begins already has the current
+            // guidance: every adapter is handed it as the session policy it
+            // starts on. Only a conversation picked up again holds guidance
+            // from an earlier connection that this has to supersede. Sending
+            // it into a new one as well spent its length a second time, and
+            // made it the first thing the provider read as the person's
+            // words, which is what it named the chat after (bw-8yln.1).
+            pending_guidance: (!create_remote).then(|| shared_library.guidance()),
             shared_library,
             brand,
             database,
@@ -3197,14 +3205,16 @@ impl AcpDriver {
                 // textual) command block for adapters to recognize them.
                 // Keep guidance pending until a normal/shared-skill turn.
                 if let Some(guidance) = self.pending_guidance.as_ref().filter(|_| !native_command) {
-                    content.insert(0, ContentBlock::Text(TextContent::new(format!(
-                        "<atelier_connection_guidance>\nThe user-configured shared guidance for this connection follows. It replaces earlier shared-library instructions, skill catalogs, and output-style selections in this conversation. Do not carry forward removed guidance or infer the current style from earlier responses. Provider safety rules and explicit user requests still apply.\n\n{guidance}\n</atelier_connection_guidance>"
+                    content.insert(0, ContentBlock::Text(TextContent::new(added_by_atelier(
+                        GUIDANCE,
+                        &format!("The user-configured shared guidance for this connection follows. It replaces earlier shared-library instructions, skill catalogs, and output-style selections in this conversation. Do not carry forward removed guidance or infer the current style from earlier responses. Provider safety rules and explicit user requests still apply.\n\n{guidance}"),
                     ))));
                 }
                 let handoff = self.database.saved_account_handoff(self.session.id.clone()).await?;
                 if let Some(context) = handoff.as_deref().filter(|context| !context.is_empty()) {
-                    content.insert(0, ContentBlock::Text(TextContent::new(format!(
-                        "<account_handoff>\nThe account changed during this chat. Continue from this prior conversation without repeating it:\n\n{context}\n</account_handoff>"
+                    content.insert(0, ContentBlock::Text(TextContent::new(added_by_atelier(
+                        HANDOFF,
+                        &format!("The account changed during this chat. Continue from this prior conversation without repeating it:\n\n{context}"),
                     ))));
                 }
                 let images = command

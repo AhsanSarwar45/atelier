@@ -44,8 +44,39 @@ fn strip_opening(mut text: String) -> String {
     text
 }
 
+/// The blocks Atelier puts in front of what a person typed, by their tag: the
+/// guidance a resumed conversation is given, and the words of the chat an
+/// account switch carried over. They reach the provider as part of the user's
+/// message, so its record holds them there too.
+pub const GUIDANCE: &str = "atelier_connection_guidance";
+pub const HANDOFF: &str = "account_handoff";
+
+/// One block Atelier adds to a message, in the form `persons_words` removes.
+pub fn added_by_atelier(tag: &str, body: &str) -> String {
+    format!("<{tag}>\n{body}\n</{tag}>")
+}
+
+/// A message as the person wrote it: every block Atelier added taken out.
+pub fn persons_words(message: &str) -> String {
+    let mut rest = message.to_string();
+    for tag in [GUIDANCE, HANDOFF] {
+        let (opening, closing) = (format!("<{tag}>"), format!("</{tag}>"));
+        while let Some(start) = rest.find(&opening) {
+            let end = rest[start..]
+                .find(&closing)
+                .map_or(rest.len(), |at| start + at + closing.len());
+            rest.replace_range(start..end, "");
+        }
+    }
+    rest.trim().to_string()
+}
+
 /// A short subject while a provider works out its own conversation name.
+///
+/// Named from the person's words alone: a title made from the guidance
+/// Atelier put in front of them names every chat the same (bw-8yln.1).
 pub fn conversation_title(prompt: &str) -> Option<String> {
+    let prompt = persons_words(prompt);
     let mut plain = String::new();
     let mut tag = false;
     for ch in prompt.chars() {
@@ -140,5 +171,21 @@ mod tests {
             Some("Investigate Why Export Button Working Safari")
         );
         assert_eq!(conversation_title(" <context></context> "), None);
+    }
+
+    #[test]
+    fn a_chat_is_named_from_what_the_person_typed_not_what_atelier_added() {
+        let guidance = added_by_atelier(
+            GUIDANCE,
+            "The user-configured shared guidance for this connection follows. It replaces earlier shared-library instructions.",
+        );
+        let handoff = added_by_atelier(HANDOFF, "The account changed during this chat.");
+        let sent = format!("{handoff}\n{guidance}\nReply with the single word: ping");
+        assert_eq!(persons_words(&sent), "Reply with the single word: ping");
+        assert_eq!(conversation_title(&sent), conversation_title("Reply with the single word: ping"));
+        // A message that is nothing but what Atelier added has no name in it.
+        assert_eq!(conversation_title(&guidance), None);
+        // One cut off before its end still says nothing of the person's.
+        assert_eq!(persons_words("<account_handoff>\nhalf a hand"), "");
     }
 }
