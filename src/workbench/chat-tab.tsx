@@ -15,6 +15,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, Folder, FolderGit2, Gauge, GitBranch, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
 
 import { BeadChip } from '@/components/bead-chip-row';
+import { ReferenceBadge } from '@/components/reference-badge';
 import { type Mentions } from '@/components/markdown-body';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -72,6 +73,8 @@ import { providerMessageIsCurrent } from '@/workbench/provider-messages';
 import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
 import { pathsIn, type Rooted } from '@/workbench/paths';
+import { useDescribeReference, type DescribeReference } from '@/workbench/reference-names';
+import type { AtelierKind } from '@/workbench/references';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
@@ -767,6 +770,7 @@ const ComposerBody = memo(function ComposerBody({
   typing,
   absorb,
   completeFiles,
+  describe,
   onKey,
 }: {
   sessionId: string;
@@ -782,6 +786,7 @@ const ComposerBody = memo(function ComposerBody({
   typing: RefObject<ComposerHandle>;
   absorb: (files: FileList | File[] | null, at?: number) => void;
   completeFiles: Parameters<typeof ComposerEditor>[0]['extra'];
+  describe: DescribeReference;
   onKey: (e: ComposerKey) => boolean;
 }) {
   const draft = useUnsentLineText(sessionId);
@@ -934,6 +939,7 @@ const ComposerBody = memo(function ComposerBody({
         onOpenPicture={onLook}
         onKey={composerKey}
         extra={completeFiles}
+        describe={describe}
         // No held case here: a held chat draws no box at all, so a disabled
         // one with a sentence in it is unreachable — and the sentence it
         // still carried claimed the holder was working, which is the whole
@@ -1265,10 +1271,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     if (asking.size > 0) disk.ask(Array.from(asking));
   }, [view.items, where, disk]);
 
+  // A card, a chat or a skill named as a reference is the one reference badge,
+  // here and in the box it was written in (bw-mi3s.1).
+  const describe = useDescribeReference(knownCardStatuses, view.menu.commands);
   const mentions = useMemo<Mentions>(() => {
     const card = (id: string) => (
       <BeadChip id={id} projectId={projectId} status={knownCardStatuses.get(id)} size="sm" testId="mention-card" className="mx-0.5" />
     );
+    const reference = (kind: AtelierKind, id: string) =>
+      kind === 'bead' ? card(id) : (
+        <ReferenceBadge reference={describe(kind, id)} projectId={projectId} testId={`mention-${kind}`} className="mx-0.5" />
+      );
     return {
       split: (text) =>
         openableIn(
@@ -1282,6 +1295,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         <PathChip absolute={absolute} raw={raw} line={line} endLine={endLine} look={inCode ? 'link' : 'badge'} />
       ),
       card,
+      reference,
       //
       // An address that asks for a DIFFERENT project stays a link too, however
       // familiar its id looks: card ids repeat across boards, and a chip drawn
@@ -1294,7 +1308,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         return knownCards.has(named.id) ? card(named.id) : null;
       },
     };
-  }, [knownCards, knownCardStatuses, projectId, where, disk]);
+  }, [knownCards, knownCardStatuses, projectId, where, disk, describe]);
   // Both are held against THIS chat's id, out where the tab bar cannot reach
   // them: leaving the chat for the board takes this whole screen down, and
   // switching chats does not take it down at all (src/workbench/drafts.ts).
@@ -3266,6 +3280,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             typing={typing}
             absorb={absorbSteady}
             completeFiles={completeFiles}
+            describe={describe}
             onKey={composerKeySteady}
           />
           {/* The row asks its OWN width, not the window's, and that is what

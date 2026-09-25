@@ -31,12 +31,13 @@
  */
 import { OLD_CARD } from '@/lib/address';
 import { askableIn, pathsIn, type OnDisk, type PathPiece, type Rooted } from '@/workbench/paths';
-import { findReferences, referenceLabel, resolveReference } from '@/workbench/references';
+import { findAtelierReferences, findReferences, referenceLabel, resolveReference, type AtelierKind } from '@/workbench/references';
 
 /** One stretch of a message: plain words, or something that opens. */
 export type Piece =
   | { kind: 'text'; text: string }
   | { kind: 'card'; id: string }
+  | { kind: 'reference'; ref: AtelierKind; id: string }
   | { kind: 'attachment'; index: number }
   | PathPiece;
 
@@ -124,6 +125,23 @@ export function mentionsIn(text: string, existing: Existing): Piece[] {
  * for, and a card is the rarer coincidence.
  */
 export function openableIn(text: string, existing: Existing, where: Rooted, disk: OnDisk): Piece[] {
+  // An Atelier reference is named on purpose — `@bead:…`, `@chat:…`,
+  // `@skill:…` — so it is a badge whether or not the board has answered yet,
+  // and the rest of the words are read around it (bw-mi3s.1).
+  const atelier = findAtelierReferences(text);
+  if (atelier.length === 0) return filesAndCards(text, existing, where, disk);
+  const out: Piece[] = [];
+  let from = 0;
+  for (const ref of atelier) {
+    if (ref.start > from) out.push(...filesAndCards(text.slice(from, ref.start), existing, where, disk));
+    out.push({ kind: 'reference', ref: ref.kind, id: ref.id });
+    from = ref.end;
+  }
+  if (from < text.length) out.push(...filesAndCards(text.slice(from), existing, where, disk));
+  return out;
+}
+
+function filesAndCards(text: string, existing: Existing, where: Rooted, disk: OnDisk): Piece[] {
   const out: Piece[] = [];
   let from = 0;
 
@@ -355,6 +373,14 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>, inCode: boolean): HastN
       children: [{ type: 'text', value: piece.raw }],
     };
   }
+  if (piece.kind === 'reference') {
+    return {
+      type: 'element',
+      tagName: 'span',
+      properties: { 'data-reference-mention': piece.ref, 'data-reference-id': piece.id },
+      children: [{ type: 'text', value: piece.id }],
+    };
+  }
   const name = piece.id;
   return {
     type: 'element',
@@ -375,7 +401,7 @@ function filesFrom(pieces: Piece[]): Piece[] {
       out.push(piece);
       continue;
     }
-    const text = piece.kind === 'text' ? piece.text : piece.id;
+    const text = piece.kind === 'text' ? piece.text : piece.kind === 'reference' ? `@${piece.ref}:${piece.id}` : piece.id;
     const last = out[out.length - 1];
     if (last && last.kind === 'text') out[out.length - 1] = { kind: 'text', text: last.text + text };
     else out.push({ kind: 'text', text });

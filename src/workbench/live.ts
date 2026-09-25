@@ -673,6 +673,40 @@ export function useLiveSessions(): LiveSession[] {
   );
 }
 
+/** What a chat is called and who runs it: all a reference badge draws. */
+export interface ChatNameEntry {
+  name: string | null;
+  brand: Brand;
+  projectId: string;
+}
+
+let namesFrom: LiveSession[] | null = null;
+let namesKey = '';
+let names: ReadonlyMap<string, ChatNameEntry> = new Map();
+
+function chatNames(): ReadonlyMap<string, ChatNameEntry> {
+  if (namesFrom === snapshot) return names;
+  namesFrom = snapshot;
+  // Rebuilt only when a name, a provider or a project moved: a chat saying
+  // another word of its answer is not news to a badge (bw-4slk).
+  const key = snapshot.map((s) => `${s.id}\u0000${s.name ?? ''}\u0000${s.title ?? ''}\u0000${s.brand}\u0000${s.projectId}`).join('\u0001');
+  if (key === namesKey) return names;
+  namesKey = key;
+  names = new Map(snapshot.map((s) => [s.id, { name: s.name || s.title || null, brand: s.brand, projectId: s.projectId }]));
+  return names;
+}
+
+const NO_NAMES: ReadonlyMap<string, ChatNameEntry> = new Map();
+
+/**
+ * Every chat's name and provider, live, and the same map for as long as none of
+ * them changed — so a screen drawing reference badges is not redrawn every time
+ * any agent says anything.
+ */
+export function useChatNames(): ReadonlyMap<string, ChatNameEntry> {
+  return useSyncExternalStore(subscribe, chatNames, () => NO_NAMES);
+}
+
 /**
  * The one chat that answers `which`, live — and the same object for as long as
  * that chat has not changed.

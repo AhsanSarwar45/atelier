@@ -283,6 +283,13 @@ export function findReferences(text: string): FoundReference[] {
     if (at < from) continue;
     if (at > 0 && !BEFORE.test(text[at - 1]!)) continue;
     if (code.some(([start, end]) => at >= start && at < end)) continue;
+    // `@bead:bw-1`, `@chat:…` and `@skill:…` name one of Atelier's own things,
+    // never a file called `bead:bw-1` (`findAtelierReferences`).
+    const atelier = atelierAt(text, at);
+    if (atelier) {
+      from = atelier.end;
+      continue;
+    }
     const ref = matchAt(text, at);
     if (!ref) continue;
     found.push(ref);
@@ -302,4 +309,77 @@ export function findReferences(text: string): FoundReference[] {
 export function resolveReference(ref: Reference, root: string | Rooted): string | null {
   const where: Rooted = typeof root === 'string' ? { cwd: root, home: '' } : root;
   return resolvePath(ref.path, where);
+}
+
+/* ------------------------------------------------------------------ *
+ * A reference to one of Atelier's own things.
+ * ------------------------------------------------------------------ */
+
+/**
+ * What else a reference can name besides a file: a card on the board, another
+ * chat, or a skill in the agent guidance library (bw-mi3s).
+ *
+ * Written `@bead:bw-zldt.2`, `@chat:<id>` and `@skill:standup`. The kind is
+ * spelled out because a card id alone has the shape of a file name — `my-file.ts`
+ * passes the card id test — and a reference has to mean one thing to the
+ * composer, the transcript and the server alike. The server reads the same
+ * shapes (`server/src/workbench/references.rs`), and both sides are held to one
+ * list of cases (`atelier-references.cases.json`).
+ *
+ * `/skill:standup` at the very start of a message is the same skill, asked to be
+ * run rather than consulted, and is drawn as the same badge.
+ */
+export type AtelierKind = 'bead' | 'chat' | 'skill';
+
+export const ATELIER_KINDS: readonly AtelierKind[] = ['bead', 'chat', 'skill'];
+
+/** An Atelier reference found inside a larger text, and where in it it sits. */
+export interface FoundAtelierReference {
+  kind: AtelierKind;
+  id: string;
+  /** The index of the `@`, or of the `/` of a leading skill command. */
+  start: number;
+  /** One past the id's last character. */
+  end: number;
+  /** Written as a command at the start of the message: run it, not read it. */
+  run: boolean;
+}
+
+/**
+ * An id: letters, digits, dots, dashes and underscores, starting and ending on a
+ * letter or a digit, so the full stop that ends a sentence is the sentence's.
+ */
+const ATELIER_ID = '[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?';
+const ATELIER_AT = new RegExp(`@(bead|chat|skill):(${ATELIER_ID})(?![A-Za-z0-9_])`, 'y');
+const LEADING_SKILL = new RegExp(`^/skill:(${ATELIER_ID})(?![A-Za-z0-9_])`);
+
+function atelierAt(text: string, at: number): FoundAtelierReference | null {
+  ATELIER_AT.lastIndex = at;
+  const m = ATELIER_AT.exec(text);
+  if (!m) return null;
+  return { kind: m[1] as AtelierKind, id: m[2]!, start: at, end: at + m[0].length, run: false };
+}
+
+/**
+ * Every Atelier reference in a run of text, in the order written. The same rules
+ * as a file reference: it starts a word, and code is skipped whole.
+ */
+export function findAtelierReferences(text: string): FoundAtelierReference[] {
+  const found: FoundAtelierReference[] = [];
+  const leading = LEADING_SKILL.exec(text);
+  if (leading) found.push({ kind: 'skill', id: leading[1]!, start: 0, end: leading[0].length, run: true });
+  if (!text.includes('@')) return found;
+  const code = codeSpans(text);
+  for (let at = text.indexOf('@'); at >= 0; at = text.indexOf('@', at + 1)) {
+    if (at > 0 && !BEFORE.test(text[at - 1]!)) continue;
+    if (code.some(([start, end]) => at >= start && at < end)) continue;
+    const ref = atelierAt(text, at);
+    if (ref) found.push(ref);
+  }
+  return found;
+}
+
+/** The one form this app writes an Atelier reference in. */
+export function formatAtelierReference(kind: AtelierKind, id: string): string {
+  return `@${kind}:${id}`;
 }

@@ -64,7 +64,9 @@ import { ExternalChange } from '@/workbench/code-editor';
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { opens as opensIt } from '@/workbench/attachment-look';
 import { drawnMarks } from '@/workbench/drawn-marks';
-import { findReferences, referenceLabel } from '@/workbench/references';
+import { referenceBadgeElement, type Reference } from '@/components/reference-badge';
+import type { DescribeReference } from '@/workbench/reference-names';
+import { findAtelierReferences, findReferences, referenceLabel } from '@/workbench/references';
 
 /** What the chat holds this box by: the one thing it ever asks of it. */
 export interface ComposerHandle {
@@ -156,8 +158,50 @@ class FileBadge extends WidgetType {
   }
 }
 
+/**
+ * A card, a chat or a skill named in the line, as the badge a sent message
+ * draws for it (`reference-badge.tsx`, bw-mi3s.1). A drawing of text still
+ * being edited, like a path's: the click goes through it to place a caret.
+ */
+class AtelierBadge extends WidgetType {
+  private readonly key: string;
+
+  constructor(readonly reference: Reference) {
+    super();
+    this.key = JSON.stringify(reference);
+  }
+
+  eq(other: AtelierBadge): boolean {
+    return other.key === this.key;
+  }
+
+  toDOM(): HTMLElement {
+    return referenceBadgeElement(this.reference);
+  }
+
+  ignoreEvent(): boolean {
+    return true;
+  }
+}
+
+/**
+ * Where a reference to one of Atelier's things is drawn as a badge: everywhere
+ * but at the very end of the line with the caret after it, which is where it is
+ * still being typed. `@bead:bw-z` on its way to `@bead:bw-zldt.2` is words until
+ * the writer moves on; anywhere else it is one atomic badge, and Backspace takes
+ * all of it, the same as a file's.
+ */
+function atelierBadges(state: EditorState, describe: DescribeReference | undefined) {
+  if (!describe) return [];
+  const text = state.doc.toString();
+  const head = state.selection.main.head;
+  return findAtelierReferences(text)
+    .filter((ref) => !(state.selection.main.empty && head === ref.end && ref.end === text.length))
+    .map((ref) => Decoration.replace({ widget: new AtelierBadge(describe(ref.kind, ref.id)) }).range(ref.start, ref.end));
+}
+
 /** Every reference in the document, as a badge over exactly its characters. */
-function badges(state: EditorState, icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void): DecorationSet {
+function badges(state: EditorState, icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void, describe: () => DescribeReference | undefined): DecorationSet {
   const text = state.doc.toString();
   const references = findReferences(text).map((ref) =>
       Decoration.replace({ widget: new FileBadge(referenceLabel(ref), fileKind(ref.path), icon) }).range(
@@ -176,7 +220,7 @@ function badges(state: EditorState, icon: IconSource, picture: (id: string) => D
     const press = opensIt(found) ? onOpen : undefined;
     return [Decoration.replace({ widget: new FileBadge(found.alt, kind, icon, found, press) }).range(match.index, match.index + match[0].length)];
   });
-  return Decoration.set([...references, ...pictures], true);
+  return Decoration.set([...references, ...pictures, ...atelierBadges(state, describe())], true);
 }
 
 /**
@@ -187,18 +231,18 @@ function badges(state: EditorState, icon: IconSource, picture: (id: string) => D
  * the end of one takes all of it. Without that, deleting a badge would eat one
  * character of a path that is no longer on screen to be read.
  */
-function referenceBadges(icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void): Extension {
+function referenceBadges(icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void, describe: () => DescribeReference | undefined): Extension {
   const drawn = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
 
       constructor(view: EditorView) {
-        this.decorations = badges(view.state, icon, picture, onOpen);
+        this.decorations = badges(view.state, icon, picture, onOpen, describe);
       }
 
       update(update: ViewUpdate) {
-        if (update.docChanged || update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(RefreshPictures)))) {
-          this.decorations = badges(update.state, icon, picture, onOpen);
+        if (update.docChanged || update.selectionSet || update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(RefreshPictures)))) {
+          this.decorations = badges(update.state, icon, picture, onOpen, describe);
         }
       }
     },
@@ -255,11 +299,16 @@ export interface ComposerEditorProps {
   placeholder?: string;
   /** bw-gr8y.7's seam: read once, when the view is built. */
   extra?: Extension;
+  /**
+   * What a card, a chat or a skill named in the line is drawn as. A new one
+   * redraws the badges — a card's status moved, a chat's name arrived.
+   */
+  describe?: DescribeReference;
   className?: string;
 }
 
 export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function ComposerEditor(
-  { value, onChange, onKey, onFiles, pictures = [], onOpenPicture = () => {}, placeholder, extra, className },
+  { value, onChange, onKey, onFiles, pictures = [], onOpenPicture = () => {}, placeholder, extra, describe, className },
   ref,
 ) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -279,6 +328,8 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
   filed.current = onFiles;
   pictured.current = pictures;
   openPicture.current = onOpenPicture;
+  const described = useRef(describe);
+  described.current = describe;
 
   // Built once; the props at that moment are the starting state.
   const opening = useRef({ value, placeholder, extra });
@@ -315,6 +366,7 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
           (kind) => icons.current?.querySelector(`[data-icon-kind="${kind}"]`)?.cloneNode(true) ?? null,
           (id) => pictured.current.find((picture) => picture.id === id),
           (picture) => openPicture.current(picture),
+          () => described.current,
         ),
         // Ahead of the chat's own answer to a key, because bw-gr8y.7's `@` menu
         // lives in here: while that menu is open, Enter picks a file and Escape
@@ -367,7 +419,7 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
     });
   }, [value]);
 
-  useEffect(() => { view.current?.dispatch({ effects: RefreshPictures.of() }); }, [pictures]);
+  useEffect(() => { view.current?.dispatch({ effects: RefreshPictures.of() }); }, [pictures, describe]);
 
   useImperativeHandle(ref, () => ({
     focus: () => view.current?.focus(),

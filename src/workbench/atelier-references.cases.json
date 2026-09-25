@@ -1,0 +1,14 @@
+[
+  { "text": "look at @bead:bw-zldt.2 please", "found": [{ "kind": "bead", "id": "bw-zldt.2", "start": 8, "end": 23, "run": false }] },
+  { "text": "done in @bead:bw-zldt.2.", "found": [{ "kind": "bead", "id": "bw-zldt.2", "start": 8, "end": 23, "run": false }] },
+  { "text": "(@chat:0b8f6c1e-2d3a-4f5b-9c7d-1e2f3a4b5c6d)", "found": [{ "kind": "chat", "id": "0b8f6c1e-2d3a-4f5b-9c7d-1e2f3a4b5c6d", "start": 1, "end": 43, "run": false }] },
+  { "text": "@skill:standup and @skill:review-agent", "found": [{ "kind": "skill", "id": "standup", "start": 0, "end": 14, "run": false }, { "kind": "skill", "id": "review-agent", "start": 19, "end": 38, "run": false }] },
+  { "text": "/skill:standup today", "found": [{ "kind": "skill", "id": "standup", "start": 0, "end": 14, "run": true }] },
+  { "text": "say /skill:standup", "found": [] },
+  { "text": "mail me at me@bead:bw-1", "found": [] },
+  { "text": "`@bead:bw-1` is how", "found": [] },
+  { "text": "```\n@bead:bw-1\n```", "found": [] },
+  { "text": "@bead: nothing", "found": [] },
+  { "text": "@beads:bw-1", "found": [] },
+  { "text": "@src/bead:x.ts", "found": [] }
+]

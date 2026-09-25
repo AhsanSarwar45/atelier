@@ -14,22 +14,14 @@
  */
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
-
-import { CircleDot } from 'lucide-react';
-
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Tooltip } from '@/components/ui/tooltip';
-import { addressWith, cardWasPushed } from '@/lib/address';
-import { classesFor } from '@/lib/state-styles';
-import { cn } from '@/lib/utils';
+import { ReferenceBadge } from '@/components/reference-badge';
 import type { BeadStatus } from '@/types';
 
 /**
  * One card, as a chip that opens it. Drawn in the chat's rail and wherever a
  * message names a card in its own words (bw-4wcd.3), so both look the same and
- * both open the card the same way.
+ * both open the card the same way. It is the one reference badge every card,
+ * chat and skill is drawn as (`reference-badge.tsx`, bw-mi3s.1).
  */
 export function BeadChip({
   id,
@@ -50,56 +42,14 @@ export function BeadChip({
   /** Its live board state, whose existing palette colors the chip. */
   status?: BeadStatus;
 }) {
-  const router = useRouter();
-  const params = useSearchParams();
   return (
-    /* The button inside takes `size="none"`: the chip around it is what sizes
-       it. The badge already sets this element's height, its side padding and
-       its type, and a second set of those from the button is what left the id
-       with no room between it and its own border (bw-s5op.2). The button is
-       here for what it does — the pointer, the focus ring, the disabled state
-       — not for a box of its own. */
-    <Tooltip label={title ?? `Open ${id}`}>
-      <Badge
-        asChild
-        variant="primary"
-        appearance="outline"
-        size={size}
-        shape="circle"
-        /* A card the board has not answered for, or does not have, wears the
-           muted set: left with no class it wore the primary blue and read as a
-           healthy open card beside chips that were telling the truth (bw-pq2a.3). */
-        className={cn('shrink-0 font-mono', classesFor(status).badge, className)}
-      >
-        <Button
-          type="button"
-          variant="foreground"
-          size="none"
-          /* No `font-inherit` here. It is not a class this project builds —
-             nothing defines one — but tailwind-merge reads it as an answer to
-             the font-family question and drops the `font-mono` the chip asked
-             for on its way past, leaving the id drawn in the page's own face
-             while every other chip kept the typewriter one (bw-oamr.6). The
-             button sets no type of its own, which is what `size="none"` means,
-             so there is nothing here to override. */
-          className="relative before:absolute before:-inset-2.5 before:content-['']"
-          data-testid={testId}
-          data-bead-id={id}
-          data-bead-status={status}
-          onClick={(e) => {
-            e.stopPropagation();
-            // Pushed, and the rest of the address kept: the card opens over what he
-            // was reading, and Back closes it again.
-            cardWasPushed();
-            router.push(addressWith(params, { id: projectId, card: id }));
-          }}
-        >
-          {/* A card wears a picture the way a report does, so a line carrying both
-              says which is which before either is read (bw-4wcd.7). */}
-          <CircleDot className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-          {id}
-        </Button>
-      </Badge>
-    </Tooltip>
+    <ReferenceBadge
+      reference={{ kind: 'bead', id, status }}
+      projectId={projectId}
+      size={size}
+      testId={testId}
+      title={title}
+      className={className}
+    />
   );
 }

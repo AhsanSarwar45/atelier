@@ -1322,7 +1322,7 @@ impl Snapshot {
     }
     pub fn commands(&self) -> Vec<Value> {
         self.items.iter().filter(|r| r.state == "available" && r.item.kind == Kind::Skill).map(|r| json!({
-            "name":format!("skill:{}", r.item.id), "description":r.item.description, "kind":"skill", "execution":"shared"
+            "name":format!("skill:{}", r.item.id), "title":r.item.name, "description":r.item.description, "kind":"skill", "execution":"shared"
         })).collect()
     }
     pub fn read_skill(&self, id: &str, resource: Option<&str>) -> Result<String, String> {

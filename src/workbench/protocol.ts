@@ -293,6 +293,8 @@ export type LookableImage = ImagePayload | ImageComparison;
 export interface CommandInfo {
   /** Without the leading slash. */
   name: string;
+  /** The name a person gave it, when that is not the name typed — an Atelier skill's library name. */
+  title?: string;
   description: string;
   /** What its argument looks like, in the brand's own words. */
   argumentHint?: string;

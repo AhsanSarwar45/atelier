@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
 import { usePathActions } from "@/workbench/path-menu";
 import { resolvePath } from "@/workbench/paths";
-import { peelLines } from "@/workbench/references";
+import { peelLines, type AtelierKind } from "@/workbench/references";
 
 /**
  * What a name written in the words should become. Absent — everywhere but a
@@ -69,6 +69,11 @@ export interface Mentions {
    * wrote is simply not there to be seen (bw-oamr.4).
    */
   attachment?: (index: number) => ReactNode;
+  /**
+   * A card, a chat or a skill named as a reference — `@bead:…`, `@chat:…`,
+   * `@skill:…` — drawn as the one reference badge (bw-mi3s.1).
+   */
+  reference?: (kind: AtelierKind, id: string) => ReactNode;
 }
 
 const PROSE_CLASSES =
@@ -609,6 +614,12 @@ export function MarkdownBody({
       const marks = props as Record<string, string | undefined>;
       const card = marks['data-card-mention'];
       if (card && mentions) return <>{mentions.card(card)}</>;
+      const referenced = marks['data-reference-mention'];
+      const referencedId = marks['data-reference-id'];
+      if (referenced && referencedId) {
+        if (mentions?.reference) return <>{mentions.reference(referenced as AtelierKind, referencedId)}</>;
+        if (referenced === 'bead' && mentions) return <>{mentions.card(referencedId)}</>;
+      }
       const attached = marks['data-attachment-mention'];
       if (attached !== undefined && mentions?.attachment) {
         return <>{mentions.attachment(Number(attached))}</>;

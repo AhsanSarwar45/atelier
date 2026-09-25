@@ -30,6 +30,7 @@ vi.mock('@/lib/api', () => ({
   request: () => Promise.reject(new Error('no program answers in a test')),
 }));
 vi.mock('@/workbench/live', () => ({
+  useChatNames: () => new Map(),
   usePlanUsage: () => ({
     available: false,
     plan: null,

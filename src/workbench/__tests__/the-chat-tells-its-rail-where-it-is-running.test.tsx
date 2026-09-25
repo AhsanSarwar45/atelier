@@ -37,6 +37,7 @@ vi.mock('@/workbench/use-session', async (real) => {
 });
 
 vi.mock('@/workbench/live', () => ({
+  useChatNames: () => new Map(),
   useHeardFromOutside: () => 0,
   useHeldFactsAreOld: () => false,
   useHolds: () => new Map(),

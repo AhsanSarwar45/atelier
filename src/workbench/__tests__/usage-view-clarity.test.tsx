@@ -28,6 +28,7 @@ const usage: PlanUsage = {
 };
 
 vi.mock('@/workbench/live', () => ({
+  useChatNames: () => new Map(),
   usePlanUsage: () => usage,
 }));
 
