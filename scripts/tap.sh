@@ -65,7 +65,18 @@ fingerprint() {
   printf '%s' "$found"
 }
 LINUX=$(fingerprint atelier-linux-x64.tar.gz) || exit 1
-ok "Linux package checksum downloaded"
+
+# The list is written once, beside the archive, but the archive can be replaced
+# afterwards — a second release run for v0.22.18 did exactly that, and the
+# recipe then named a fingerprint no download could match (bw-f66pz). GitHub
+# reports the fingerprint of the file it is serving now; the two must agree.
+SERVED=$(gh release view "$TAG" -R "$SOURCE" --json assets \
+           --jq '.assets[] | select(.name == "atelier-linux-x64.tar.gz") | .digest' 2>/dev/null)
+SERVED=${SERVED#sha256:}
+[ -n "$SERVED" ] || die "GitHub reports no fingerprint for the archive on $TAG"
+[ "$SERVED" = "$LINUX" ] \
+  || die "$TAG serves an archive ($SERVED) that SHA256SUMS.txt does not describe ($LINUX) — it was replaced after the list was written"
+ok "Linux package checksum downloaded and matches the archive GitHub serves"
 
 step "The recipe"
 [ -f "$SHAPE" ] || die "this repository holds no $SHAPE to build the recipe from"

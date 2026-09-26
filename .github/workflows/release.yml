@@ -136,6 +136,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # One tag push has reached GitHub twice (v0.13.0, v0.22.18) and started two
+    # runs of this workflow. The builds are not byte-for-byte reproducible, so
+    # the later run replaced the published archive after the tap had recorded
+    # the earlier one's checksum, and every `brew upgrade` failed on a SHA-256
+    # mismatch (bw-f66pz). Publishing is serialized per tag, and a tag whose
+    # archive is already online is never published again.
+    concurrency:
+      group: release-${{ inputs.version || github.ref_name }}
+      cancel-in-progress: false
 
     steps:
       - name: Download Linux release package
@@ -156,22 +165,42 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Refuse to replace a published archive
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          online=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets \
+                     --jq '[.assets[].name] | index("atelier-linux-x64.tar.gz") != null' 2>/dev/null || echo false)
+          if [ "$online" = "true" ]; then
+            echo "::warning::$TAG already has its archive online; this run publishes nothing, so the checksum Homebrew recorded stays true."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create Release
+        if: steps.published.outputs.skip != 'true'
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ inputs.version || github.ref_name }}
           tag_name: ${{ inputs.version || github.ref_name }}
           files: release/*
           generate_release_notes: true
+          overwrite_files: false
 
       # The Homebrew formula is written from the template in this repository,
       # so the tag's own tree has to be on disk beside the built files.
       - name: Checkout this tag for the Homebrew template
+        if: steps.published.outputs.skip != 'true'
         uses: actions/checkout@v5
         with:
           path: repo
 
       - name: Update Homebrew formula
+        if: steps.published.outputs.skip != 'true'
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |

@@ -560,8 +560,11 @@ async fn say(brew: &Path, args: &[&str], watch: &UpdateWatch) -> Result<(), Stri
     let mut trouble = BufReader::new(err).lines();
 
     // The last thing brew said, kept so a failure can be reported in brew's own
-    // words rather than as a bare exit code.
+    // words rather than as a bare exit code. Brew keeps talking after it fails —
+    // it tidies its cache and prints what it removed — so its own `Error:` line
+    // is kept apart — the first one, which names the cause — and wins (bw-f66pz).
     let mut newest = String::new();
+    let mut error = String::new();
 
     loop {
         let line = tokio::select! {
@@ -573,6 +576,9 @@ async fn say(brew: &Path, args: &[&str], watch: &UpdateWatch) -> Result<(), Stri
                 let said = said.trim().to_string();
                 if !said.is_empty() {
                     info!("brew: {}", said);
+                    if let (true, Some(reason)) = (error.is_empty(), said.strip_prefix("Error:")) {
+                        error = reason.trim().to_string();
+                    }
                     newest = said.clone();
                     watch.note(said).await;
                 }
@@ -588,13 +594,14 @@ async fn say(brew: &Path, args: &[&str], watch: &UpdateWatch) -> Result<(), Stri
         .map_err(|e| format!("brew {} did not finish: {}", args.join(" "), e))?;
 
     if !ended.success() {
-        return Err(if newest.is_empty() {
+        let said = if error.is_empty() { newest } else { error };
+        return Err(if said.is_empty() {
             format!("brew {} failed. Nothing was replaced.", args.join(" "))
         } else {
             format!(
                 "brew {} failed: {}. Nothing was replaced.",
                 args.join(" "),
-                newest
+                said
             )
         });
     }
@@ -1362,6 +1369,41 @@ mod tests {
         assert!(
             !windows.to_ascii_lowercase().contains("node"),
             "the Windows updater must not mention Node, got:\n{windows}"
+        );
+    }
+
+    /// A failed upgrade is reported by brew's own `Error:` line, not by the
+    /// cache tidying brew prints after it (bw-f66pz). The output replayed here
+    /// is what a checksum mismatch actually printed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_brew_is_reported_by_its_error_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let brew = dir.path().join("brew");
+        std::fs::write(
+            &brew,
+            "#!/bin/sh\n\
+             echo '==> Fetching downloads for: atelier'\n\
+             echo 'Error: Formula reports different checksum: 2894' >&2\n\
+             echo 'Error: SHA-256 mismatch' >&2\n\
+             sleep 0.1\n\
+             echo 'Removing: /home/x/.cache/Homebrew/bootsnap/a56d... (1,175 files, 10.6MB)'\n\
+             exit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&brew, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let failed = say(
+            &brew,
+            &["upgrade", "atelier"],
+            &crate::routes::update_run::new_watch(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            failed,
+            "brew upgrade atelier failed: Formula reports different checksum: 2894. Nothing was replaced."
         );
     }
 }
