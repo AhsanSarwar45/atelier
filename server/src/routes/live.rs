@@ -1403,6 +1403,10 @@ mod tests {
         assert!(at_end(&state, &record).await);
         assert!(shell_ended(&state, "bshell02").await);
         assert_eq!(state.database().driven_from("chat-1".into()).await.unwrap(), None);
+        // The chat, driverless now, is due one status row saying it rests. A
+        // sweep writes it whenever it next comes; settle it here so the count
+        // below measures only what following the record adds.
+        state.reconcile_status("chat-1").await.unwrap();
         let before = event_count(&state).await;
         let (_lease, start) = state.chat_follow_subscription("chat-1").await;
         start_following(&state, start.unwrap());
