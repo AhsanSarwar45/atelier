@@ -41,6 +41,69 @@ pub fn import_recipe(brand: &str) -> i64 {
 /// 1: a picture a call answered with is kept on the call's row (bw-343e.1).
 const TRANSCRIPT_FOLD_VERSION: i64 = 1;
 
+/// Events a message's id gathers into its transcript row.
+const MESSAGE_REF_TYPES: &[&str] = &[
+    "message.started",
+    "text.delta",
+    "thinking.delta",
+    "message.completed",
+    "message.retracted",
+    "image",
+    "image.compare",
+    "widget",
+];
+/// Events a call's id gathers into its transcript row.
+const TOOL_REF_TYPES: &[&str] = &["tool.started", "tool.completed", "tool.progress", "diff", "image"];
+/// Events a helper's id gathers into its side-panel entry.
+const AGENT_REF_TYPES: &[&str] = &[
+    "agent.started",
+    "agent.progress",
+    "agent.finished",
+    "agent.relayed",
+    "agent.identified",
+];
+/// Every event type that has an `event_ref` row.
+const REF_TYPES: &[&str] = &[
+    "message.started",
+    "text.delta",
+    "thinking.delta",
+    "message.completed",
+    "message.retracted",
+    "image",
+    "image.compare",
+    "widget",
+    "tool.started",
+    "tool.completed",
+    "tool.progress",
+    "diff",
+    "agent.started",
+    "agent.progress",
+    "agent.finished",
+    "agent.relayed",
+    "agent.identified",
+];
+
+/// The ids one event is filed under: `m:` a message, `t:` a call, `a:` a
+/// helper. The same types the first-page query gathers by each id.
+fn event_refs(
+    kind: &str,
+    message: Option<&str>,
+    tool: Option<&str>,
+    agent: Option<&str>,
+) -> Vec<String> {
+    let mut refs = Vec::new();
+    if let Some(id) = message.filter(|_| MESSAGE_REF_TYPES.contains(&kind)) {
+        refs.push(format!("m:{id}"));
+    }
+    if let Some(id) = tool.filter(|_| TOOL_REF_TYPES.contains(&kind)) {
+        refs.push(format!("t:{id}"));
+    }
+    if let Some(id) = agent.filter(|_| AGENT_REF_TYPES.contains(&kind)) {
+        refs.push(format!("a:{id}"));
+    }
+    refs
+}
+
 /// The parts of a provider's menu that describe the provider rather than one
 /// chat: its commands, skills and agents stay with the chat that announced
 /// them (bw-y5dc.1).
@@ -443,6 +506,8 @@ impl Store {
         self.agents_folded.borrow_mut().remove(id);
         let transaction = self.connection.transaction()?;
         transaction.execute("DELETE FROM event WHERE session_id = ?1", [id])?;
+        transaction.execute("DELETE FROM event_ref WHERE session_id = ?1", [id])?;
+        transaction.execute("DELETE FROM event_ref_ready WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM bead_link WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_handoff WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_notice WHERE session_id = ?1", [id])?;
@@ -995,6 +1060,13 @@ fn held_in_its_project(
                 session_id, seq, at, kind, json, provider, thread_id, event_id
             ])?;
         if changed == 1 {
+            let refs = event_refs(
+                &kind,
+                event.fields.get("messageId").and_then(Value::as_str),
+                event.fields.get("toolCallId").and_then(Value::as_str),
+                event.fields.get("agentId").and_then(Value::as_str),
+            );
+            self.remember_event_refs(session_id, seq, &kind, &refs)?;
             self.remove_superseded_progress(event, session_id, seq)?;
             self.note_the_person_spoke(event, session_id, at)?;
         }
@@ -1070,10 +1142,102 @@ fn held_in_its_project(
         let Some(owner) = event.fields.get(key).and_then(Value::as_str) else {
             return Ok(0);
         };
-        self.connection.execute(
-            "DELETE FROM event WHERE session_id=?1 AND type=?2 AND seq<?3 AND json_extract(json,?4)=?5",
-            params![session_id, kind, seq, format!("$.{key}"), owner],
-        )
+        // Found by id, not by reading the JSON of every earlier report
+        // (bw-0xeav.1).
+        self.ensure_event_refs(session_id)?;
+        let reference = format!("{}:{owner}", if key == "toolCallId" { 't' } else { 'a' });
+        let removed = self
+            .connection
+            .prepare_cached(
+                "DELETE FROM event WHERE session_id=?1 AND seq IN (
+                   SELECT seq FROM event_ref WHERE session_id=?1 AND ref=?2 AND type=?3 AND seq<?4)",
+            )?
+            .execute(params![session_id, reference, kind, seq])?;
+        if removed > 0 {
+            self.connection
+                .prepare_cached(
+                    "DELETE FROM event_ref WHERE session_id=?1 AND ref=?2 AND type=?3 AND seq<?4",
+                )?
+                .execute(params![session_id, reference, kind, seq])?;
+        }
+        Ok(removed)
+    }
+
+    fn remember_event_refs(
+        &self,
+        session_id: &str,
+        seq: i64,
+        kind: &str,
+        refs: &[String],
+    ) -> rusqlite::Result<()> {
+        let mut insert = self.connection.prepare_cached(
+            "INSERT OR IGNORE INTO event_ref (session_id, ref, seq, type) VALUES (?1,?2,?3,?4)",
+        )?;
+        for reference in refs {
+            insert.execute(params![session_id, reference, seq, kind])?;
+        }
+        Ok(())
+    }
+
+    /// Fill a chat's id rows from its stored events, once.
+    ///
+    /// Events stored since this table existed already have theirs; this reads
+    /// the older ones, which costs one pass over the chat's JSON the first
+    /// time and nothing after.
+    fn ensure_event_refs(&self, session_id: &str) -> rusqlite::Result<()> {
+        let ready = self
+            .connection
+            .prepare_cached("SELECT 1 FROM event_ref_ready WHERE session_id=?1")?
+            .exists([session_id])?;
+        if ready {
+            return Ok(());
+        }
+        let owns_transaction = self.connection.is_autocommit();
+        if owns_transaction {
+            self.connection.execute_batch("BEGIN IMMEDIATE")?;
+        }
+        let filled = (|| {
+            let mut statement = self.connection.prepare(&format!(
+                "SELECT seq, type, json_extract(json,'$.messageId'), json_extract(json,'$.toolCallId'),
+                        json_extract(json,'$.agentId')
+                   FROM event WHERE session_id=?1 AND type IN ({})",
+                REF_TYPES
+                    .iter()
+                    .map(|kind| format!("'{kind}'"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ))?;
+            let rows = statement
+                .query_map([session_id], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for (seq, kind, message, tool, agent) in rows {
+                let refs = event_refs(&kind, message.as_deref(), tool.as_deref(), agent.as_deref());
+                self.remember_event_refs(session_id, seq, &kind, &refs)?;
+            }
+            self.connection.execute(
+                "INSERT OR IGNORE INTO event_ref_ready (session_id) VALUES (?1)",
+                [session_id],
+            )?;
+            Ok(())
+        })();
+        if owns_transaction {
+            match filled {
+                Ok(()) => self.connection.execute_batch("COMMIT")?,
+                Err(error) => {
+                    let _ = self.connection.execute_batch("ROLLBACK");
+                    return Err(error);
+                }
+            }
+        }
+        filled
     }
 
     /// Group a replay import into one SQLite commit. The chat actor remains
@@ -2474,6 +2638,7 @@ fn held_in_its_project(
         before: Option<i64>,
         limit: usize,
     ) -> rusqlite::Result<TranscriptItemPage> {
+        self.ensure_event_refs(session_id)?;
         let newest_seq: i64 = self.connection.query_row(
             "SELECT COALESCE(MAX(seq),0) FROM event WHERE session_id=?1",
             [session_id],
@@ -2570,28 +2735,31 @@ fn held_in_its_project(
                  SELECT DISTINCT json_extract(json,'$.agentId') FROM event
                  WHERE session_id=?1 AND seq>?5 AND seq<?3 AND type='agent.started'
                    AND json_extract(json,'$.toolCallId') IN (SELECT id FROM selected_tools)
+               ),
+               -- Each chosen message, call and helper's events are found by
+               -- id in `event_ref`, never by reading the JSON of every event
+               -- the chat stored (bw-0xeav.1). A picture a CALL answered with
+               -- names the call and leaves messageId null, so it is filed
+               -- under the call; one naming a message is filed under that
+               -- (bw-343e.1).
+               wanted(ref) AS (
+                 SELECT 'm:' || id FROM selected_messages
+                 UNION SELECT 't:' || id FROM selected_tools
+                 UNION SELECT 'a:' || id FROM selected_agents
+               ),
+               picked(seq) AS (
+                 SELECT seq FROM event_ref
+                 WHERE session_id=?1 AND ref IN (SELECT ref FROM wanted) AND seq>?5 AND seq<?3
+                 UNION
+                 SELECT seq FROM event
+                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND type IN
+                   ('ask.permission','ask.resolved','question.requested','question.resolved',
+                    'plan.proposed','plan.resolved','provider.message','notice','note')
                )
-               SELECT seq,json FROM event
-               WHERE session_id=?1 AND seq>?5 AND seq<?3 AND (
-                 (type IN ('message.started','text.delta','thinking.delta','message.completed',
-                           'message.retracted','image','image.compare','widget')
-                    AND json_extract(json,'$.messageId') IN (SELECT id FROM selected_messages))
-                 -- 'image' is here as well as above because a picture a CALL
-                 -- answered with names the call and leaves messageId null, so
-                 -- the clause above never selected one and a reopened chat was
-                 -- not even told the picture existed. The two clauses cannot
-                 -- both match one event: an image carries one key or the other
-                 -- (bw-343e.1).
-                 OR (type IN ('tool.started','tool.completed','tool.progress','diff','image')
-                    AND json_extract(json,'$.toolCallId') IN (SELECT id FROM selected_tools))
-                 OR (type IN ('agent.started','agent.progress','agent.finished','agent.relayed','agent.identified')
-                    AND json_extract(json,'$.agentId') IN (SELECT id FROM selected_agents))
-                 OR (seq>=?2 AND type IN
-                    ('ask.permission','ask.resolved','question.requested','question.resolved',
-                     'plan.proposed','plan.resolved','provider.message','notice','note'))
-               )
-               AND NOT(type='note' AND json_extract(json,'$.rank')='detail')
-               ORDER BY seq"#,
+               SELECT event.seq,event.json FROM picked
+               JOIN event ON event.session_id=?1 AND event.seq=picked.seq
+               WHERE NOT(event.type='note' AND json_extract(event.json,'$.rank')='detail')
+               ORDER BY event.seq"#,
         )?;
             let rows = statement
                 .query_map(
@@ -3135,6 +3303,26 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
                );"#,
         )?;
     }
+    /*
+      Which events belong to which message, call and helper, by id. The first
+      page of a chat and the pruning of old progress both pick events by those
+      ids, and the ids live inside each event's JSON: finding them meant
+      reading every tool result, progress report and picture the chat ever
+      stored. On the owner's busiest chat that was a gigabyte on every page
+      and a quarter of one on every progress update, on the one thread every
+      send and stop waits behind (bw-0xeav.1). A chat's rows are filled once,
+      the first time they are needed, and `event_ref_ready` says so.
+    */
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS event_ref (
+           session_id TEXT NOT NULL,
+           ref TEXT NOT NULL,
+           seq INTEGER NOT NULL,
+           type TEXT NOT NULL,
+           PRIMARY KEY (session_id, ref, seq)
+         ) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS event_ref_ready (session_id TEXT PRIMARY KEY);",
+    )?;
     transaction.execute_batch(
         "CREATE TABLE IF NOT EXISTS held_message (
            id TEXT PRIMARY KEY,
@@ -4786,6 +4974,78 @@ mod tests {
         assert_eq!(older.items.len(), 10);
         assert_eq!(older.items[0]["text"], "row 1");
         assert!(!older.has_older);
+    }
+
+    /// Opening a chat reads the events of the rows it shows and no others.
+    ///
+    /// The first page picked its events by the ids inside each event's JSON,
+    /// so it read every tool result, progress report and picture the chat had
+    /// ever stored: a gigabyte on the owner's busiest chat, on the one thread
+    /// every send and stop waits behind. An old call's result is stored here
+    /// as text that is not JSON at all, so a page that so much as looks inside
+    /// it fails. A chat stored before the id rows existed gets them filled
+    /// the first time, and the page and the pruning of progress come out the
+    /// same (bw-0xeav.1).
+    #[test]
+    fn opening_a_chat_reads_only_the_events_of_the_rows_it_shows() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let append = |value: serde_json::Value| {
+            assert!(store
+                .append_event(&serde_json::from_value(value).unwrap())
+                .unwrap());
+        };
+        append(json!({"type":"tool.started","sessionId":"chat","seq":1,"at":"now","toolCallId":"old","name":"Read"}));
+        append(json!({"type":"tool.completed","sessionId":"chat","seq":2,"at":"now","toolCallId":"old","status":"completed"}));
+        for seq in 3..=42 {
+            append(json!({"type":"notice","sessionId":"chat","seq":seq,"at":"now","text":format!("row {seq}")}));
+        }
+        append(json!({"type":"message.started","sessionId":"chat","seq":43,"at":"now","messageId":"m","role":"assistant"}));
+        append(json!({"type":"text.delta","sessionId":"chat","seq":44,"at":"now","messageId":"m","text":"hello"}));
+        append(json!({"type":"tool.started","sessionId":"chat","seq":45,"at":"now","toolCallId":"new","name":"Bash"}));
+        append(json!({"type":"tool.progress","sessionId":"chat","seq":46,"at":"now","toolCallId":"new","output":"one"}));
+        append(json!({"type":"tool.progress","sessionId":"chat","seq":47,"at":"now","toolCallId":"new","output":"two"}));
+
+        // Only the newest progress report of a call is kept.
+        let progress = |store: &Store| -> Vec<i64> {
+            let mut statement = store
+                .connection()
+                .prepare("SELECT seq FROM event WHERE session_id='chat' AND type='tool.progress' ORDER BY seq")
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert_eq!(progress(&store), vec![47]);
+        let page = store.transcript_items("chat", None, 20).unwrap();
+
+        // The same chat as an older build stored it: no id rows yet.
+        store
+            .connection()
+            .execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_ready;")
+            .unwrap();
+        assert_eq!(store.transcript_items("chat", None, 20).unwrap().items, page.items);
+        append(json!({"type":"tool.progress","sessionId":"chat","seq":48,"at":"now","toolCallId":"new","output":"three"}));
+        assert_eq!(progress(&store), vec![48]);
+
+        // The old call's result, far above the page, cannot be read at all.
+        store
+            .connection()
+            .execute("UPDATE event SET json='not json' WHERE session_id='chat' AND seq=2", [])
+            .unwrap();
+        let page = store.transcript_items("chat", None, 20).unwrap();
+        let tools: Vec<&str> = page
+            .items
+            .iter()
+            .filter(|item| item["kind"] == "tool")
+            .filter_map(|item| item["id"].as_str())
+            .collect();
+        assert_eq!(tools, vec!["new"]);
+        assert!(page.items.iter().any(|item| item["kind"] == "message"));
+        append(json!({"type":"tool.progress","sessionId":"chat","seq":49,"at":"now","toolCallId":"new","output":"four"}));
+        assert_eq!(progress(&store), vec![49]);
     }
 
     /// Reopening a chat still shows the picture an agent read.
