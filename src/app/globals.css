@@ -696,3 +696,26 @@
     height: 44px;
   }
 }
+
+/* The moving segment of a progress bar that cannot say how far it has got
+   (components/ui/progress.tsx). With reduced motion it holds still, half
+   across, which still reads as a bar that is working rather than empty. */
+@keyframes progress-sweep {
+  from {
+    left: -33%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+.progress-sweep {
+  animation: progress-sweep 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-sweep {
+    animation: none;
+    left: 33%;
+  }
+}

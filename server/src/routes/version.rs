@@ -63,6 +63,10 @@ pub struct VersionCheckResponse {
     /// same release as `asset_url` so a download can only ever be proved
     /// against the release it came from
     pub checksums_url: Option<String>,
+    /// Bytes in the platform archive, as the release lists it. Brew never says
+    /// how big its download is, so this is the denominator the Homebrew path
+    /// measures its progress against.
+    pub asset_size: Option<u64>,
     /// The version the person asked not to be told about again, if any.
     ///
     /// Read from the settings table on every answer rather than kept with the
@@ -94,6 +98,8 @@ struct GitHubRelease {
 struct GitHubAsset {
     name: String,
     browser_download_url: String,
+    #[serde(default)]
+    size: Option<u64>,
 }
 
 /// What a caller may ask of the version check.
@@ -185,6 +191,14 @@ async fn check_github_release() -> VersionCheckResponse {
         })
     };
     let asset_url = current_platform_asset().and_then(|name| asset_named(name));
+    let asset_size = current_platform_asset().and_then(|name| {
+        release
+            .assets
+            .as_ref()?
+            .iter()
+            .find(|a| a.name == name)?
+            .size
+    });
     let checksums_url = asset_named(crate::published::CHECKSUMS_ASSET);
 
     VersionCheckResponse {
@@ -205,6 +219,7 @@ async fn check_github_release() -> VersionCheckResponse {
         }),
         asset_url,
         checksums_url,
+        asset_size,
         skipped_version: None,
         install_method: None,
     }
@@ -229,6 +244,7 @@ fn fallback_response() -> VersionCheckResponse {
         release_notes: None,
         asset_url: None,
         checksums_url: None,
+        asset_size: None,
         skipped_version: None,
         install_method: None,
     }
@@ -332,13 +348,27 @@ async fn checked(cache: &VersionCache, refresh: bool) -> VersionCheckResponse {
 /// mismatch deletes what it wrote, and true of everything after it because the
 /// program is only ever replaced by the script at the very end.
 async fn run_update(check: VersionCheckResponse, watch: UpdateWatch, how: InstallMethod) {
+    crate::handover::hold_for_update(true);
     let outcome = match how {
-        InstallMethod::Homebrew => run_homebrew(&watch).await,
-        InstallMethod::Standalone => run_standalone(check, &watch).await,
+        InstallMethod::Homebrew => run_homebrew(&watch, check.asset_size).await,
+        InstallMethod::Standalone => run_standalone(check, &watch).await.map(Some),
     };
 
     match outcome {
-        Ok(script) => {
+        // A service manager brings this program back however it stops, and
+        // starts it through the link brew has just moved on to the new
+        // version. A restart script as well would start a second copy racing
+        // it for the port, which the manager then kills (bw-45wvy).
+        Ok(None) => {
+            watch.phase(Phase::Restarting, None).await;
+            watch.done().await;
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                info!("Exiting so the service starts the updated program...");
+                std::process::exit(0);
+            });
+        }
+        Ok(Some(script)) => {
             watch.phase(Phase::Restarting, None).await;
             let spawned = if cfg!(windows) {
                 std::process::Command::new("cmd")
@@ -351,6 +381,7 @@ async fn run_update(check: VersionCheckResponse, watch: UpdateWatch, how: Instal
             if let Err(e) = spawned {
                 warn!("Failed to spawn updater: {}", e);
                 let _ = std::fs::remove_file(&script);
+                crate::handover::hold_for_update(false);
                 watch
                     .failed(format!("Failed to start the updater: {}", e))
                     .await;
@@ -369,6 +400,7 @@ async fn run_update(check: VersionCheckResponse, watch: UpdateWatch, how: Instal
         }
         Err(why) => {
             warn!("The update did not happen: {}", why);
+            crate::handover::hold_for_update(false);
             watch.failed(why).await;
         }
     }
@@ -497,38 +529,63 @@ async fn run_standalone(
     })
 }
 
-/// Upgrade through Homebrew, then write a script that only restarts.
+/// Upgrade through Homebrew, then write a script that only restarts — or
+/// nothing, when a service manager will start the program again by itself.
 ///
 /// Brew has already put the new files where it wants them, so there is nothing
 /// to move and no `.old` to keep — the program just has to go down and come
-/// back. Brew does not say how many bytes it is fetching, so this path reports
-/// its own output lines instead and leaves the bar indeterminate.
-async fn run_homebrew(watch: &UpdateWatch) -> Result<PathBuf, String> {
+/// back.
+///
+/// Brew prints nothing while it downloads when its output is not a terminal,
+/// so a watcher used to see one line for the whole 180 MB (bw-45wvy). Brew
+/// downloads into `<brew --cache formula>.incomplete` and renames it when it is
+/// done, so the size of that file against the size the release lists is a true
+/// byte count. Brew's own step headings move the screen on from there.
+async fn run_homebrew(watch: &UpdateWatch, size: Option<u64>) -> Result<Option<PathBuf>, String> {
     let brew = install_method::brew().ok_or(
         "This copy was installed with Homebrew, but brew cannot be found to upgrade it.",
     )?;
 
     // `brew upgrade` can only see a release the tap has been told about.
     watch
-        .phase(Phase::Downloading, Some("Refreshing Homebrew".into()))
-        .await;
-    say(&brew, &["update"], watch).await?;
-
-    watch
         .phase(
             Phase::Downloading,
-            Some(format!("Upgrading {}", install_method::FORMULA)),
+            Some("Checking Homebrew for the new version".into()),
         )
         .await;
-    say(&brew, &["upgrade", install_method::FORMULA], watch).await?;
+    say(&brew, &["update"], watch, &[]).await?;
 
-    let current_exe = std::env::current_exe()
-        .map(|p| p.canonicalize().unwrap_or(p))
-        .map_err(|e| format!("Cannot determine executable path: {}", e))?;
-    let current_dir = current_exe
-        .parent()
-        .ok_or("Cannot determine executable directory")?
-        .to_path_buf();
+    watch
+        .phase(Phase::Downloading, Some("Starting the download".into()))
+        .await;
+    // Asked after the refresh, so it names the new version's download.
+    let counting = brew_download(&brew)
+        .await
+        .map(|partial| tokio::spawn(count_download(partial, size, watch.clone())));
+    let upgraded = say(
+        &brew,
+        &["upgrade", install_method::FORMULA],
+        watch,
+        &[
+            ("Upgrading", Phase::Unpacking, "Installing the new version"),
+            ("Installing", Phase::Unpacking, "Installing the new version"),
+            ("Cleanup", Phase::Unpacking, "Removing the old version"),
+        ],
+    )
+    .await;
+    if let Some(counting) = counting {
+        counting.abort();
+    }
+    upgraded?;
+
+    if crate::handover::can_come_back() {
+        return Ok(None);
+    }
+
+    // Brew's cleanup has deleted the file this process runs from, and Linux
+    // then names it `<path> (deleted)`. Taken as a path, that restarted a
+    // program called `atelier (deleted)`, which does not exist (bw-45wvy).
+    let current_exe = crate::handover::program().ok_or("Cannot determine executable path")?;
     let port = std::env::var("PORT").unwrap_or_else(|_| "3008".to_string());
 
     // Started again through the link on the path, not through the resolved
@@ -536,15 +593,60 @@ async fn run_homebrew(watch: &UpdateWatch) -> Result<PathBuf, String> {
     // version brew has just replaced.
     let restart_as = install_method::linked(&current_exe).unwrap_or(current_exe);
 
-    generate_unix_restart_script(&current_dir, &restart_as, std::process::id(), &port)
+    // Written to the temporary folder, not beside the program: brew's cleanup
+    // has just deleted the folder this program was started from, and every
+    // Homebrew update ended "Failed to write restart script" after it had
+    // succeeded (bw-45wvy).
+    generate_unix_restart_script(&std::env::temp_dir(), &restart_as, std::process::id(), &port)
+        .map(Some)
         .map_err(|e| format!("Failed to create restart script: {}", e))
 }
 
-/// Run one brew command, publishing each line it prints.
+/// Where brew writes the formula's archive while it is still arriving.
+async fn brew_download(brew: &Path) -> Option<PathBuf> {
+    let said = tokio::process::Command::new(brew)
+        .args(["--cache", install_method::FORMULA])
+        .output()
+        .await
+        .ok()?;
+    let path = String::from_utf8(said.stdout).ok()?;
+    let path = path.trim();
+    (said.status.success() && !path.is_empty()).then(|| PathBuf::from(format!("{path}.incomplete")))
+}
+
+/// Report how much of brew's download has arrived, until it is renamed into
+/// place or the upgrade ends.
+async fn count_download(partial: PathBuf, size: Option<u64>, watch: UpdateWatch) {
+    let mut seen = false;
+    loop {
+        match tokio::fs::metadata(&partial).await {
+            Ok(file) => {
+                seen = true;
+                watch.arrived(file.len(), size).await;
+            }
+            Err(_) if seen => {
+                if let Some(size) = size {
+                    watch.arrived(size, Some(size)).await;
+                }
+                return;
+            }
+            Err(_) => {}
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    }
+}
+
+/// Run one brew command, moving the screen on at each of `steps`.
 ///
-/// Brew writes its progress to stderr and its results to stdout, and a person
-/// watching wants whichever came last, so both are read as one.
-async fn say(brew: &Path, args: &[&str], watch: &UpdateWatch) -> Result<(), String> {
+/// Brew writes its progress to stderr and its results to stdout, so both are
+/// read as one. Every line is logged; a heading named in `steps` sets the phase
+/// and the words under the bar.
+async fn say(
+    brew: &Path,
+    args: &[&str],
+    watch: &UpdateWatch,
+    steps: &[(&str, Phase, &str)],
+) -> Result<(), String> {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     let mut child = tokio::process::Command::new(brew)
@@ -576,11 +678,20 @@ async fn say(brew: &Path, args: &[&str], watch: &UpdateWatch) -> Result<(), Stri
                 let said = said.trim().to_string();
                 if !said.is_empty() {
                     info!("brew: {}", said);
+                    // Brew's `==>` headings mark its steps. The lines between
+                    // them are notices and caveats, which read as noise under a
+                    // progress bar, so only a known heading moves the screen on.
+                    if let Some(heading) = said.strip_prefix("==> ") {
+                        if let Some((_, phase, note)) =
+                            steps.iter().find(|(start, _, _)| heading.starts_with(start))
+                        {
+                            watch.phase(*phase, Some((*note).to_string())).await;
+                        }
+                    }
                     if let (true, Some(reason)) = (error.is_empty(), said.strip_prefix("Error:")) {
                         error = reason.trim().to_string();
                     }
-                    newest = said.clone();
-                    watch.note(said).await;
+                    newest = said;
                 }
             }
             Ok(None) => break,
@@ -623,7 +734,8 @@ fn generate_unix_restart_script(
     pid: u32,
     port: &str,
 ) -> Result<PathBuf, String> {
-    let script_path = dir.join("beads-restart.sh");
+    // Named for this process, because the temporary folder is shared.
+    let script_path = dir.join(format!("atelier-restart-{pid}.sh"));
     let start = start.to_string_lossy();
 
     let content = format!(
@@ -1398,12 +1510,81 @@ mod tests {
             &brew,
             &["upgrade", "atelier"],
             &crate::routes::update_run::new_watch(),
+            &[],
         )
         .await
         .unwrap_err();
         assert_eq!(
             failed,
             "brew upgrade atelier failed: Formula reports different checksum: 2894. Nothing was replaced."
+        );
+    }
+
+    /// Brew's download is measured by the file it writes into, and reaches the
+    /// full size when brew renames it into place (bw-45wvy).
+    #[tokio::test]
+    async fn a_brew_download_is_counted_in_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let partial = dir.path().join("atelier.tar.gz.incomplete");
+        let watch = crate::routes::update_run::new_watch();
+        assert!(watch.claim(Some("9.9.9".into())).await);
+        let counting = tokio::spawn(count_download(partial.clone(), Some(1000), watch.clone()));
+
+        std::fs::write(&partial, vec![0u8; 400]).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        let now = watch.now().await;
+        assert_eq!((now.received, now.total), (400, Some(1000)));
+
+        std::fs::remove_file(&partial).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(3), counting)
+            .await
+            .expect("counting stops once the download is renamed")
+            .unwrap();
+        assert_eq!(watch.now().await.received, 1000);
+    }
+
+    /// A known brew heading moves the screen to its step; the notices and
+    /// caveats between headings do not reach the screen.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn brew_headings_move_the_screen_on() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let brew = dir.path().join("brew");
+        std::fs::write(
+            &brew,
+            "#!/bin/sh\n\
+             echo '==> Upgrading ahsansarwar45/atelier/atelier'\n\
+             echo '==> Caveats'\n\
+             echo 'Three commands, and nothing else to start:'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&brew, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let watch = crate::routes::update_run::new_watch();
+        say(
+            &brew,
+            &["upgrade"],
+            &watch,
+            &[("Upgrading", Phase::Unpacking, "Installing the new version")],
+        )
+        .await
+        .unwrap();
+        let now = watch.now().await;
+        assert_eq!(now.phase, Phase::Unpacking);
+        assert_eq!(now.note.as_deref(), Some("Installing the new version"));
+    }
+
+    /// The program brew has just deleted is restarted through brew's link, not
+    /// through its old path with Linux's `(deleted)` note on the end.
+    #[test]
+    fn a_deleted_keg_restarts_through_the_link() {
+        let running = crate::handover::without_the_deleted_mark(
+            "/home/linuxbrew/.linuxbrew/Cellar/atelier/0.22.16/bin/atelier (deleted)",
+        );
+        assert_eq!(
+            install_method::linked(Path::new(running)),
+            Some(PathBuf::from("/home/linuxbrew/.linuxbrew/bin/atelier"))
         );
     }
 }

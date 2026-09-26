@@ -9,8 +9,8 @@
 //! every change to whoever is watching. The download reports real bytes,
 //! because `published::download_watched` already hashes the body chunk by
 //! chunk and only had to be asked to count as it went. The Homebrew path
-//! reports lines instead, because `brew` does not say how many bytes a
-//! download will be.
+//! measures the file brew is downloading into, because `brew` itself says
+//! nothing while it downloads.
 //!
 //! Only one update may run at a time. A second start is refused rather than
 //! doubled: two downloads writing the same staged file would race each other
@@ -147,16 +147,6 @@ impl UpdateWatcher {
         let mut now = self.now.write().await;
         now.phase = phase;
         now.note = note;
-        let _ = self.changes.send(now.clone());
-    }
-
-    /// Say what is happening now, without changing the phase.
-    ///
-    /// The Homebrew path reports lines rather than bytes, because `brew` never
-    /// says how big a download will be.
-    pub async fn note(&self, note: impl Into<String>) {
-        let mut now = self.now.write().await;
-        now.note = Some(note.into());
         let _ = self.changes.send(now.clone());
     }
 

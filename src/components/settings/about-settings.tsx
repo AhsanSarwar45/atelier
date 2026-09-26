@@ -182,13 +182,12 @@ export function AboutSettings() {
 
           {run.phase !== 'idle' && (
             <div className="px-3 py-3" data-testid="about-progress">
-              {/* A download with no declared size leaves `far` null, and the
-                  bar is drawn as moving rather than as a made-up number —
-                  which is the truth of a Homebrew upgrade, because brew never
-                  says how many bytes it is fetching. */}
+              {/* A step with no byte count leaves `far` null, and the bar is
+                  drawn as moving rather than as a made-up number. */}
               <Progress
                 value={far ?? undefined}
-                className={far === null && run.phase !== 'failed' ? 'animate-pulse' : undefined}
+                indeterminate={far === null && run.phase !== 'failed'}
+                pace="steady"
               />
               <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <span className="min-w-0 break-words text-xs text-t-muted">{inWords(run)}</span>

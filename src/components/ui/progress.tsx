@@ -58,8 +58,16 @@ const Progress = React.forwardRef<
   React.ElementRef<typeof ProgressPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root> &
     VariantProps<typeof progressIndicatorVariants> &
-    VariantProps<typeof progressVariants>
->(({ className, value, tone, pace, size, ...props }, ref) => (
+    VariantProps<typeof progressVariants> & {
+      /**
+       * Work is happening but nothing says how much is left. A short segment
+       * sweeps the track instead of an empty bar, which reads as stalled: a
+       * Homebrew refresh ran for fifty seconds behind a bar that never moved
+       * (bw-45wvy).
+       */
+      indeterminate?: boolean
+    }
+>(({ className, value, tone, pace, size, indeterminate, ...props }, ref) => (
   <ProgressPrimitive.Root
     ref={ref}
     // Handed to the primitive as well as drawn, so the bar says how full it is
@@ -68,15 +76,23 @@ const Progress = React.forwardRef<
     // of the props here and only ever used for the inline transform below.
     // `null` is how the primitive spells "no idea yet", which is the honest
     // answer for a download whose size nothing declared.
-    value={value ?? null}
+    value={indeterminate ? null : (value ?? null)}
     className={cn(progressVariants({ size }), className)}
     {...props}
   >
-    <ProgressPrimitive.Indicator
-      data-tone={tone ?? "default"}
-      className={progressIndicatorVariants({ tone, pace })}
-      style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
-    />
+    {indeterminate ? (
+      <ProgressPrimitive.Indicator
+        data-tone={tone ?? "default"}
+        data-indeterminate=""
+        className={cn(progressIndicatorVariants({ tone }), "progress-sweep absolute inset-y-0 w-1/3")}
+      />
+    ) : (
+      <ProgressPrimitive.Indicator
+        data-tone={tone ?? "default"}
+        className={progressIndicatorVariants({ tone, pace })}
+        style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
+      />
+    )}
   </ProgressPrimitive.Root>
 ))
 Progress.displayName = ProgressPrimitive.Root.displayName

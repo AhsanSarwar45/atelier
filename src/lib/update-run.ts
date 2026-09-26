@@ -118,6 +118,9 @@ export function inWords(run: UpdateRun): string {
   if (run.phase === "downloading" && run.total) {
     return `${phase} — ${inBytes(run.received)} of ${inBytes(run.total)}`;
   }
+  if (run.phase === "downloading" && run.received > 0) {
+    return `${phase} — ${inBytes(run.received)}`;
+  }
   if (run.note) return run.note;
   return phase;
 }
@@ -157,7 +160,11 @@ export function useUpdateRun(): {
   useEffect(() => {
     return onUpdate((said) => {
       try {
-        setRun(JSON.parse(said) as UpdateRun);
+        const next = JSON.parse(said) as UpdateRun;
+        // The connection comes back to the new server before the page
+        // reloads, and that server has run nothing. Its idle frame would draw
+        // the old offer again for the moment until the reload.
+        setRun((was) => (was.phase === "done" && next.phase === "idle" ? was : next));
       } catch {
         // A frame we cannot read says nothing about the update, and dropping
         // it leaves the last good reading on screen.

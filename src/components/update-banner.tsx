@@ -127,10 +127,7 @@ export function UpdateBanner() {
 
           {run.phase !== "idle" && !failed && (
             <div className="pt-1" data-testid="update-progress">
-              <Progress
-                value={far ?? undefined}
-                className={far === null ? "h-1.5 animate-pulse" : "h-1.5"}
-              />
+              <Progress value={far ?? undefined} indeterminate={far === null} size="sm" pace="steady" />
               <p className="mt-1 break-words text-xs text-t-muted">{inWords(run)}</p>
             </div>
           )}
@@ -151,7 +148,7 @@ export function UpdateBanner() {
                 ) : (
                   <RefreshCw className="size-3" aria-hidden="true" />
                 )}
-                {failed ? "Try again" : busy ? inWords(run) : "Update & Restart"}
+                {failed ? "Try again" : busy ? "Updating…" : "Update & Restart"}
               </Button>
             )}
 

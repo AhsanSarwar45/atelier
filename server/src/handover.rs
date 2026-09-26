@@ -16,6 +16,7 @@ use serde::Deserialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -28,6 +29,21 @@ const LOOK_EVERY: Duration = Duration::from_secs(10);
 /// half written, or briefly absent. Handing over on that would restart into
 /// something that cannot run.
 const SETTLE: Duration = Duration::from_secs(3);
+
+/// Set while this copy is installing an update of its own.
+///
+/// `brew upgrade` moves the link to the new build and only then removes the
+/// old one. Standing down on seeing the link move would exit while brew is
+/// still at work, and a service manager stops every process the program
+/// started when it exits, brew with them (bw-45wvy). The update exits by
+/// itself once brew has finished.
+static UPDATING: AtomicBool = AtomicBool::new(false);
+
+/// Hold off standing down for a newer build while an update runs, or release
+/// the hold when it did not happen.
+pub fn hold_for_update(held: bool) {
+    UPDATING.store(held, Ordering::SeqCst);
+}
 
 /* ------------------------------------------------------------------ *
  * Which build this is.
@@ -253,6 +269,9 @@ pub fn stand_down_for_a_newer_build(registered: PathBuf) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(LOOK_EVERY).await;
+            if UPDATING.load(Ordering::SeqCst) {
+                continue;
+            }
             // The cheap question first. While the program file sits exactly as
             // it was, this whole check costs one look at its directory entry.
             let seen_now = glance(&registered);
@@ -271,6 +290,9 @@ pub fn stand_down_for_a_newer_build(registered: PathBuf) {
             // newer build, and restarting into one serves nobody.
             tokio::time::sleep(SETTLE).await;
             let settled = look(&registered);
+            if UPDATING.load(Ordering::SeqCst) {
+                continue;
+            }
             if !a_newer_build_is_there(Some(at_start), settled) {
                 // Back to the build already running, whatever happened in
                 // between. This is the file to sit quietly on now.
