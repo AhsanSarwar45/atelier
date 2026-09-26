@@ -471,6 +471,17 @@ impl Store {
         self.connection.execute_batch("COMMIT")
     }
 
+    /// Let a reader write for the length of `work`; the writer always may.
+    fn allow_writes<T>(&self, work: impl FnOnce() -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+        if !self.reader {
+            return work();
+        }
+        self.connection.execute_batch("PRAGMA query_only = 0;")?;
+        let result = work();
+        self.connection.execute_batch("PRAGMA query_only = 1;")?;
+        result
+    }
+
     /// Chats the writer skipped pruning for because their id rows were not
     /// filled yet. Each is named once per process; a reader fills it.
     pub fn take_unfilled(&self) -> Vec<String> {
@@ -1275,33 +1286,32 @@ fn held_in_its_project(
             .collect::<rusqlite::Result<Vec<_>>>()?;
         drop(statement);
         let owns_transaction = self.connection.is_autocommit();
-        if self.reader {
-            self.connection.execute_batch("PRAGMA query_only = 0;")?;
-        }
-        let filled = (|| {
+        self.allow_writes(|| {
             if owns_transaction {
                 self.connection.execute_batch("BEGIN IMMEDIATE")?;
             }
-            for (seq, kind, message, tool, agent) in rows {
-                let refs = event_refs(&kind, message.as_deref(), tool.as_deref(), agent.as_deref());
-                self.remember_event_refs(session_id, seq, &kind, &refs)?;
-            }
-            self.connection.execute(
-                "INSERT OR IGNORE INTO event_ref_ready (session_id) VALUES (?1)",
-                [session_id],
-            )?;
+            let filled = (|| {
+                for (seq, kind, message, tool, agent) in rows {
+                    let refs =
+                        event_refs(&kind, message.as_deref(), tool.as_deref(), agent.as_deref());
+                    self.remember_event_refs(session_id, seq, &kind, &refs)?;
+                }
+                self.connection.execute(
+                    "INSERT OR IGNORE INTO event_ref_ready (session_id) VALUES (?1)",
+                    [session_id],
+                )?;
+                Ok(())
+            })();
             if owns_transaction {
-                self.connection.execute_batch("COMMIT")?;
+                match &filled {
+                    Ok(()) => self.connection.execute_batch("COMMIT")?,
+                    Err(_) => {
+                        let _ = self.connection.execute_batch("ROLLBACK");
+                    }
+                }
             }
-            Ok(())
-        })();
-        if filled.is_err() && owns_transaction && !self.connection.is_autocommit() {
-            let _ = self.connection.execute_batch("ROLLBACK");
-        }
-        if self.reader {
-            self.connection.execute_batch("PRAGMA query_only = 1;")?;
-        }
-        filled
+            filled
+        })
     }
 
     /// Group a replay import into one SQLite commit. The chat actor remains
@@ -2590,7 +2600,9 @@ fn held_in_its_project(
         if before.is_none() || before.is_some_and(|cursor| cursor < 0) || !has_projection {
             return self.event_transcript_items(session_id, before, limit);
         }
-        let newest_seq = self.ensure_transcript_projection(session_id)?;
+        // Only a cursor from a page an older build served comes here; its
+        // catch-up writes, which a reader is let do for this alone.
+        let newest_seq = self.allow_writes(|| self.ensure_transcript_projection(session_id))?;
         let ceiling = before.unwrap_or(i64::MAX);
         let page_predicate = r#"(
             json_extract(json,'$.kind') NOT IN ('tool','message','thinking')
