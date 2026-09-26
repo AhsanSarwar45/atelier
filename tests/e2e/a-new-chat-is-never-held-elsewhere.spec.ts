@@ -76,3 +76,61 @@ test('a chat started from the app never draws the held-elsewhere line', async ({
     rmSync(FIXTURE, { recursive: true, force: true });
   }
 });
+
+/**
+ * Stopping a chat from the app never draws it as somebody else's (bw-4retm).
+ *
+ * Stop kills the provider with SIGKILL, so it cannot delete its marker, and for
+ * a moment its process is still in the table while it exits. What the server
+ * reads ownership from — the process's environment and its group leader — goes
+ * first, so a hold beat in that moment filed the dying process as another
+ * program's, and the chat flashed the external badge and the held line.
+ */
+test('a chat stopped from the app never draws the held-elsewhere line', async ({ page, request }) => {
+  test.skip(process.env.BEADS_E2E_LIVE_PROVIDERS !== '1', 'needs a live provider: the flash is made of a real process dying');
+  test.setTimeout(240_000);
+  const fixture = `${FIXTURE}-stop`;
+  rmSync(fixture, { recursive: true, force: true });
+  mkdirSync(fixture, { recursive: true });
+  await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const url = new URL(route.request().url());
+    url.searchParams.set('include_test', 'true');
+    await route.continue({ url: url.toString() });
+  });
+  const made = await request.post('/api/projects', {
+    data: { name: 'stopped-chat-never-held', path: fixture, isTest: true },
+  });
+  expect(made.status(), await made.text()).toBe(201);
+  const project = (await made.json()) as { id: string; path: string };
+
+  try {
+    const started = await request.post('/api/workbench/command', {
+      data: { type: 'session.start', projectId: project.id, projectPath: project.path, brand: 'claude', permissionMode: 'bypassPermissions' },
+    });
+    expect(started.ok(), await started.text()).toBe(true);
+    const sessionId = ((await started.json()) as { id: string }).id;
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${sessionId}`);
+    const composer = page.getByTestId('composer');
+    await composer.waitFor({ timeout: HELLO_MS });
+    await composer.fill('Run the shell command `sleep 90` with your Bash tool, then say done.');
+    await composer.press('Enter');
+    await expect(page.getByTestId('stop-button')).toBeVisible({ timeout: HELLO_MS });
+    // Well into the turn, so the provider is mid-command when it is killed.
+    await page.waitForTimeout(8_000);
+
+    await page.getByTestId('stop-button').click();
+    const until = Date.now() + WATCH_MS;
+    while (Date.now() < until) {
+      expect(await page.getByTestId('held-elsewhere').count(), 'a stopped chat was drawn as held elsewhere').toBe(0);
+      expect(await page.getByTestId('external-origin').count(), 'a stopped chat was badged as another program’s').toBe(0);
+      await page.waitForTimeout(25);
+    }
+    await expect(page.getByTestId('stop-button')).toHaveCount(0);
+    await expect(composer).toBeEnabled();
+    await page.screenshot({ path: `${SHOTS}/a-stopped-chat-is-never-held-elsewhere.png` });
+  } finally {
+    await request.delete(`/api/projects/${project.id}`);
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
