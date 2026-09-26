@@ -425,6 +425,21 @@ pub struct TranscriptItemPage {
     pub newest_seq: i64,
 }
 
+/// The few events a chat's view is rebuilt from, each found through the type
+/// index. Asking `type = 'session.pinned' OR seq IN (...)` of the chat's rows
+/// instead made SQLite visit every row the chat has to test its type: on a
+/// 2.2 GB chat that was about 1 GB read from a cold disk to find 99 rows.
+const VIEW_EVENTS_SQL: &str = r#"SELECT seq, json FROM event
+   WHERE session_id = ?1 AND seq IN (
+     SELECT seq FROM event WHERE type = 'session.pinned' AND session_id = ?1
+     UNION ALL
+     SELECT MAX(seq) FROM event
+     WHERE session_id = ?1 AND type IN (
+       'session.started','session.state','session.menu','todo',
+       'cost','context','error','thinking.progress'
+     ) GROUP BY type
+   ) ORDER BY seq"#;
+
 impl Store {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         if let Some(parent) = path.parent() {
@@ -1644,18 +1659,7 @@ fn held_in_its_project(
     /// Transcript rows and agents already live in indexed projection tables;
     /// replaying their raw deltas here defeats on-demand history loading.
     pub fn view_events(&self, session_id: &str) -> rusqlite::Result<Vec<Event>> {
-        let mut statement = self.connection.prepare(
-            r#"SELECT seq, json FROM event
-               WHERE session_id = ?1 AND (
-                 type = 'session.pinned' OR seq IN (
-                   SELECT MAX(seq) FROM event
-                   WHERE session_id = ?1 AND type IN (
-                     'session.started','session.state','session.menu','todo',
-                     'cost','context','error','thinking.progress'
-                   ) GROUP BY type
-                 )
-               ) ORDER BY seq"#,
-        )?;
+        let mut statement = self.connection.prepare(VIEW_EVENTS_SQL)?;
         let rows = statement.query_map([session_id], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
@@ -5823,6 +5827,74 @@ mod tests {
         assert!(
             plan.iter().any(|step| step.contains("event_by_type")),
             "both halves are found through the type index: {plan:?}"
+        );
+    }
+
+    /// A chat's view is rebuilt from every pin and the newest of each status
+    /// kind, and those rows are found through the type index, never by
+    /// visiting each of the chat's rows to test its type. That visit read
+    /// about 1 GB from a cold disk to open a 2.2 GB chat (bw-xeeqg.1).
+    #[test]
+    fn workbench_core_a_chats_view_is_read_from_its_status_rows_alone() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session("chat", "claude", None, "2026-09-27T00:00:00Z"))
+            .unwrap();
+        let event = |seq: i64, kind: &str, extra: serde_json::Value| -> Event {
+            let mut value = json!({
+                "type": kind, "sessionId": "chat", "seq": seq,
+                "at": "2026-09-27T00:00:00Z"
+            });
+            value.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            serde_json::from_value(value).unwrap()
+        };
+        for appended in [
+            event(1, "session.pinned", json!({"title": "First"})),
+            event(2, "session.state", json!({"state": "working"})),
+            event(3, "text.delta", json!({"messageId": "m1", "text": "hello"})),
+            event(4, "session.state", json!({"state": "idle"})),
+            event(5, "session.pinned", json!({"title": "Second"})),
+            event(6, "context", json!({"used": 1})),
+        ] {
+            assert!(store.append_event(&appended).unwrap());
+        }
+
+        let kinds: Vec<(i64, String)> = store
+            .view_events("chat")
+            .unwrap()
+            .into_iter()
+            .map(|event| {
+                (
+                    event.fields["seq"].as_i64().unwrap(),
+                    serde_json::to_value(event.kind).unwrap().as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                (1, "session.pinned".to_string()),
+                (4, "session.state".to_string()),
+                (5, "session.pinned".to_string()),
+                (6, "context".to_string()),
+            ],
+            "every pin and the newest of each status kind, in order"
+        );
+
+        let plan: Vec<String> = store
+            .connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {VIEW_EVENTS_SQL}"))
+            .unwrap()
+            .query_map(["chat"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .filter(|step| step.contains("SEARCH event ") && !step.contains("event_by_type"))
+                .all(|step| step.contains("seq=?")),
+            "the chat's rows are fetched by seq, not visited one by one: {plan:?}"
         );
     }
 
