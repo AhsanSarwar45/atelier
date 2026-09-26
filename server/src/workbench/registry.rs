@@ -406,6 +406,13 @@ pub struct WorkbenchRegistry {
     /// its stretch has been handed back — longer than the drivers map holds
     /// one, which lets go before the process is closed and done writing.
     supervising: Supervising,
+    /// The provider processes already known to be this server's own, by pid
+    /// and start time. Ownership is read off a process while it runs, but a
+    /// process being killed loses what it is read from — its environment and
+    /// its group leader go first — while its marker still names the chat. Once
+    /// ours, a process stays ours until it is gone, so a chat being stopped is
+    /// never drawn as another program's on the way down.
+    owned: std::sync::Mutex<std::collections::HashSet<(u32, Option<String>)>>,
 }
 
 type Supervising = Arc<tokio::sync::Mutex<HashMap<String, usize>>>;
@@ -550,6 +557,7 @@ impl WorkbenchRegistry {
             profiles,
             signins: Arc::default(),
             supervising: Arc::default(),
+            owned: Default::default(),
         }
     }
 
@@ -711,6 +719,8 @@ impl WorkbenchRegistry {
         let claude = self.account_directories("claude", &self.paths.claude_config);
         let codex = self.account_directories("codex", &self.paths.codex_home);
         let mut ownership = ProviderOwnership::default();
+        let mut owned = self.owned.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut present = std::collections::HashSet::new();
         for hold in external::provider_holds(&claude, proc_root, &codex, now_ms) {
             let pids = hold.pids.clone();
             let mut ours = hold.clone();
@@ -718,7 +728,10 @@ impl WorkbenchRegistry {
             ours.pids.clear();
             outside.pids.clear();
             for pid in pids {
-                if external::owned_by_this_process(pid, proc_root) {
+                let identity = external::process_identity(pid, proc_root);
+                present.insert(identity.clone());
+                if owned.contains(&identity) || external::owned_by_this_process(pid, proc_root) {
+                    owned.insert(identity);
                     ours.pids.insert(pid);
                 } else {
                     outside.pids.insert(pid);
@@ -731,6 +744,7 @@ impl WorkbenchRegistry {
                 ownership.external.push(outside);
             }
         }
+        owned.retain(|identity| present.contains(identity));
         ownership
     }
 
@@ -3546,6 +3560,73 @@ mod tests {
         assert_eq!(view.view["permissionMode"], "plan");
         assert_eq!(view.view["effort"], "xhigh");
         assert!(view.view["model"].is_null());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_provider_being_killed_stays_ours_until_it_is_gone() {
+        let root = tempfile::tempdir().unwrap();
+        let claude = root.path().join("claude");
+        std::fs::create_dir_all(claude.join("sessions")).unwrap();
+        let proc_root = root.path().join("proc");
+        let process = proc_root.join("42");
+        std::fs::create_dir_all(&process).unwrap();
+        let stat = |state: &str, start: &str| {
+            let mut fields = vec!["0"; 18];
+            fields.insert(0, state);
+            fields.push(start);
+            format!("42 (claude) {}", fields.join(" "))
+        };
+        std::fs::write(process.join("stat"), stat("S", "777")).unwrap();
+        std::fs::write(
+            process.join("environ"),
+            format!("{}={}\0", external::OWNER_ENV, external::owner_token()),
+        )
+        .unwrap();
+        let marker = |start: &str| {
+            serde_json::to_vec(&json!({
+                "sessionId":"thread", "pid":42, "cwd":"/project", "startedAt":1,
+                "procStart":start, "entrypoint":"sdk-ts", "kind":"interactive", "status":"busy"
+            }))
+            .unwrap()
+        };
+        std::fs::write(claude.join("sessions/42.json"), marker("777")).unwrap();
+        let registry = WorkbenchRegistry::new(
+            ChatDb::open(&root.path().join("workbench.db")).unwrap(),
+            RegistryPaths {
+                home: root.path().into(),
+                claude_config: claude.clone(),
+                codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
+                media: root.path().join("media"),
+            },
+            Arc::new(FakeFactory {
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
+        let external_pids = |registry: &WorkbenchRegistry| {
+            registry
+                .provider_holds(&proc_root, 1_000)
+                .into_iter()
+                .flat_map(|hold| hold.pids)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(registry.provider_ownership(&proc_root, 1_000).ours.len(), 1);
+
+        // SIGKILL: the environment is gone before the pid leaves the table,
+        // and the marker, which the provider never got to delete, remains.
+        std::fs::write(process.join("environ"), "").unwrap();
+        std::fs::write(process.join("stat"), stat("R", "777")).unwrap();
+        assert!(external_pids(&registry).is_empty());
+        // Waiting to be reaped is not holding anything.
+        std::fs::write(process.join("stat"), stat("Z", "777")).unwrap();
+        assert!(registry.provider_ownership(&proc_root, 1_000).ours.is_empty());
+        assert!(external_pids(&registry).is_empty());
+
+        // Gone, and the pid reused by a stranger's provider: not ours.
+        std::fs::write(process.join("stat"), stat("S", "888")).unwrap();
+        std::fs::write(claude.join("sessions/42.json"), marker("888")).unwrap();
+        assert_eq!(external_pids(&registry), vec![42]);
     }
 
     #[cfg(target_os = "linux")]

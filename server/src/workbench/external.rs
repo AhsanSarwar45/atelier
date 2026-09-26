@@ -498,34 +498,46 @@ fn valid_marker(marker: &ClaudeMarker) -> bool {
         && !marker.kind.is_empty()
 }
 
+/// Whether the process a marker names is still the one that wrote it, and
+/// still running.
+///
+/// A provider stopped with SIGKILL cannot delete its marker, and for a moment
+/// afterwards its pid is still in the process table, exiting or waiting to be
+/// reaped. That row is not holding the conversation any more, so the same
+/// liveness rule the takeover path uses applies here too (`pid_alive`).
 fn marker_alive(marker: &ClaudeMarker, proc_root: &Path) -> bool {
+    // Claude's procStart is a Linux clock-tick value, which is what guards
+    // against a reused pid. Other platforms have only the pid to go on, which
+    // is the provider's own fallback there.
     #[cfg(target_os = "linux")]
     {
-        let stat = proc_root.join(marker.pid.to_string()).join("stat");
-        fs::read_to_string(stat)
+        let started = fs::read_to_string(proc_root.join(marker.pid.to_string()).join("stat"))
             .ok()
-            .and_then(|line| proc_start(&line).map(str::to_string))
-            .is_some_and(|started| started == marker.proc_start)
+            .and_then(|line| proc_start(&line).map(str::to_string));
+        if started.as_deref() != Some(marker.proc_start.as_str()) {
+            return false;
+        }
     }
-    #[cfg(all(unix, not(target_os = "linux")))]
+    pid_alive(marker.pid, proc_root)
+}
+
+/// One process, told apart from any later process that reuses its pid.
+///
+/// The start time comes from `/proc` on Linux. Elsewhere only the pid is known,
+/// which is enough for the one use this has: remembering a process between
+/// scans that are two seconds apart.
+pub fn process_identity(pid: u32, proc_root: &Path) -> (u32, Option<String>) {
+    #[cfg(target_os = "linux")]
     {
-        // Signal zero asks only whether the PID exists. Claude's procStart is a
-        // Linux clock-tick value, so this matches the provider's own fallback
-        // on macOS without pretending it can detect PID reuse there.
-        i32::try_from(marker.pid)
+        let started = fs::read_to_string(proc_root.join(pid.to_string()).join("stat"))
             .ok()
-            .is_some_and(|pid| unsafe { libc::kill(pid, 0) == 0 })
+            .and_then(|line| proc_start(&line).map(str::to_string));
+        (pid, started)
     }
-    #[cfg(windows)]
+    #[cfg(not(target_os = "linux"))]
     {
         let _ = proc_root;
-        std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {}", marker.pid), "/NH"])
-            .output()
-            .ok()
-            .is_some_and(|out| {
-                String::from_utf8_lossy(&out.stdout).contains(&marker.pid.to_string())
-            })
+        (pid, None)
     }
 }
 
