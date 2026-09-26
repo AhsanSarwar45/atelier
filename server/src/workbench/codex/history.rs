@@ -385,8 +385,15 @@ pub async fn list_threads(
     let mut threads = Vec::new();
     let mut cursor = Value::Null;
     loop {
+        // Codex's own state database already holds every thread's metadata.
+        // Without `useStateDbOnly` each page first re-reads every rollout to
+        // repair that metadata: measured against codex-cli 0.153.4, 142 MB
+        // read per listing of 30 threads against 3.8 MB with it, and the same
+        // threads with the same fields. On the owner's 6.5 GB of rollouts it
+        // was a continuous 100 MB/s (bw-0xeav.2).
         let mut params = json!({
-            "limit": 100, "cursor": cursor, "sortKey": "updated_at", "sortDirection": "desc"
+            "limit": 100, "cursor": cursor, "sortKey": "updated_at", "sortDirection": "desc",
+            "useStateDbOnly": true
         });
         if let Some(source_kinds) = &source_kinds {
             params["sourceKinds"] = source_kinds.clone();

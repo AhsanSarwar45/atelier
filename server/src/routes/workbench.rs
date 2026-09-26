@@ -60,6 +60,8 @@ pub struct WorkbenchState {
     discovery_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Vec<Value>)>>>,
     discoveries: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     listing_refused: Arc<tokio::sync::Mutex<HashMap<String, std::time::Instant>>>,
+    /// When each provider last took longer than discovery waits to list.
+    listing_slow: Arc<tokio::sync::Mutex<HashMap<String, std::time::Instant>>>,
     listings: Listings,
     /// One usage connection per Claude account, keyed by profile id.
     claude_usage_readers: ClaudeReaders,
@@ -154,6 +156,7 @@ impl WorkbenchState {
             discovery_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             discoveries: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             listing_refused: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            listing_slow: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             listings: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             claude_usage_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -1762,6 +1765,15 @@ async fn fresh_discovery(
 /// one per discovery, each paying for a process that could not help.
 const LISTING_REFUSED_FOR: Duration = Duration::from_secs(60);
 
+/// How long a provider that did not list in time is left alone.
+///
+/// A timeout used to be forgotten, so the next discovery started another
+/// adapter at once. Discovery runs every few seconds while chats are busy, and
+/// the Codex adapter reads every rollout on the machine before it answers: one
+/// fresh scan every few seconds, each dropped at eight seconds, and never an
+/// answer (bw-0xeav.2). The record scan stands in meanwhile.
+const LISTING_SLOW_FOR: Duration = Duration::from_secs(600);
+
 /// How long a provider's `session/list` answer stands for the same folder.
 ///
 /// Every answer starts one adapter process per account, and each of those
@@ -1791,6 +1803,11 @@ async fn ask_provider_to_list(
     if let Some(refused) = state.listing_refused.lock().await.get(brand) {
         if refused.elapsed() < LISTING_REFUSED_FOR {
             return Err(format!("{brand} refused session/list a moment ago"));
+        }
+    }
+    if let Some(slow) = state.listing_slow.lock().await.get(brand) {
+        if slow.elapsed() < LISTING_SLOW_FOR {
+            return Err(format!("{brand} was too slow to answer session/list a moment ago"));
         }
     }
     let key = (brand.to_string(), filter.map(std::path::Path::to_path_buf));
@@ -1886,10 +1903,17 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
         match tokio::time::timeout(ANSWER_WITHIN, ask_provider_to_list(state, brand, filter)).await
         {
             Ok(answer) => answer,
-            Err(_) => Err(format!(
-                "no session/list answer within {}s",
-                ANSWER_WITHIN.as_secs()
-            )),
+            Err(_) => {
+                state
+                    .listing_slow
+                    .lock()
+                    .await
+                    .insert(brand.to_string(), std::time::Instant::now());
+                Err(format!(
+                    "no session/list answer within {}s",
+                    ANSWER_WITHIN.as_secs()
+                ))
+            }
         }
     };
     let (claude_acp, codex_acp) = tokio::join!(ask("claude"), ask("codex"));
@@ -4590,6 +4614,32 @@ mod tests {
         let answer = ask_provider_to_list(&state, "codex", None).await;
         assert!(answer.is_err_and(|why| !why.contains("a moment ago")));
         assert!(state.listing_refused.lock().await.contains_key("codex"));
+    }
+
+    /**
+     * A provider that took too long to list is left alone for ten minutes.
+     *
+     * Each attempt starts an adapter that reads every Codex rollout before it
+     * answers, and a timed-out attempt was forgotten, so the next discovery a
+     * few seconds later started another one (bw-0xeav.2).
+     */
+    #[tokio::test]
+    async fn native_workbench_stops_asking_a_provider_that_was_too_slow_to_list() {
+        let (_directory, state) = fixture();
+        state
+            .listing_slow
+            .lock()
+            .await
+            .insert("codex".into(), std::time::Instant::now() - LISTING_REFUSED_FOR * 2);
+        let answer = ask_provider_to_list(&state, "codex", None).await;
+        assert!(answer.is_err_and(|why| why.contains("too slow")));
+
+        state.listing_slow.lock().await.insert(
+            "codex".into(),
+            std::time::Instant::now() - LISTING_SLOW_FOR - Duration::from_secs(1),
+        );
+        let answer = ask_provider_to_list(&state, "codex", None).await;
+        assert!(answer.is_err_and(|why| !why.contains("too slow")));
     }
 
     /**

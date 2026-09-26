@@ -374,6 +374,11 @@ mod tests {
             let result = match method {
                 "initialize" => json!({"server": "fake"}),
                 "echo" => message["params"].clone(),
+                // A listing that would re-read every rollout is refused, so
+                // the listing test also proves it asks the state DB only.
+                "thread/list" if message["params"]["useStateDbOnly"] != true => {
+                    json!({"scanned":"every rollout"})
+                }
                 "thread/list" => {
                     if message["params"]["cursor"].is_null() {
                         json!({"data":[
