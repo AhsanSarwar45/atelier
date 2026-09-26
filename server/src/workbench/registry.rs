@@ -261,6 +261,13 @@ async fn send_held(
         }
         Err(error) => {
             database.release_held(held_id).await?;
+            // A pushed line was drawn as sent. It is waiting again, and the
+            // screen is told so.
+            if held["pushed"] == json!(true) {
+                let mut waiting = held.clone();
+                waiting["pushed"] = json!(false);
+                note_held(database, session_id, &waiting, false).await?;
+            }
             Err(error)
         }
     }
@@ -2376,7 +2383,14 @@ impl WorkbenchRegistry {
             kind: CommandKind::SessionInterrupt,
             fields: serde_json::Map::from_iter([("sessionId".into(), json!(session_id))]),
         };
-        self.driver_command(&interrupt).await?;
+        if let Err(error) = self.driver_command(&interrupt).await {
+            // The turn goes on, so the line is waiting, not sent.
+            self.database.release_held(held_id.to_string()).await?;
+            let mut waiting = held;
+            waiting["pushed"] = json!(false);
+            note_held(&self.database, session_id, &waiting, false).await?;
+            return Err(error);
+        }
         Ok(held)
     }
 
@@ -2862,6 +2876,77 @@ mod tests {
         assert_eq!(prompt.at("messageId"), &json!("line-0001"));
     }
 
+    /// A driver that ends turns but will not take a prompt.
+    struct NoPromptDriver;
+    impl ProviderDriver for NoPromptDriver {
+        fn brand(&self) -> &'static str {
+            "claude"
+        }
+        fn command<'a>(&'a mut self, command: &'a Command) -> DriverFuture<'a> {
+            let refused = command.kind == CommandKind::PromptSend;
+            Box::pin(async move {
+                if refused {
+                    Err("the agent would not take it".to_string())
+                } else {
+                    Ok(json!({"ok":true}))
+                }
+            })
+        }
+        fn close<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+    }
+
+    /// A line pushed into a turn, whose send is then refused, is waiting
+    /// again, and is no longer drawn as sent.
+    #[tokio::test]
+    async fn a_pushed_line_the_agent_refuses_goes_back_to_waiting() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            paths(root.path()),
+            Arc::new(OneDriverFactory {
+                driver: std::sync::Mutex::new(Some(Box::new(NoPromptDriver))),
+            }),
+        );
+        database.create_session(a_chat("running_tool")).await.unwrap();
+        registry
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
+            .await
+            .unwrap();
+        say_state(&database, "running_tool").await;
+        registry
+            .execute(&command(
+                CommandKind::PromptSend,
+                json!({"sessionId":"session-1","messageId":"line-0002","text":"read this now"}),
+            ))
+            .await
+            .unwrap();
+
+        say_state(&database, "idle").await;
+        let mut last = Value::Null;
+        for _ in 0..100 {
+            last = database
+                .events_since("session-1".into(), 0)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|event| serde_json::to_value(event).unwrap())
+                .filter(|event| event["type"] == "prompt.held")
+                .last()
+                .unwrap_or(Value::Null);
+            if last["held"]["pushed"] == json!(false) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(last["held"]["id"], json!("line-0002"));
+        assert_eq!(last["held"]["pushed"], json!(false), "the screen is told it is waiting again");
+        let waiting = database.held_messages("session-1".into()).await.unwrap();
+        assert_eq!(waiting[0]["pushed"], json!(false));
+    }
+
     #[test]
     fn a_message_id_the_composer_did_not_choose_well_is_replaced() {
         let named = |id: Value| {
@@ -2944,6 +3029,18 @@ mod tests {
         let waiting = database.held_messages("session-1".into()).await.unwrap();
         assert_eq!(waiting.len(), 1, "it is still waiting, and still sendable");
         assert_eq!(waiting[0]["text"], json!("say this now"));
+        // Waiting, not drawn as sent: the screen's last word on it says so.
+        assert_eq!(waiting[0]["pushed"], json!(false));
+        let last = database
+            .events_since("session-1".into(), 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|event| serde_json::to_value(event).unwrap())
+            .filter(|event| event["type"] == "prompt.held")
+            .last()
+            .unwrap();
+        assert_eq!(last["held"]["pushed"], json!(false));
 
         // And it can still be dropped, which a claimed message could not be.
         registry

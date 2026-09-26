@@ -1763,9 +1763,10 @@ fn held_in_its_project(
     }
 
     /// Put a claimed message back, because the send it was claimed for failed.
+    /// It is waiting again, so it is no longer drawn as sent.
     pub fn release_held(&self, id: &str) -> rusqlite::Result<()> {
         self.connection
-            .prepare_cached("UPDATE held_message SET sending = 0 WHERE id = ?1")?
+            .prepare_cached("UPDATE held_message SET sending = 0, pushed = 0 WHERE id = ?1")?
             .execute(params![id])?;
         Ok(())
     }
