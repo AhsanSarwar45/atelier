@@ -5124,6 +5124,39 @@ mod tests {
         assert_eq!(progress(&store), vec![49]);
     }
 
+    /// A reader answers a page asked for with a cursor an older build gave.
+    ///
+    /// That page catches up the chat's stored projection first, which writes;
+    /// readers refuse writes, so it would fail with a read-only error where
+    /// the writer used to serve it (bw-0xeav.3).
+    #[test]
+    fn a_reader_serves_an_older_builds_cursor_whose_projection_is_behind() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        let notice = |seq: i64| -> Event {
+            serde_json::from_value(json!({
+                "type":"notice","sessionId":"chat","seq":seq,"at":"now","text":format!("row {seq}")
+            }))
+            .unwrap()
+        };
+        for seq in 1..=3 {
+            assert!(store.append_event(&notice(seq)).unwrap());
+        }
+        store.ensure_transcript_projection("chat").unwrap();
+        assert!(store.append_event(&notice(4)).unwrap());
+
+        let reader = Store::open_reader(&path).unwrap();
+        let page = reader.transcript_items("chat", Some(i64::MAX), 40).unwrap();
+        assert_eq!(page.items.len(), 4);
+        assert_eq!(page.newest_seq, 4);
+        // And it is still a reader afterwards.
+        assert!(reader
+            .connection()
+            .execute("DELETE FROM event WHERE session_id='chat'", [])
+            .is_err());
+    }
+
     /// Reopening a chat still shows the picture an agent read.
     ///
     /// The manager's report: "images dont show when we reload a chat (the
