@@ -960,10 +960,10 @@ impl SessionFactory for NativeProviderFactory {
 pub(super) async fn record_user_for_transport(
     database: &ChatDb,
     session: &Session,
+    id: String,
     text: &str,
     images: &[Value],
 ) -> Result<String, String> {
-    let id = uuid::Uuid::new_v4().to_string();
     let at = now();
     let mut values = vec![
         json!({"type":"message.started","sessionId":session.id,"seq":0,"at":at,"messageId":id,"role":"user","composedHere":true}),
@@ -1031,6 +1031,7 @@ mod tests {
         record_user_for_transport(
             &database,
             &session,
+            "user-line-1".into(),
             "What is shown?",
             &[json!({"mimeType":"image/png","data":"aGVsbG8="})],
         )

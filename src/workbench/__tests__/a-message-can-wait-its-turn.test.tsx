@@ -146,7 +146,7 @@ describe('a chat that is working, with something written in the box', () => {
     await act(async () => {});
 
     expect(asked('prompt.hold')).toEqual([
-      { type: 'prompt.hold', sessionId: 's1', text: 'one more thing', images: [] },
+      { type: 'prompt.hold', sessionId: 's1', messageId: expect.any(String), text: 'one more thing', images: [] },
     ]);
     expect(asked('prompt.send')).toEqual([]);
     expect(box.value).toBe('');

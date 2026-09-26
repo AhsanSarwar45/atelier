@@ -124,6 +124,7 @@ enum Command {
     TakeHeld(String, Option<String>, Reply<Option<serde_json::Value>>),
     ReleaseHeld(String, Reply<()>),
     PutFirst(String, String, Reply<Option<serde_json::Value>>),
+    UnpushHeld(String, Reply<Vec<serde_json::Value>>),
     DropHeld(String, String, Reply<Option<serde_json::Value>>),
     ForgetHeld(String, Reply<()>),
     Shutdown,
@@ -551,6 +552,10 @@ impl ChatDb {
     ) -> Result<Option<serde_json::Value>, String> {
         self.request(|reply| Command::PutFirst(session_id, id, reply))
             .await
+    }
+
+    pub async fn unpush_held(&self, session_id: String) -> Result<Vec<serde_json::Value>, String> {
+        self.request(|reply| Command::UnpushHeld(session_id, reply)).await
     }
 
     pub async fn release_held(&self, id: String) -> Result<(), String> {
@@ -1386,6 +1391,9 @@ fn run(
             Command::ReleaseHeld(id, reply) => respond(reply, store.release_held(&id)),
             Command::PutFirst(session_id, id, reply) => {
                 respond(reply, store.put_first(&session_id, &id))
+            }
+            Command::UnpushHeld(session_id, reply) => {
+                respond(reply, store.unpush_held(&session_id))
             }
             Command::DropHeld(session_id, id, reply) => {
                 respond(reply, store.drop_held(&session_id, &id))

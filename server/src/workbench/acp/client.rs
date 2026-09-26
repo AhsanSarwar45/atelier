@@ -2230,6 +2230,7 @@ pub struct AcpDriver {
 impl AcpDriver {
     async fn submit_user_turn(
         &self,
+        message_id: String,
         text: &str,
         images: &[Value],
         content: Vec<ContentBlock>,
@@ -2243,6 +2244,7 @@ impl AcpDriver {
         let message_id = super::super::provider::record_user_for_transport(
             &self.database,
             &self.session,
+            message_id,
             text,
             images,
         )
@@ -3364,6 +3366,7 @@ impl AcpDriver {
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
                 let accepted = self.submit_user_turn(
+                    super::super::registry::message_id(command),
                     command.at("text").as_str().unwrap_or_default(),
                     images,
                     content,
@@ -3568,6 +3571,7 @@ impl AcpDriver {
                 );
                 let result = self
                     .submit_user_turn(
+                        super::super::registry::message_id(command),
                         &instruction,
                         &[],
                         vec![ContentBlock::Text(TextContent::new(instruction.clone()))],
@@ -4306,6 +4310,7 @@ mod tests {
         let sent = tokio::spawn(async move {
             driver
                 .submit_user_turn(
+                    uuid::Uuid::new_v4().to_string(),
                     "Use the safer route",
                     &[],
                     vec![ContentBlock::Text(TextContent::new("Use the safer route"))],
@@ -4427,6 +4432,7 @@ mod tests {
         let sent = tokio::spawn(async move {
             driver
                 .submit_user_turn(
+                    uuid::Uuid::new_v4().to_string(),
                     "Never mind",
                     &[],
                     vec![ContentBlock::Text(TextContent::new("Never mind"))],
@@ -4491,6 +4497,7 @@ mod tests {
         let sent = tokio::spawn(async move {
             driver
                 .submit_user_turn(
+                    uuid::Uuid::new_v4().to_string(),
                     "Start here",
                     &[],
                     vec![ContentBlock::Text(TextContent::new("Start here"))],

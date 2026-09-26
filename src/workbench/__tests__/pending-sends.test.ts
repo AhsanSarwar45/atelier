@@ -1,156 +1,113 @@
 import { describe, expect, it } from 'vitest';
 
-import { drawnAsSent, stillPending, transcriptMark, worthDrawing, type PendingSend } from '@/workbench/pending-sends';
+import { linesInFlight, worthDrawing, type PendingSend } from '@/workbench/pending-sends';
 import type { TranscriptItem } from '@/workbench/fold';
+import type { HeldMessage } from '@/workbench/protocol';
 
-function said(id: string, role: 'user' | 'assistant'): TranscriptItem {
-  return { kind: 'message', id, role, text: id, images: [], done: true, parentId: null };
+function said(id: string, role: 'user' | 'assistant', text = id): TranscriptItem {
+  return { kind: 'message', id, role, text, images: [], done: true, parentId: null };
+}
+
+function held(id: string, pushed = false): HeldMessage {
+  return { id, sessionId: 'chat', text: id, images: [], parts: null, heldAt: '2026-09-26T00:00:00Z', pushed };
 }
 
 const SENT: PendingSend[] = [
-  { key: 'sending-0', text: 'first', images: [] },
-  { key: 'sending-1', text: 'second', images: [] },
+  { id: 'line-1', text: 'first', images: [] },
+  { id: 'line-2', text: 'second', images: [] },
 ];
+
+/** Where each line is on one frame: in the transcript (drawn or recorded) or in the queue. */
+function onScreen(pending: PendingSend[], items: TranscriptItem[], queue: HeldMessage[]) {
+  const lines = linesInFlight(pending, items, queue);
+  return {
+    transcript: [...items.filter(worthDrawing), ...lines.sent].map((item) => item.id),
+    queue: lines.waiting.map((line) => line.id),
+  };
+}
 
 describe('a line drawn before the server has spoken it back', () => {
   it('stands while the transcript has gained nothing', () => {
-    const before = [said('older-answer', 'assistant')];
-    expect(stillPending(SENT, before, transcriptMark(before))).toEqual(SENT);
+    expect(linesInFlight(SENT, [said('older-answer', 'assistant')], []).outstanding).toEqual(SENT);
   });
 
-  it('goes as soon as the server sends its own copy', () => {
-    const before = [said('older-answer', 'assistant')];
-    const mark = transcriptMark(before);
-    const after = [...before, said('from-the-server', 'user')];
-    expect(stillPending(SENT, after, mark)).toEqual([SENT[1]]);
+  it('goes when the server records it under the same id, and only that one', () => {
+    const lines = linesInFlight(SENT, [said('line-1', 'user')], []);
+    expect(lines.outstanding).toEqual([SENT[1]]);
+    expect(lines.sent.map((row) => row.id)).toEqual(['line-2']);
   });
 
-  /**
-   * The reply that names the sent line usually arrives AFTER the stream has
-   * already carried the line itself, so matching on the id would leave two
-   * copies on the page for the length of a round trip. Counting does not care
-   * which arrived first.
-   */
-  it('is matched by count, not by the id it was drawn under', () => {
-    const before = [said('older-prompt', 'user')];
-    const mark = transcriptMark(before);
-    const after = [...before, said('first-back', 'user'), said('second-back', 'user')];
-    expect(stillPending(SENT, after, mark)).toEqual([]);
-  });
-
-  /** An answer arriving is not the line coming back, and must not retire it. */
-  it('is not spoken for by anything the agent says', () => {
-    const before: TranscriptItem[] = [];
-    const after = [said('an-answer', 'assistant'), { kind: 'tool', id: 'a-tool' } as TranscriptItem];
-    expect(stillPending(SENT, after, transcriptMark(before))).toEqual(SENT);
-  });
-
-  /**
-   * The reader scrolls up mid-send. Older pages are prepended, every one of
-   * them full of their own past messages — and each of those used to be counted
-   * as the echo of the line still on its way, so the line they had just sent
-   * disappeared from under them (bw-ad3r.11).
-   */
-  it('is not spoken for by older history arriving above it', () => {
-    const before = [said('older-prompt', 'user'), said('older-answer', 'assistant')];
-    const mark = transcriptMark(before);
-    const older = [said('page-back-1', 'user'), said('page-back-2', 'user'), said('page-back-3', 'user')];
-    expect(stillPending(SENT, [...older, ...before], mark)).toEqual(SENT);
-  });
-
-  /** And the echo still retires it once the older pages are sitting above. */
-  it('still goes when its own copy arrives below prepended history', () => {
-    const before = [said('older-answer', 'assistant')];
-    const mark = transcriptMark(before);
-    const older = [said('page-back-1', 'user'), said('page-back-2', 'user')];
-    const after = [...older, ...before, said('from-the-server', 'user')];
-    expect(stillPending(SENT, after, mark)).toEqual([SENT[1]]);
-  });
-
-  /** Nothing sent, nothing drawn — the ordinary state of a chat being read. */
-  it('draws nothing when nothing is outstanding', () => {
-    const items = [said('older-prompt', 'user'), said('an-answer', 'assistant')];
-    expect(stillPending([], items, transcriptMark([]))).toEqual([]);
+  /** Older history prepended while a send is in flight names none of its lines. */
+  it('is not spoken for by other messages of the reader’s arriving', () => {
+    const history = [said('page-back-1', 'user'), said('page-back-2', 'user')];
+    expect(linesInFlight(SENT, history, []).outstanding).toEqual(SENT);
   });
 
   it('is drawn exactly as the server’s copy will be, so the swap shows nothing', () => {
-    const row = drawnAsSent({ key: 'sending-0', text: 'hello', images: [] });
-    // The same shape a folded user message has, under this page's own name for
-    // it: anything the drawing keys on must already be here, or the row would
-    // change appearance the moment the server's copy took its place.
-    // `composedHere` among them: the server's copy carries it (provider.rs
-    // stamps it on `message.started`), and a row drawn without it would be
-    // filed as a machine line and hidden for as long as the send was in flight
-    // whenever the words opened with a picture marker (bw-oamr.1).
-    expect(row).toEqual({ ...said('sending-0', 'user'), text: 'hello', composedHere: true });
+    const [row] = linesInFlight([{ id: 'line-1', text: 'hello', images: [] }], [], []).sent;
+    // `composedHere` among the fields: the server's copy carries it, and a row
+    // drawn without it would be filed as a machine line (bw-oamr.1).
+    expect(row).toEqual({ ...said('line-1', 'user'), text: 'hello', composedHere: true });
   });
 });
 
 /**
- * The swap, frame by frame, in the order the sidecar actually writes.
- *
- * `record_user_for_transport` appends `message.started`, then any pictures,
- * then `text.delta`, then `message.completed`, each its own row in the store
- * and so each its own frame on the wire. The fold builds the row on the first
- * of those with `text: ''` and fills it on the third. Retiring the drawn line
- * on the first left the reader's own words gone from the screen until the
- * third arrived — read on the running app as a blink (bw-w29l).
+ * Ctrl+Enter mid-turn, frame by frame in the order the server writes: the line
+ * is held already pushed, the turn is interrupted, the turn's end records the
+ * message, and only then is the held row released. It used to be drawn, then
+ * shown waiting, then drawn again.
  */
-describe('the swap from the drawn line to the server’s own', () => {
-  const SENT: PendingSend[] = [{ key: 'sending-0', text: 'what the reader wrote', images: [] }];
-  const started: TranscriptItem = {
-    kind: 'message', id: 'from-the-server', role: 'user',
-    text: '', images: [], done: false, parentId: null,
-  };
-  const filled = { ...started, text: 'what the reader wrote' } as TranscriptItem;
-  const completed = { ...filled, done: true } as TranscriptItem;
-
-  /** What the transcript would read, drawn line included, at one moment. */
-  function onScreen(items: TranscriptItem[]): string[] {
-    return [...items.filter(worthDrawing), ...stillPending(SENT, items, new Set()).map(drawnAsSent)]
-      .filter((item): item is typeof filled & { text: string } => item.kind === 'message')
-      .map((item) => item.text);
-  }
-
-  it('never loses the words, on any frame of the sequence', () => {
-    for (const frame of [[], [started], [started], [filled], [completed]]) {
-      expect(onScreen(frame as TranscriptItem[])).toEqual(['what the reader wrote']);
+describe('a line sent into a turn', () => {
+  const pending = [SENT[0]!];
+  it('stays in the transcript, once, on every frame', () => {
+    const frames: Array<[TranscriptItem[], HeldMessage[]]> = [
+      [[], []],
+      [[], [held('line-1', true)]],
+      [[{ ...said('line-1', 'user', ''), done: false } as TranscriptItem], [held('line-1', true)]],
+      [[said('line-1', 'user', 'first')], [held('line-1', true)]],
+      [[said('line-1', 'user', 'first')], []],
+    ];
+    for (const [items, queue] of frames) {
+      expect(onScreen(pending, items, queue)).toEqual({ transcript: ['line-1'], queue: [] });
     }
   });
 
-  it('keeps exactly one copy once the server’s carries the words', () => {
-    expect(stillPending(SENT, [filled], new Set())).toEqual([]);
+  it('is drawn as sent in another window, from the pushed row alone', () => {
+    expect(onScreen([], [], [held('line-1', true)])).toEqual({ transcript: ['line-1'], queue: [] });
   });
 
-  /** An empty row that completes anyway is still the server speaking. */
-  it('is retired by a completed message even if it says nothing', () => {
-    expect(stillPending(SENT, [{ ...started, done: true }], new Set())).toEqual([]);
+  /** Stopped before its turn ended: back to waiting, where it can be sent, edited or dropped. */
+  it('goes back to the queue when the turn is stopped instead', () => {
+    const lines = linesInFlight(pending, [], [held('line-1', false)]);
+    expect(lines.sent).toEqual([]);
+    expect(lines.waiting.map((line) => line.id)).toEqual(['line-1']);
+    expect(lines.outstanding).toEqual([]);
   });
 });
 
-describe('a row with nothing in it yet', () => {
-  const bare = {
-    kind: 'message', id: 'm', role: 'user', text: '', images: [], done: false, parentId: null,
-  } as TranscriptItem;
+describe('a line held to wait', () => {
+  it('is in the queue until it is recorded, and never in both', () => {
+    expect(onScreen([], [], [held('line-3')])).toEqual({ transcript: [], queue: ['line-3'] });
+    expect(onScreen([], [said('line-3', 'user')], [held('line-3')])).toEqual({ transcript: ['line-3'], queue: [] });
+  });
+});
 
-  it('is held back while it is the reader’s and says nothing', () => {
-    expect(worthDrawing(bare)).toBe(false);
+/** The recorded row is built empty and filled a frame later (bw-w29l). */
+describe('the swap from the drawn line to the server’s own', () => {
+  const pending: PendingSend[] = [{ id: 'line-1', text: 'what the reader wrote', images: [] }];
+  const started: TranscriptItem = { kind: 'message', id: 'line-1', role: 'user', text: '', images: [], done: false, parentId: null };
+  const filled = { ...started, text: 'what the reader wrote' } as TranscriptItem;
+
+  it('never loses the words, on any frame of the sequence', () => {
+    for (const frame of [[], [started], [filled], [{ ...filled, done: true } as TranscriptItem]]) {
+      const lines = linesInFlight(pending, frame, []);
+      const texts = [...frame.filter(worthDrawing), ...lines.sent]
+        .map((item) => (item.kind === 'message' ? item.text : ''));
+      expect(texts).toEqual(['what the reader wrote']);
+    }
   });
 
-  it('is drawn once it has words, pictures, or has finished', () => {
-    expect(worthDrawing({ ...bare, text: 'said' } as TranscriptItem)).toBe(true);
-    expect(worthDrawing({
-      ...bare, images: [{ mime: 'image/png', dataUrl: 'data:image/png;base64,x', alt: 'a shot' }],
-    } as TranscriptItem)).toBe(true);
-    expect(worthDrawing({ ...bare, done: true } as TranscriptItem)).toBe(true);
-  });
-
-  /** The agent's own empty opening is the thing the reader watches fill. */
-  it('is drawn anyway when the agent is the one speaking', () => {
-    expect(worthDrawing({ ...bare, role: 'assistant' } as TranscriptItem)).toBe(true);
-  });
-
-  it('leaves every other kind of row alone', () => {
-    expect(worthDrawing({ kind: 'tool', id: 't' } as TranscriptItem)).toBe(true);
+  it('is retired by a completed message even if it says nothing', () => {
+    expect(linesInFlight(pending, [{ ...started, done: true }], []).outstanding).toEqual([]);
   });
 });

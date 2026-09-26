@@ -1661,13 +1661,13 @@ fn held_in_its_project(
             parts.map(Value::to_string),
             at
         ])?;
-        Ok(held_row(id, session_id, text, images.clone(), parts.cloned(), at))
+        Ok(held_row(id, session_id, text, images.clone(), parts.cloned(), at, false))
     }
 
     /// Every message this chat is holding, oldest first.
     pub fn held_messages(&self, session_id: &str) -> rusqlite::Result<Vec<Value>> {
         let mut statement = self.connection.prepare_cached(
-            "SELECT id, text, images, parts, held_at FROM held_message
+            "SELECT id, text, images, parts, held_at, pushed FROM held_message
              WHERE session_id = ?1 ORDER BY position",
         )?;
         let rows = statement.query_map(params![session_id], |row| {
@@ -1676,6 +1676,7 @@ fn held_in_its_project(
             let images: String = row.get(2)?;
             let parts: Option<String> = row.get(3)?;
             let at: String = row.get(4)?;
+            let pushed: bool = row.get(5)?;
             Ok(held_row(
                 &id,
                 session_id,
@@ -1683,6 +1684,7 @@ fn held_in_its_project(
                 serde_json::from_str(&images).unwrap_or_else(|_| json!([])),
                 parts.and_then(|parts| serde_json::from_str(&parts).ok()),
                 &at,
+                pushed,
             ))
         })?;
         rows.collect()
@@ -1720,19 +1722,44 @@ fn held_in_its_project(
      * reader asked for it now.
      *
      * The turn is being interrupted for this message, so it is the one the
-     * turn's end sends, whatever was waiting before it. None when it is not
-     * waiting any more: already on its way, dropped, or never this chat's.
+     * turn's end sends, whatever was waiting before it, and it is marked
+     * pushed: the reader has sent it, and it is drawn as sent. None when it is
+     * not waiting any more: already on its way, dropped, or never this chat's.
      */
     pub fn put_first(&self, session_id: &str, id: &str) -> rusqlite::Result<Option<Value>> {
         let moved = self.connection.prepare_cached(
             "UPDATE held_message
-             SET position = (SELECT MIN(position) - 1 FROM held_message WHERE session_id = ?1)
+             SET position = (SELECT MIN(position) - 1 FROM held_message WHERE session_id = ?1),
+                 pushed = 1
              WHERE id = ?2 AND session_id = ?1 AND sending = 0",
         )?.execute(params![session_id, id])?;
         if moved == 0 {
             return Ok(None);
         }
         Ok(self.held_messages(session_id)?.into_iter().find(|row| row["id"] == json!(id)))
+    }
+
+    /**
+     * Put pushed messages back to plain waiting, because the turn they were
+     * pushed into was stopped rather than ended for them. Answers the rows it
+     * changed, first in line first.
+     */
+    pub fn unpush_held(&self, session_id: &str) -> rusqlite::Result<Vec<Value>> {
+        let pushed: Vec<Value> = self
+            .held_messages(session_id)?
+            .into_iter()
+            .filter(|row| row["pushed"] == json!(true))
+            .collect();
+        self.connection
+            .prepare_cached("UPDATE held_message SET pushed = 0 WHERE session_id = ?1")?
+            .execute(params![session_id])?;
+        Ok(pushed
+            .into_iter()
+            .map(|mut row| {
+                row["pushed"] = json!(false);
+                row
+            })
+            .collect())
     }
 
     /// Put a claimed message back, because the send it was claimed for failed.
@@ -3006,6 +3033,7 @@ fn held_row(
     images: Value,
     parts: Option<Value>,
     at: &str,
+    pushed: bool,
 ) -> Value {
     json!({
         "id": id,
@@ -3014,6 +3042,7 @@ fn held_row(
         "images": images,
         "parts": parts,
         "heldAt": at,
+        "pushed": pushed,
     })
 }
 
@@ -3119,6 +3148,15 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
          CREATE INDEX IF NOT EXISTS held_message_in_order
            ON held_message(session_id, position);",
     )?;
+    // Whether the reader sent it now: the turn is being ended for it, so it is
+    // drawn as sent rather than as waiting (`put_first`).
+    if !columns(transaction, "held_message")?
+        .iter()
+        .any(|name| name == "pushed")
+    {
+        transaction
+            .execute_batch("ALTER TABLE held_message ADD COLUMN pushed INTEGER NOT NULL DEFAULT 0;")?;
+    }
     /*
       The choices a provider last offered, one row per provider account and
       project: a project's own settings can narrow what its provider allows. Kept beside the chats rather than in any one chat's history:
@@ -3354,7 +3392,7 @@ fn one_row_per_external_chat(transaction: &Transaction<'_>) -> rusqlite::Result<
 fn columns(transaction: &Transaction<'_>, table: &str) -> rusqlite::Result<Vec<String>> {
     debug_assert!(matches!(
         table,
-        "session" | "event" | "transcript_projection" | "session_notice"
+        "session" | "event" | "transcript_projection" | "session_notice" | "held_message"
     ));
     let mut statement = transaction.prepare(&format!("PRAGMA table_info({table})"))?;
     let found = statement

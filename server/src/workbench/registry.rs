@@ -153,6 +153,9 @@ fn held_as_prompt(session_id: &str, held: &Value) -> Result<Command, String> {
     fields.insert("sessionId".into(), json!(session_id));
     fields.insert("text".into(), held["text"].clone());
     fields.insert("images".into(), held["images"].clone());
+    // The held row's id becomes the recorded message's, so the line keeps one
+    // name from the composer to the transcript.
+    fields.insert("messageId".into(), held["id"].clone());
     if held["parts"].is_array() {
         fields.insert("parts".into(), held["parts"].clone());
     }
@@ -162,6 +165,25 @@ fn held_as_prompt(session_id: &str, held: &Value) -> Result<Command, String> {
         map
     }))
     .map_err(|error| error.to_string())
+}
+
+/**
+ * The name a user message goes by from the moment it is written.
+ *
+ * The composer names the line it sends, so the row it draws, the row the queue
+ * holds and the row the transcript records are one message under one id, and
+ * the screen matches them by that id rather than by guessing. A command without
+ * a usable name gets a fresh one.
+ */
+pub(super) fn message_id(command: &Command) -> String {
+    command
+        .at("messageId")
+        .as_str()
+        .filter(|id| {
+            (8..=64).contains(&id.len())
+                && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        })
+        .map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_string)
 }
 
 /// Note that a message is waiting; `first` when it now leads the queue.
@@ -1559,6 +1581,14 @@ impl WorkbenchRegistry {
             }
         }
         let result = self.execute_inner(command).await;
+        // A message pushed into a turn the reader then stopped was never read,
+        // and the stopped chat will not send it on its own: it goes back to
+        // waiting, where it can be sent, edited or dropped.
+        if let (CommandKind::SessionStop, Some(id), Ok(_)) = (command.kind, id, &result) {
+            for held in self.database.unpush_held(id.to_string()).await? {
+                note_held(&self.database, id, &held, false).await?;
+            }
+        }
         let result_id = id.or_else(|| result.as_ref().ok().and_then(|value| value["id"].as_str()));
         if let Some(id) = result_id {
             self.reconcile_status(id).await?;
@@ -2112,7 +2142,11 @@ impl WorkbenchRegistry {
             // reader wrote is kept by the app, and every provider gets it as
             // the ordinary prompt it would have got anyway, once its turn is
             // over (bw-r54j.1).
-            CommandKind::PromptHold => self.hold(command).await,
+            CommandKind::PromptHold => {
+                let held = self.hold(command).await?;
+                note_held(&self.database, Self::field(command, "sessionId")?, &held, false).await?;
+                Ok(json!({"ok":true,"held":held}))
+            }
             // Sent now, into a turn: held, and then sent now like any waiting
             // message (`send_now`).
             CommandKind::PromptSend
@@ -2120,8 +2154,12 @@ impl WorkbenchRegistry {
             {
                 let held = self.hold(command).await?;
                 let session_id = Self::field(command, "sessionId")?;
-                let held_id = held["held"]["id"].as_str().unwrap_or_default().to_string();
-                if let Err(error) = self.send_now(session_id, &held_id).await {
+                let held_id = held["id"].as_str().unwrap_or_default().to_string();
+                // Announced once, by `send_now`, already pushed: never drawn
+                // as waiting on its way to being sent.
+                let held = match self.send_now(session_id, &held_id).await {
+                    Ok(held) => held,
+                    Err(error) => {
                     // Refused whole, so the box can have its words back: a
                     // line left waiting as well would be the same words twice.
                     if self
@@ -2133,8 +2171,9 @@ impl WorkbenchRegistry {
                         note_released(&self.database, session_id, &held_id, "dropped").await?;
                     }
                     return Err(error);
-                }
-                Ok(held)
+                    }
+                };
+                Ok(json!({"ok":true,"held":held}))
             }
             CommandKind::PromptDrop => {
                 let session_id = Self::field(command, "sessionId")?;
@@ -2269,7 +2308,7 @@ impl WorkbenchRegistry {
     }
 
     /// Keep what the reader wrote, at the back of the queue, until the chat
-    /// can take it.
+    /// can take it. Answers the held row; the caller announces it.
     async fn hold(&self, command: &Command) -> Result<Value, String> {
         let session_id = Self::field(command, "sessionId")?;
         let text = command.at("text").as_str().unwrap_or_default().to_string();
@@ -2287,19 +2326,16 @@ impl WorkbenchRegistry {
             Value::Array(parts) => Some(Value::Array(parts.clone())),
             _ => None,
         };
-        let held = self
-            .database
+        self.database
             .hold_message(
                 session_id.to_string(),
-                format!("held-{}", uuid::Uuid::new_v4()),
+                message_id(command),
                 text,
                 images,
                 parts,
                 chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             )
-            .await?;
-        note_held(&self.database, session_id, &held, false).await?;
-        Ok(json!({"ok":true,"held":held}))
+            .await
     }
 
     /// Whether an attached chat is in the middle of a turn a message would
@@ -2780,6 +2816,63 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert_eq!(seen.lock().unwrap()[1], "prompt.send stop and read this");
+    }
+
+    /// A line sent into a turn is announced once, already pushed and under the
+    /// composer's own id, so it is never drawn as waiting on its way to being
+    /// sent. Stopping the turn instead puts it back to waiting.
+    #[tokio::test]
+    async fn a_line_sent_into_a_turn_keeps_its_name_and_is_announced_once_as_sent() {
+        let root = tempfile::tempdir().unwrap();
+        let (registry, database, _) = kinds_registry(root.path(), "running_tool").await;
+        let answer = registry
+            .execute(&command(
+                CommandKind::PromptSend,
+                json!({"sessionId":"session-1","messageId":"line-0001","text":"stop and read this"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(answer["held"]["id"], json!("line-0001"));
+        assert_eq!(answer["held"]["pushed"], json!(true));
+        let announced = |events: Vec<Event>| {
+            events
+                .into_iter()
+                .map(|event| serde_json::to_value(event).unwrap())
+                .filter(|event| event["type"] == "prompt.held")
+                .map(|event| (event["held"]["id"].clone(), event["held"]["pushed"].clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            announced(database.events_since("session-1".into(), 0).await.unwrap()),
+            vec![(json!("line-0001"), json!(true))],
+        );
+
+        registry
+            .execute(&command(CommandKind::SessionStop, json!({"sessionId":"session-1"})))
+            .await
+            .unwrap();
+        let waiting = database.held_messages("session-1".into()).await.unwrap();
+        assert_eq!(waiting[0]["pushed"], json!(false));
+        assert_eq!(
+            announced(database.events_since("session-1".into(), 0).await.unwrap()).last(),
+            Some(&(json!("line-0001"), json!(false))),
+        );
+        // Sent later, it is recorded under the same name.
+        let prompt = held_as_prompt("session-1", &waiting[0]).unwrap();
+        assert_eq!(prompt.at("messageId"), &json!("line-0001"));
+    }
+
+    #[test]
+    fn a_message_id_the_composer_did_not_choose_well_is_replaced() {
+        let named = |id: Value| {
+            message_id(&command(CommandKind::PromptSend, json!({"sessionId":"s","messageId":id})))
+        };
+        assert_eq!(named(json!("0d1c8a52-6c1e-4f35-9a55-1b6f0f1d2c3e")), "0d1c8a52-6c1e-4f35-9a55-1b6f0f1d2c3e");
+        for bad in [json!("short"), json!("has space in it"), json!("x".repeat(65)), json!(7), Value::Null] {
+            let id = named(bad.clone());
+            assert_ne!(json!(id), bad);
+            assert_eq!(id.len(), 36);
+        }
     }
 
     /// bw-fhyi: pushing a waiting message into a turn is the same road — it

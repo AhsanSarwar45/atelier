@@ -590,14 +590,17 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'prompt.held':
       // Held twice is once: the same message can arrive from the live tail and
       // from a snapshot taken after it, and the queue is a list of messages,
-      // not of deliveries.
+      // not of deliveries. The later word on it wins, in its place: a message
+      // pushed and then stopped comes back as waiting.
       // A message sent now leads the queue: the turn is being ended for it,
       // so it is the next thing the chat reads, whatever waited before it.
       if (e.first) {
         next.held = [e.held, ...view.held.filter((held) => held.id !== e.held.id)];
         return next;
       }
-      next.held = view.held.some((held) => held.id === e.held.id) ? view.held : [...view.held, e.held];
+      next.held = view.held.some((held) => held.id === e.held.id)
+        ? view.held.map((held) => (held.id === e.held.id ? e.held : held))
+        : [...view.held, e.held];
       return next;
 
     case 'prompt.released':
@@ -605,8 +608,10 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'message.started':
+      // One id is one message. A line sent again after a refused send starts
+      // over in its own row rather than drawing a second copy of itself.
       next.items = [
-        ...items,
+        ...items.filter((it) => it.kind !== 'message' || it.id !== e.messageId),
         {
           kind: 'message',
           id: e.messageId,

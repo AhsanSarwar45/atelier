@@ -207,6 +207,8 @@ export interface HeldMessage {
   parts: PromptPart[] | null;
   /** When it was held, as an ISO timestamp. */
   heldAt: string;
+  /** Sent now by the reader: the turn is ending for it, so it is drawn as sent, not as waiting. */
+  pushed?: boolean;
 }
 
 export interface ImagePayload {
@@ -1181,8 +1183,9 @@ export type WbpCommand =
       effort?: string;
       brief?: Brief;
     }
-  | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; parts?: PromptPart[]; takeover?: boolean }
-  | { type: 'prompt.hold'; sessionId: string; text: string; images?: ImagePayload[]; parts?: PromptPart[] }
+  /** `messageId` names the line for its whole life: the held row and the recorded message both keep it. */
+  | { type: 'prompt.send'; sessionId: string; messageId?: string; text: string; images?: ImagePayload[]; parts?: PromptPart[]; takeover?: boolean }
+  | { type: 'prompt.hold'; sessionId: string; messageId?: string; text: string; images?: ImagePayload[]; parts?: PromptPart[] }
   | { type: 'prompt.drop'; sessionId: string; heldId: string }
   | { type: 'prompt.push'; sessionId: string; heldId?: string; takeover?: boolean }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string; value?: string }
