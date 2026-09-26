@@ -2965,6 +2965,11 @@ fn held_in_its_project(
         before: Option<i64>,
         limit: usize,
     ) -> rusqlite::Result<TranscriptItemPage> {
+        // The helper's rows are found by the `p:` id its call files them
+        // under and their events by id, never by reading the JSON of every
+        // event in the chat: that was 2.3 GB from a cold disk on a 2.2 GB
+        // chat (bw-xeeqg.3).
+        self.ensure_event_refs(session_id)?;
         let newest_seq: i64 = self.connection.query_row(
             "SELECT COALESCE(MAX(seq),0) FROM event WHERE session_id=?1",
             [session_id],
@@ -2984,26 +2989,25 @@ fn held_in_its_project(
         let (items, anchors) = loop {
             let mut statement = self.connection.prepare(
                 r#"WITH candidate_events(item_kind,item_id,started) AS (
-                     SELECT CASE type
+                     SELECT CASE event.type
                        WHEN 'message.started' THEN 'message'
                        WHEN 'thinking.delta' THEN 'thinking'
                        WHEN 'tool.started' THEN 'tool'
                        WHEN 'ask.permission' THEN 'ask'
                        WHEN 'question.requested' THEN 'question'
                        WHEN 'plan.proposed' THEN 'plan' END,
-                       CASE type
-                       WHEN 'message.started' THEN json_extract(json,'$.messageId')
-                       WHEN 'thinking.delta' THEN json_extract(json,'$.messageId')
-                       WHEN 'tool.started' THEN json_extract(json,'$.toolCallId')
-                       WHEN 'ask.permission' THEN json_extract(json,'$.askId')
-                       WHEN 'question.requested' THEN json_extract(json,'$.requestId')
-                       WHEN 'plan.proposed' THEN json_extract(json,'$.proposalId') END,
-                       seq
-                     FROM event
-                     WHERE session_id=?1 AND seq>?2 AND seq<?3
-                       AND json_extract(json,'$.parentToolCallId')=?4
-                       AND type IN ('message.started','thinking.delta','tool.started',
-                                    'ask.permission','question.requested','plan.proposed')
+                       CASE event.type
+                       WHEN 'message.started' THEN json_extract(event.json,'$.messageId')
+                       WHEN 'thinking.delta' THEN json_extract(event.json,'$.messageId')
+                       WHEN 'tool.started' THEN json_extract(event.json,'$.toolCallId')
+                       WHEN 'ask.permission' THEN json_extract(event.json,'$.askId')
+                       WHEN 'question.requested' THEN json_extract(event.json,'$.requestId')
+                       WHEN 'plan.proposed' THEN json_extract(event.json,'$.proposalId') END,
+                       event.seq
+                     FROM event_ref
+                     CROSS JOIN event ON event.session_id=?1 AND event.seq=event_ref.seq
+                     WHERE event_ref.session_id=?1 AND event_ref.ref='p:' || ?4
+                       AND event_ref.seq>?2 AND event_ref.seq<?3
                    ), anchors(item_kind,item_id,started) AS (
                      SELECT item_kind,item_id,MIN(started) FROM candidate_events
                      GROUP BY item_kind,item_id ORDER BY MIN(started) DESC LIMIT ?5
@@ -3013,29 +3017,42 @@ fn held_in_its_project(
                        AND event.type='agent.started'
                        AND json_extract(event.json,'$.toolCallId') IN
                            (SELECT item_id FROM anchors WHERE item_kind='tool')
+                   ), picked(seq) AS (
+                     SELECT seq FROM event_ref
+                     WHERE session_id=?1 AND seq>?2 AND seq<?3
+                       AND ref IN (SELECT 'm:' || item_id FROM anchors
+                                   WHERE item_kind IN ('message','thinking'))
+                       AND type IN ('message.started','text.delta','thinking.delta','message.completed',
+                                    'message.retracted','image','image.compare','widget')
+                     UNION
+                     SELECT seq FROM event_ref
+                     WHERE session_id=?1 AND seq>?2 AND seq<?3
+                       AND ref IN (SELECT 't:' || item_id FROM anchors WHERE item_kind='tool')
+                       AND type IN ('tool.started','tool.completed','tool.progress','diff')
+                     UNION
+                     SELECT seq FROM event_ref
+                     WHERE session_id=?1 AND seq>?2 AND seq<?3
+                       AND ref IN (SELECT 'a:' || id FROM selected_agents)
+                     UNION
+                     -- Asks, questions and plans are few; their ids are read
+                     -- from their own rows through the type index.
+                     SELECT seq FROM event
+                     WHERE session_id=?1 AND seq>?2 AND seq<?3
+                       AND type IN ('ask.permission','ask.resolved','question.requested',
+                                    'question.resolved','plan.proposed','plan.resolved')
+                       AND ((type IN ('ask.permission','ask.resolved')
+                              AND json_extract(json,'$.askId') IN
+                                  (SELECT item_id FROM anchors WHERE item_kind='ask'))
+                         OR (type IN ('question.requested','question.resolved')
+                              AND json_extract(json,'$.requestId') IN
+                                  (SELECT item_id FROM anchors WHERE item_kind='question'))
+                         OR (type IN ('plan.proposed','plan.resolved')
+                              AND json_extract(json,'$.proposalId') IN
+                                  (SELECT item_id FROM anchors WHERE item_kind='plan')))
                    )
-                   SELECT event.seq,event.json FROM event
-                   WHERE event.session_id=?1 AND event.seq>?2 AND event.seq<?3 AND (
-                     (event.type IN ('message.started','text.delta','thinking.delta','message.completed',
-                                     'message.retracted','image','image.compare','widget')
-                       AND json_extract(event.json,'$.messageId') IN
-                           (SELECT item_id FROM anchors WHERE item_kind IN ('message','thinking')))
-                     OR (event.type IN ('tool.started','tool.completed','tool.progress','diff')
-                       AND json_extract(event.json,'$.toolCallId') IN
-                           (SELECT item_id FROM anchors WHERE item_kind='tool'))
-                     OR (event.type IN ('ask.permission','ask.resolved')
-                       AND json_extract(event.json,'$.askId') IN
-                           (SELECT item_id FROM anchors WHERE item_kind='ask'))
-                     OR (event.type IN ('question.requested','question.resolved')
-                       AND json_extract(event.json,'$.requestId') IN
-                           (SELECT item_id FROM anchors WHERE item_kind='question'))
-                     OR (event.type IN ('plan.proposed','plan.resolved')
-                       AND json_extract(event.json,'$.proposalId') IN
-                           (SELECT item_id FROM anchors WHERE item_kind='plan'))
-                     OR (event.type IN ('agent.started','agent.progress','agent.finished',
-                                        'agent.relayed','agent.identified')
-                       AND json_extract(event.json,'$.agentId') IN (SELECT id FROM selected_agents))
-                   ) ORDER BY event.seq"#,
+                   SELECT event.seq,event.json FROM picked
+                   CROSS JOIN event ON event.session_id=?1 AND event.seq=picked.seq
+                   ORDER BY event.seq"#,
             )?;
             let rows = statement
                 .query_map(
@@ -3081,11 +3098,8 @@ fn held_in_its_project(
             .min();
         let has_older = match oldest_anchor {
             Some(cursor) => self.connection.query_row(
-                r#"SELECT EXISTS(SELECT 1 FROM event
-                    WHERE session_id=?1 AND seq>?2 AND seq<?3
-                      AND json_extract(json,'$.parentToolCallId')=?4
-                      AND type IN ('message.started','thinking.delta','tool.started',
-                                   'ask.permission','question.requested','plan.proposed'))"#,
+                r#"SELECT EXISTS(SELECT 1 FROM event_ref
+                    WHERE session_id=?1 AND ref='p:' || ?4 AND seq>?2 AND seq<?3)"#,
                 params![session_id, reset_seq, cursor, parent_id],
                 |row| row.get::<_, bool>(0),
             )?,
