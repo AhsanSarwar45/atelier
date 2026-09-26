@@ -59,7 +59,7 @@ describe('Markdown file links', () => {
     const badge = screen.getByTestId('markdown-web-badge');
     expect(badge).toHaveAttribute('target', '_blank');
     expect(badge).toHaveAttribute('data-web-kind', 'site');
-    expect(badge).toHaveClass('h-5');
+    expect(badge).toHaveClass('min-h-5');
     expect(screen.getByTestId('external-favicon')).toHaveAttribute('decoding', 'async');
     expect(screen.getByTestId('external-favicon')).toHaveAttribute('src', 'https://example.com/favicon.ico');
     expect(openExternal).not.toHaveBeenCalled();

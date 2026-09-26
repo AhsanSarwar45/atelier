@@ -6,6 +6,8 @@
  * (docs/designs/app-shell.md §1.5). Nothing here writes a finished colour.
  *
  * Its HEIGHT is spelled once too, and by `size` below — including on a phone.
+ * It is a minimum, the same for every chip of that size: one line of words is
+ * exactly that tall, and a chip grows only when its words take a second line.
  * A clickable chip is drawn as whatever it has to be to be clicked, which is
  * `<Badge asChild><Button>` for a card and `<Badge asChild><a href>` for a file
  * or a site, and the coarse-pointer floor in `globals.css` names exactly those
@@ -81,6 +83,18 @@ const badgeVariants = cva(
   // gives both their room back without moving the centre. `[data-slot]`
   // spares the dot and the button, which are not text.
   //
+  // The padding is only there to undo the trim, so it is given only where the
+  // trim happens. Firefox, and Zen on top of it, has no `text-box`: it drew
+  // the label untrimmed with the padding still added, and every chip whose
+  // height comes from its words stood 27px beside its 20px neighbours
+  // (bw-3nv0s.1).
+  //
+  // Its height is `size`'s minimum and nothing else. `!h-auto` is there so
+  // no caller and no element a chip is drawn as can give it another: a chip
+  // drawn as a `size="sm"` button was 32px tall the moment a chip's height
+  // became a minimum, because the button's own `h-8` was a second answer
+  // (bw-3nv0s.1).
+  //
   // Every chip is drawn in the body face, and so is everything inside it. A
   // chip that switched to monospace sat higher than the ones beside it, because
   // each face puts its letters at a different height in the same box, and
@@ -105,7 +119,7 @@ const badgeVariants = cva(
   // resets: it returns family, size, weight and line height to the chip's in
   // one declaration, which is what `size` below spent two comments getting
   // right.
-  '![font-family:var(--font-body)] [&_*]:![font-family:inherit] inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:[text-box:trim-both_ex_alphabetic] [&>span:not([data-slot])]:py-[0.35em] [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!rounded-none [&_code]:!text-inherit [&_code]:![font:inherit]',
+  '![font-family:var(--font-body)] [&_*]:![font-family:inherit] !h-auto inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0 [&>span:not([data-slot])]:[text-box:trim-both_ex_alphabetic] supports-[text-box:trim-both_ex_alphabetic]:[&>span:not([data-slot])]:py-[0.35em] [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!rounded-none [&_code]:!text-inherit [&_code]:![font:inherit]',
   {
     variants: {
       variant: {
@@ -131,14 +145,14 @@ const badgeVariants = cva(
         true: 'opacity-50 pointer-events-none',
       },
       size: {
-        lg: 'rounded-md px-[0.5rem] h-7 min-w-7 gap-1.5 text-xs [&_svg]:size-3.5',
-        md: 'rounded-md px-[0.45rem] h-6 min-w-6 gap-1.5 text-xs [&_svg]:size-3.5 ',
+        lg: 'rounded-md px-[0.5rem] min-h-7 min-w-7 gap-1.5 text-xs [&_svg]:size-3.5',
+        md: 'rounded-md px-[0.45rem] min-h-6 min-w-6 gap-1.5 text-xs [&_svg]:size-3.5 ',
         // Same fault as `xs` below, one size up, and it arrived the moment the
         // rail's chips were moved onto this size: 0.75rem of line for 0.6875rem
         // of letters cuts the tail off every g and y inside a `truncate`
         // (bw-jaoz.1). The letters get room to be whole; the badge's own 1.25rem
         // is untouched, so nothing beside it moves.
-        sm: 'rounded-sm px-[0.325rem] h-5 min-w-5 gap-1 text-[0.6875rem] leading-[0.9375rem] [&_svg]:size-3',
+        sm: 'rounded-sm px-[0.325rem] min-h-5 min-w-5 gap-1 text-[0.6875rem] leading-[0.9375rem] [&_svg]:size-3',
         // The line the text is drawn on used to be shorter than the text
         // itself — 0.5rem of room for 0.625rem of letters — and a label inside
         // a badge is usually wrapped in `truncate`, which hides whatever will
@@ -146,31 +160,26 @@ const badgeVariants = cva(
         // the rail's chip read "Workina" where it says "Working" (bw-96is.20).
         // Still well inside the badge's own 1rem height, so nothing beside it
         // moves; only the box the letters are allowed to use grows.
-        xs: 'rounded-sm px-[0.25rem] h-4 min-w-4 gap-1 text-[0.625rem] leading-[0.875rem] [&_svg]:size-3',
+        xs: 'rounded-sm px-[0.25rem] min-h-4 min-w-4 gap-1 text-[0.625rem] leading-[0.875rem] [&_svg]:size-3',
       },
       shape: {
         default: '',
         circle: 'rounded-full',
       },
       // A chip whose words are an address — a file's path — which can be most
-      // of a line by itself. It is let break anywhere and grow as tall as the
-      // lines it needs, rather than running out of the message it sits in.
-      // Listed after `size` so it wins that size's fixed height, but not its
-      // `min-h`: on one line it is exactly as tall as every other chip of its
-      // size. It was a pixel shorter than a card's chip beside it, and in the
-      // `@` menu a skill's chip was squeezed into a column of broken letters
-      // (bw-mydas.1). A chip that names a card, a chat or a skill never wraps;
-      // it ends in an ellipsis instead (`reference-badge.tsx`).
+      // of a line by itself. It is let break anywhere, rather than running out
+      // of the message it sits in. It says nothing about height: every chip's
+      // height is `size`'s minimum, which the words exceed only when they
+      // really take a second line. It used to swap the size's fixed height for
+      // one of its own, so a file chip was sized by a different rule from every
+      // other chip, and any change inside the label moved one kind and not the
+      // other (bw-3nv0s.1). A chip that names a card, a chat or a skill never
+      // wraps; it ends in an ellipsis instead (`reference-badge.tsx`).
       wrap: {
-        true: 'h-auto max-w-full whitespace-normal break-all py-px',
+        true: 'max-w-full whitespace-normal break-all',
       },
     },
     compoundVariants: [
-      /* A chip allowed to wrap is, on one line, exactly its size's height. */
-      { wrap: true, size: 'lg', className: 'min-h-7' },
-      { wrap: true, size: 'md', className: 'min-h-6' },
-      { wrap: true, size: 'sm', className: 'min-h-5' },
-      { wrap: true, size: 'xs', className: 'min-h-4' },
       /* Light */
       {
         variant: 'primary',

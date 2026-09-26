@@ -43,8 +43,22 @@ describe('Badge', () => {
       </Badge>,
     );
     const chip = screen.getByText('a/very/long/path.ts');
-    expect(chip).toHaveClass('h-auto', 'whitespace-normal', 'break-all');
-    expect(chip).not.toHaveClass('h-5', 'whitespace-nowrap');
+    expect(chip).toHaveClass('whitespace-normal', 'break-all');
+    expect(chip).not.toHaveClass('whitespace-nowrap');
+  });
+
+  it('sizes a wrapping chip by the same rule as every other chip', () => {
+    render(
+      <>
+        <Badge size="sm" wrap>
+          a/very/long/path.ts
+        </Badge>
+        <Badge size="sm">card-1</Badge>
+      </>,
+    );
+    const height = (el: HTMLElement) => el.className.split(' ').filter((c) => /^(min-|max-)?h-/.test(c));
+    expect(height(screen.getByText('a/very/long/path.ts'))).toEqual(['min-h-5']);
+    expect(height(screen.getByText('card-1'))).toEqual(['min-h-5']);
   });
 
   it('takes a colour that is not a hex, thinning it the same way', () => {
