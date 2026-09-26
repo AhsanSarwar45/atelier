@@ -17,6 +17,16 @@ use std::thread::{self, JoinHandle};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 type Reply<T> = oneshot::Sender<Result<T, String>>;
+type LiveMenus = Arc<Mutex<HashMap<String, Event>>>;
+/// One read for the reader pool, given that reader's own connection and the
+/// menus the provider named live.
+type ReadJob = Box<dyn FnOnce(&Store, &LiveMenus) + Send>;
+
+/// Readers beside the one writer. A chat's page, history and search can take
+/// seconds on a big chat or a cold disk; on the writer every send, stop and
+/// status write queued behind them and the whole app stood still (bw-0xeav.3).
+/// SQLite in WAL mode lets these read while the writer writes.
+const READERS: usize = 3;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,17 +78,11 @@ enum Command {
     BeadsForSession(String, Reply<Vec<String>>),
     RememberBeadLink(String, String, String, String, Reply<()>),
     SessionsForBead(String, Reply<Vec<Session>>),
-    Search(String, usize, Reply<Vec<SearchHit>>),
-    AccountHandoff(String, Reply<String>),
-    ChatText(String, Reply<String>),
     SaveAccountHandoff(String, String, Reply<()>),
     SavedAccountHandoff(String, Reply<Option<String>>),
     ClearAccountHandoff(String, Reply<()>),
-    Spend(Reply<Vec<Spend>>),
-    ToolDetails(String, String, Reply<Option<serde_json::Value>>),
     Append(Event, Reply<Option<Event>>),
     AppendMany(Vec<Event>, bool, Reply<usize>),
-    EventsSince(String, i64, Reply<Vec<Event>>),
     EventCount(String, Reply<i64>),
     TimelineCount(String, Reply<i64>),
     FollowedTo(String, Reply<Option<i64>>),
@@ -94,23 +98,11 @@ enum Command {
     SessionStatus(String, Reply<Option<serde_json::Value>>),
     SessionActivity(String, Reply<SessionActivity>),
     SessionActivities(Reply<HashMap<String, SessionActivity>>),
-    TokenStats(String, Reply<TokenStats>),
     NoteSummaryRun(String, String, String, i64, Reply<()>),
     SummaryRuns(String, usize, Reply<Vec<i64>>),
-    ViewEvents(String, Reply<Vec<Event>>),
     SteeringMenu(String, Reply<serde_json::Value>),
     OfferedMenu(String, Reply<serde_json::Value>),
     OfferCatalogue(String, Option<Event>, Vec<serde_json::Value>, Reply<()>),
-    Snapshot(String, Reply<SnapshotParts>),
-    TranscriptItems(String, Option<i64>, usize, Reply<TranscriptItemPage>),
-    AgentTranscriptItems(
-        String,
-        String,
-        Option<i64>,
-        usize,
-        Reply<TranscriptItemPage>,
-    ),
-    ProjectedAgents(String, Reply<Vec<serde_json::Value>>),
     HoldMessage(
         String,
         String,
@@ -133,6 +125,8 @@ enum Command {
 struct Owner {
     commands: mpsc::UnboundedSender<Command>,
     worker: Mutex<Option<JoinHandle<()>>>,
+    reads: Mutex<Option<std::sync::mpsc::Sender<ReadJob>>>,
+    readers: Mutex<Vec<JoinHandle<()>>>,
     #[cfg(test)]
     stopped: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -142,6 +136,12 @@ impl Drop for Owner {
         let _ = self.commands.send(Command::Shutdown);
         if let Some(worker) = self.worker.lock().unwrap().take() {
             let _ = worker.join();
+        }
+        // The writer held the other sender; with both gone every reader
+        // finishes the read it is on and stops.
+        self.reads.lock().unwrap().take();
+        for reader in self.readers.lock().unwrap().drain(..) {
+            let _ = reader.join();
         }
     }
 }
@@ -158,6 +158,31 @@ impl ChatDb {
         // Open before starting the thread so migration/open failures are
         // returned to startup instead of becoming a lost worker panic.
         let store = Store::open(path).map_err(|error| error.to_string())?;
+        let live_menus: LiveMenus = Default::default();
+        let (reads, read_queue) = std::sync::mpsc::channel::<ReadJob>();
+        let read_queue = Arc::new(Mutex::new(read_queue));
+        let mut readers = Vec::new();
+        for index in 0..READERS {
+            let reader = Store::open_reader(path).map_err(|error| error.to_string())?;
+            let queue = read_queue.clone();
+            let menus = live_menus.clone();
+            readers.push(
+                thread::Builder::new()
+                    .name(format!("atelier-chat-read-{index}"))
+                    .spawn(move || loop {
+                        let job = queue.lock().unwrap().recv();
+                        let Ok(job) = job else { break };
+                        // A read that panics answers nothing and its caller is
+                        // told so; the reader stays for the next one.
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            job(&reader, &menus)
+                        }));
+                    })
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+        let worker_reads = reads.clone();
+        let worker_menus = live_menus.clone();
         let (commands, receiver) = mpsc::unbounded_channel();
         let (global, _) = broadcast::channel(1024);
         let sessions = Arc::new(Mutex::new(HashMap::new()));
@@ -170,7 +195,7 @@ impl ChatDb {
         let worker = thread::Builder::new()
             .name("atelier-chat-db".to_string())
             .spawn(move || {
-                run(store, receiver, worker_global, worker_sessions);
+                run(store, receiver, worker_global, worker_sessions, worker_menus, worker_reads);
                 #[cfg(test)]
                 worker_stopped.store(true, std::sync::atomic::Ordering::SeqCst);
             })
@@ -179,12 +204,36 @@ impl ChatDb {
             owner: Arc::new(Owner {
                 commands,
                 worker: Mutex::new(Some(worker)),
+                reads: Mutex::new(Some(reads)),
+                readers: Mutex::new(readers),
                 #[cfg(test)]
                 stopped,
             }),
             global,
             sessions,
         })
+    }
+
+    /// Run a read on the reader pool, never queued behind the writer.
+    async fn read<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&Store, &LiveMenus) -> rusqlite::Result<T> + Send + 'static,
+    ) -> Result<T, String> {
+        let (reply, receive) = oneshot::channel();
+        let job: ReadJob = Box::new(move |store, menus| {
+            let _ = reply.send(work(store, menus).map_err(|error| error.to_string()));
+        });
+        self.owner
+            .reads
+            .lock()
+            .unwrap()
+            .as_ref()
+            .ok_or_else(|| "chat database readers stopped".to_string())?
+            .send(job)
+            .map_err(|_| "chat database readers stopped".to_string())?;
+        receive
+            .await
+            .map_err(|_| "chat database reader stopped before replying".to_string())?
     }
 
     async fn request<T>(&self, make: impl FnOnce(Reply<T>) -> Command) -> Result<T, String> {
@@ -338,14 +387,13 @@ impl ChatDb {
             .await
     }
     pub async fn search(&self, query: String, limit: usize) -> Result<Vec<SearchHit>, String> {
-        self.request(|reply| Command::Search(query, limit, reply))
-            .await
+        self.read(move |store, _| store.search(&query, limit)).await
     }
     pub async fn account_handoff(&self, id: String) -> Result<String, String> {
-        self.request(|reply| Command::AccountHandoff(id, reply)).await
+        self.read(move |store, _| store.account_handoff(&id)).await
     }
     pub async fn chat_text(&self, id: String) -> Result<String, String> {
-        self.request(|reply| Command::ChatText(id, reply)).await
+        self.read(move |store, _| store.chat_text(&id)).await
     }
     pub async fn save_account_handoff(&self, id: String, context: String) -> Result<(), String> {
         self.request(|reply| Command::SaveAccountHandoff(id, context, reply)).await
@@ -357,15 +405,14 @@ impl ChatDb {
         self.request(|reply| Command::ClearAccountHandoff(id, reply)).await
     }
     pub async fn spend(&self) -> Result<Vec<Spend>, String> {
-        self.request(Command::Spend).await
+        self.read(|store, _| store.spend()).await
     }
     pub async fn tool_details(
         &self,
         session: String,
         tool: String,
     ) -> Result<Option<serde_json::Value>, String> {
-        self.request(|reply| Command::ToolDetails(session, tool, reply))
-            .await
+        self.read(move |store, _| store.tool_details(&session, &tool)).await
     }
 
     /// Append a provider event after assigning its durable sequence number.
@@ -391,8 +438,17 @@ impl ChatDb {
     }
 
     pub async fn events_since(&self, session_id: String, since: i64) -> Result<Vec<Event>, String> {
-        self.request(|reply| Command::EventsSince(session_id, since, reply))
-            .await
+        self.read(move |store, menus| {
+            let live = menus.lock().unwrap().get(&session_id).cloned().filter(|menu| {
+                menu.fields
+                    .get("seq")
+                    .and_then(serde_json::Value::as_i64)
+                    .is_some_and(|seq| seq > since)
+            });
+            let events = store.events_since(&session_id, since)?;
+            Ok(view_with_live_menu(events, live.as_ref()))
+        })
+        .await
     }
 
     pub async fn event_count(&self, session_id: String) -> Result<i64, String> {
@@ -457,8 +513,7 @@ impl ChatDb {
         self.request(Command::SessionActivities).await
     }
     pub async fn token_stats(&self, session_id: String) -> Result<TokenStats, String> {
-        self.request(|reply| Command::TokenStats(session_id, reply))
-            .await
+        self.read(move |store, _| store.token_stats(&session_id)).await
     }
     pub async fn note_summary_run(
         &self,
@@ -476,8 +531,13 @@ impl ChatDb {
     }
 
     pub async fn view_events(&self, session_id: String) -> Result<Vec<Event>, String> {
-        self.request(|reply| Command::ViewEvents(session_id, reply))
-            .await
+        self.read(move |store, menus| {
+            let menus = menus.lock().unwrap().clone();
+            let events = store.view_events(&session_id)?;
+            let live = live_steering_menu(store, &menus, &session_id);
+            Ok(view_with_live_menu(events, live.as_ref()))
+        })
+        .await
     }
 
     pub async fn steering_menu(&self, session_id: String) -> Result<serde_json::Value, String> {
@@ -576,8 +636,7 @@ impl ChatDb {
     }
 
     pub async fn snapshot(&self, session_id: String) -> Result<SnapshotParts, String> {
-        self.request(|reply| Command::Snapshot(session_id, reply))
-            .await
+        self.read(move |store, menus| snapshot(store, menus, &session_id)).await
     }
 
     pub async fn transcript_items(
@@ -586,7 +645,7 @@ impl ChatDb {
         before: Option<i64>,
         limit: usize,
     ) -> Result<TranscriptItemPage, String> {
-        self.request(|reply| Command::TranscriptItems(session_id, before, limit, reply))
+        self.read(move |store, _| store.transcript_items(&session_id, before, limit))
             .await
     }
 
@@ -597,8 +656,8 @@ impl ChatDb {
         before: Option<i64>,
         limit: usize,
     ) -> Result<TranscriptItemPage, String> {
-        self.request(|reply| {
-            Command::AgentTranscriptItems(session_id, parent_id, before, limit, reply)
+        self.read(move |store, _| {
+            store.agent_transcript_items(&session_id, &parent_id, before, limit)
         })
         .await
     }
@@ -607,8 +666,7 @@ impl ChatDb {
         &self,
         session_id: String,
     ) -> Result<Vec<serde_json::Value>, String> {
-        self.request(|reply| Command::ProjectedAgents(session_id, reply))
-            .await
+        self.read(move |store, _| store.projected_agents(&session_id)).await
     }
 
     pub fn subscribe_all(&self) -> broadcast::Receiver<StoreUpdate> {
@@ -1104,14 +1162,17 @@ fn run(
     mut commands: mpsc::UnboundedReceiver<Command>,
     global: broadcast::Sender<StoreUpdate>,
     sessions: Arc<Mutex<HashMap<String, broadcast::Sender<SessionUpdate>>>>,
+    shared_menus: LiveMenus,
+    reads: std::sync::mpsc::Sender<ReadJob>,
 ) {
     let mut agent_lifecycles: HashMap<String, super::lifecycle::AgentLifecycle> = HashMap::new();
     // Provider catalogues describe the installed provider right now. They are
     // broadcast and replayed while this process is alive, and never restored
     // from a chat's durable history; only the provider's own last menu is
     // (`Store::provider_catalogue`).
-    let mut live_menus: HashMap<String, Event> = HashMap::new();
     while let Some(command) = commands.blocking_recv() {
+        // Held for one command at a time; a reader copies it and lets go.
+        let mut live_menus = shared_menus.lock().unwrap();
         match command {
             Command::CreateSession(session, reply) => {
                 respond(reply, store.create_session(&session))
@@ -1167,16 +1228,9 @@ fn run(
                     .map(|_| ()),
             ),
             Command::SessionsForBead(id, reply) => respond(reply, store.sessions_for_bead(&id)),
-            Command::Search(query, limit, reply) => respond(reply, store.search(&query, limit)),
-            Command::AccountHandoff(id, reply) => respond(reply, store.account_handoff(&id)),
-            Command::ChatText(id, reply) => respond(reply, store.chat_text(&id)),
             Command::SaveAccountHandoff(id, context, reply) => respond(reply, store.save_account_handoff(&id, &context)),
             Command::SavedAccountHandoff(id, reply) => respond(reply, store.saved_account_handoff(&id)),
             Command::ClearAccountHandoff(id, reply) => respond(reply, store.clear_account_handoff(&id)),
-            Command::Spend(reply) => respond(reply, store.spend()),
-            Command::ToolDetails(session, tool, reply) => {
-                respond(reply, store.tool_details(&session, &tool))
-            }
             Command::Append(event, reply) => {
                 let lifecycle_before = agent_lifecycles.clone();
                 let result =
@@ -1306,18 +1360,6 @@ fn run(
                     }
                 }
             }
-            Command::EventsSince(session_id, since, reply) => {
-                let result = store.events_since(&session_id, since).map(|events| {
-                    let live = live_menus.get(&session_id).filter(|menu| {
-                        menu.fields
-                            .get("seq")
-                            .and_then(serde_json::Value::as_i64)
-                            .is_some_and(|seq| seq > since)
-                    });
-                    view_with_live_menu(events, live)
-                });
-                respond(reply, result)
-            }
             Command::EventCount(session_id, reply) => {
                 respond(reply, store.event_count(&session_id))
             }
@@ -1359,24 +1401,12 @@ fn run(
                 respond(reply, store.session_activity(&session_id))
             }
             Command::SessionActivities(reply) => respond(reply, store.session_activities()),
-            Command::TokenStats(session_id, reply) => {
-                respond(reply, store.token_stats(&session_id))
-            }
             Command::NoteSummaryRun(project, session_id, at, ms, reply) => respond(
                 reply,
                 store.note_summary_run(&project, &session_id, &at, ms),
             ),
             Command::SummaryRuns(project, limit, reply) => {
                 respond(reply, store.summary_runs(&project, limit))
-            }
-            Command::ViewEvents(session_id, reply) => {
-                let result = store
-                    .view_events(&session_id)
-                    .map(|events| {
-                        let live = live_steering_menu(&store, &live_menus, &session_id);
-                        view_with_live_menu(events, live.as_ref())
-                    });
-                respond(reply, result)
             }
             Command::HoldMessage(session_id, id, text, images, parts, at, reply) => respond(
                 reply,
@@ -1462,43 +1492,50 @@ fn run(
                 };
                 let _ = reply.send(result);
             }
-            Command::Snapshot(session_id, reply) => {
-                let result = (|| {
-                    let started = std::time::Instant::now();
-                    let live = live_steering_menu(&store, &live_menus, &session_id);
-                    let history = view_with_live_menu(store.view_events(&session_id)?, live.as_ref());
-                    let after_history = started.elapsed();
-                    let page = store.transcript_items(&session_id, None, 40)?;
-                    let after_page = started.elapsed();
-                    let agents = store.projected_agents(&session_id)?;
-                    tracing::info!(
-                        session_id,
-                        history_ms = after_history.as_millis(),
-                        page_ms = (after_page - after_history).as_millis(),
-                        agents_ms = (started.elapsed() - after_page).as_millis(),
-                        "bounded snapshot phases"
-                    );
-                    Ok(SnapshotParts {
-                        history,
-                        page,
-                        agents,
-                    })
-                })();
-                respond(reply, result)
-            }
-            Command::TranscriptItems(session_id, before, limit, reply) => {
-                respond(reply, store.transcript_items(&session_id, before, limit))
-            }
-            Command::AgentTranscriptItems(session_id, parent_id, before, limit, reply) => respond(
-                reply,
-                store.agent_transcript_items(&session_id, &parent_id, before, limit),
-            ),
-            Command::ProjectedAgents(session_id, reply) => {
-                respond(reply, store.projected_agents(&session_id))
-            }
             Command::Shutdown => break,
         }
+        drop(live_menus);
+        for session_id in store.take_unfilled() {
+            let _ = reads.send(Box::new(move |reader, _| {
+                if let Err(error) = reader.ensure_event_refs(&session_id) {
+                    tracing::warn!(session_id, %error, "could not file a chat's events by id");
+                }
+            }));
+        }
     }
+}
+
+/// One self-consistent cold-chat read on a reader. The chat's ids are filled
+/// first, then the history, page and helpers are read in one read
+/// transaction, so an append lands wholly before or wholly after the page's
+/// `newest_seq`, which the stream uses as its watermark.
+fn snapshot(store: &Store, menus: &LiveMenus, session_id: &str) -> rusqlite::Result<SnapshotParts> {
+    store.ensure_event_refs(session_id)?;
+    let menus = menus.lock().unwrap().clone();
+    store.begin_read()?;
+    let result = (|| {
+        let started = std::time::Instant::now();
+        let live = live_steering_menu(store, &menus, session_id);
+        let history = view_with_live_menu(store.view_events(session_id)?, live.as_ref());
+        let after_history = started.elapsed();
+        let page = store.transcript_items(session_id, None, 40)?;
+        let after_page = started.elapsed();
+        let agents = store.projected_agents(session_id)?;
+        tracing::info!(
+            session_id,
+            history_ms = after_history.as_millis(),
+            page_ms = (after_page - after_history).as_millis(),
+            agents_ms = (started.elapsed() - after_page).as_millis(),
+            "bounded snapshot phases"
+        );
+        Ok(SnapshotParts {
+            history,
+            page,
+            agents,
+        })
+    })();
+    let _ = store.end_read();
+    result
 }
 
 #[cfg(test)]
@@ -1884,6 +1921,131 @@ mod tests {
         // A message the provider took back is one nobody said.
         persist(said("message.retracted", json!({"messageId":"m1"})));
         assert!(store.search("PERIWINKLE", 10).unwrap().is_empty());
+    }
+
+    /// A send, a stop and a status write finish while every reader is busy.
+    ///
+    /// The manager's report: when a big chat was being read the whole app
+    /// hung, "i cant stop stuff, i can't send messages, i cant stop chats".
+    /// Every read and write took turns on one thread, so a send waited for
+    /// whatever page was being read. Reads now run beside the writer; here
+    /// each reader is held for two seconds and the writes still come back at
+    /// once (bw-0xeav.3).
+    #[tokio::test]
+    async fn a_send_and_a_stop_finish_while_every_reader_is_busy() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        database.create_session(Session {
+            id: "chat".into(), brand: "claude".into(), external_id: None,
+            project_id: "here".into(), project_path: "/here".into(), cwd: "/here".into(),
+            model: None, permission_mode: "default".into(), effort: None,
+            collaboration_mode: None, profile: None, title: None, state: "running".into(),
+            origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
+            last_spoke_at: None, begun_by: None, named_by_owner: false,
+        }).await.unwrap();
+        let (started, mut all_started) = tokio::sync::mpsc::unbounded_channel();
+        let slow: Vec<_> = (0..READERS)
+            .map(|_| {
+                let database = database.clone();
+                let started = started.clone();
+                tokio::spawn(async move {
+                    database
+                        .read(move |store, _| {
+                            let _ = started.send(());
+                            std::thread::sleep(std::time::Duration::from_secs(2));
+                            store.transcript_items("chat", None, 40)
+                        })
+                        .await
+                })
+            })
+            .collect();
+        for _ in 0..READERS {
+            all_started.recv().await.unwrap();
+        }
+
+        let begun = std::time::Instant::now();
+        let said: Event = serde_json::from_value(json!({
+            "type":"message.started","sessionId":"chat","seq":0,"at":"now",
+            "messageId":"m1","role":"user"
+        }))
+        .unwrap();
+        assert!(database.append(said).await.unwrap().is_some());
+        database
+            .hold_message("chat".into(), "held-1".into(), "and then".into(), json!([]), None, "now".into())
+            .await
+            .unwrap();
+        database
+            .update_session(
+                "chat".into(),
+                SessionPatch { state: Some("idle".into()), ..Default::default() },
+                None,
+            )
+            .await
+            .unwrap();
+        let took = begun.elapsed();
+        assert!(
+            took < std::time::Duration::from_millis(500),
+            "the writes waited {took:?} behind the reads"
+        );
+        for read in slow {
+            read.await.unwrap().unwrap();
+        }
+    }
+
+    /// A chat stored before its events were filed by id is filed by a reader,
+    /// not by the writer on its next progress report, and pruning resumes.
+    ///
+    /// Filing the owner's busiest chat reads about a gigabyte once; on the
+    /// writer that would have held every send and stop for ten seconds
+    /// (bw-0xeav.3).
+    #[tokio::test]
+    async fn a_chat_filed_before_the_id_rows_is_filled_beside_the_writer() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let progress = |seq: i64, output: &str| -> Event {
+            serde_json::from_value(json!({
+                "type":"tool.progress","sessionId":"chat","seq":seq,"at":"now",
+                "toolCallId":"call","output":output
+            }))
+            .unwrap()
+        };
+        {
+            let store = Store::open(&path).unwrap();
+            let started: Event = serde_json::from_value(json!({
+                "type":"tool.started","sessionId":"chat","seq":1,"at":"now","toolCallId":"call","name":"Bash"
+            }))
+            .unwrap();
+            assert!(store.append_event(&started).unwrap());
+            assert!(store.append_event(&progress(2, "one")).unwrap());
+            // As an older build left it.
+            store
+                .connection()
+                .execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_ready;")
+                .unwrap();
+        }
+        let database = ChatDb::open(&path).unwrap();
+        let reports = |database: ChatDb| async move {
+            database
+                .read(|store, _| {
+                    store.connection().query_row(
+                        "SELECT COUNT(*), (SELECT COUNT(*) FROM event_ref_ready) FROM event WHERE type='tool.progress'",
+                        [],
+                        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                    )
+                })
+                .await
+                .unwrap()
+        };
+        database.append(progress(0, "two")).await.unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut seen = reports(database.clone()).await;
+        while seen.1 == 0 && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            seen = reports(database.clone()).await;
+        }
+        assert_eq!(seen, (2, 1), "the old report was pruned by the writer, or the chat was never filled");
+        database.append(progress(0, "three")).await.unwrap();
+        assert_eq!(reports(database.clone()).await, (1, 1));
     }
 
     #[tokio::test]

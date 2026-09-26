@@ -270,6 +270,12 @@ pub struct Store {
     /// Each chat's helpers as last folded, with the newest lifecycle row and
     /// the count of them they were folded from (`projected_agents`).
     agents_folded: std::cell::RefCell<HashMap<String, ((i64, i64), Vec<Value>)>>,
+    /// A reader beside the writer (`open_reader`): it may write nothing but
+    /// a chat's id rows, and those only in `ensure_event_refs`.
+    reader: bool,
+    /// Chats whose id rows the writer found missing and left for a reader to
+    /// fill (`take_unfilled`), so no append waits for a whole chat's JSON.
+    unfilled: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 /// What has already been said about one chat, and to whom (`session_notice`).
@@ -432,7 +438,43 @@ impl Store {
         Ok(Self {
             connection,
             agents_folded: Default::default(),
+            reader: false,
+            unfilled: Default::default(),
         })
+    }
+
+    /// Another connection to a database `open` has already brought up to
+    /// date, for reads that must not queue behind the writer's appends. It is
+    /// query-only: a read that tried to write would fail rather than take the
+    /// write lock the sends and stops need (bw-0xeav.3).
+    pub fn open_reader(path: &Path) -> rusqlite::Result<Self> {
+        let connection = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        connection.busy_timeout(Duration::from_secs(10))?;
+        connection.execute_batch("PRAGMA query_only = 1;")?;
+        Ok(Self {
+            connection,
+            agents_folded: Default::default(),
+            reader: true,
+            unfilled: Default::default(),
+        })
+    }
+
+    /// Read what follows as of one moment, until `end_read`.
+    pub fn begin_read(&self) -> rusqlite::Result<()> {
+        self.connection.execute_batch("BEGIN DEFERRED")
+    }
+
+    pub fn end_read(&self) -> rusqlite::Result<()> {
+        self.connection.execute_batch("COMMIT")
+    }
+
+    /// Chats the writer skipped pruning for because their id rows were not
+    /// filled yet. Each is named once per process; a reader fills it.
+    pub fn take_unfilled(&self) -> Vec<String> {
+        self.unfilled.borrow_mut().drain().collect()
     }
 
     /// The last positional migration understood by this build.
@@ -1067,6 +1109,12 @@ fn held_in_its_project(
                 event.fields.get("agentId").and_then(Value::as_str),
             );
             self.remember_event_refs(session_id, seq, &kind, &refs)?;
+            if seq == 1 {
+                // A chat begun under this build has no older events to file.
+                self.connection
+                    .prepare_cached("INSERT OR IGNORE INTO event_ref_ready (session_id) VALUES (?1)")?
+                    .execute([session_id])?;
+            }
             self.remove_superseded_progress(event, session_id, seq)?;
             self.note_the_person_spoke(event, session_id, at)?;
         }
@@ -1143,7 +1191,14 @@ fn held_in_its_project(
             return Ok(0);
         };
         // Found by id, not by reading the JSON of every earlier report
-        // (bw-0xeav.1).
+        // (bw-0xeav.1). Until a chat's older ids are filled the writer leaves
+        // the old reports for later rather than reading the whole chat with
+        // every send and stop waiting: a reader fills it, and the next report
+        // prunes everything before it.
+        if !self.reader && !self.event_refs_ready(session_id)? {
+            self.unfilled.borrow_mut().insert(session_id.to_string());
+            return Ok(0);
+        }
         self.ensure_event_refs(session_id)?;
         let reference = format!("{}:{owner}", if key == "toolCallId" { 't' } else { 'a' });
         let removed = self
@@ -1179,45 +1234,54 @@ fn held_in_its_project(
         Ok(())
     }
 
+    fn event_refs_ready(&self, session_id: &str) -> rusqlite::Result<bool> {
+        self.connection
+            .prepare_cached("SELECT 1 FROM event_ref_ready WHERE session_id=?1")?
+            .exists([session_id])
+    }
+
     /// Fill a chat's id rows from its stored events, once.
     ///
     /// Events stored since this table existed already have theirs; this reads
     /// the older ones, which costs one pass over the chat's JSON the first
-    /// time and nothing after.
-    fn ensure_event_refs(&self, session_id: &str) -> rusqlite::Result<()> {
-        let ready = self
-            .connection
-            .prepare_cached("SELECT 1 FROM event_ref_ready WHERE session_id=?1")?
-            .exists([session_id])?;
-        if ready {
+    /// time and nothing after. The pass is a plain read and the write lock is
+    /// taken only for the inserts, so the writer's appends never wait for the
+    /// reading. An event stored meanwhile brings its own rows, and one pruned
+    /// meanwhile leaves a row that matches nothing.
+    pub fn ensure_event_refs(&self, session_id: &str) -> rusqlite::Result<()> {
+        if self.event_refs_ready(session_id)? {
             return Ok(());
         }
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT seq, type, json_extract(json,'$.messageId'), json_extract(json,'$.toolCallId'),
+                    json_extract(json,'$.agentId')
+               FROM event WHERE session_id=?1 AND type IN ({})",
+            REF_TYPES
+                .iter()
+                .map(|kind| format!("'{kind}'"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ))?;
+        let rows = statement
+            .query_map([session_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(statement);
         let owns_transaction = self.connection.is_autocommit();
-        if owns_transaction {
-            self.connection.execute_batch("BEGIN IMMEDIATE")?;
+        if self.reader {
+            self.connection.execute_batch("PRAGMA query_only = 0;")?;
         }
         let filled = (|| {
-            let mut statement = self.connection.prepare(&format!(
-                "SELECT seq, type, json_extract(json,'$.messageId'), json_extract(json,'$.toolCallId'),
-                        json_extract(json,'$.agentId')
-                   FROM event WHERE session_id=?1 AND type IN ({})",
-                REF_TYPES
-                    .iter()
-                    .map(|kind| format!("'{kind}'"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ))?;
-            let rows = statement
-                .query_map([session_id], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                    ))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
+            if owns_transaction {
+                self.connection.execute_batch("BEGIN IMMEDIATE")?;
+            }
             for (seq, kind, message, tool, agent) in rows {
                 let refs = event_refs(&kind, message.as_deref(), tool.as_deref(), agent.as_deref());
                 self.remember_event_refs(session_id, seq, &kind, &refs)?;
@@ -1226,16 +1290,16 @@ fn held_in_its_project(
                 "INSERT OR IGNORE INTO event_ref_ready (session_id) VALUES (?1)",
                 [session_id],
             )?;
+            if owns_transaction {
+                self.connection.execute_batch("COMMIT")?;
+            }
             Ok(())
         })();
-        if owns_transaction {
-            match filled {
-                Ok(()) => self.connection.execute_batch("COMMIT")?,
-                Err(error) => {
-                    let _ = self.connection.execute_batch("ROLLBACK");
-                    return Err(error);
-                }
-            }
+        if filled.is_err() && owns_transaction && !self.connection.is_autocommit() {
+            let _ = self.connection.execute_batch("ROLLBACK");
+        }
+        if self.reader {
+            self.connection.execute_batch("PRAGMA query_only = 1;")?;
         }
         filled
     }
@@ -2981,7 +3045,7 @@ fn held_in_its_project(
     }
 
     #[cfg(test)]
-    fn connection(&self) -> &Connection {
+    pub(crate) fn connection(&self) -> &Connection {
         &self.connection
     }
 }
