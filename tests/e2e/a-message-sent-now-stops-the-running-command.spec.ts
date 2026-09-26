@@ -102,6 +102,22 @@ test('a message sent now stops the running command, and the same agent reads it'
   const composer = page.getByTestId('composer');
   await composer.fill(NOW);
   await page.screenshot({ path: `${SHOTS}/before-sending-now.png` });
+  // Every change to the page from the key press on, as the reader would see
+  // it: how many times the line is drawn as sent, and whether it is waiting.
+  // It used to be drawn, then moved to the queue, then drawn again.
+  await page.evaluate((text) => {
+    const seen: Array<{ sent: number; waiting: number }> = [];
+    const look = () => {
+      const count = (id: string) => [...document.querySelectorAll(`[data-testid="${id}"]`)]
+        .filter((row) => row.textContent?.includes(text)).length;
+      const now = { sent: count('user-message'), waiting: count('held-message') };
+      const last = seen[seen.length - 1];
+      if (!last || last.sent !== now.sent || last.waiting !== now.waiting) seen.push(now);
+    };
+    look();
+    new MutationObserver(look).observe(document.body, { childList: true, subtree: true, characterData: true });
+    (window as unknown as { sentNowFrames: typeof seen }).sentNowFrames = seen;
+  }, NOW);
   const pressed = Date.now();
   await composer.press('ControlOrMeta+Enter');
 
@@ -113,6 +129,11 @@ test('a message sent now stops the running command, and the same agent reads it'
   expect(Date.now() - pressed).toBeLessThan(20_000);
   await expect(page.getByTestId('user-message').filter({ hasText: NOW })).toHaveCount(1);
   await expect(page.getByTestId('held-message')).toHaveCount(0);
+  const frames = await page.evaluate(() => (window as unknown as { sentNowFrames: unknown }).sentNowFrames);
+  expect(frames, 'drawn once as sent from the key press on, and never shown waiting').toEqual([
+    { sent: 0, waiting: 0 },
+    { sent: 1, waiting: 0 },
+  ]);
   await expect(page.getByTestId('stop-button')).toHaveCount(0, { timeout: 15_000 });
   await page.screenshot({ path: `${SHOTS}/after-sending-now.png` });
 });
