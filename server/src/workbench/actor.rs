@@ -2020,7 +2020,7 @@ mod tests {
             // As an older build left it.
             store
                 .connection()
-                .execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_ready;")
+                .execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_filled;")
                 .unwrap();
         }
         let database = ChatDb::open(&path).unwrap();
@@ -2028,7 +2028,7 @@ mod tests {
             database
                 .read(|store, _| {
                     store.connection().query_row(
-                        "SELECT COUNT(*), (SELECT COUNT(*) FROM event_ref_ready) FROM event WHERE type='tool.progress'",
+                        "SELECT COUNT(*), (SELECT COUNT(*) FROM event_ref_filled) FROM event WHERE type='tool.progress'",
                         [],
                         |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
                     )

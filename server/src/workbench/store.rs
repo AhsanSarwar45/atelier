@@ -62,6 +62,17 @@ const AGENT_REF_TYPES: &[&str] = &[
     "agent.relayed",
     "agent.identified",
 ];
+/// Events a helper's call owns, filed under that call as their parent. A
+/// chat's own rows are the ones without one, and telling the two apart used to
+/// mean reading each event's JSON (bw-xeeqg.2).
+const PARENT_REF_TYPES: &[&str] = &[
+    "message.started",
+    "thinking.delta",
+    "tool.started",
+    "ask.permission",
+    "question.requested",
+    "plan.proposed",
+];
 /// Every event type that has an `event_ref` row.
 const REF_TYPES: &[&str] = &[
     "message.started",
@@ -81,15 +92,20 @@ const REF_TYPES: &[&str] = &[
     "agent.finished",
     "agent.relayed",
     "agent.identified",
+    "ask.permission",
+    "question.requested",
+    "plan.proposed",
 ];
 
 /// The ids one event is filed under: `m:` a message, `t:` a call, `a:` a
-/// helper. The same types the first-page query gathers by each id.
+/// helper, `p:` the helper's call that owns it. The same types the page
+/// queries gather by each id.
 fn event_refs(
     kind: &str,
     message: Option<&str>,
     tool: Option<&str>,
     agent: Option<&str>,
+    parent: Option<&str>,
 ) -> Vec<String> {
     let mut refs = Vec::new();
     if let Some(id) = message.filter(|_| MESSAGE_REF_TYPES.contains(&kind)) {
@@ -100,6 +116,9 @@ fn event_refs(
     }
     if let Some(id) = agent.filter(|_| AGENT_REF_TYPES.contains(&kind)) {
         refs.push(format!("a:{id}"));
+    }
+    if let Some(id) = parent.filter(|_| PARENT_REF_TYPES.contains(&kind)) {
+        refs.push(format!("p:{id}"));
     }
     refs
 }
@@ -575,7 +594,7 @@ impl Store {
         let transaction = self.connection.transaction()?;
         transaction.execute("DELETE FROM event WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM event_ref WHERE session_id = ?1", [id])?;
-        transaction.execute("DELETE FROM event_ref_ready WHERE session_id = ?1", [id])?;
+        transaction.execute("DELETE FROM event_ref_filled WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM bead_link WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_handoff WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_notice WHERE session_id = ?1", [id])?;
@@ -1133,12 +1152,13 @@ fn held_in_its_project(
                 event.fields.get("messageId").and_then(Value::as_str),
                 event.fields.get("toolCallId").and_then(Value::as_str),
                 event.fields.get("agentId").and_then(Value::as_str),
+                event.fields.get("parentToolCallId").and_then(Value::as_str),
             );
             self.remember_event_refs(session_id, seq, &kind, &refs)?;
             if seq == 1 {
                 // A chat begun under this build has no older events to file.
                 self.connection
-                    .prepare_cached("INSERT OR IGNORE INTO event_ref_ready (session_id) VALUES (?1)")?
+                    .prepare_cached("INSERT OR IGNORE INTO event_ref_filled (session_id) VALUES (?1)")?
                     .execute([session_id])?;
             }
             self.remove_superseded_progress(event, session_id, seq)?;
@@ -1262,7 +1282,7 @@ fn held_in_its_project(
 
     fn event_refs_ready(&self, session_id: &str) -> rusqlite::Result<bool> {
         self.connection
-            .prepare_cached("SELECT 1 FROM event_ref_ready WHERE session_id=?1")?
+            .prepare_cached("SELECT 1 FROM event_ref_filled WHERE session_id=?1")?
             .exists([session_id])
     }
 
@@ -1280,7 +1300,7 @@ fn held_in_its_project(
         }
         let mut statement = self.connection.prepare(&format!(
             "SELECT seq, type, json_extract(json,'$.messageId'), json_extract(json,'$.toolCallId'),
-                    json_extract(json,'$.agentId')
+                    json_extract(json,'$.agentId'), json_extract(json,'$.parentToolCallId')
                FROM event WHERE session_id=?1 AND type IN ({})",
             REF_TYPES
                 .iter()
@@ -1296,6 +1316,7 @@ fn held_in_its_project(
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1306,13 +1327,18 @@ fn held_in_its_project(
                 self.connection.execute_batch("BEGIN IMMEDIATE")?;
             }
             let filled = (|| {
-                for (seq, kind, message, tool, agent) in rows {
-                    let refs =
-                        event_refs(&kind, message.as_deref(), tool.as_deref(), agent.as_deref());
+                for (seq, kind, message, tool, agent, parent) in rows {
+                    let refs = event_refs(
+                        &kind,
+                        message.as_deref(),
+                        tool.as_deref(),
+                        agent.as_deref(),
+                        parent.as_deref(),
+                    );
                     self.remember_event_refs(session_id, seq, &kind, &refs)?;
                 }
                 self.connection.execute(
-                    "INSERT OR IGNORE INTO event_ref_ready (session_id) VALUES (?1)",
+                    "INSERT OR IGNORE INTO event_ref_filled (session_id) VALUES (?1)",
                     [session_id],
                 )?;
                 Ok(())
@@ -2739,11 +2765,31 @@ fn held_in_its_project(
             let cutoff = self
             .connection
             .query_row(
-                r#"WITH anchors AS (
+                // The chat's own messages and calls are found by their ids in
+                // `event_ref`, the ones a helper's call owns by their `p:` id,
+                // so no event's JSON is read to tell them apart; only the rare
+                // kinds below are read, through the type index. Reading every
+                // started call's JSON instead was about a gigabyte from a cold
+                // disk on a 2.2 GB chat, because the calls' big results sit
+                // between them (bw-xeeqg.2).
+                r#"WITH parented(seq) AS (
+                     SELECT seq FROM event_ref
+                     WHERE session_id=?1 AND ref>='p:' AND ref<'p;' AND seq<?2 AND seq>?3
+                   ),
+                   anchors AS (
                      SELECT CASE type
-                       WHEN 'message.started' THEN 'message:' || json_extract(json,'$.messageId')
-                       WHEN 'thinking.delta' THEN 'thinking:' || json_extract(json,'$.messageId')
-                       WHEN 'tool.started' THEN 'tool:' || json_extract(json,'$.toolCallId')
+                       WHEN 'message.started' THEN 'message:'
+                       WHEN 'thinking.delta' THEN 'thinking:'
+                       ELSE 'tool:' END || substr(ref,3) AS item_key,
+                       MIN(seq) AS started
+                     FROM event_ref
+                     WHERE session_id=?1 AND seq<?2 AND seq>?3
+                       AND ((ref>='m:' AND ref<'m;' AND type IN ('message.started','thinking.delta'))
+                         OR (ref>='t:' AND ref<'t;' AND type='tool.started'))
+                       AND seq NOT IN (SELECT seq FROM parented)
+                     GROUP BY item_key
+                     UNION ALL
+                     SELECT CASE type
                        WHEN 'note' THEN 'note:' || json_extract(json,'$.noteId')
                        WHEN 'ask.permission' THEN 'ask:' || json_extract(json,'$.askId')
                        WHEN 'question.requested' THEN 'question:' || json_extract(json,'$.requestId')
@@ -2753,12 +2799,8 @@ fn held_in_its_project(
                        MIN(seq) AS started
                      FROM event
                      WHERE session_id=?1 AND seq<?2 AND seq>?3
-                       AND (
-                         type IN ('note','ask.permission','question.requested','plan.proposed',
-                                  'provider.message','notice')
-                         OR (type IN ('message.started','thinking.delta','tool.started')
-                             AND json_extract(json,'$.parentToolCallId') IS NULL)
-                       )
+                       AND type IN ('note','ask.permission','question.requested','plan.proposed',
+                                    'provider.message','notice')
                        AND NOT(type='note' AND json_extract(json,'$.rank')='detail')
                      GROUP BY item_key
                    )
@@ -2779,33 +2821,42 @@ fn held_in_its_project(
             // Rust never parses or repeatedly folds a huge intervening child run.
             let mut statement = self.connection.prepare(
             r#"WITH
+               -- Which messages and calls are the chat's own and which a
+               -- helper's call owns is read from their ids, never from their
+               -- JSON (bw-xeeqg.2).
+               parented(seq) AS (
+                 SELECT seq FROM event_ref
+                 WHERE session_id=?1 AND ref>='p:' AND ref<'p;' AND seq>?5 AND seq<?3
+               ),
                root_messages(id) AS (
-                 SELECT DISTINCT json_extract(json,'$.messageId') FROM event
-                 WHERE session_id=?1 AND seq>=?2 AND seq<?3
+                 SELECT DISTINCT substr(ref,3) FROM event_ref
+                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND ref>='m:' AND ref<'m;'
                    AND type IN ('message.started','thinking.delta')
-                   AND json_extract(json,'$.parentToolCallId') IS NULL
+                   AND seq NOT IN (SELECT seq FROM parented)
                ),
                child_messages(id) AS (
-                 SELECT json_extract(json,'$.messageId') FROM event
-                 WHERE session_id=?1 AND seq>?5 AND seq<?3
+                 SELECT substr(ref,3) FROM event_ref
+                 WHERE session_id=?1 AND seq>?5 AND seq<?3 AND ref>='m:' AND ref<'m;'
                    AND type IN ('message.started','thinking.delta')
-                   AND json_extract(json,'$.parentToolCallId') IS NOT NULL
-                 GROUP BY json_extract(json,'$.messageId')
+                   AND seq IN (SELECT seq FROM parented)
+                 GROUP BY ref
                  ORDER BY MIN(seq) DESC LIMIT ?4
                ),
                selected_messages(id) AS (
                  SELECT id FROM root_messages UNION SELECT id FROM child_messages
                ),
                root_tools(id) AS (
-                 SELECT DISTINCT json_extract(json,'$.toolCallId') FROM event
-                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND type='tool.started'
-                   AND json_extract(json,'$.parentToolCallId') IS NULL
+                 SELECT DISTINCT substr(ref,3) FROM event_ref
+                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND ref>='t:' AND ref<'t;'
+                   AND type='tool.started'
+                   AND seq NOT IN (SELECT seq FROM parented)
                ),
                child_tools(id) AS (
-                 SELECT json_extract(json,'$.toolCallId') FROM event
-                 WHERE session_id=?1 AND seq>?5 AND seq<?3 AND type='tool.started'
-                   AND json_extract(json,'$.parentToolCallId') IS NOT NULL
-                 GROUP BY json_extract(json,'$.toolCallId')
+                 SELECT substr(ref,3) FROM event_ref
+                 WHERE session_id=?1 AND seq>?5 AND seq<?3 AND ref>='t:' AND ref<'t;'
+                   AND type='tool.started'
+                   AND seq IN (SELECT seq FROM parented)
+                 GROUP BY ref
                  ORDER BY MIN(seq) DESC LIMIT ?4
                ),
                selected_tools(id) AS (
@@ -2836,8 +2887,10 @@ fn held_in_its_project(
                    ('ask.permission','ask.resolved','question.requested','question.resolved',
                     'plan.proposed','plan.resolved','provider.message','notice','note')
                )
+               -- CROSS JOIN keeps the picked seqs on the outside: a plain
+               -- join let SQLite walk every row of the chat instead.
                SELECT event.seq,event.json FROM picked
-               JOIN event ON event.session_id=?1 AND event.seq=picked.seq
+               CROSS JOIN event ON event.session_id=?1 AND event.seq=picked.seq
                WHERE NOT(event.type='note' AND json_extract(event.json,'$.rank')='detail')
                ORDER BY event.seq"#,
         )?;
@@ -3391,7 +3444,11 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
       stored. On the owner's busiest chat that was a gigabyte on every page
       and a quarter of one on every progress update, on the one thread every
       send and stop waits behind (bw-0xeav.1). A chat's rows are filled once,
-      the first time they are needed, and `event_ref_ready` says so.
+      the first time they are needed, and `event_ref_filled` says so.
+
+      `event_ref_ready` was the same mark from before the `p:` ids a helper's
+      call files its events under (bw-xeeqg.2). Dropping it has every chat
+      filled once more, which adds those ids beside the ones it has.
     */
     transaction.execute_batch(
         "CREATE TABLE IF NOT EXISTS event_ref (
@@ -3401,7 +3458,8 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
            type TEXT NOT NULL,
            PRIMARY KEY (session_id, ref, seq)
          ) WITHOUT ROWID;
-         CREATE TABLE IF NOT EXISTS event_ref_ready (session_id TEXT PRIMARY KEY);",
+         CREATE TABLE IF NOT EXISTS event_ref_filled (session_id TEXT PRIMARY KEY);
+         DROP TABLE IF EXISTS event_ref_ready;",
     )?;
     transaction.execute_batch(
         "CREATE TABLE IF NOT EXISTS held_message (
@@ -5066,6 +5124,81 @@ mod tests {
     /// it fails. A chat stored before the id rows existed gets them filled
     /// the first time, and the page and the pruning of progress come out the
     /// same (bw-0xeav.1).
+    /// A helper's call files its events under the call as their parent, so a
+    /// page tells the chat's own rows from the helper's without reading any
+    /// event's JSON. A chat an older build filed has no such ids: its old mark
+    /// is dropped when the store opens, and the chat is filled once more
+    /// (bw-xeeqg.2).
+    #[test]
+    fn a_helpers_rows_are_told_apart_by_their_parent_id() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        let append = |store: &Store, value: serde_json::Value| {
+            assert!(store
+                .append_event(&serde_json::from_value(value).unwrap())
+                .unwrap());
+        };
+        append(&store, json!({"type":"tool.started","sessionId":"chat","seq":1,"at":"now","toolCallId":"task","name":"Task"}));
+        append(&store, json!({"type":"tool.started","sessionId":"chat","seq":2,"at":"now","toolCallId":"child","name":"Read","parentToolCallId":"task"}));
+        append(&store, json!({"type":"message.started","sessionId":"chat","seq":3,"at":"now","messageId":"inner","role":"assistant","parentToolCallId":"task"}));
+        append(&store, json!({"type":"text.delta","sessionId":"chat","seq":4,"at":"now","messageId":"inner","text":"looking","parentToolCallId":"task"}));
+        append(&store, json!({"type":"tool.completed","sessionId":"chat","seq":5,"at":"now","toolCallId":"task","status":"completed"}));
+        append(&store, json!({"type":"message.started","sessionId":"chat","seq":6,"at":"now","messageId":"outer","role":"assistant"}));
+        append(&store, json!({"type":"text.delta","sessionId":"chat","seq":7,"at":"now","messageId":"outer","text":"done"}));
+
+        let parents = |store: &Store| -> Vec<(String, i64)> {
+            store
+                .connection()
+                .prepare("SELECT ref, seq FROM event_ref WHERE ref LIKE 'p:%' ORDER BY seq")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert_eq!(
+            parents(&store),
+            vec![("p:task".to_string(), 2), ("p:task".to_string(), 3)],
+            "the helper's call and message are filed under the call that owns them"
+        );
+        let page = store.transcript_items("chat", None, 20).unwrap();
+        let parent_of = |id: &str| {
+            page.items
+                .iter()
+                .find(|item| item["id"] == id)
+                .map(|item| item["parentId"].clone())
+        };
+        assert_eq!(parent_of("task"), Some(serde_json::Value::Null));
+        assert_eq!(parent_of("outer"), Some(serde_json::Value::Null));
+        assert_eq!(parent_of("child"), Some(json!("task")));
+
+        // The same chat as an older build left it: filled, but with no
+        // parent ids, under the older mark.
+        store
+            .connection()
+            .execute_batch(
+                "DELETE FROM event_ref WHERE ref LIKE 'p:%';
+                 DELETE FROM event_ref_filled;
+                 CREATE TABLE event_ref_ready (session_id TEXT PRIMARY KEY);
+                 INSERT INTO event_ref_ready VALUES ('chat');",
+            )
+            .unwrap();
+        drop(store);
+        let store = Store::open(&path).unwrap();
+        assert!(
+            !store
+                .connection()
+                .prepare("SELECT 1 FROM sqlite_master WHERE name='event_ref_ready'")
+                .unwrap()
+                .exists([])
+                .unwrap(),
+            "the older mark is gone, so the chat is filled again"
+        );
+        assert_eq!(store.transcript_items("chat", None, 20).unwrap().items, page.items);
+        assert_eq!(parents(&store).len(), 2, "filling again adds the parent ids");
+    }
+
     #[test]
     fn opening_a_chat_reads_only_the_events_of_the_rows_it_shows() {
         let directory = tempfile::tempdir().unwrap();
@@ -5104,7 +5237,7 @@ mod tests {
         // The same chat as an older build stored it: no id rows yet.
         store
             .connection()
-            .execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_ready;")
+            .execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_filled;")
             .unwrap();
         assert_eq!(store.transcript_items("chat", None, 20).unwrap().items, page.items);
         append(json!({"type":"tool.progress","sessionId":"chat","seq":48,"at":"now","toolCallId":"new","output":"three"}));
