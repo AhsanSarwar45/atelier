@@ -459,6 +459,43 @@ const VIEW_EVENTS_SQL: &str = r#"SELECT seq, json FROM event
      ) GROUP BY type
    ) ORDER BY seq"#;
 
+/// What a sweep's calls answered. The calls' rows are found by id, so a sweep
+/// reads those rows alone rather than every tool row the chat ever wrote.
+const BACKGROUND_OUTPUTS_SQL: &str = r#"SELECT json_extract(json,'$.toolCallId'),
+          json_extract(json,'$.output') FROM event
+   WHERE session_id = ?1 AND seq IN (
+     SELECT seq FROM event_ref WHERE session_id = ?1
+       AND ref IN (SELECT 't:' || value FROM json_each(?2))
+       AND type IN ('tool.completed','tool.progress')
+   ) AND json_extract(json,'$.output') LIKE '%Output is being written to: %'"#;
+
+/// Both sides are read from the calls' id rows, which hold the id and kind,
+/// so no event's JSON is opened.
+const UNFINISHED_TOOLS_SQL: &str = r#"WITH since AS (
+     SELECT COALESCE(MAX(seq),0) AS seq FROM event
+      WHERE type = 'transcript.reset' AND session_id = ?1)
+   SELECT substr(ref,3) FROM event_ref, since
+    WHERE session_id = ?1 AND ref >= 't:' AND ref < 't;'
+      AND type = 'tool.started' AND event_ref.seq > since.seq
+   EXCEPT
+   SELECT substr(ref,3) FROM event_ref, since
+    WHERE session_id = ?1 AND ref >= 't:' AND ref < 't;'
+      AND type = 'tool.completed' AND event_ref.seq > since.seq"#;
+
+const TOOL_DETAILS_SQL: &str = r#"SELECT json FROM event
+   WHERE session_id = ?1 AND seq IN (
+     SELECT seq FROM event_ref WHERE session_id = ?1 AND ref = 't:' || ?2
+       AND type IN ('tool.started','tool.completed','diff')
+   ) ORDER BY seq"#;
+
+/// Two index lookups: one aggregate over both would visit every row of the
+/// chat to test its type.
+const PROJECTION_HEAD_SQL: &str = r#"SELECT
+     (SELECT COALESCE(MAX(seq), 0) FROM event WHERE session_id = ?1),
+     (SELECT COALESCE(MAX(seq), 0) FROM event
+       WHERE type = 'transcript.reset' AND session_id = ?1)"#;
+
+
 impl Store {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         if let Some(parent) = path.parent() {
@@ -983,12 +1020,7 @@ fn held_in_its_project(
         tool_call_ids: &[String],
     ) -> rusqlite::Result<Vec<(String, String)>> {
         let ids = serde_json::to_string(tool_call_ids).unwrap_or_else(|_| "[]".into());
-        let mut statement = self.connection.prepare(
-            r#"SELECT json_extract(json,'$.toolCallId'), json_extract(json,'$.output') FROM event
-                WHERE session_id=?1 AND type IN ('tool.completed','tool.progress')
-                  AND json_extract(json,'$.toolCallId') IN (SELECT value FROM json_each(?2))
-                  AND json_extract(json,'$.output') LIKE '%Output is being written to: %'"#,
-        )?;
+        let mut statement = self.connection.prepare(BACKGROUND_OUTPUTS_SQL)?;
         let found = statement
             .query_map(rusqlite::params![session_id, ids], |row| {
                 Ok((row.get(0)?, row.get(1)?))
@@ -1659,18 +1691,9 @@ fn held_in_its_project(
         ids
     }
     /// The tool calls this chat started since its transcript last began and
-    /// never reported the end of. Two passes over the type index, one per
-    /// kind, not one lookup per call: a long chat has thousands of calls.
+    /// never reported the end of.
     pub fn unfinished_tools(&self, session_id: &str) -> rusqlite::Result<Vec<String>> {
-        let mut statement = self.connection.prepare(
-            "WITH since AS (SELECT COALESCE(MAX(seq),0) AS seq FROM event \
-               WHERE session_id=?1 AND type='transcript.reset') \
-             SELECT json_extract(json,'$.toolCallId') FROM event, since \
-               WHERE type='tool.started' AND session_id=?1 AND event.seq>since.seq \
-             EXCEPT \
-             SELECT json_extract(json,'$.toolCallId') FROM event, since \
-               WHERE type='tool.completed' AND session_id=?1 AND event.seq>since.seq",
-        )?;
+        let mut statement = self.connection.prepare(UNFINISHED_TOOLS_SQL)?;
         let calls = statement
             .query_map([session_id], |row| row.get::<_, Option<String>>(0))?
             .filter_map(|call| call.transpose())
@@ -2364,11 +2387,7 @@ fn held_in_its_project(
     }
 
     pub fn tool_details(&self, session_id: &str, tool_id: &str) -> rusqlite::Result<Option<Value>> {
-        let mut statement = self.connection.prepare(
-            r#"SELECT json FROM event WHERE session_id = ?1
-               AND type IN ('tool.started','tool.completed','diff')
-               AND json_extract(json, '$.toolCallId') = ?2 ORDER BY seq"#,
-        )?;
+        let mut statement = self.connection.prepare(TOOL_DETAILS_SQL)?;
         let rows =
             statement.query_map(params![session_id, tool_id], |row| row.get::<_, String>(0))?;
         let mut found = false;
@@ -2431,9 +2450,7 @@ fn held_in_its_project(
     /// the helper this replaces.
     fn ensure_transcript_projection(&self, session_id: &str) -> rusqlite::Result<i64> {
         let (newest_seq, reset_seq) = self.connection.query_row(
-            r#"SELECT COALESCE(MAX(seq), 0),
-                      COALESCE(MAX(CASE WHEN type = 'transcript.reset' THEN seq END), 0)
-                 FROM event WHERE session_id = ?1"#,
+            PROJECTION_HEAD_SQL,
             [session_id],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
         )?;
@@ -6043,6 +6060,90 @@ mod tests {
                 .all(|step| step.contains("seq=?")),
             "the chat's rows are fetched by seq, not visited one by one: {plan:?}"
         );
+    }
+
+    /// The sweep's background outputs, a hand back's unfinished calls, an
+    /// opened call's details and the projection's head each find their rows
+    /// by id or by kind. Each used to visit every row of the chat to test its
+    /// type or JSON: on a 2.2 GB chat, 1 to 1.8 GB from a cold disk each time,
+    /// and the first two on the writer, every sweep (bw-xeeqg.4).
+    #[test]
+    fn workbench_core_a_chats_calls_are_found_by_their_ids() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session("chat", "claude", None, "2026-09-27T00:00:00Z"))
+            .unwrap();
+        let event = |seq: i64, kind: &str, extra: serde_json::Value| -> Event {
+            let mut value = json!({
+                "type": kind, "sessionId": "chat", "seq": seq,
+                "at": "2026-09-27T00:00:00Z"
+            });
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            serde_json::from_value(value).unwrap()
+        };
+        let written = "Output is being written to: /tmp/out";
+        for appended in [
+            event(1, "tool.started", json!({"toolCallId": "gone", "name": "Bash", "input": {}})),
+            event(2, "transcript.reset", json!({})),
+            event(3, "tool.started", json!({"toolCallId": "t1", "name": "Bash", "input": {"command": "ls"}})),
+            event(4, "tool.progress", json!({"toolCallId": "t1", "output": "partial"})),
+            event(5, "tool.completed", json!({"toolCallId": "t1", "output": written})),
+            event(6, "diff", json!({"toolCallId": "t1", "path": "a", "before": "x", "after": "y"})),
+            event(7, "tool.started", json!({"toolCallId": "t2", "name": "Read", "input": {}})),
+            event(8, "tool.completed", json!({"toolCallId": "t2", "output": written})),
+            event(9, "tool.started", json!({"toolCallId": "t3", "name": "Bash", "input": {}})),
+        ] {
+            assert!(store.append_event(&appended).unwrap());
+        }
+
+        assert_eq!(store.unfinished_tools("chat").unwrap(), vec!["t3".to_string()]);
+        assert_eq!(
+            store
+                .background_outputs("chat", &["t1".to_string(), "t3".to_string()])
+                .unwrap(),
+            vec![("t1".to_string(), written.to_string())]
+        );
+        assert_eq!(
+            store.tool_details("chat", "t1").unwrap().unwrap(),
+            json!({
+                "input": {"command": "ls"},
+                "output": written,
+                "diff": {"path": "a", "before": "x", "after": "y", "line": null}
+            })
+        );
+        assert_eq!(store.tool_details("chat", "none").unwrap(), None);
+        assert_eq!(store.ensure_transcript_projection("chat").unwrap(), 9);
+
+        for (name, sql, arguments) in [
+            ("background outputs", BACKGROUND_OUTPUTS_SQL, 2),
+            ("unfinished tools", UNFINISHED_TOOLS_SQL, 1),
+            ("tool details", TOOL_DETAILS_SQL, 2),
+            ("projection head", PROJECTION_HEAD_SQL, 1),
+        ] {
+            let mut statement = store
+                .connection
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap();
+            let values = ["chat", "[\"t1\"]"];
+            let plan: Vec<String> = statement
+                .query_map(rusqlite::params_from_iter(&values[..arguments]), |row| {
+                    row.get::<_, String>(3)
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert!(
+                plan.iter()
+                    .filter(|step| step.contains("SEARCH event ")
+                        && !step.contains("COVERING INDEX"))
+                    .all(|step| step.contains("seq=?") || step.contains("rowid=?")),
+                "{name}: the chat's rows are fetched by seq, not visited one by one: {plan:?}"
+            );
+        }
     }
 
     /// The sweep's question — which chats are mid-turn — reads the json of

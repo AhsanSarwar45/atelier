@@ -70,7 +70,6 @@ enum Command {
     CorrectFolders(Vec<(String, String, String)>, Reply<usize>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
     ActiveSessionIds(Reply<Vec<String>>),
-    BackgroundOutputs(String, Vec<String>, Reply<Vec<(String, String)>>),
     LastModelForBrand(String, Reply<Option<String>>),
     ListRestoreSessions(Option<String>, bool, Vec<std::path::PathBuf>, Reply<Vec<Session>>),
     MarkAllDormant(Reply<usize>),
@@ -94,7 +93,6 @@ enum Command {
     EndDriving(String, Reply<()>),
     DrivenFrom(String, Reply<Option<i64>>),
     StillDriving(Reply<Vec<String>>),
-    UnfinishedTools(String, Reply<Vec<String>>),
     SessionStatus(String, Reply<Option<serde_json::Value>>),
     SessionActivity(String, Reply<SessionActivity>),
     SessionActivities(Reply<HashMap<String, SessionActivity>>),
@@ -332,8 +330,13 @@ impl ChatDb {
         session_id: String,
         tool_call_ids: Vec<String>,
     ) -> Result<Vec<(String, String)>, String> {
-        self.request(|reply| Command::BackgroundOutputs(session_id, tool_call_ids, reply))
-            .await
+        // A reader, not the writer: a chat never opened since its ids were
+        // first filed pays that one pass here, and sends must not wait on it.
+        self.read(move |store, _| {
+            store.ensure_event_refs(&session_id)?;
+            store.background_outputs(&session_id, &tool_call_ids)
+        })
+        .await
     }
 
     pub async fn list_sessions(&self, project_id: Option<String>) -> Result<Vec<Session>, String> {
@@ -412,7 +415,11 @@ impl ChatDb {
         session: String,
         tool: String,
     ) -> Result<Option<serde_json::Value>, String> {
-        self.read(move |store, _| store.tool_details(&session, &tool)).await
+        self.read(move |store, _| {
+            store.ensure_event_refs(&session)?;
+            store.tool_details(&session, &tool)
+        })
+        .await
     }
 
     /// Append a provider event after assigning its durable sequence number.
@@ -491,8 +498,11 @@ impl ChatDb {
         self.request(Command::StillDriving).await
     }
     pub async fn unfinished_tools(&self, session_id: String) -> Result<Vec<String>, String> {
-        self.request(|reply| Command::UnfinishedTools(session_id, reply))
-            .await
+        self.read(move |store, _| {
+            store.ensure_event_refs(&session_id)?;
+            store.unfinished_tools(&session_id)
+        })
+        .await
     }
     pub async fn was_driven_here(&self, session_id: String) -> Result<bool, String> {
         self.request(|reply| Command::WasDrivenHere(session_id, reply))
@@ -1208,9 +1218,6 @@ fn run(
                 respond(reply, store.last_model_for_brand(&brand))
             }
             Command::ActiveSessionIds(reply) => respond(reply, store.active_session_ids()),
-            Command::BackgroundOutputs(session_id, calls, reply) => {
-                respond(reply, store.background_outputs(&session_id, &calls))
-            }
             Command::ListSessions(project_id, reply) => {
                 respond(reply, store.list_sessions(project_id.as_deref()))
             }
@@ -1391,9 +1398,6 @@ fn run(
                 respond(reply, store.driven_from(&session_id))
             }
             Command::StillDriving(reply) => respond(reply, store.still_driving()),
-            Command::UnfinishedTools(session_id, reply) => {
-                respond(reply, store.unfinished_tools(&session_id))
-            }
             Command::SessionStatus(session_id, reply) => {
                 respond(reply, store.session_status(&session_id))
             }
