@@ -89,6 +89,8 @@ const bootstrappers = new Set<(data: string) => void>();
 const updaters = new Set<(data: string) => void>();
 
 let source: WebSocket | null = null;
+/** Nothing is waiting to be unpacked. */
+const settled: Promise<void> = Promise.resolve();
 /** The shape the open connection was opened with, so a change is visible. */
 let asked = '';
 /** A reshape is already queued; several hooks mounting cost one open. */
@@ -241,9 +243,33 @@ function close(): void {
  * page's own address to be relative to.
  */
 function wire(want: string): string {
-  const path = apiUrl(`/api/live?${want}`);
+  const path = apiUrl(`/api/live?${want}${unpacks() ? '&pack=gzip' : ''}`);
   const absolute = /^https?:/i.test(path) ? path : new URL(path, window.location.href).toString();
   return absolute.replace(/^http/i, 'ws');
+}
+
+/**
+ * Whether this browser can unpack a gzipped frame.
+ *
+ * A socket frame is never compressed on the way, and a conversation is JSON:
+ * a phone on Wi-Fi was sent every snapshot at its full size. Asked for, the
+ * server gzips every frame over a kilobyte (live.rs, `framed`).
+ */
+function unpacks(): boolean {
+  return typeof DecompressionStream === 'function';
+}
+
+/**
+ * A frame as text, whichever way it came.
+ *
+ * Packed frames are unpacked one after another, and a text frame waits for the
+ * packed ones before it: the chat folds its events in the order they were sent,
+ * so a small frame must never overtake a large one that is still unpacking.
+ */
+function readFrame(data: unknown): Promise<string> | string {
+  if (typeof data === 'string') return data;
+  const packed = new Response(data as Blob | ArrayBuffer).body as ReadableStream<BufferSource>;
+  return new Response(packed.pipeThrough(new DecompressionStream('gzip'))).text();
 }
 
 /** One frame off the connection: which feed spoke, and what it said. */
@@ -398,8 +424,25 @@ function open(): void {
   const socket = new WebSocket(wire(want));
   source = socket;
 
+  // Frames are handed on strictly in the order they arrived; see `readFrame`.
+  let inOrder = settled;
   socket.onmessage = (msg: MessageEvent) => {
-    if (source === socket) heard(String(msg.data));
+    const frame = readFrame(msg.data);
+    if (typeof frame === 'string' && inOrder === settled) {
+      if (source === socket) heard(frame);
+      return;
+    }
+    const next = inOrder
+      .then(() => frame)
+      .then((text) => {
+        if (source === socket) heard(text);
+      })
+      // One frame that will not unpack is not worth the whole connection.
+      .catch(() => {})
+      .finally(() => {
+        if (inOrder === next) inOrder = settled;
+      });
+    inOrder = next;
   };
   // A socket that fails reports both of these, one after the other; a socket
   // this window closed itself is no longer the one being held, so its close

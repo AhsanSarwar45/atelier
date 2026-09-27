@@ -122,7 +122,7 @@ function SideBySide({ comparison, transform, onChange }: { comparison: ImageComp
   return (
     <div data-testid="picture-viewer-comparison" data-mode="side_by_side" className="grid min-h-0 w-full flex-1 grid-cols-1 grid-rows-2 gap-3 sm:grid-cols-2 sm:grid-rows-1">
       {[comparison.before, comparison.after].map((side, index) => (
-        <figure key={side.dataUrl} className="flex min-h-0 min-w-0 flex-col gap-2">
+        <figure key={`${index}:${attachmentSrc(side)}`} className="flex min-h-0 min-w-0 flex-col gap-2">
           <ZoomViewport transform={transform} onChange={onChange} testId={`comparison-zoom-viewport-${index}`}>
             <TransformLayer transform={transform} testId={`comparison-transform-${index}`}><Picture image={side} /></TransformLayer>
           </ZoomViewport>

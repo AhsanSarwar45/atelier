@@ -1,7 +1,10 @@
 //! Shared storage and delivery limits for provider-owned payloads.
 
 use super::protocol::{Event, EventKind};
+use base64::Engine;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 const KEPT: usize = 4_000;
 const COMMAND_KEPT: usize = 20_000;
@@ -34,9 +37,91 @@ fn trim(value: &mut Value, depth: usize, key: &str) {
     }
 }
 
+/// Where pictures are kept once they leave the conversation, set once at start.
+///
+/// Unset — a test, or a tool that never serves pictures — and pictures stay in
+/// the conversation as they came.
+static PICTURE_STORE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Below this, a picture costs less inline than the request that would fetch it.
+const INLINE_PICTURE_KEPT: usize = 8 * 1024;
+
+/// Name the store pictures are moved into. Called once, by the app at start.
+pub fn keep_pictures_in(directory: PathBuf) {
+    let _ = PICTURE_STORE.set(directory);
+}
+
+/// A picture as bytes becomes a picture as a name.
+///
+/// A screenshot is most of a conversation's weight, and base64 does not
+/// compress, so every snapshot carried every picture in full — to a phone on
+/// Wi-Fi, again on every open. Kept in the content-addressed store instead, it
+/// is fetched once through `/api/presentation-assets`, cached for good, and
+/// only when it is drawn. The shape goes with the name, so the page can hold
+/// the picture's place before it arrives.
+fn keep_pictures(value: &mut Value, depth: usize, store: &Path) {
+    match value {
+        Value::Object(fields) => {
+            if let Some(kept) = fields
+                .get("dataUrl")
+                .and_then(Value::as_str)
+                .and_then(|url| kept_picture(url, store))
+            {
+                let (asset, size, shape) = kept;
+                fields.insert("dataUrl".into(), Value::String(String::new()));
+                fields.insert("asset".into(), Value::String(asset));
+                fields.entry("size").or_insert(size.into());
+                if let Some(shape) = shape {
+                    if !fields.contains_key("width") || !fields.contains_key("height") {
+                        fields.insert("width".into(), shape.width.into());
+                        fields.insert("height".into(), shape.height.into());
+                    }
+                }
+                return;
+            }
+            if depth > 0 {
+                for value in fields.values_mut() {
+                    keep_pictures(value, depth - 1, store)
+                }
+            }
+        }
+        Value::Array(values) if depth > 0 => {
+            for value in values {
+                keep_pictures(value, depth - 1, store)
+            }
+        }
+        _ => {}
+    }
+}
+
+fn kept_picture(
+    url: &str,
+    store: &Path,
+) -> Option<(String, usize, Option<super::media::Dimensions>)> {
+    if url.len() < INLINE_PICTURE_KEPT {
+        return None;
+    }
+    let (head, data) = url.strip_prefix("data:")?.split_once(',')?;
+    if !head.ends_with(";base64") {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.trim())
+        .ok()?;
+    // Anything the store will not take — too big, not a picture it knows —
+    // stays as it came rather than being lost.
+    let asset = super::media::import_image(&bytes, "picture", store).ok()?;
+    Some((asset, bytes.len(), super::media::picture_dimensions(&bytes)))
+}
+
 /// Bound the fields whose native provider shapes are intentionally unbounded.
 /// This is applied once by the durable actor for every provider and delivery.
 pub fn bound_event(event: &mut Event) {
+    if let Some(store) = PICTURE_STORE.get() {
+        for value in event.fields.values_mut() {
+            keep_pictures(value, DEPTH, store);
+        }
+    }
     match event.kind {
         EventKind::ToolStarted => {
             if let Some(input) = event.fields.get_mut("input") {
@@ -209,5 +294,30 @@ mod tests {
 
         assert_eq!(diff.fields["hunks"], once);
         assert_eq!(diff.fields["added"], json!(1));
+    }
+
+    /// A screenshot leaves the conversation as a name the page fetches once,
+    /// with its shape, and a small picture stays inline.
+    #[test]
+    fn a_large_picture_is_sent_as_a_name_and_a_small_one_stays() {
+        let store = tempfile::tempdir().unwrap();
+        // A 3x2 PNG header, padded past the inline limit.
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x03\0\0\0\x02".to_vec();
+        png.extend(std::iter::repeat(0u8).take(16 * 1024));
+        let big = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&png)
+        );
+        let mut value =
+            json!({"images":[{"dataUrl":big},{"dataUrl":"data:image/png;base64,AAAA"}]});
+        keep_pictures(&mut value, DEPTH, store.path());
+
+        let kept = &value["images"][0];
+        assert_eq!(kept["dataUrl"], "");
+        assert_eq!(kept["width"], 3);
+        assert_eq!(kept["height"], 2);
+        assert_eq!(kept["size"], png.len());
+        assert!(store.path().join(kept["asset"].as_str().unwrap()).is_file());
+        assert_eq!(value["images"][1]["dataUrl"], "data:image/png;base64,AAAA");
     }
 }

@@ -1078,6 +1078,79 @@ pub fn png_dimensions(bytes: &[u8]) -> Option<Dimensions> {
     (size.width > 0 && size.height > 0).then_some(size)
 }
 
+/// The shape of a PNG, GIF, WebP or JPEG, read off its header.
+///
+/// The same reading `picture-shape.ts` does in the browser. A picture sent as a
+/// name rather than bytes has nothing there to read, so the shape travels with
+/// the name, and the page can hold the picture's place before it arrives.
+pub fn picture_dimensions(b: &[u8]) -> Option<Dimensions> {
+    let be16 = |at: usize| Some(u16::from_be_bytes(b.get(at..at + 2)?.try_into().ok()?) as u32);
+    let le16 = |at: usize| Some(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?) as u32);
+    let le24 = |at: usize| {
+        let x = b.get(at..at + 3)?;
+        Some(x[0] as u32 | (x[1] as u32) << 8 | (x[2] as u32) << 16)
+    };
+    let shape = if b.starts_with(PNG_MAGIC) {
+        png_dimensions(b)
+    } else if b.starts_with(b"GIF8") {
+        Some(Dimensions {
+            width: le16(6)?,
+            height: le16(8)?,
+        })
+    } else if b.starts_with(b"RIFF") && b.get(8..12) == Some(b"WEBP") {
+        match b.get(12..16)? {
+            b"VP8X" => Some(Dimensions {
+                width: le24(24)? + 1,
+                height: le24(27)? + 1,
+            }),
+            b"VP8L" => {
+                let bits = u32::from_le_bytes(b.get(21..25)?.try_into().ok()?);
+                Some(Dimensions {
+                    width: (bits & 0x3fff) + 1,
+                    height: ((bits >> 14) & 0x3fff) + 1,
+                })
+            }
+            b"VP8 " if b.get(23..26) == Some(&[0x9d, 0x01, 0x2a]) => Some(Dimensions {
+                width: le16(26)? & 0x3fff,
+                height: le16(28)? & 0x3fff,
+            }),
+            _ => None,
+        }
+    } else if b.starts_with(&[0xff, 0xd8]) {
+        // The size lives in whichever start-of-frame marker comes first.
+        let mut at = 2;
+        loop {
+            if at + 9 >= b.len() {
+                break None;
+            }
+            if b[at] != 0xff {
+                at += 1;
+                continue;
+            }
+            let marker = b[at + 1];
+            if marker == 0xff || (0xd0..=0xd9).contains(&marker) || marker == 0x01 {
+                at += 2;
+                continue;
+            }
+            let frame = matches!(marker, 0xc0..=0xc3 | 0xc5..=0xc7 | 0xc9..=0xcb | 0xcd..=0xcf);
+            if frame {
+                break Some(Dimensions {
+                    width: be16(at + 7)?,
+                    height: be16(at + 5)?,
+                });
+            }
+            let length = be16(at + 2)? as usize;
+            if length < 2 {
+                break None;
+            }
+            at += 2 + length;
+        }
+    } else {
+        None
+    };
+    shape.filter(|shape| shape.width > 0 && shape.height > 0)
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct PixelAlignment {
     pub basis: &'static str,

@@ -482,6 +482,12 @@ async fn serve(open_browser: bool) {
         .expect("Failed to resolve the Claude config directory");
     let codex_home = workbench::profiles::system_dir("codex")
         .expect("Failed to resolve the Codex home directory");
+    // Pictures leave every conversation as names in the same store, so a
+    // snapshot carries words and a phone fetches each picture once.
+    workbench::wire::keep_pictures_in(
+        identity::presentation_media_dir()
+            .expect("Failed to resolve the presentation media directory"),
+    );
     let registry = workbench::registry::WorkbenchRegistry::new(
         chat_db,
         workbench::registry::RegistryPaths {

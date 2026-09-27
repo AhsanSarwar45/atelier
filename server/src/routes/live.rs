@@ -138,6 +138,10 @@ pub struct LiveParams {
     /// for the same reason the repository is: the Files tab shows one project
     /// or one of its worktrees (src/workbench/live-wire.ts, bw-g3o3.3).
     pub fs: Option<String>,
+    /// `gzip` when the window can unpack a compressed frame. Frames over a
+    /// kilobyte are then sent gzipped; a window that does not ask — one loaded
+    /// before this, or curl — is sent text as it always was.
+    pub pack: Option<String>,
 }
 
 /// Whether a query flag was written as a yes.
@@ -728,7 +732,10 @@ pub async fn live(
     drop(tx);
 
     match upgrade {
-        Some(upgrade) => upgrade.on_upgrade(move |socket| carry(socket, rx)),
+        Some(upgrade) => {
+            let gzip = params.pack.as_deref() == Some("gzip");
+            upgrade.on_upgrade(move |socket| carry(socket, rx, gzip))
+        }
         // Nothing in the app asks this way any more. It is kept because a
         // stream is what a person with curl, and this file's own tests, can
         // read — and because the feeds behind it are the same either way.
@@ -757,7 +764,7 @@ const PING_EVERY: Duration = Duration::from_secs(30);
 /// counted against that ration at all, so a reader can have as many windows of
 /// this app open as he likes and an ordinary read still goes out at once
 /// (bw-zkh4.10).
-async fn carry(socket: WebSocket, mut rx: mpsc::Receiver<Tagged>) {
+async fn carry(socket: WebSocket, mut rx: mpsc::Receiver<Tagged>, gzip: bool) {
     let (mut writing, mut reading) = socket.split();
     let mut feeds_open = true;
     let mut ping = tokio::time::interval(PING_EVERY);
@@ -767,7 +774,7 @@ async fn carry(socket: WebSocket, mut rx: mpsc::Receiver<Tagged>) {
         tokio::select! {
             said = rx.recv(), if feeds_open => match said {
                 Some(said) => {
-                    if writing.send(Message::Text(said.as_text())).await.is_err() {
+                    if writing.send(framed(said.as_text(), gzip)).await.is_err() {
                         return;
                     }
                 }
@@ -788,6 +795,34 @@ async fn carry(socket: WebSocket, mut rx: mpsc::Receiver<Tagged>) {
                 }
             }
         }
+    }
+}
+
+/// Below this a frame goes as text: packing it would save a few bytes and cost
+/// the page a round of unpacking.
+const PACK_FROM: usize = 1024;
+
+/// One frame as the window asked for it.
+///
+/// A socket frame is not compressed by the browser or by this server, and a
+/// conversation is JSON — a phone on Wi-Fi was sent every snapshot at its full
+/// size. Gzipped, the words travel at a fifth of that. Each frame is packed on
+/// its own, so the page can unpack any one of them without the ones before.
+fn framed(text: String, gzip: bool) -> Message {
+    if !gzip || text.len() < PACK_FROM {
+        return Message::Text(text);
+    }
+    use std::io::Write;
+    let mut packing = flate2::write::GzEncoder::new(
+        Vec::with_capacity(text.len() / 4),
+        flate2::Compression::new(4),
+    );
+    match packing
+        .write_all(text.as_bytes())
+        .and_then(|_| packing.finish())
+    {
+        Ok(packed) => Message::Binary(packed),
+        Err(_) => Message::Text(text),
     }
 }
 
@@ -1690,5 +1725,27 @@ mod tests {
         })
         .await
         .expect("the last viewer stops and removes the follower");
+    }
+
+    /// A window that can unpack is sent large frames gzipped and small ones as
+    /// text; one that did not ask is sent text as it always was.
+    #[test]
+    fn large_frames_go_gzipped_only_to_a_window_that_asked() {
+        use std::io::Read;
+        let big = format!(
+            "{{\"tag\":\"chat.snapshot\",\"data\":\"{}\"}}",
+            "row ".repeat(2000)
+        );
+        let Message::Binary(packed) = framed(big.clone(), true) else {
+            panic!("a large frame to a window that asked was not packed");
+        };
+        assert!(packed.len() < big.len() / 4);
+        let mut unpacked = String::new();
+        flate2::read::GzDecoder::new(packed.as_slice())
+            .read_to_string(&mut unpacked)
+            .unwrap();
+        assert_eq!(unpacked, big);
+        assert!(matches!(framed(big, false), Message::Text(_)));
+        assert!(matches!(framed("{}".into(), true), Message::Text(_)));
     }
 }

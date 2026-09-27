@@ -51,8 +51,8 @@ export function ImageComparisonView({ comparison, onLook }: {
   if (comparison.mode === 'side_by_side') {
     return (
       <div data-testid="image-comparison" data-mode="side_by_side" className="mb-2 grid max-w-2xl grid-cols-2 gap-2">
-        {[comparison.before, comparison.after].map((image) => (
-          <figure key={image.dataUrl} className="flex min-w-0 flex-col items-center">
+        {[comparison.before, comparison.after].map((image, index) => (
+          <figure key={`${index}:${attachmentSrc(image)}`} className="flex min-w-0 flex-col items-center">
             {onLook ? <Button type="button" variant="foreground" aria-label={`Open ${image.alt} comparison to zoom`}
               className="block h-auto w-full whitespace-normal p-0" onClick={() => onLook(comparison)}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
