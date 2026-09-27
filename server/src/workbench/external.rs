@@ -903,31 +903,125 @@ fn uuid_in(text: &str) -> Vec<String> {
     found.into_iter().collect()
 }
 
-fn logged_codex_threads(home: &Path, pids: &[u32]) -> HashMap<u32, String> {
+/// Where the process log of one Codex home was last read to, and the newest
+/// thread each process named up to there.
+#[derive(Default)]
+struct CodexLogCursor {
+    read_to: i64,
+    threads: HashMap<u32, (i64, String)>,
+}
+
+/// Each process's newest thread in Codex's process log.
+///
+/// The log has no index that serves a lookup by process, so asking it afresh
+/// read the whole table — about 155 MB on a 440 MB log — for every live
+/// process, every two seconds. Rows are only ever added, so this reads what
+/// was added since the last call and keeps the answers. The first read starts
+/// where the oldest of the processes started, found through the log's time
+/// index, since a process cannot have logged before it existed.
+fn logged_codex_threads(
+    home: &Path,
+    proc_root: Option<&Path>,
+    pids: &[u32],
+) -> HashMap<u32, String> {
+    static CURSORS: std::sync::LazyLock<std::sync::Mutex<HashMap<PathBuf, CodexLogCursor>>> =
+        std::sync::LazyLock::new(Default::default);
+    if pids.is_empty() {
+        return HashMap::new();
+    }
     let path = home.join("logs_2.sqlite");
-    let Ok(db) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+    let Ok(db) = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
         return HashMap::new();
     };
-    let Ok(mut query) = db.prepare(
-        "SELECT process_uuid, thread_id FROM logs
-         WHERE process_uuid GLOB ?1 AND thread_id IS NOT NULL AND thread_id != ''
-         ORDER BY ts DESC, ts_nanos DESC, id DESC",
-    ) else {
-        return HashMap::new();
-    };
-    let mut found = HashMap::new();
-    for pid in pids {
-        let pattern = format!("pid:{pid}:*");
-        let Ok(rows) = query.query_map([pattern], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }) else {
-            continue;
-        };
-        for row in rows.flatten() {
-            found.entry(*pid).or_insert_with(|| row.1.to_lowercase());
+    let mut cursors = CURSORS.lock().unwrap_or_else(|error| error.into_inner());
+    let cursor = cursors.entry(path).or_default();
+    let newest: i64 = db
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM logs", [], |row| row.get(0))
+        .unwrap_or(0);
+    if newest < cursor.read_to {
+        // A log started over reuses ids; what was known of the old one is gone.
+        *cursor = CodexLogCursor::default();
+    }
+    if cursor.read_to == 0 {
+        let started = proc_root
+            .and_then(|root| {
+                pids.iter()
+                    .map(|pid| process_started_at(root, *pid))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .and_then(|starts| starts.into_iter().min());
+        if let Some(started) = started {
+            cursor.read_to = db
+                .query_row(
+                    "SELECT id FROM logs WHERE ts >= ?1
+                     ORDER BY ts, ts_nanos, id LIMIT 1",
+                    [started],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|id| id - 1)
+                .unwrap_or(newest);
         }
     }
-    found
+    if newest > cursor.read_to {
+        if let Ok(mut query) = db.prepare(
+            "SELECT id, process_uuid, thread_id FROM logs
+             WHERE id > ?1 AND id <= ?2 AND process_uuid GLOB 'pid:*'
+               AND thread_id IS NOT NULL AND thread_id != ''",
+        ) {
+            if let Ok(rows) = query.query_map([cursor.read_to, newest], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            }) {
+                for (id, process, thread) in rows.flatten() {
+                    let Some(pid) = process
+                        .strip_prefix("pid:")
+                        .and_then(|rest| rest.split(':').next())
+                        .and_then(|pid| pid.parse::<u32>().ok())
+                    else {
+                        continue;
+                    };
+                    let known = cursor.threads.entry(pid).or_insert((id, String::new()));
+                    if id >= known.0 {
+                        *known = (id, thread.to_lowercase());
+                    }
+                }
+                cursor.read_to = newest;
+            }
+        }
+    }
+    pids.iter()
+        .filter_map(|pid| {
+            let (_, thread) = cursor.threads.get(pid)?;
+            (!thread.is_empty()).then(|| (*pid, thread.clone()))
+        })
+        .collect()
+}
+
+/// When a process started, in seconds since the epoch, from `/proc`.
+fn process_started_at(proc_root: &Path, pid: u32) -> Option<i64> {
+    let stat = fs::read_to_string(proc_root.join(pid.to_string()).join("stat")).ok()?;
+    // The command name can hold spaces and brackets; fields resume after
+    // its closing bracket, with the start time the 20th of them.
+    let ticks: i64 = stat
+        .rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()?;
+    let boot: i64 = fs::read_to_string(proc_root.join("stat"))
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))?
+        .trim()
+        .parse()
+        .ok()?;
+    // SAFETY: sysconf reads a constant and has no preconditions.
+    let hertz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    (hertz > 0).then(|| boot + ticks / hertz as i64)
 }
 
 /// Codex terminal processes from the native process table used on machines
@@ -1018,7 +1112,7 @@ pub fn codex_thread_processes(
                 found.entry(id).or_default().insert(pid);
             }
         }
-        for (pid, id) in logged_codex_threads(codex_home, &pids) {
+        for (pid, id) in logged_codex_threads(codex_home, None, &pids) {
             if explicit.contains(&pid) {
                 continue;
             }
@@ -1081,7 +1175,7 @@ pub fn codex_thread_processes(
             found.entry(id).or_default().insert(pid);
         }
     }
-    for (pid, id) in logged_codex_threads(codex_home, &terminal_pids) {
+    for (pid, id) in logged_codex_threads(codex_home, Some(proc_root), &terminal_pids) {
         if explicit.contains(&pid) {
             continue;
         }
@@ -1733,6 +1827,68 @@ mod tests {
         assert_eq!(threads[&CHAT.to_string()], BTreeSet::from([51, 52]));
         assert!(!threads.contains_key(OTHER));
         assert_eq!(paths[OTHER], rollout);
+    }
+
+    /// The process log is read from where it was last read to, and first from
+    /// where the process started: a process's newest thread is kept across
+    /// calls and moves on when it logs another (bw-xeeqg.6).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_codex_process_log_is_read_only_where_it_grew() {
+        let root = tempfile::tempdir().unwrap();
+        let proc_root = root.path().join("proc");
+        let home = root.path().join("codex");
+        fs::create_dir_all(proc_root.join("70")).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        let hertz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as i64;
+        // Booted at 1000, started 50 s later: rows before 1050 cannot be its.
+        fs::write(proc_root.join("stat"), "cpu 0\nbtime 1000\n").unwrap();
+        let mut fields = vec!["0"; 18];
+        let ticks = (50 * hertz).to_string();
+        fields.push(&ticks);
+        fs::write(
+            proc_root.join("70/stat"),
+            format!("70 (codex (x)) S {}", fields.join(" ")),
+        )
+        .unwrap();
+        assert_eq!(process_started_at(&proc_root, 70), Some(1050));
+
+        let db = Connection::open(home.join("logs_2.sqlite")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE logs (id INTEGER PRIMARY KEY, ts INTEGER, ts_nanos INTEGER, process_uuid TEXT, thread_id TEXT);",
+        )
+        .unwrap();
+        let log = |id: i64, ts: i64, thread: &str| {
+            db.execute(
+                "INSERT INTO logs VALUES (?1, ?2, 0, 'pid:70:p', ?3)",
+                (id, ts, thread),
+            )
+            .unwrap();
+        };
+        log(1, 1040, CHAT);
+        log(2, 1060, "");
+        let found = logged_codex_threads(&home, Some(&proc_root), &[70]);
+        assert!(found.is_empty(), "a row from before the process started is not its thread");
+
+        log(3, 1070, OTHER);
+        assert_eq!(
+            logged_codex_threads(&home, Some(&proc_root), &[70]),
+            HashMap::from([(70, OTHER.to_string())])
+        );
+        log(4, 1080, CHAT);
+        assert_eq!(
+            logged_codex_threads(&home, Some(&proc_root), &[70]),
+            HashMap::from([(70, CHAT.to_string())]),
+            "the newest thread wins, read from the rows added since"
+        );
+
+        db.execute_batch("DELETE FROM logs;").unwrap();
+        log(1, 1090, OTHER);
+        assert_eq!(
+            logged_codex_threads(&home, Some(&proc_root), &[70]),
+            HashMap::from([(70, OTHER.to_string())]),
+            "a log that started over is read from its start again"
+        );
     }
 
     #[cfg(unix)]
