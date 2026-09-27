@@ -26,7 +26,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tooltip } from '@/components/ui/tooltip';
 import { usePlanUsage } from '@/workbench/live';
 import { CHIP_GAP } from '@/workbench/what-it-runs';
-import type { Brand } from '@/workbench/protocol';
+import { newId, type Brand } from '@/workbench/protocol';
 import {
   clearsReads,
   clockReads,
@@ -383,7 +383,7 @@ export function Resets({
   const attempt = useRef<{ reset: string; id: string } | null>(null);
 
   async function use(reset: PlanReset) {
-    if (attempt.current?.reset !== reset.id) attempt.current = { reset: reset.id, id: crypto.randomUUID() };
+    if (attempt.current?.reset !== reset.id) attempt.current = { reset: reset.id, id: newId() };
     setBusy(true);
     setSaid(null);
     try {

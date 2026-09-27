@@ -1517,14 +1517,15 @@ export interface SessionSummary {
 export const BRAND_DEFAULT_MODEL = 'default';
 
 /**
- * A name for a chat about to be started, made here rather than waited for.
+ * A fresh v4 UUID, for anything the browser names itself: a chat about to be
+ * started, a message about to be sent, a confirmed attempt.
  *
  * `crypto.randomUUID` exists only on a secure page, and this app is opened over
- * plain HTTP from a phone on the same network (bw-8ig7); `getRandomValues` is
- * there on any page. The shape is a v4 UUID because that is what the server
- * would have made had it been left to name the chat itself.
+ * plain HTTP from a phone on the same network (bw-8ig7), where calling it throws
+ * and the action silently does nothing. `getRandomValues` is there on any page.
+ * The shape is a v4 UUID because that is what the server makes for itself.
  */
-export function newChatId(): string {
+export function newId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;

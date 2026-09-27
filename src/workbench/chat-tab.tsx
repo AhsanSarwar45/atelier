@@ -84,7 +84,7 @@ import type { SessionMenu } from '@/workbench/fold';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
-import { BRAND_DEFAULT_MODEL, newChatId, offeringAtelierAuto, startingChat } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL, newId, offeringAtelierAuto, startingChat } from '@/workbench/protocol';
 import { SectionHeading } from '@/workbench/section-heading';
 import { conversationOf, heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -1053,7 +1053,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // pointing at the chat he had just left, and the new chat's row, which the
     // list shows within a frame of the click, sat there unlit for the whole of
     // the launch (bw-akk9.1). The server takes the name it is given.
-    const id = newChatId();
+    const id = newId();
     setStarting({ brand, id });
     setStartError(null);
     // Where to put him back if the launch never happens. A chat that was never
@@ -1875,7 +1875,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       return;
     }
     // Drawn before it is sent, under the id the server will record it by.
-    const messageId = crypto.randomUUID();
+    const messageId = newId();
     const pending = { messageId, text: draft, images, itemsBeforeSend: new Set(view.items.map((item) => item.id)) };
     recallableNow.current = pending;
     setRecallable(pending);
@@ -1941,7 +1941,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       await sendCommand({
         type: 'prompt.hold',
         sessionId,
-        messageId: crypto.randomUUID(),
+        messageId: newId(),
         text,
         images,
         ...(carried.length ? { parts: promptParts(written, carried) } : {}),
