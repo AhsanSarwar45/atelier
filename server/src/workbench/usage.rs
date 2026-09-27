@@ -907,6 +907,165 @@ pub async fn use_codex_reset(
     }
 }
 
+/// Why a Codex account's plan could not be read over the ChatGPT API.
+#[derive(Debug, PartialEq)]
+pub enum CodexMiss {
+    /// The login has run out or was refused. Codex renews it itself, so the
+    /// caller asks a Codex app-server for this one reading.
+    Renew,
+    Failed(String),
+}
+
+const CODEX_API: &str = "https://chatgpt.com/backend-api";
+
+/// The ChatGPT login Codex keeps in `$CODEX_HOME/auth.json`.
+struct CodexLogin {
+    token: String,
+    account: Option<String>,
+}
+
+/// Seconds since the epoch at which a JWT runs out, read without checking
+/// its signature; only its own server does that.
+fn jwt_expiry(token: &str) -> Option<i64> {
+    use base64::Engine;
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload.trim_end_matches('='))
+        .ok()?;
+    serde_json::from_slice::<Value>(&bytes).ok()?["exp"].as_i64()
+}
+
+fn codex_login(home: &std::path::Path) -> Result<Option<CodexLogin>, CodexMiss> {
+    let Some(auth) = std::fs::read_to_string(home.join("auth.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+    else {
+        return Ok(None);
+    };
+    // An API key has no plan to read.
+    let Some(token) = text(&auth["tokens"]["access_token"]) else {
+        return Ok(None);
+    };
+    if jwt_expiry(&token).is_some_and(|exp| exp <= chrono::Utc::now().timestamp() + 60) {
+        return Err(CodexMiss::Renew);
+    }
+    Ok(Some(CodexLogin {
+        token,
+        account: text(&auth["tokens"]["account_id"]),
+    }))
+}
+
+async fn codex_get(login: &CodexLogin, path: &str) -> Result<Value, CodexMiss> {
+    let mut request = reqwest::Client::new()
+        .get(format!("{CODEX_API}{path}"))
+        .bearer_auth(&login.token)
+        .header("User-Agent", "codex_cli_rs")
+        .timeout(Duration::from_secs(10));
+    if let Some(account) = &login.account {
+        request = request.header("ChatGPT-Account-Id", account);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| CodexMiss::Failed(error.to_string()))?;
+    match response.status().as_u16() {
+        401 | 403 => Err(CodexMiss::Renew),
+        status if !(200..300).contains(&status) => {
+            Err(CodexMiss::Failed(format!("the usage API answered {status}")))
+        }
+        _ => response
+            .json()
+            .await
+            .map_err(|error| CodexMiss::Failed(error.to_string())),
+    }
+}
+
+/// Read a Codex account's plan and reset credits straight from the ChatGPT
+/// API, with the login the account already has on disk. No app-server is
+/// started for it.
+pub async fn read_codex_direct(
+    home: &std::path::Path,
+    at: impl Into<String>,
+) -> Result<PlanUsage, CodexMiss> {
+    let at = at.into();
+    let Some(login) = codex_login(home)? else {
+        return Ok(unavailable(None, at));
+    };
+    let usage = codex_get(&login, "/wham/usage").await?;
+    // The credits are a second question. Failing it costs the resets, never
+    // the figures.
+    let credits = codex_get(&login, "/wham/rate-limit-reset-credits").await.ok();
+    Ok(codex_usage(&codex_api_as_native(&usage, credits.as_ref()), at))
+}
+
+/// The ChatGPT API's answer in the shape Codex's `account/rateLimits/read`
+/// gives it, which is what `codex_usage` reads. Codex makes the same
+/// translation inside its app-server.
+fn codex_api_as_native(usage: &Value, credits: Option<&Value>) -> Value {
+    let window = |raw: &Value| {
+        raw.is_object().then(|| {
+            json!({
+                "usedPercent": raw["used_percent"],
+                "windowDurationMins": raw["limit_window_seconds"].as_f64().map(|s| (s / 60.0).round()),
+                "resetsAt": raw["reset_at"],
+            })
+        })
+    };
+    let snapshot = |id: &str, name: &Value, limit: &Value| {
+        json!({
+            "limitId": id,
+            "limitName": name,
+            "primary": window(&limit["primary_window"]),
+            "secondary": window(&limit["secondary_window"]),
+            "credits": usage["credits"].is_object().then(|| json!({
+                "hasCredits": usage["credits"]["has_credits"],
+                "unlimited": usage["credits"]["unlimited"],
+                "balance": usage["credits"]["balance"],
+            })),
+            "planType": usage["plan_type"],
+        })
+    };
+    if !usage["rate_limit"].is_object() {
+        return json!({});
+    }
+    let main = snapshot("codex", &Value::Null, &usage["rate_limit"]);
+    let mut by_id = serde_json::Map::new();
+    by_id.insert("codex".into(), main.clone());
+    for extra in usage["additional_rate_limits"].as_array().into_iter().flatten() {
+        if let Some(id) = text(&extra["metered_feature"]) {
+            by_id.insert(id.clone(), snapshot(&id, &extra["limit_name"], &extra["rate_limit"]));
+        }
+    }
+    let seconds = |raw: &Value| {
+        text(raw)
+            .and_then(|at| chrono::DateTime::parse_from_rfc3339(&at).ok())
+            .map(|at| at.timestamp())
+    };
+    let resets = match credits {
+        Some(credits) => json!({
+            "availableCount": credits["available_count"],
+            "credits": credits["credits"].as_array().map(|list| list.iter().map(|credit| json!({
+                "id": credit["id"],
+                "status": credit["status"],
+                "title": credit["title"],
+                "description": credit["description"],
+                "grantedAt": seconds(&credit["granted_at"]),
+                "expiresAt": seconds(&credit["expires_at"]),
+            })).collect::<Vec<_>>()),
+        }),
+        // Only the count, from the usage answer itself.
+        None => match usage["rate_limit_reset_credits"]["available_count"].as_i64() {
+            Some(count) => json!({"availableCount": count, "credits": null}),
+            None => Value::Null,
+        },
+    };
+    json!({
+        "rateLimits": main,
+        "rateLimitsByLimitId": by_id,
+        "rateLimitResetCredits": resets,
+    })
+}
+
 /// Translate Claude's live context report into the browser contract. Keep the
 /// provider's own totals instead of re-adding bands whose measurements are not
 /// defined to sum to the same value.
@@ -1175,4 +1334,86 @@ mod tests {
         assert!(claude_snapshot_of(&config("theirs", 60_000), None, now).is_none());
         assert!(claude_snapshot_of(&config("mine", 61 * 60_000), None, now).is_none());
     }
+
+    /// The ChatGPT API's answers, as captured from `/wham/usage` and
+    /// `/wham/rate-limit-reset-credits` on 2026-09-27, read the same as the
+    /// app-server's `account/rateLimits/read` answer for the same account.
+    #[test]
+    fn the_chatgpt_api_answers_read_like_the_app_servers() {
+        let usage = json!({
+            "plan_type": "prolite",
+            "rate_limit": {"allowed": true, "limit_reached": false,
+                "primary_window": {"used_percent": 9, "limit_window_seconds": 604800, "reset_after_seconds": 553176, "reset_at": 1791047392},
+                "secondary_window": null},
+            "additional_rate_limits": null,
+            "credits": {"has_credits": false, "unlimited": false, "balance": "0"},
+            "rate_limit_reset_credits": {"available_count": 1, "applicable_available_count": 0}
+        });
+        let credits = json!({
+            "credits": [{"id": "RateLimitResetCredit_1", "reset_type": "codex_rate_limits", "status": "available",
+                "granted_at": "2026-09-22T20:55:01.828309Z", "expires_at": "2026-10-22T20:55:01.828309Z",
+                "title": "Full reset", "description": "One free rate limit reset."}],
+            "available_count": 1
+        });
+        let native = json!({
+            "rateLimits": {"limitId": "codex", "limitName": null,
+                "primary": {"usedPercent": 9, "windowDurationMins": 10080, "resetsAt": 1791047392},
+                "secondary": null, "credits": {"hasCredits": false, "unlimited": false, "balance": "0"},
+                "planType": "prolite"},
+            "rateLimitResetCredits": {"availableCount": 1, "credits": [{"id": "RateLimitResetCredit_1",
+                "status": "available", "grantedAt": 1790110501, "expiresAt": 1792702501,
+                "title": "Full reset", "description": "One free rate limit reset."}]}
+        });
+        let direct = codex_usage(&codex_api_as_native(&usage, Some(&credits)), "now");
+        let expected = codex_usage(&native, "now");
+        assert!(direct.available);
+        assert_eq!(direct.plan, expected.plan);
+        assert_eq!(direct.session, expected.session);
+        assert_eq!(direct.week, expected.week);
+        assert_eq!(direct.credits, expected.credits);
+        let (direct_resets, expected_resets) = (direct.resets.unwrap(), expected.resets.unwrap());
+        assert_eq!(direct_resets.available, expected_resets.available);
+        assert_eq!(direct_resets.items[0].id, expected_resets.items[0].id);
+        assert!(direct_resets.items[0].usable);
+
+        // Without the credit list, the count alone still offers a reset.
+        let counted = codex_usage(&codex_api_as_native(&usage, None), "now").resets.unwrap();
+        assert_eq!(counted.available, 1);
+        assert_eq!(counted.items[0].id, "");
+
+        // Another limit is drawn as its own weekly bar.
+        let mut extra = usage.clone();
+        extra["additional_rate_limits"] = json!([{"limit_name": "GPT-6 Astra", "metered_feature": "astra",
+            "rate_limit": {"primary_window": {"used_percent": 30, "limit_window_seconds": 604800, "reset_at": 1791047392}}}]);
+        let per_model = codex_usage(&codex_api_as_native(&extra, None), "now").per_model;
+        assert_eq!(per_model[0].label, "This week · GPT-6 Astra");
+        assert_eq!(per_model[0].percent, Some(30.0));
+    }
+
+    #[test]
+    fn a_codex_login_runs_out_when_its_token_says() {
+        use base64::Engine;
+        let token = |exp: i64| {
+            let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(json!({"exp": exp}).to_string());
+            format!("head.{payload}.sig")
+        };
+        assert_eq!(jwt_expiry(&token(1_790_000_000)), Some(1_790_000_000));
+        let home = tempfile::tempdir().unwrap();
+        let write = |exp: i64| {
+            std::fs::write(
+                home.path().join("auth.json"),
+                json!({"tokens": {"access_token": token(exp), "account_id": "acct"}}).to_string(),
+            )
+            .unwrap()
+        };
+        write(chrono::Utc::now().timestamp() - 10);
+        assert!(matches!(codex_login(home.path()), Err(CodexMiss::Renew)));
+        write(chrono::Utc::now().timestamp() + 86_400);
+        assert!(matches!(codex_login(home.path()), Ok(Some(_))));
+        // An API key has no plan to read.
+        std::fs::write(home.path().join("auth.json"), json!({"OPENAI_API_KEY": "sk"}).to_string()).unwrap();
+        assert!(matches!(codex_login(home.path()), Ok(None)));
+    }
+
 }

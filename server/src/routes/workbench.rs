@@ -627,14 +627,20 @@ impl WorkbenchState {
         named: Option<&std::path::Path>,
         at: String,
     ) -> Result<crate::workbench::usage::PlanUsage, String> {
-        use crate::workbench::usage::read_codex;
-        let _ = profile;
-        let transport = self.codex_reader(named).await?;
-        let result = read_codex(&transport, at).await;
-        if result.is_err() {
-            self.forget_codex_reader(named, &transport).await;
+        use crate::workbench::usage::{read_codex, read_codex_direct, CodexMiss};
+        let home = self.registry.profile_directory("codex", profile);
+        match read_codex_direct(&home, at.clone()).await {
+            Ok(usage) => Ok(usage),
+            Err(CodexMiss::Failed(error)) => Err(error),
+            Err(CodexMiss::Renew) => {
+                let transport = self.codex_reader(named).await?;
+                let result = read_codex(&transport, at).await;
+                if result.is_err() {
+                    self.forget_codex_reader(named, &transport).await;
+                }
+                result
+            }
         }
-        result
     }
 
     /// Read every account of every brand, each on its own task, and send each
