@@ -350,6 +350,29 @@ async fn supervise_driver(
 ) {
     loop {
         match requests.try_recv() {
+            Ok(DriverRequest::Command(command, reply)) if command.kind == CommandKind::SessionStop => {
+                // Stop must not wait on the agent it stops. Past the limit the
+                // driver is closed as far as it will close and dropped here, so
+                // nothing keeps draining it, and the registry ends the process.
+                let Ok(result) = tokio::time::timeout(STOP_WAIT, driver.command(&command)).await else {
+                    requests.close();
+                    let _ = tokio::time::timeout(Duration::from_secs(1), driver.close()).await;
+                    let _ = reply.send(Ok(json!({"ok":true,"detached":true,"unanswered":true})));
+                    return;
+                };
+                let detached = result
+                    .as_ref()
+                    .ok()
+                    .is_some_and(|value| value["detached"] == true);
+                if detached {
+                    requests.close();
+                }
+                let _ = reply.send(result);
+                if detached {
+                    return;
+                }
+                continue;
+            }
             Ok(DriverRequest::Command(command, reply)) => {
                 let result = driver.command(&command).await;
                 let detached = result
@@ -1239,29 +1262,32 @@ impl WorkbenchRegistry {
                 .map_err(|_| format!("provider for {session_id} stopped before replying"))?;
         }
         // Stop is what a person presses when the chat will not answer, so it
-        // must not wait for the chat to answer it. A driver busy past the
-        // limit is let go of: the chat is marked stopped, and the next
-        // message starts a fresh process after ending this one's
-        // (`prepare_unattached`).
-        match tokio::time::timeout(STOP_WAIT, receive).await {
-            Ok(reply) => {
-                reply.map_err(|_| format!("provider for {session_id} stopped before replying"))?
-            }
-            Err(_) => {
-                {
-                    let mut live = self.drivers.write().await;
-                    if live
-                        .get(session_id)
-                        .is_some_and(|current| current.same_channel(&driver))
-                    {
-                        live.remove(session_id);
-                    }
-                }
-                tracing::warn!(session_id, "the agent did not answer Stop in time; it was let go");
-                self.mark_stopped(session_id).await?;
-                Ok(json!({"ok":true,"detached":true,"unanswered":true}))
+        // must not wait for the chat to answer it. The supervisor gives up on
+        // the agent after STOP_WAIT; this wait is only the backstop for a
+        // supervisor stuck before it read the request.
+        let reply = tokio::time::timeout(STOP_WAIT + Duration::from_secs(3), receive).await;
+        match reply {
+            Ok(Ok(Ok(value))) if value["unanswered"] != true => return Ok(value),
+            Ok(Ok(Err(error))) => return Err(error),
+            Ok(Err(_)) => return Err(format!("provider for {session_id} stopped before replying")),
+            _ => {}
+        }
+        {
+            let mut live = self.drivers.write().await;
+            if live
+                .get(session_id)
+                .is_some_and(|current| current.same_channel(&driver))
+            {
+                live.remove(session_id);
             }
         }
+        tracing::warn!(session_id, "the agent did not answer Stop in time; it was ended");
+        // The process this app started for the chat is ended now, not at the
+        // next message: it may still be running tools. One held by another
+        // program is left alone.
+        let _ = self.prepare_unattached(command, false).await;
+        self.mark_stopped(session_id).await?;
+        Ok(json!({"ok":true,"detached":true,"unanswered":true}))
     }
 
     async fn mark_stopped(&self, session_id: &str) -> Result<(), String> {
@@ -2665,6 +2691,7 @@ mod tests {
     /// never answered: a provider stuck behind a busy database.
     struct StuckDriver {
         probe: Arc<tokio::sync::Notify>,
+        closed: Arc<std::sync::atomic::AtomicBool>,
     }
     impl ProviderDriver for StuckDriver {
         fn brand(&self) -> &'static str {
@@ -2690,18 +2717,22 @@ mod tests {
             })
         }
         fn close<'a>(&'a mut self) -> DriverFuture<'a> {
+            self.closed.store(true, Ordering::SeqCst);
             Box::pin(async { Ok(json!({"ok":true})) })
         }
     }
 
-    async fn stuck_chat(root: &Path) -> (ChatDb, Arc<WorkbenchRegistry>, Arc<tokio::sync::Notify>) {
+    async fn stuck_chat(
+        root: &Path,
+    ) -> (ChatDb, Arc<WorkbenchRegistry>, Arc<tokio::sync::Notify>, Arc<std::sync::atomic::AtomicBool>) {
         let database = ChatDb::open(&root.join("workbench.db")).unwrap();
         let probe = Arc::new(tokio::sync::Notify::new());
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let registry = Arc::new(WorkbenchRegistry::new(
             database.clone(),
             paths(root),
             Arc::new(OneDriverFactory {
-                driver: std::sync::Mutex::new(Some(Box::new(StuckDriver { probe: probe.clone() }))),
+                driver: std::sync::Mutex::new(Some(Box::new(StuckDriver { probe: probe.clone(), closed: closed.clone() }))),
             }),
         ));
         database.create_session(a_chat("idle")).await.unwrap();
@@ -2709,13 +2740,13 @@ mod tests {
             .launch(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
             .await
             .unwrap();
-        (database, registry, probe)
+        (database, registry, probe, closed)
     }
 
     #[tokio::test]
     async fn a_slow_status_probe_does_not_hold_up_every_other_command() {
         let root = tempfile::tempdir().unwrap();
-        let (_database, registry, probe) = stuck_chat(root.path()).await;
+        let (_database, registry, probe, _) = stuck_chat(root.path()).await;
 
         // A command's status check is waiting on the database...
         let checking = {
@@ -2743,7 +2774,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn stop_stops_a_chat_whose_agent_never_answers_it() {
         let root = tempfile::tempdir().unwrap();
-        let (database, registry, probe) = stuck_chat(root.path()).await;
+        let (database, registry, probe, closed) = stuck_chat(root.path()).await;
         // The probe answers at once here; only Stop is stuck.
         let answering = {
             let probe = probe.clone();
@@ -2771,6 +2802,14 @@ mod tests {
         assert!(!registry.has_driver("session-1").await, "the next message starts a fresh agent");
         let session = database.get_session("session-1".into()).await.unwrap().unwrap();
         assert_eq!(session.state, "stopped");
+        assert!(closed.load(Ordering::SeqCst), "the agent that did not answer was closed, not left running");
+        for _ in 0..100 {
+            if registry.supervising.lock().await.get("session-1").copied().unwrap_or(0) == 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the chat's driver was never handed back");
     }
 
     async fn say_state(database: &ChatDb, state: &str) {
