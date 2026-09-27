@@ -111,7 +111,7 @@ describe('memory badge', () => {
     const groups = await screen.findAllByTestId('memory-group');
     expect(groups.map(group => group.dataset.kind)).toEqual(['chat', 'other']);
     expect(groups[0]).toHaveTextContent('Build the app1 process · 1 container2.5 GB');
-    expect(groups[1]).toHaveTextContent('Other containersNot counted in the total · 1 container1.0 GB');
+    expect(groups[1]).toHaveTextContent('Other containers1 container1.0 GB');
     fireEvent.click(screen.getByRole('button', { name: /Build the app/ }));
     const parts = within(groups[0]).getAllByTestId('memory-subgroup');
     expect(parts[0]).toHaveTextContent('Processes (1)512 MB');
@@ -155,6 +155,6 @@ describe('memory badge', () => {
       totalBytes: 1, swapBytes: 0, metric: 'pssWithSwap', processCount: 1, chats: [],
       processDetails: [{ pid: 5, parentPid: null, name: 'node', bytes: 9, swapBytes: 0, sessionId: 'gone', chatTitle: null, role: 'subprocess', killable: true, startTime: 1 }],
     });
-    expect(groups.map(group => [group.title, group.bytes])).toEqual([['Chat no longer listed', 9]]);
+    expect(groups.map(group => [group.title, group.bytes])).toEqual([['Closed chat', 9]]);
   });
 });

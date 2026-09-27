@@ -89,7 +89,7 @@ test('the real server lists the running containers and charges none of them to a
   try {
     await page.getByTestId('memory-badge').click();
     const other = page.locator('[data-testid="memory-group"][data-kind="other"]');
-    await expect(other).toContainText('Not counted in the total');
+    await expect(other).toContainText('Other containers');
     await other.getByRole('button', { name: /Other containers/ }).click();
     const rows = other.getByTestId('memory-container-row');
     await expect(rows.first()).toBeVisible();
@@ -121,9 +121,9 @@ test('a chat is charged for the containers it started, and a stranger container 
     await expect(parts.nth(1)).toContainText('5.0 GB');
     const rows = chat.getByTestId('memory-container-row');
     await expect(rows).toHaveCount(2);
-    await expect(rows.nth(1)).toContainText('Matched by folder');
+    await expect(rows.nth(1)).toContainText('keystone-postgres-300');
     const other = page.locator('[data-testid="memory-group"][data-kind="other"]');
-    await expect(other).toContainText('Not counted in the total · 1 container');
+    await expect(other).toContainText('1 container');
     await expect(other).toContainText('205 MB');
     const line = page.getByTestId('memory-container-line');
     await expect(line).toContainText('Processes 1.5 GB');

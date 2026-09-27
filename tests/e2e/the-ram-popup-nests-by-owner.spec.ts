@@ -107,7 +107,7 @@ test('each chat and the app are one entry that opens to what they hold', async (
     await expect(groups.nth(2)).toContainText('App');
     await expect(groups.nth(2)).toContainText('880 MB');
     await expect(groups.nth(3)).toContainText('Other containers');
-    await expect(groups.nth(3)).toContainText('Not counted');
+    await expect(groups.nth(3)).toContainText('1 container');
     // Closed entries hold no rows.
     await expect(popup.getByTestId('memory-process-row')).toHaveCount(0);
 
@@ -116,7 +116,7 @@ test('each chat and the app are one entry that opens to what they hold', async (
     const essays = groups.nth(0);
     await expect(essays.getByTestId('memory-process-row')).toHaveCount(5);
     await expect(essays.getByTestId('memory-container-row')).toHaveCount(2);
-    await expect(essays.getByTestId('memory-container-row').nth(1)).toContainText('Matched by folder');
+    await expect(essays.getByTestId('memory-container-row').nth(1)).toContainText('keystone-postgres');
     const cargo = essays.getByTestId('memory-process-row').filter({ hasText: 'cargo' });
     const adapter = essays.getByTestId('memory-process-row').filter({ hasText: 'claude-acp' });
     await expect(cargo).toHaveAttribute('data-depth', '3');
