@@ -363,61 +363,107 @@ fn read_session_source(path: &Path) -> Option<Value> {
     (!source.is_null()).then_some(source)
 }
 
-pub async fn list_threads(
-    transport: &CodexTransport,
-    cwd: Option<&Path>,
-    everything: bool,
-) -> Result<Vec<Value>, CodexTransportError> {
-    let source_kinds = everything.then(|| {
-        json!([
-            "cli",
-            "vscode",
-            "exec",
-            "appServer",
-            "subAgent",
-            "subAgentReview",
-            "subAgentCompact",
-            "subAgentThreadSpawn",
-            "subAgentOther",
-            "unknown"
-        ])
-    });
-    let mut threads = Vec::new();
-    let mut cursor = Value::Null;
-    loop {
-        // Codex's own state database already holds every thread's metadata.
-        // Without `useStateDbOnly` each page first re-reads every rollout to
-        // repair that metadata: measured against codex-cli 0.153.4, 142 MB
-        // read per listing of 30 threads against 3.8 MB with it, and the same
-        // threads with the same fields. On the owner's 6.5 GB of rollouts it
-        // was a continuous 100 MB/s (bw-0xeav.2).
-        let mut params = json!({
-            "limit": 100, "cursor": cursor, "sortKey": "updated_at", "sortDirection": "desc",
-            "useStateDbOnly": true
-        });
-        if let Some(source_kinds) = &source_kinds {
-            params["sourceKinds"] = source_kinds.clone();
-        }
-        let result = transport
-            .call("thread/list", params, REQUEST_TIMEOUT)
-            .await?;
-        threads.extend(result["data"].as_array().cloned().unwrap_or_default());
-        cursor = result.get("nextCursor").cloned().unwrap_or(Value::Null);
-        if cursor.is_null() {
-            break;
-        }
-    }
-    let Some(cwd) = cwd else { return Ok(threads) };
-    let cwd = cwd.to_string_lossy();
-    let root = format!("{}/", cwd.trim_end_matches('/'));
+/// Every thread of the Codex account at `home`, read from its own state
+/// database, newest first, in the shape `thread/list` gave.
+///
+/// A Codex app-server was started for this and kept open two minutes: about
+/// 100 MB for one query, and a program the RAM chip had to explain. The
+/// database already holds every field the listing uses, so it is opened
+/// read-only instead (bw-xeeqg.19). The rows are the ones `thread/list` with
+/// `useStateDbOnly` returned, measured against codex-cli 0.153.4 on the
+/// owner's 751 threads: not archived, with a first message, and with a
+/// rollout still on disk. A missing column is an error, not an empty list.
+pub fn state_threads(home: &Path) -> Result<Vec<Value>, String> {
+    let database = newest_state_database(home)
+        .ok_or_else(|| format!("no Codex state database in {}", home.display()))?;
+    let connection = rusqlite::Connection::open_with_flags(
+        &database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| format!("{}: {error}", database.display()))?;
+    connection
+        .busy_timeout(Duration::from_secs(2))
+        .map_err(|error| error.to_string())?;
+    let mut rows = connection
+        .prepare(
+            "SELECT id, rollout_path, cwd, name, title, preview, first_user_message, \
+             updated_at, git_branch, source, thread_source FROM threads \
+             WHERE archived = 0 AND preview <> '' ORDER BY updated_at DESC, id DESC",
+        )
+        .map_err(|error| format!("{}: {error}", database.display()))?;
+    let threads = rows
+        .query_map([], |row| {
+            let text = |index: usize| row.get::<_, Option<String>>(index);
+            let (id, path, cwd) = (text(0)?, text(1)?, text(2)?);
+            let (name, title, preview, first) = (text(3)?, text(4)?, text(5)?, text(6)?);
+            let (updated, branch) = (row.get::<_, Option<i64>>(7)?, text(8)?);
+            let (source, handed) = (text(9)?, text(10)?);
+            // A thread renamed in Codex keeps the new name in `title` and
+            // leaves `name` empty; an unnamed one's title is its first
+            // message.
+            let name = name.filter(|name| !name.is_empty()).or_else(|| {
+                title.filter(|title| {
+                    !title.is_empty()
+                        && Some(title) != preview.as_ref()
+                        && Some(title) != first.as_ref()
+                })
+            });
+            Ok(json!({
+                "id": id, "path": path, "cwd": cwd, "name": name, "preview": preview,
+                "updatedAt": updated, "gitInfo": {"branch": branch},
+                "source": listed_source(source.as_deref(), handed.as_deref()),
+            }))
+        })
+        .map_err(|error| format!("{}: {error}", database.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("{}: {error}", database.display()))?;
+    // A rollout deleted by hand leaves its row behind; `thread/list` left
+    // such a thread out, and there is nothing in it to open.
     Ok(threads
         .into_iter()
-        .filter(|thread| {
-            thread["cwd"]
-                .as_str()
-                .is_some_and(|found| found == cwd || found.starts_with(&root))
-        })
+        .filter(|thread| thread["path"].as_str().is_some_and(|path| Path::new(path).exists()))
         .collect())
+}
+
+/// The highest-numbered `state_N.sqlite`: Codex starts a new file when its
+/// schema changes and leaves the old one behind.
+fn newest_state_database(home: &Path) -> Option<PathBuf> {
+    fs::read_dir(home)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let number = name
+                .to_str()?
+                .strip_prefix("state_")?
+                .strip_suffix(".sqlite")?
+                .parse::<u32>()
+                .ok()?;
+            Some((number, entry.path()))
+        })
+        .max_by_key(|(number, _)| *number)
+        .map(|(_, path)| path)
+}
+
+/// `source` as `thread/list` gave it: the kind's name, or the object a
+/// subagent's thread stores as JSON text. A `codex exec` run is stored as
+/// `"exec"` whoever began it, with the kind it was handed in `thread_source`
+/// (bw-s7cd); a subagent's kind there is the answer.
+fn listed_source(source: Option<&str>, handed: Option<&str>) -> Value {
+    let Some(source) = source else { return Value::Null };
+    if source == "exec" {
+        if let Some(handed) = handed.map(|kind| Value::String(kind.into())) {
+            if by_a_subagent(&handed) {
+                return handed;
+            }
+        }
+    }
+    if source.starts_with('{') {
+        if let Ok(object) = serde_json::from_str::<Value>(source) {
+            return object;
+        }
+    }
+    Value::String(source.into())
 }
 
 pub async fn read_thread(
@@ -746,6 +792,74 @@ pub(crate) fn agent_definitions(cwd: &Path, profile: Option<&str>) -> Vec<Value>
 
 #[cfg(test)]
 mod tests {
+    /// The chat list reads each account's state database itself, and lists
+    /// what `thread/list` listed: not archived, begun, rollout on disk; newest
+    /// first; the name a thread was given; who began it (bw-xeeqg.19).
+    #[test]
+    fn codex_threads_are_read_from_the_newest_state_database() {
+        let home = tempfile::tempdir().unwrap();
+        let rollout = |id: &str| {
+            let path = home.path().join(format!("{id}.jsonl"));
+            std::fs::write(&path, "{}\n").unwrap();
+            path.display().to_string()
+        };
+        // An older schema's file is left behind by Codex and never read.
+        std::fs::write(home.path().join("state_4.sqlite"), "not a database").unwrap();
+        let database = rusqlite::Connection::open(home.path().join("state_5.sqlite")).unwrap();
+        database
+            .execute_batch(
+                "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, \
+                 updated_at INTEGER NOT NULL, source TEXT NOT NULL, cwd TEXT NOT NULL, \
+                 title TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, git_branch TEXT, \
+                 first_user_message TEXT NOT NULL DEFAULT '', thread_source TEXT, \
+                 preview TEXT NOT NULL DEFAULT '', name TEXT);",
+            )
+            .unwrap();
+        let add = |id: &str, path: &str, at: i64, source: &str, handed: Option<&str>, title: &str,
+                   archived: i64, preview: &str, name: Option<&str>| {
+            database
+                .execute(
+                    "INSERT INTO threads VALUES (?1, ?2, ?3, ?4, '/project', ?5, ?6, 'main', ?7, ?8, ?7, ?9)",
+                    rusqlite::params![id, path, at, source, title, archived, preview, handed, name],
+                )
+                .unwrap();
+        };
+        add("person", &rollout("person"), 30, "vscode", None, "Fix the hook", 0, "the hook fails", None);
+        add("named", &rollout("named"), 20, "cli", Some("user"), "ask", 0, "ask", Some("Kept name"));
+        add("review", &rollout("review"), 40, "exec", Some("subAgentReview"), "review", 0, "review", None);
+        add("guardian", &rollout("guardian"), 10, r#"{"subagent":{"other":"guardian"}}"#, Some("subagent"), "g", 0, "g", None);
+        add("archived", &rollout("archived"), 50, "cli", None, "old", 1, "old", None);
+        add("unbegun", &rollout("unbegun"), 60, "cli", None, "", 0, "", None);
+        add("deleted", &home.path().join("deleted.jsonl").display().to_string(), 70, "cli", None, "d", 0, "d", None);
+        drop(database);
+
+        let threads = super::state_threads(home.path()).unwrap();
+        let ids: Vec<&str> = threads.iter().map(|thread| thread["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["review", "person", "named", "guardian"]);
+        let by_id = |id: &str| threads.iter().find(|thread| thread["id"] == id).unwrap();
+        assert_eq!(by_id("person")["name"], "Fix the hook");
+        assert_eq!(by_id("named")["name"], "Kept name");
+        assert!(by_id("guardian")["name"].is_null());
+        assert_eq!(by_id("person")["cwd"], "/project");
+        assert_eq!(by_id("person")["gitInfo"]["branch"], "main");
+        assert_eq!(by_id("person")["updatedAt"], 30);
+        let begun: Vec<&str> = ids.iter().map(|id| super::begun_by(by_id(id))).collect();
+        assert_eq!(begun, ["agent", "person", "person", "agent"]);
+    }
+
+    /// A database without the columns the listing needs is an error, so the
+    /// account is left out rather than listed wrong.
+    #[test]
+    fn a_codex_state_database_without_the_columns_is_an_error() {
+        let home = tempfile::tempdir().unwrap();
+        assert!(super::state_threads(home.path()).is_err());
+        rusqlite::Connection::open(home.path().join("state_5.sqlite"))
+            .unwrap()
+            .execute_batch("CREATE TABLE threads (id TEXT PRIMARY KEY);")
+            .unwrap();
+        assert!(super::state_threads(home.path()).is_err());
+    }
+
     /// What the last run learned about each rollout is known after a
     /// restart, and a rollout that is gone is not kept (bw-sppo.2).
     #[test]

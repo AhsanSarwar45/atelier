@@ -37,20 +37,6 @@ use crate::workbench::{
 
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<SseEvent, Infallible>> + Send>>;
 
-/// One Codex app-server per account directory, and when it was last asked
-/// anything. One left unasked for `CODEX_READER_IDLE` is closed.
-type CodexReaders = Arc<
-    tokio::sync::Mutex<
-        HashMap<
-            Option<std::path::PathBuf>,
-            (
-                crate::workbench::codex::transport::CodexTransport,
-                std::time::Instant,
-            ),
-        >,
-    >,
->;
-
 /// Start a Codex app-server that only reads, for the account at `home`.
 async fn start_codex_app_server(
     home: Option<&std::path::Path>,
@@ -76,11 +62,6 @@ async fn start_codex_app_server(
     Ok(reader)
 }
 
-/// How long an app-server stays open with nothing asked of it. Plan usage no
-/// never uses one, so only a thread listing starts one; about 100 MB is not
-/// kept for the rest of the day.
-const CODEX_READER_IDLE: Duration = Duration::from_secs(120);
-
 #[derive(Clone)]
 pub struct WorkbenchState {
     registry: Arc<WorkbenchRegistry>,
@@ -103,10 +84,6 @@ pub struct WorkbenchState {
     /// Stands in for Claude in tests of the one reading Claude is started for.
     #[cfg(test)]
     claude_reader: Arc<std::sync::Mutex<Option<crate::workbench::claude::transport::ClaudeTransportConfig>>>,
-    /// One Codex app-server per account, while it is in use. `None` for the
-    /// account the server booted with, which is read with the environment it
-    /// already has.
-    codex_readers: CodexReaders,
     codex_records: Arc<std::sync::Mutex<HashMap<String, std::path::PathBuf>>>,
     claim_sweeps: Arc<tokio::sync::Mutex<HashMap<std::path::PathBuf, std::time::Instant>>>,
     watch_polls: broadcast::Sender<Value>,
@@ -201,7 +178,6 @@ impl WorkbenchState {
             usage_paused: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             #[cfg(test)]
             claude_reader: Arc::new(std::sync::Mutex::new(None)),
-            codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
             claim_sweeps: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             watch_polls,
@@ -398,77 +374,6 @@ impl WorkbenchState {
             hold.detail = activity.detail;
             hold.since = activity.since;
             hold.turn_since = activity.turn_since;
-        }
-    }
-
-    /// One read-only app-server per account.
-    ///
-    /// Initializing Codex is expensive; list, metadata and usage reads must
-    /// share it just as the former sidecar's reader cache did. The account is
-    /// the key because an app-server answers for the `CODEX_HOME` it was
-    /// started with and nothing else: one reader for every account would have
-    /// answered the work account's allowance with the personal account's
-    /// (bw-5ihw.8). The folder is not: its thread list is every thread of the
-    /// account wherever it was started, and the listing picks a project's out
-    /// itself, so a reader per project folder was another copy of the same
-    /// program for every project ever listed (bw-zoz0.1).
-    async fn codex_reader(
-        &self,
-        home: Option<&std::path::Path>,
-    ) -> Result<crate::workbench::codex::transport::CodexTransport, String> {
-        let key = home.map(std::path::Path::to_path_buf);
-        let mut readers = self.codex_readers.lock().await;
-        if let Some((reader, used)) = readers.get_mut(&key) {
-            *used = std::time::Instant::now();
-            return Ok(reader.clone());
-        }
-        let reader = start_codex_app_server(home).await?;
-        readers.insert(key.clone(), (reader.clone(), std::time::Instant::now()));
-        // Closed once nothing has asked it anything for a while.
-        let state = self.clone();
-        let child = reader.child_id();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(CODEX_READER_IDLE / 4).await;
-                let mut readers = state.codex_readers.lock().await;
-                match readers.get(&key) {
-                    Some((current, used)) if current.child_id() == child => {
-                        if used.elapsed() < CODEX_READER_IDLE {
-                            continue;
-                        }
-                    }
-                    // Replaced or already closed.
-                    _ => return,
-                }
-                if let Some((idle, _)) = readers.remove(&key) {
-                    drop(readers);
-                    idle.close().await;
-                }
-                return;
-            }
-        });
-        Ok(reader)
-    }
-
-    async fn forget_codex_reader(
-        &self,
-        home: Option<&std::path::Path>,
-        failed: &crate::workbench::codex::transport::CodexTransport,
-    ) {
-        let key = home.map(std::path::Path::to_path_buf);
-        let removed = {
-            let mut readers = self.codex_readers.lock().await;
-            if readers
-                .get(&key)
-                .is_some_and(|(reader, _)| reader.child_id() == failed.child_id())
-            {
-                readers.remove(&key)
-            } else {
-                None
-            }
-        };
-        if let Some((reader, _)) = removed {
-            reader.close().await;
         }
     }
 
@@ -1132,14 +1037,6 @@ impl WorkbenchState {
             self.usage_cache.lock().await.remove(&key);
             self.usage_breakdowns.lock().await.remove(&key);
             self.usage_paused.lock().await.remove(&key);
-            if brand == "codex" {
-                let home = (profile != crate::workbench::profiles::SYSTEM)
-                    .then(|| self.registry.profile_directory(brand, profile));
-                let removed = self.codex_readers.lock().await.remove(&home);
-                if let Some((reader, _)) = removed {
-                    reader.close().await;
-                }
-            }
         }
         // A reading taken the moment the login lands can still say "nothing
         // known", before the account's files are all written. Asked again a
@@ -2135,9 +2032,12 @@ async fn provider_sessions(state: &WorkbenchState, project: Option<&str>) -> Vec
             }
         }
     };
-    let (claude_acp, codex_acp) = tokio::join!(ask("claude"), ask("codex"));
-    let mut rows = Vec::new();
-    for (brand, result) in [("claude", claude_acp), ("codex", codex_acp)] {
+    // Codex's chats are its state database's, read directly. Its adapter
+    // answers `session/list` by starting a Codex app-server to read that same
+    // database, and adds nothing the listing uses (bw-xeeqg.19).
+    let mut rows = recorded_sessions(state, "codex").await;
+    {
+        let (brand, result) = ("claude", ask("claude").await);
         let recorded = recorded_sessions(state, brand).await;
         match result {
             Ok(sessions) => {
@@ -2300,10 +2200,11 @@ async fn recorded_sessions(state: &WorkbenchState, brand: &str) -> Vec<Value> {
         .await
         .unwrap_or_default();
     }
-    // One app-server per account: a thread list answers for the CODEX_HOME it
-    // was started with, so the accounts are asked one after another and their
-    // answers put together (bw-5ihw.8). Every thread of the account, wherever
-    // it was started; the caller keeps the ones in its folder.
+    // Each account's own state database, read directly: every thread of the
+    // account wherever it was started; the caller keeps the ones in its
+    // folder. Subagents' threads are listed too, for the same reason as the
+    // Claude record above: a subagent's thread left unlisted is a thread the
+    // adapter's answer then adopts as a person's (bw-p61.17).
     let mut threads: Vec<Value> = Vec::new();
     for home in state.codex_account_homes() {
         let stamp = codex_listing_stamp(home.as_deref());
@@ -2311,24 +2212,23 @@ async fn recorded_sessions(state: &WorkbenchState, brand: &str) -> Vec<Value> {
             threads.extend(listed);
             continue;
         }
-        let Ok(transport) = state.codex_reader(home.as_deref()).await else {
+        let Some(folder) = home
+            .clone()
+            .or_else(|| crate::workbench::profiles::system_dir("codex"))
+        else {
             continue;
         };
-        // Every source kind, for the same reason as the Claude record above:
-        // a subagent's thread left unlisted is a thread the adapter's answer
-        // then adopts as a person's (bw-p61.17).
-        match crate::workbench::codex::history::list_threads(&transport, None, true)
-            .await
-        {
+        let read = tokio::task::spawn_blocking(move || {
+            crate::workbench::codex::history::state_threads(&folder)
+        })
+        .await
+        .unwrap_or_else(|error| Err(error.to_string()));
+        match read {
             Ok(listed) => {
                 remember_threads(home.as_deref(), stamp, &listed);
                 threads.extend(listed)
             }
-            Err(_) => {
-                state
-                    .forget_codex_reader(home.as_deref(), &transport)
-                    .await
-            }
+            Err(error) => tracing::warn!(%error, "could not list this Codex account's chats"),
         }
     }
     let rows = threads
@@ -2372,7 +2272,7 @@ static LISTED_THREADS: std::sync::LazyLock<std::sync::Mutex<ListedThreads>> =
 /// What a Codex account's thread list is drawn from, as sizes and clocks:
 /// its state database and the folders a new thread's rollout lands in. When
 /// none moved there is no new thread, no renamed one and none deleted, and
-/// asking the app-server to page through every thread again learns nothing.
+/// reading every thread again learns nothing.
 /// A thread's own clocks are read from its rollout on every discovery
 /// regardless (bw-sppo.2).
 fn codex_listing_stamp(home: Option<&std::path::Path>) -> String {

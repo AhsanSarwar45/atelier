@@ -374,21 +374,6 @@ mod tests {
             let result = match method {
                 "initialize" => json!({"server": "fake"}),
                 "echo" => message["params"].clone(),
-                // A listing that would re-read every rollout is refused, so
-                // the listing test also proves it asks the state DB only.
-                "thread/list" if message["params"]["useStateDbOnly"] != true => {
-                    json!({"scanned":"every rollout"})
-                }
-                "thread/list" => {
-                    if message["params"]["cursor"].is_null() {
-                        json!({"data":[
-                            {"id":"inside","cwd":"/project","path":"/rollout/inside.jsonl"},
-                            {"id":"outside","cwd":"/elsewhere","path":"/rollout/outside.jsonl"}
-                        ],"nextCursor":"next"})
-                    } else {
-                        json!({"data":[{"id":"nested","cwd":"/project/nested","path":"/rollout/nested.jsonl"}],"nextCursor":null})
-                    }
-                }
                 "thread/read" => json!({"thread":{"id":message["params"]["threadId"],"turns":[]}}),
                 "thread/backgroundTerminals/list" => json!({"data":[]}),
                 "thread/start" => {
@@ -548,19 +533,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn native_codex_history_discovers_all_pages_filters_folders_and_reads_one_chat() {
-        use crate::workbench::codex::history::{list_threads, menu, read_thread, thread_usage};
+    async fn native_codex_history_reads_one_chat_its_usage_and_the_menu() {
+        use crate::workbench::codex::history::{menu, read_thread, thread_usage};
         let transport = CodexTransport::start(fake_config()).await.unwrap();
-        let found = list_threads(&transport, Some(Path::new("/project")), true)
-            .await
-            .unwrap();
-        assert_eq!(
-            found
-                .iter()
-                .map(|thread| thread["id"].as_str().unwrap())
-                .collect::<Vec<_>>(),
-            ["inside", "nested"]
-        );
         assert_eq!(
             read_thread(&transport, "inside").await.unwrap()["id"],
             "inside"
