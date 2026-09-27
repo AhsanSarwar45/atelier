@@ -51,10 +51,34 @@ type CodexReaders = Arc<
     >,
 >;
 
+/// Start a Codex app-server that only reads, for the account at `home`.
+async fn start_codex_app_server(
+    home: Option<&std::path::Path>,
+) -> Result<crate::workbench::codex::transport::CodexTransport, String> {
+    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(&cwd);
+    if let Some(home) = home {
+        config
+            .environment
+            .push(("CODEX_HOME".into(), home.to_string_lossy().into_owned()));
+    }
+    if let Some(executable) = crate::routes::find_tool("codex", &[]) {
+        config.executable = executable;
+    }
+    let reader = crate::workbench::codex::transport::CodexTransport::start(config)
+        .await
+        .map_err(|error| error.to_string())?;
+    // A read-only client does not consume provider notifications. Drain
+    // them so a reader has bounded memory.
+    if let Some(mut inbound) = reader.take_inbound() {
+        tokio::spawn(async move { while inbound.recv().await.is_some() {} });
+    }
+    Ok(reader)
+}
+
 /// How long an app-server stays open with nothing asked of it. Plan usage no
-/// longer keeps one busy, so only a thread listing, a login renewal or a
-/// reset use starts one, and each is over in seconds; about 100 MB is not
-/// kept for the rest of the day.
+/// longer keeps one, so only a thread listing or a reset use starts one, and
+/// each is over in seconds; about 100 MB is not kept for the rest of the day.
 const CODEX_READER_IDLE: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
@@ -398,24 +422,7 @@ impl WorkbenchState {
             *used = std::time::Instant::now();
             return Ok(reader.clone());
         }
-        let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
-        let mut config = crate::workbench::codex::transport::CodexTransportConfig::app_server(&cwd);
-        if let Some(home) = home {
-            config
-                .environment
-                .push(("CODEX_HOME".into(), home.to_string_lossy().into_owned()));
-        }
-        if let Some(executable) = crate::routes::find_tool("codex", &[]) {
-            config.executable = executable;
-        }
-        let reader = crate::workbench::codex::transport::CodexTransport::start(config)
-            .await
-            .map_err(|error| error.to_string())?;
-        // A read-only client does not consume provider notifications. Drain
-        // them so a long-lived cached reader has bounded memory.
-        if let Some(mut inbound) = reader.take_inbound() {
-            tokio::spawn(async move { while inbound.recv().await.is_some() {} });
-        }
+        let reader = start_codex_app_server(home).await?;
         readers.insert(key.clone(), (reader.clone(), std::time::Instant::now()));
         // Closed once nothing has asked it anything for a while.
         let state = self.clone();
@@ -632,12 +639,13 @@ impl WorkbenchState {
         match read_codex_direct(&home, at.clone()).await {
             Ok(usage) => Ok(usage),
             Err(CodexMiss::Failed(error)) => Err(error),
+            // The app-server renews the login while it reads. It is started
+            // for this one reading and closed, so an API that keeps refusing
+            // cannot keep one running beat after beat.
             Err(CodexMiss::Renew) => {
-                let transport = self.codex_reader(named).await?;
+                let transport = start_codex_app_server(named).await?;
                 let result = read_codex(&transport, at).await;
-                if result.is_err() {
-                    self.forget_codex_reader(named, &transport).await;
-                }
+                transport.close().await;
                 result
             }
         }
