@@ -125,15 +125,25 @@ async fn reconcile_session(
     launching: &std::sync::atomic::AtomicUsize,
     session_id: &str,
 ) -> Result<Value, String> {
-    // Keep attachment identity stable through publication. A retired probe
-    // cannot write its outcome over a newly attached turn.
-    let live = drivers.read().await;
-    if let Some(driver) = live.get(session_id).filter(|driver| !driver.is_closed()) {
-        if let Some(reconcile) = &driver.reconcile {
-            return reconcile().await;
-        }
-        // Only test drivers lack an actual runtime probe.
-        return Ok(Value::Null);
+    // The probe is taken out and the table let go before it runs. Held
+    // across the probe's database calls, the read side kept a launch, close or
+    // exit waiting for the write side, and the lock is fair, so every other
+    // command's own look at the table queued behind that writer: one busy
+    // database stopped Stop in every chat. A retired probe still cannot write
+    // over a newly attached turn, since a status is written only if no newer
+    // state landed after it read the chat (bw-cnlk9.1).
+    let probe = drivers
+        .read()
+        .await
+        .get(session_id)
+        .filter(|driver| !driver.is_closed())
+        .map(|driver| driver.reconcile.clone());
+    if let Some(probe) = probe {
+        return match probe {
+            Some(reconcile) => reconcile().await,
+            // Only test drivers lack an actual runtime probe.
+            None => Ok(Value::Null),
+        };
     }
     if launching.load(std::sync::atomic::Ordering::Acquire) != 0 {
         if database
@@ -418,6 +428,9 @@ async fn supervise_driver(
         }
     }
 }
+
+/// How long Stop waits for a live chat's agent to answer before letting it go.
+const STOP_WAIT: Duration = Duration::from_secs(5);
 
 pub struct WorkbenchRegistry {
     database: ChatDb,
@@ -982,16 +995,21 @@ impl WorkbenchRegistry {
         let paths = self.paths.clone();
         tokio::spawn(async move {
             supervise_driver(database.clone(), session_id.clone(), driver, receiver).await;
-            {
+            let ours = {
                 let mut live = live.write().await;
-                if live
+                let ours = live
                     .get(&session_id)
-                    .is_some_and(|current| current.same_channel(&owner))
-                {
+                    .is_some_and(|current| current.same_channel(&owner));
+                if ours {
                     live.remove(&session_id);
-                    // Even a dropped completion callback leaves no active status.
-                    let _ = super::status::reconcile(&database, &session_id, None).await;
                 }
+                ours
+            };
+            // Even a dropped completion callback leaves no active status. The
+            // table is let go first: every command looks in it, and none of
+            // them should wait for this chat's database write.
+            if ours {
+                let _ = super::status::reconcile(&database, &session_id, None).await;
             }
             end_supervising(&supervising, &database, &paths, &session_id).await;
         });
@@ -1215,9 +1233,55 @@ impl WorkbenchRegistry {
         driver
             .send(request)
             .map_err(|_| format!("provider for {session_id} stopped"))?;
-        receive
-            .await
-            .map_err(|_| format!("provider for {session_id} stopped before replying"))?
+        if command.kind != CommandKind::SessionStop {
+            return receive
+                .await
+                .map_err(|_| format!("provider for {session_id} stopped before replying"))?;
+        }
+        // Stop is what a person presses when the chat will not answer, so it
+        // must not wait for the chat to answer it. A driver busy past the
+        // limit is let go of: the chat is marked stopped, and the next
+        // message starts a fresh process after ending this one's
+        // (`prepare_unattached`).
+        match tokio::time::timeout(STOP_WAIT, receive).await {
+            Ok(reply) => {
+                reply.map_err(|_| format!("provider for {session_id} stopped before replying"))?
+            }
+            Err(_) => {
+                {
+                    let mut live = self.drivers.write().await;
+                    if live
+                        .get(session_id)
+                        .is_some_and(|current| current.same_channel(&driver))
+                    {
+                        live.remove(session_id);
+                    }
+                }
+                tracing::warn!(session_id, "the agent did not answer Stop in time; it was let go");
+                self.mark_stopped(session_id).await?;
+                Ok(json!({"ok":true,"detached":true,"unanswered":true}))
+            }
+        }
+    }
+
+    async fn mark_stopped(&self, session_id: &str) -> Result<(), String> {
+        let session = self
+            .database
+            .get_session(session_id.to_string())
+            .await?
+            .ok_or_else(|| format!("no session {session_id}"))?;
+        if session.state != "stopped" {
+            self.database
+                .append(
+                    serde_json::from_value(json!({
+                        "type":"session.state", "sessionId":session_id, "seq":0,
+                        "at":chrono::Utc::now().to_rfc3339(), "state":"stopped", "label":"Stopped"
+                    }))
+                    .map_err(|error| error.to_string())?,
+                )
+                .await?;
+        }
+        Ok(())
     }
 
     /// Establish the only state from which a driverless command may proceed.
@@ -1534,7 +1598,10 @@ impl WorkbenchRegistry {
         // Remove first so a prompt arriving after the reply always takes the
         // lazy attach path. Retiring closes only the process; unlike Chat Close
         // it does not end the conversation or add an Asleep transition.
-        if let Some(driver) = self.drivers.write().await.remove(session_id) {
+        // Taken out in its own statement: bound in the `if let`, the table's
+        // write side stayed held until the provider had retired.
+        let retiring = self.drivers.write().await.remove(session_id);
+        if let Some(driver) = retiring {
             let (reply, receive) = oneshot::channel();
             driver
                 .send(DriverRequest::Retire(reply))
@@ -2257,18 +2324,7 @@ impl WorkbenchRegistry {
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>
             {
                 self.prepare_unattached(command, false).await?;
-                let session_id = Self::field(command, "sessionId")?;
-                let session = self
-                    .database
-                    .get_session(session_id.to_string())
-                    .await?
-                    .ok_or_else(|| format!("no session {session_id}"))?;
-                if session.state != "stopped" {
-                    self.database.append(serde_json::from_value(json!({
-                        "type":"session.state", "sessionId":session_id, "seq":0,
-                        "at":chrono::Utc::now().to_rfc3339(), "state":"stopped", "label":"Stopped"
-                    })).map_err(|error| error.to_string())?).await?;
-                }
+                self.mark_stopped(Self::field(command, "sessionId")?).await?;
                 Ok(json!({"ok":true,"detached":true}))
             }
             CommandKind::SessionClose
@@ -2603,6 +2659,118 @@ mod tests {
         fn close<'a>(&'a mut self) -> DriverFuture<'a> {
             Box::pin(async { Ok(json!({"ok":true})) })
         }
+    }
+
+    /// A driver whose status probe waits until let go and whose Stop is
+    /// never answered: a provider stuck behind a busy database.
+    struct StuckDriver {
+        probe: Arc<tokio::sync::Notify>,
+    }
+    impl ProviderDriver for StuckDriver {
+        fn brand(&self) -> &'static str {
+            "claude"
+        }
+        fn reconciler(&self) -> Option<super::super::status::Reconciler> {
+            let probe = self.probe.clone();
+            Some(Arc::new(move || {
+                let probe = probe.clone();
+                Box::pin(async move {
+                    probe.notified().await;
+                    Ok(Value::Null)
+                })
+            }))
+        }
+        fn command<'a>(&'a mut self, command: &'a Command) -> DriverFuture<'a> {
+            let stuck = command.kind == CommandKind::SessionStop;
+            Box::pin(async move {
+                if stuck {
+                    std::future::pending::<()>().await;
+                }
+                Ok(json!({"ok":true}))
+            })
+        }
+        fn close<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+    }
+
+    async fn stuck_chat(root: &Path) -> (ChatDb, Arc<WorkbenchRegistry>, Arc<tokio::sync::Notify>) {
+        let database = ChatDb::open(&root.join("workbench.db")).unwrap();
+        let probe = Arc::new(tokio::sync::Notify::new());
+        let registry = Arc::new(WorkbenchRegistry::new(
+            database.clone(),
+            paths(root),
+            Arc::new(OneDriverFactory {
+                driver: std::sync::Mutex::new(Some(Box::new(StuckDriver { probe: probe.clone() }))),
+            }),
+        ));
+        database.create_session(a_chat("idle")).await.unwrap();
+        registry
+            .launch(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
+            .await
+            .unwrap();
+        (database, registry, probe)
+    }
+
+    #[tokio::test]
+    async fn a_slow_status_probe_does_not_hold_up_every_other_command() {
+        let root = tempfile::tempdir().unwrap();
+        let (_database, registry, probe) = stuck_chat(root.path()).await;
+
+        // A command's status check is waiting on the database...
+        let checking = {
+            let registry = registry.clone();
+            tokio::spawn(async move { registry.reconcile_status("session-1").await })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // ...when a launch, close or exit asks for the table to change it.
+        let changing = {
+            let drivers = registry.drivers.clone();
+            tokio::spawn(async move {
+                drivers.write().await;
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Stop's first question is whether the chat has a live agent.
+        let answered = tokio::time::timeout(Duration::from_secs(1), registry.has_driver("session-1")).await;
+        probe.notify_waiters();
+        assert!(answered.is_ok(), "the table stayed locked while a status check waited on the database");
+        tokio::time::timeout(Duration::from_secs(1), changing).await.unwrap().unwrap();
+        checking.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_stops_a_chat_whose_agent_never_answers_it() {
+        let root = tempfile::tempdir().unwrap();
+        let (database, registry, probe) = stuck_chat(root.path()).await;
+        // The probe answers at once here; only Stop is stuck.
+        let answering = {
+            let probe = probe.clone();
+            tokio::spawn(async move {
+                loop {
+                    probe.notify_waiters();
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+        };
+
+        // The agent never answers, so Stop returning at all is the proof.
+        // Paused time runs ahead while the database works on its own thread,
+        // so how long it took is not measured.
+        let reply = tokio::time::timeout(
+            STOP_WAIT * 4,
+            registry.execute(&command(CommandKind::SessionStop, json!({"sessionId":"session-1"}))),
+        )
+        .await
+        .expect("Stop waited for an agent that never answers")
+        .unwrap();
+        answering.abort();
+
+        assert_eq!(reply["detached"], json!(true));
+        assert!(!registry.has_driver("session-1").await, "the next message starts a fresh agent");
+        let session = database.get_session("session-1".into()).await.unwrap().unwrap();
+        assert_eq!(session.state, "stopped");
     }
 
     async fn say_state(database: &ChatDb, state: &str) {
