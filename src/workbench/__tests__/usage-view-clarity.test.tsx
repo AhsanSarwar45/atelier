@@ -27,6 +27,9 @@ const usage: PlanUsage = {
   at: '2026-09-20T00:00:00Z',
 };
 
+const request = vi.fn(async () => ({ ok: true, json: async () => usage }));
+vi.mock('@/lib/api', () => ({ request: (...args: unknown[]) => request(...args) }));
+
 vi.mock('@/workbench/live', () => ({
   useChatNames: () => new Map(),
   usePlanUsage: () => usage,
@@ -38,6 +41,17 @@ describe('usage explanations', () => {
   it('turns internal identifiers into readable names', () => {
     expect(readableName('general-purpose')).toBe('General Purpose');
     expect(readableName('chrome-devtools')).toBe('Chrome DevTools');
+  });
+
+  // The breakdown costs Claude a read of every transcript of the last week,
+  // so the chip's beats skip it and only the open view asks (bw-xeeqg.17).
+  it('asks for what is driving the usage only when the view opens', async () => {
+    expect(request).not.toHaveBeenCalled();
+    render(<UsageView profile="work" onClose={() => {}} />);
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/api/workbench/usage?brand=claude&breakdown=true&profile=work'));
+    request.mockClear();
+    render(<UsageView brand="codex" onClose={() => {}} />);
+    expect(request).not.toHaveBeenCalled();
   });
 
   it('states what every percentage measures', () => {

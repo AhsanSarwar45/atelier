@@ -599,39 +599,72 @@ pub fn claude_reset_outcome(raw: &Value) -> ResetOutcome {
 ///
 /// Read from the account's own files, the way Claude Code keeps them. The
 /// token is never refreshed here: refreshing rotates it, and the CLI that owns
-/// the file would then hold a dead one. The usage reader keeps it fresh.
+/// the file would then hold a dead one. A login found out of date is renewed
+/// by starting Claude itself for one reading (`ClaudeMiss::Renew`).
 struct ClaudeLogin {
     token: String,
     /// Needed only to use a reset, never to read them.
     organization: Option<String>,
+    /// The plan Claude Code recorded with the login (`team`, `max`, ...).
+    plan: Option<String>,
 }
 
-fn claude_login(directory: &std::path::Path) -> Result<ClaudeLogin, String> {
+/// Why an account has no login to read with.
+enum LoginProblem {
+    /// Never signed in to claude.ai, or signed out.
+    Missing(&'static str),
+    /// Signed in, but the access token has run out.
+    Expired,
+}
+
+fn claude_config(directory: &std::path::Path) -> Option<Value> {
     let read = |path: std::path::PathBuf| -> Option<Value> {
         serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
     };
-    let credentials = read(directory.join(".credentials.json"))
-        .ok_or("Claude login not found for this account")?;
-    let oauth = &credentials["claudeAiOauth"];
-    let token = text(&oauth["accessToken"]).ok_or("This account is not signed in to claude.ai")?;
-    if oauth["expiresAt"]
-        .as_i64()
-        .is_some_and(|ms| ms <= chrono::Utc::now().timestamp_millis())
-    {
-        return Err("The claude.ai login has expired. Open a Claude chat to renew it.".into());
-    }
     // `.claude.json` sits inside a relocated config directory, and beside the
     // default `~/.claude` directory otherwise.
     let beside = directory
         .parent()
         .filter(|_| directory.file_name().is_some_and(|name| name == ".claude"))
         .map(|home| home.join(".claude.json"));
-    let organization = [Some(directory.join(".claude.json")), beside]
+    [Some(directory.join(".claude.json")), beside]
         .into_iter()
         .flatten()
-        .filter_map(read)
-        .find_map(|config| text(&config["oauthAccount"]["organizationUuid"]));
-    Ok(ClaudeLogin { token, organization })
+        .find_map(read)
+}
+
+fn claude_account(directory: &std::path::Path) -> Result<ClaudeLogin, LoginProblem> {
+    let credentials: Value = std::fs::read_to_string(directory.join(".credentials.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .ok_or(LoginProblem::Missing("Claude login not found for this account"))?;
+    let oauth = &credentials["claudeAiOauth"];
+    let token = text(&oauth["accessToken"])
+        .ok_or(LoginProblem::Missing("This account is not signed in to claude.ai"))?;
+    // A minute's margin, so a token does not run out between here and the
+    // request.
+    if oauth["expiresAt"]
+        .as_i64()
+        .is_some_and(|ms| ms <= chrono::Utc::now().timestamp_millis() + 60_000)
+    {
+        return Err(LoginProblem::Expired);
+    }
+    let organization =
+        claude_config(directory).and_then(|config| text(&config["oauthAccount"]["organizationUuid"]));
+    Ok(ClaudeLogin {
+        token,
+        organization,
+        plan: text(&oauth["subscriptionType"]),
+    })
+}
+
+fn claude_login(directory: &std::path::Path) -> Result<ClaudeLogin, String> {
+    claude_account(directory).map_err(|problem| match problem {
+        LoginProblem::Missing(said) => said.to_string(),
+        LoginProblem::Expired => {
+            "The claude.ai login has expired. Open a Claude chat to renew it.".to_string()
+        }
+    })
 }
 
 const CLAUDE_API: &str = "https://api.anthropic.com";
@@ -683,6 +716,142 @@ pub async fn read_claude_resets(directory: &std::path::Path) -> Result<Option<Pl
     .await
     .map_err(|error| error.to_string())?;
     Ok(claude_resets(&raw["cedar_ember"], chrono::Utc::now()))
+}
+
+/// Why a Claude account's plan could not be read over the account API.
+#[derive(Debug, PartialEq)]
+pub enum ClaudeMiss {
+    /// The login has run out. Only Claude may renew it, since a renewal
+    /// rotates the refresh token every chat on the account shares, so the
+    /// caller starts Claude for one reading.
+    Renew,
+    /// The API refused for asking too often; wait this many seconds when it
+    /// said how long.
+    Limited(Option<u64>),
+    Failed(String),
+}
+
+/// How old Claude Code's own saved reading may be and still be drawn when
+/// the API cannot be asked. Claude Code keeps the same limit for itself.
+const SNAPSHOT_MAX_AGE_MS: i64 = 60 * 60 * 1000;
+
+fn unavailable(plan: Option<String>, at: String) -> PlanUsage {
+    PlanUsage {
+        available: false,
+        plan,
+        session: None,
+        week: None,
+        per_model: vec![],
+        credits: None,
+        driving: vec![],
+        resets: None,
+        at,
+    }
+}
+
+/// The plan figures in the account API's own shape, as the browser contract.
+///
+/// `/api/oauth/usage` answers with the same body Claude's `get_usage` hands
+/// back as `rate_limits`, so it is read by the same code.
+fn claude_api_usage(body: &Value, plan: Option<String>, at: String) -> PlanUsage {
+    claude_usage(
+        Some(&json!({
+            "subscription_type": plan,
+            "rate_limits_available": true,
+            "rate_limits": body,
+        })),
+        at,
+    )
+}
+
+/// Read a Claude account's plan and resets straight from the account API,
+/// with the login the account already has on disk. No Claude process is
+/// started: keeping one per account cost about 240 MB each.
+pub async fn read_claude_direct(
+    directory: &std::path::Path,
+    at: impl Into<String>,
+) -> Result<PlanUsage, ClaudeMiss> {
+    let at = at.into();
+    let login = match claude_account(directory) {
+        Ok(login) => login,
+        // Nothing to read with, so nothing to show. The chip draws nothing.
+        Err(LoginProblem::Missing(_)) => return Ok(unavailable(None, at)),
+        Err(LoginProblem::Expired) => return Err(ClaudeMiss::Renew),
+    };
+    let response = claude_request(
+        &login,
+        reqwest::Client::new().get(format!("{CLAUDE_API}/api/oauth/usage?cedar_ember=1")),
+    )
+    .timeout(Duration::from_secs(10))
+    .send()
+    .await
+    .map_err(|error| ClaudeMiss::Failed(error.to_string()))?;
+    match response.status().as_u16() {
+        401 => return Err(ClaudeMiss::Renew),
+        429 => {
+            let after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()?.parse().ok());
+            return Err(ClaudeMiss::Limited(after));
+        }
+        status if !(200..300).contains(&status) => {
+            return Err(ClaudeMiss::Failed(format!("the usage API answered {status}")))
+        }
+        _ => {}
+    }
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|error| ClaudeMiss::Failed(error.to_string()))?;
+    claude_body_usage(&body, login.plan, at, chrono::Utc::now())
+}
+
+/// A body the account API answered with, as a reading. A refusal can also
+/// come back inside a 200, as Claude Code itself allows for.
+fn claude_body_usage(
+    body: &Value,
+    plan: Option<String>,
+    at: String,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<PlanUsage, ClaudeMiss> {
+    if body["error"]["type"] == "rate_limit_error" {
+        return Err(ClaudeMiss::Limited(None));
+    }
+    if !body.is_object() || body.get("error").is_some() {
+        return Err(ClaudeMiss::Failed("the usage API answered without figures".into()));
+    }
+    let mut usage = claude_api_usage(body, plan, at);
+    usage.resets = claude_resets(&body["cedar_ember"], now);
+    Ok(usage)
+}
+
+/// Claude Code's own last reading of an account's plan, which it saves in
+/// `.claude.json` whenever it reads the plan. Used when the API will not
+/// answer; it carries no resets. `at` is when Claude Code took it.
+pub fn claude_snapshot(directory: &std::path::Path) -> Option<PlanUsage> {
+    let config = claude_config(directory)?;
+    let plan = std::fs::read_to_string(directory.join(".credentials.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|credentials| text(&credentials["claudeAiOauth"]["subscriptionType"]));
+    claude_snapshot_of(&config, plan, chrono::Utc::now().timestamp_millis())
+}
+
+fn claude_snapshot_of(config: &Value, plan: Option<String>, now_ms: i64) -> Option<PlanUsage> {
+    let saved = &config["cachedUsageUtilization"];
+    // A reading saved for another login on this directory is not this one's.
+    let account = text(&config["oauthAccount"]["accountUuid"]);
+    if text(&saved["accountUuid"]).is_some_and(|saved| Some(saved) != account) {
+        return None;
+    }
+    let taken = saved["fetchedAtMs"].as_i64()?;
+    let age = now_ms - taken;
+    if !(0..=SNAPSHOT_MAX_AGE_MS).contains(&age) || !saved["utilization"].is_object() {
+        return None;
+    }
+    let at = chrono::DateTime::from_timestamp_millis(taken)?.to_rfc3339();
+    Some(claude_api_usage(&saved["utilization"], plan, at))
 }
 
 /// Use one Claude reset. `attempt` identifies the attempt, so a retry of the
@@ -816,15 +985,30 @@ pub fn window_now(raw: &Value) -> Option<Value> {
 
 /// Read Claude's account allowance over the same native control channel as a
 /// chat; no SDK process is needed.
+///
+/// Without `breakdown` Claude is told to skip its "what is driving your
+/// usage" section, which it builds by reading every transcript the account
+/// touched in the last seven days: 1.6 GB for one account on the manager's
+/// machine, on every beat, until the service was killed for the page cache it
+/// filled (bw-xeeqg.17).
 pub async fn read_claude(
     transport: &crate::workbench::claude::transport::ClaudeTransport,
     at: impl Into<String>,
+    breakdown: bool,
 ) -> Result<PlanUsage, String> {
     let raw = transport
-        .call(json!({"subtype":"get_usage"}), Duration::from_secs(15))
+        .call(claude_usage_request(breakdown), Duration::from_secs(if breakdown { 60 } else { 15 }))
         .await
         .map_err(|error| error.to_string())?;
     Ok(claude_usage(Some(&raw), at))
+}
+
+pub(crate) fn claude_usage_request(breakdown: bool) -> Value {
+    if breakdown {
+        json!({"subtype":"get_usage"})
+    } else {
+        json!({"subtype":"get_usage","skip_behaviors":true})
+    }
 }
 
 /// Read Codex's account allowance from its native app-server transport.
@@ -926,5 +1110,69 @@ mod tests {
         assert_eq!(codex_reset_outcome(&json!({"outcome":"noCredit"})).outcome, "no_reset");
         assert_eq!(claude_reset_outcome(&json!({"result":"not_limited"})).outcome, "nothing_to_reset");
         assert_eq!(claude_reset_outcome(&json!({"result":"unavailable","reason":"reset_unconfirmed"})).outcome, "unconfirmed");
+    }
+
+    /// The account API's body, as captured from `/api/oauth/usage` on
+    /// 2026-09-27, reads the same as Claude's own `get_usage` did.
+    #[test]
+    fn the_account_api_body_reads_like_claudes_own_answer() {
+        let body = json!({
+            "five_hour": {"utilization": 38.0, "resets_at": "2026-09-27T10:59:59.786391+00:00"},
+            "seven_day": {"utilization": 74.0, "resets_at": "2026-09-29T07:59:59.786422+00:00"},
+            "extra_usage": {"is_enabled": true, "monthly_limit": 10000, "used_credits": 2966.0,
+                "utilization": 29.66, "currency": "USD"},
+            "limits": [
+                {"kind": "session", "group": "session", "percent": 38, "resets_at": "2026-09-27T10:59:59.786391+00:00", "severity": "normal", "is_active": true},
+                {"kind": "weekly_all", "group": "weekly", "percent": 74, "resets_at": "2026-09-29T07:59:59.786422+00:00", "severity": "normal", "is_active": true},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 0, "resets_at": "2026-09-29T07:59:59.786666+00:00", "severity": "normal", "is_active": true,
+                    "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}}
+            ],
+            "cedar_ember": {"eligible": true, "next_grant_id": "g1", "grants": [
+                {"id": "g1", "label": "Launch reset", "usable_now": true, "resets_left": 1}
+            ]}
+        });
+        let now = chrono::Utc::now();
+        let usage = claude_body_usage(&body, Some("team".into()), "now".into(), now).unwrap();
+        assert!(usage.available);
+        assert_eq!(usage.plan.as_deref(), Some("team"));
+        assert_eq!(usage.session.as_ref().unwrap().percent, Some(38.0));
+        assert_eq!(usage.week.as_ref().unwrap().percent, Some(74.0));
+        assert_eq!(usage.per_model[0].label, "This week · Fable");
+        assert_eq!(usage.credits.as_ref().unwrap().limit, Some(10000.0));
+        let resets = usage.resets.unwrap();
+        assert_eq!(resets.available, 1);
+        assert!(resets.items[0].usable);
+
+        // A refusal can come back inside a 200.
+        assert_eq!(
+            claude_body_usage(
+                &json!({"error": {"type": "rate_limit_error", "message": "Rate limited."}}),
+                None,
+                "now".into(),
+                now,
+            ),
+            Err(ClaudeMiss::Limited(None))
+        );
+    }
+
+    /// Claude Code's saved reading is drawn only for the login it was taken
+    /// on, and only under an hour old.
+    #[test]
+    fn a_saved_reading_is_used_only_for_its_own_login_and_while_recent() {
+        let now = 1_790_000_000_000;
+        let config = |account: &str, age: i64| {
+            json!({
+                "oauthAccount": {"accountUuid": "mine"},
+                "cachedUsageUtilization": {"fetchedAtMs": now - age, "accountUuid": account,
+                    "utilization": {"five_hour": {"utilization": 12, "resets_at": null},
+                        "seven_day": {"utilization": 50, "resets_at": null}}}
+            })
+        };
+        let saved = claude_snapshot_of(&config("mine", 5 * 60_000), Some("max".into()), now).unwrap();
+        assert_eq!(saved.session.unwrap().percent, Some(12.0));
+        assert_eq!(saved.week.unwrap().percent, Some(50.0));
+        assert_eq!(saved.at, chrono::DateTime::from_timestamp_millis(now - 5 * 60_000).unwrap().to_rfc3339());
+        assert!(claude_snapshot_of(&config("theirs", 60_000), None, now).is_none());
+        assert!(claude_snapshot_of(&config("mine", 61 * 60_000), None, now).is_none());
     }
 }

@@ -37,25 +37,35 @@ use crate::workbench::{
 
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<SseEvent, Infallible>> + Send>>;
 
-/// One usage connection per Claude account, keyed by profile id.
-type ClaudeReaders =
-    Arc<tokio::sync::Mutex<HashMap<String, crate::workbench::claude::transport::ClaudeTransport>>>;
-
-/// One Codex app-server per account directory.
+/// One Codex app-server per account directory, and when it was last asked
+/// anything. One left unasked for `CODEX_READER_IDLE` is closed.
 type CodexReaders = Arc<
     tokio::sync::Mutex<
         HashMap<
             Option<std::path::PathBuf>,
-            crate::workbench::codex::transport::CodexTransport,
+            (
+                crate::workbench::codex::transport::CodexTransport,
+                std::time::Instant,
+            ),
         >,
     >,
 >;
+
+/// How long an app-server stays open with nothing asked of it. Plan usage no
+/// longer keeps one busy, so only a thread listing, a login renewal or a
+/// reset use starts one, and each is over in seconds; about 100 MB is not
+/// kept for the rest of the day.
+const CODEX_READER_IDLE: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
 pub struct WorkbenchState {
     registry: Arc<WorkbenchRegistry>,
     hold_memory: Arc<tokio::sync::Mutex<HoldMemory>>,
     usage_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Value)>>>,
+    /// Each Claude account's last "what is driving your usage" section and
+    /// when it was read. Only the Plan usage view asks for it, and a beat's
+    /// reading borrows it (bw-xeeqg.17).
+    usage_breakdowns: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Value)>>>,
     usage_refreshes: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     discovery_cache: Arc<tokio::sync::Mutex<HashMap<String, (std::time::Instant, Vec<Value>)>>>,
     discoveries: Arc<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
@@ -63,10 +73,15 @@ pub struct WorkbenchState {
     /// When each provider last took longer than discovery waits to list.
     listing_slow: Arc<tokio::sync::Mutex<HashMap<String, std::time::Instant>>>,
     listings: Listings,
-    /// One usage connection per Claude account, keyed by profile id.
-    claude_usage_readers: ClaudeReaders,
-    /// One Codex app-server per account. `None` for the account the server
-    /// booted with, which is read with the environment it already has.
+    /// When each account's plan may next be asked of the provider's API,
+    /// after the API said to wait. Claude's usage API allows few questions.
+    usage_paused: Arc<tokio::sync::Mutex<HashMap<String, std::time::Instant>>>,
+    /// Stands in for Claude in tests of the one reading Claude is started for.
+    #[cfg(test)]
+    claude_reader: Arc<std::sync::Mutex<Option<crate::workbench::claude::transport::ClaudeTransportConfig>>>,
+    /// One Codex app-server per account, while it is in use. `None` for the
+    /// account the server booted with, which is read with the environment it
+    /// already has.
     codex_readers: CodexReaders,
     codex_records: Arc<std::sync::Mutex<HashMap<String, std::path::PathBuf>>>,
     claim_sweeps: Arc<tokio::sync::Mutex<HashMap<std::path::PathBuf, std::time::Instant>>>,
@@ -152,13 +167,16 @@ impl WorkbenchState {
             registry: Arc::new(registry),
             hold_memory: Arc::new(tokio::sync::Mutex::new(HoldMemory::default())),
             usage_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            usage_breakdowns: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             usage_refreshes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             discovery_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             discoveries: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             listing_refused: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             listing_slow: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             listings: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            claude_usage_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            usage_paused: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            claude_reader: Arc::new(std::sync::Mutex::new(None)),
             codex_readers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
             claim_sweeps: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -376,7 +394,8 @@ impl WorkbenchState {
     ) -> Result<crate::workbench::codex::transport::CodexTransport, String> {
         let key = home.map(std::path::Path::to_path_buf);
         let mut readers = self.codex_readers.lock().await;
-        if let Some(reader) = readers.get(&key) {
+        if let Some((reader, used)) = readers.get_mut(&key) {
+            *used = std::time::Instant::now();
             return Ok(reader.clone());
         }
         let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
@@ -397,7 +416,30 @@ impl WorkbenchState {
         if let Some(mut inbound) = reader.take_inbound() {
             tokio::spawn(async move { while inbound.recv().await.is_some() {} });
         }
-        readers.insert(key, reader.clone());
+        readers.insert(key.clone(), (reader.clone(), std::time::Instant::now()));
+        // Closed once nothing has asked it anything for a while.
+        let state = self.clone();
+        let child = reader.child_id();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(CODEX_READER_IDLE / 4).await;
+                let mut readers = state.codex_readers.lock().await;
+                match readers.get(&key) {
+                    Some((current, used)) if current.child_id() == child => {
+                        if used.elapsed() < CODEX_READER_IDLE {
+                            continue;
+                        }
+                    }
+                    // Replaced or already closed.
+                    _ => return,
+                }
+                if let Some((idle, _)) = readers.remove(&key) {
+                    drop(readers);
+                    idle.close().await;
+                }
+                return;
+            }
+        });
         Ok(reader)
     }
 
@@ -411,14 +453,14 @@ impl WorkbenchState {
             let mut readers = self.codex_readers.lock().await;
             if readers
                 .get(&key)
-                .is_some_and(|reader| reader.child_id() == failed.child_id())
+                .is_some_and(|(reader, _)| reader.child_id() == failed.child_id())
             {
                 readers.remove(&key)
             } else {
                 None
             }
         };
-        if let Some(reader) = removed {
+        if let Some((reader, _)) = removed {
             reader.close().await;
         }
     }
@@ -439,21 +481,24 @@ impl WorkbenchState {
             .clone()
     }
 
-    /// The connection plan usage is read over, one per account.
+    /// Start Claude on one account for a single plan reading, then close it.
+    ///
+    /// Only for what the account API cannot do alone: renewing a login that
+    /// has run out (Claude renews it while reading), and the breakdown of
+    /// what is driving the usage, which Claude builds from the account's
+    /// transcripts. Keeping a Claude open per account for every beat cost
+    /// about 240 MB each.
     ///
     /// `directory` is where that account's login lives, or `None` for the one
     /// the computer itself is signed in with — which is asked with the
     /// environment left alone, because `CLAUDE_CONFIG_DIR=~/.claude` makes
     /// Claude look for `~/.claude/.claude.json` and answer for nobody.
-    async fn claude_usage_reader(
+    async fn read_claude_once(
         &self,
-        profile: &str,
         directory: Option<&std::path::Path>,
-    ) -> Result<crate::workbench::claude::transport::ClaudeTransport, String> {
-        let mut readers = self.claude_usage_readers.lock().await;
-        if let Some(transport) = readers.get(profile) {
-            return Ok(transport.clone());
-        }
+        breakdown: bool,
+        at: String,
+    ) -> Result<crate::workbench::usage::PlanUsage, String> {
         let options = crate::workbench::claude::transport::ClaudeSessionOptions {
             cwd: std::env::current_dir().map_err(|error| error.to_string())?,
             resume: None,
@@ -476,38 +521,120 @@ impl WorkbenchState {
         if let Some(executable) = crate::routes::find_tool("claude", &[]) {
             config.executable = executable;
         }
+        #[cfg(test)]
+        if let Some(fake) = self.claude_reader.lock().unwrap().clone() {
+            config = fake;
+        }
         let transport = crate::workbench::claude::transport::ClaudeTransport::start(config)
             .await
             .map_err(|error| error.to_string())?;
-        // A usage-only connection does not consume provider notifications.
-        // Drain them so the one reused reader cannot accumulate an unbounded
-        // inbound queue between its thirty-second requests.
         if let Some(mut inbound) = transport.take_inbound() {
             tokio::spawn(async move { while inbound.recv().await.is_some() {} });
         }
-        readers.insert(profile.to_string(), transport.clone());
-        Ok(transport)
+        let result = crate::workbench::usage::read_claude(&transport, at, breakdown).await;
+        transport.close().await;
+        result
     }
 
-    async fn forget_claude_usage_reader(
+    /// Whether the provider's API asked this account's reads to wait.
+    async fn usage_waiting(&self, key: &str) -> bool {
+        self.usage_paused
+            .lock()
+            .await
+            .get(key)
+            .is_some_and(|until| std::time::Instant::now() < *until)
+    }
+
+    /// One Claude account's reading, from the account API, with Claude
+    /// started only for a login renewal or the breakdown.
+    async fn claude_reading(
         &self,
+        key: &str,
         profile: &str,
-        failed: &crate::workbench::claude::transport::ClaudeTransport,
-    ) {
-        let removed = {
-            let mut readers = self.claude_usage_readers.lock().await;
-            if readers
-                .get(profile)
-                .is_some_and(|current| current.child_id() == failed.child_id())
-            {
-                readers.remove(profile)
-            } else {
-                None
+        named: Option<&std::path::Path>,
+        scan: bool,
+        at: String,
+    ) -> Result<Value, String> {
+        use crate::workbench::usage::{read_claude_direct, read_claude_resets, ClaudeMiss};
+        let json = |usage| serde_json::to_value(usage).map_err(|e: serde_json::Error| e.to_string());
+        let directory = self.registry.profile_directory("claude", profile);
+        let last = self.usage_cache.lock().await.get(key).map(|(_, value)| value.clone());
+        // What Claude alone says nothing about is kept from the last reading.
+        let with_last_resets = |mut value: Value| {
+            value["resets"] = last.as_ref().map_or(Value::Null, |last| last["resets"].clone());
+            value
+        };
+        if scan {
+            // Claude reads the plan while it builds the breakdown, so the API
+            // is not asked as well.
+            return Ok(with_last_resets(json(self.read_claude_once(named, true, at).await?)?));
+        }
+        let miss = if self.usage_waiting(key).await {
+            ClaudeMiss::Limited(None)
+        } else {
+            match read_claude_direct(&directory, at.clone()).await {
+                Ok(usage) => {
+                    self.usage_paused.lock().await.remove(key);
+                    return json(usage);
+                }
+                Err(ClaudeMiss::Renew) => {
+                    let mut usage = self.read_claude_once(named, false, at).await?;
+                    // The login is fresh again, so the resets can be read.
+                    if usage.available {
+                        usage.resets = read_claude_resets(&directory).await.ok().flatten();
+                    }
+                    return json(usage);
+                }
+                Err(ClaudeMiss::Limited(after)) => {
+                    // Asking again while refused keeps the refusal going, so
+                    // wait at least a reading's age, longer if told to.
+                    let wait = Duration::from_secs(after.unwrap_or(0).clamp(300, 1800));
+                    self.usage_paused
+                        .lock()
+                        .await
+                        .insert(key.to_string(), std::time::Instant::now() + wait);
+                    ClaudeMiss::Limited(after)
+                }
+                Err(miss) => miss,
             }
         };
-        if let Some(transport) = removed {
-            transport.close().await;
+        // The newer of Claude Code's own saved reading, which any Claude on
+        // the account keeps and which is used under an hour old, and the last
+        // reading taken here. Each still says when it was taken.
+        let taken = |value: &Value| {
+            value["at"]
+                .as_str()
+                .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+        };
+        if let Some(saved) = crate::workbench::usage::claude_snapshot(&directory) {
+            let saved = with_last_resets(json(saved)?);
+            if last.as_ref().map_or(true, |last| taken(&saved) > taken(last)) {
+                return Ok(saved);
+            }
         }
+        last.ok_or_else(|| match miss {
+            ClaudeMiss::Limited(_) => "Claude's usage API asked to wait before the next reading".into(),
+            ClaudeMiss::Failed(error) => error,
+            ClaudeMiss::Renew => "The claude.ai login has expired".into(),
+        })
+    }
+
+    /// One Codex account's reading, from the ChatGPT API, with an app-server
+    /// asked only when the login needs renewing.
+    async fn codex_reading(
+        &self,
+        profile: &str,
+        named: Option<&std::path::Path>,
+        at: String,
+    ) -> Result<crate::workbench::usage::PlanUsage, String> {
+        use crate::workbench::usage::read_codex;
+        let _ = profile;
+        let transport = self.codex_reader(named).await?;
+        let result = read_codex(&transport, at).await;
+        if result.is_err() {
+            self.forget_codex_reader(named, &transport).await;
+        }
+        result
     }
 
     /// Read every account of every brand, each on its own task, and send each
@@ -917,55 +1044,61 @@ impl WorkbenchState {
         brand: &str,
         profile: Option<&str>,
     ) -> Result<Value, String> {
+        self.account_usage_with(brand, profile, false).await
+    }
+
+    /// The same reading, with `breakdown` also asking what is driving the
+    /// account's usage when that was last read more than half an hour ago.
+    /// Claude builds it by reading every transcript of the last seven days, so
+    /// only the open Plan usage view asks for it (bw-xeeqg.17).
+    pub(crate) async fn account_usage_with(
+        &self,
+        brand: &str,
+        profile: Option<&str>,
+        breakdown: bool,
+    ) -> Result<Value, String> {
         let profile = profile.unwrap_or(crate::workbench::profiles::SYSTEM);
         let key = usage_key(brand, profile);
-        if let Some(value) = fresh_usage(&self.usage_cache, &key).await {
-            return Ok(value);
+        let wants_scan = |breakdowns: &HashMap<String, (std::time::Instant, Value)>| {
+            breakdown && brand == "claude" && !breakdown_fresh(breakdowns, &key)
+        };
+        if !wants_scan(&*self.usage_breakdowns.lock().await) {
+            if let Some(value) = fresh_usage(&self.usage_cache, &key).await {
+                return Ok(value);
+            }
         }
         // Only callers for this account share an in-flight refresh. Claude and
         // Codex must never wait behind each other's fifteen-second native
         // allowance request, and neither must two accounts of one brand.
         let refresh = self.usage_refresh(&key).await;
         let _refresh = refresh.lock().await;
-        if let Some(value) = fresh_usage(&self.usage_cache, &key).await {
-            return Ok(value);
+        let scan = wants_scan(&*self.usage_breakdowns.lock().await);
+        if !scan {
+            if let Some(value) = fresh_usage(&self.usage_cache, &key).await {
+                return Ok(value);
+            }
         }
-        // Where the account's login lives. The system account is read with the
-        // environment the server already has, which is the one thing that
-        // cannot be spelled out; see `claude_usage_reader`.
+        // Where the account's login lives, for the process started when one
+        // is needed. The system account is left to the environment the server
+        // already has, which is the one thing that cannot be spelled out; see
+        // `read_claude_once`.
         let named = (profile != crate::workbench::profiles::SYSTEM)
             .then(|| self.registry.profile_directory(brand, profile));
         let at = chrono::Utc::now().to_rfc3339();
         let value = if brand == "codex" {
-            let transport = self.codex_reader(named.as_deref()).await?;
-            let result = crate::workbench::usage::read_codex(&transport, at).await;
-            if result.is_err() {
-                self.forget_codex_reader(named.as_deref(), &transport).await;
-            }
-            serde_json::to_value(result?).map_err(|e| e.to_string())?
+            serde_json::to_value(self.codex_reading(profile, named.as_deref(), at).await?)
+                .map_err(|e| e.to_string())?
         } else if brand == "claude" {
-            let transport = self.claude_usage_reader(profile, named.as_deref()).await?;
-            let result = crate::workbench::usage::read_claude(&transport, at).await;
-            // A reader that answers "no allowance known" is as stuck as one
-            // that errors: it read its login when it started, so an account
-            // that was signed out then (or whose login has since died) keeps
-            // saying nothing even after the account is signed in again. The
-            // next beat starts a fresh one that reads the login as it is now.
-            if result.as_ref().map_or(true, |usage| !usage.available) {
-                self.forget_claude_usage_reader(profile, &transport).await;
+            let mut value = self
+                .claude_reading(&key, profile, named.as_deref(), scan, at)
+                .await?;
+            let mut breakdowns = self.usage_breakdowns.lock().await;
+            if scan && value["available"] == true {
+                breakdowns.insert(key.clone(), (std::time::Instant::now(), value["driving"].clone()));
+            } else if let Some((_, driving)) = breakdowns.get(&key) {
+                value["driving"] = driving.clone();
             }
-            let mut usage = result?;
-            // The control channel says nothing about resets, so they are read
-            // from the account API with the same login. A failure there costs
-            // the resets, never the figure.
-            if usage.available {
-                let directory = self.registry.profile_directory(brand, profile);
-                usage.resets = crate::workbench::usage::read_claude_resets(&directory)
-                    .await
-                    .ok()
-                    .flatten();
-            }
-            serde_json::to_value(usage).map_err(|e| e.to_string())?
+            value
         } else {
             return Err(format!("unknown usage provider {brand}"));
         };
@@ -975,8 +1108,7 @@ impl WorkbenchState {
     }
     /// An account has just been signed in: forget everything read on its old
     /// login and read it again now, so the plan chip comes back at once rather
-    /// than on some later beat — or never, behind a reader that started
-    /// signed out.
+    /// than on some later beat.
     pub(crate) async fn account_signed_in(&self, brand: &str, profile: &str) {
         self.registry.retire_idle_on_account(brand, profile).await;
         let key = usage_key(brand, profile);
@@ -984,22 +1116,19 @@ impl WorkbenchState {
         {
             let _refresh = refresh.lock().await;
             self.usage_cache.lock().await.remove(&key);
-            if brand == "claude" {
-                let removed = self.claude_usage_readers.lock().await.remove(profile);
-                if let Some(transport) = removed {
-                    transport.close().await;
-                }
-            } else if brand == "codex" {
+            self.usage_breakdowns.lock().await.remove(&key);
+            self.usage_paused.lock().await.remove(&key);
+            if brand == "codex" {
                 let home = (profile != crate::workbench::profiles::SYSTEM)
                     .then(|| self.registry.profile_directory(brand, profile));
                 let removed = self.codex_readers.lock().await.remove(&home);
-                if let Some(reader) = removed {
+                if let Some((reader, _)) = removed {
                     reader.close().await;
                 }
             }
         }
-        // A reader started a moment after the login lands can answer before
-        // it has loaded the account, and say "nothing known". Asked again a
+        // A reading taken the moment the login lands can still say "nothing
+        // known", before the account's files are all written. Asked again a
         // few times, a few seconds apart, rather than left to the next beat.
         for attempt in 0..4 {
             if attempt > 0 {
@@ -1071,18 +1200,28 @@ pub(crate) fn usage_key(brand: &str, profile: &str) -> String {
 
 /// How long one account's reading stands before a beat reads it again.
 ///
-/// Claude answers `get_usage` by reading every transcript the account has
-/// saved: 1.6 GB for one account, 557 MB for another, measured on the
-/// manager's machine, once for every beat of thirty seconds. That filled the
-/// page cache the service is limited by until the kernel stalled it and
-/// `systemd-oomd` killed it (bw-xeeqg.15). A plan's percentage moves slowly;
-/// a sign-in or a reset clears the reading and reads it at once.
+/// A Claude reading is work in a Claude process on every account (bw-xeeqg.15),
+/// and a plan's percentage moves slowly. A sign-in or a reset clears the
+/// reading and reads it at once. The transcript scan that once made each
+/// reading cost 1.6 GB is skipped on a beat altogether (bw-xeeqg.17).
 fn usage_max_age(key: &str) -> Duration {
     if key.starts_with("claude/") {
         Duration::from_secs(300)
     } else {
         Duration::from_secs(30)
     }
+}
+
+/// Whether an account's breakdown was read in the last half hour. It covers a
+/// day and a week of use, so an older one is still worth drawing between
+/// readings, but the open view reads it again.
+fn breakdown_fresh(
+    breakdowns: &HashMap<String, (std::time::Instant, Value)>,
+    key: &str,
+) -> bool {
+    breakdowns
+        .get(key)
+        .is_some_and(|(at, _)| at.elapsed() < Duration::from_secs(30 * 60))
 }
 
 async fn fresh_usage(
@@ -1307,19 +1446,30 @@ struct UsageQuery {
     /// Which account to ask. Absent means the one the computer is signed in
     /// with, which is what every caller meant before accounts existed.
     profile: Option<String>,
+    /// Also read what is driving the account's usage; the Plan usage view
+    /// asks for it when it opens (bw-xeeqg.17).
+    #[serde(default)]
+    breakdown: bool,
 }
 async fn usage(
     State(state): State<WorkbenchState>,
     Query(query): Query<UsageQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    Ok(Json(
-        state
-            .account_usage(
-                query.brand.as_deref().unwrap_or("claude"),
-                query.profile.as_deref(),
-            )
-            .await?,
-    ))
+    let brand = query.brand.as_deref().unwrap_or("claude");
+    let usage = state
+        .account_usage_with(brand, query.profile.as_deref(), query.breakdown)
+        .await?;
+    if query.breakdown {
+        // The view draws from the stream, as every chip does.
+        let profile = query
+            .profile
+            .as_deref()
+            .unwrap_or(crate::workbench::profiles::SYSTEM);
+        let _ = state.watch_polls.send(
+            json!({"kind":"usage","brand":brand,"profile":profile,"usage":usage.clone()}),
+        );
+    }
+    Ok(Json(usage))
 }
 
 #[derive(Deserialize)]
@@ -4212,6 +4362,98 @@ mod tests {
         assert!(fresh_usage(&cache, &usage_key("claude", "work")).await.is_some());
         assert!(fresh_usage(&cache, &usage_key("claude", "old")).await.is_none());
         assert!(fresh_usage(&cache, &usage_key("codex", "work")).await.is_none());
+    }
+
+    /// A beat reads the plan from the account API and starts no Claude; the
+    /// breakdown, which Claude builds by reading every transcript of the last
+    /// week, is asked of a Claude started for that one reading, only by the
+    /// open Plan usage view and once per half hour, and the beats between keep
+    /// drawing it (bw-xeeqg.17, bw-e3xt2.1).
+    #[tokio::test]
+    async fn a_beat_starts_no_claude_and_the_open_view_asks_one_for_the_breakdown() {
+        let (_directory, state) = fixture();
+        *state.claude_reader.lock().unwrap() =
+            Some(crate::workbench::claude::transport::tests::fake_config());
+        let key = usage_key("claude", "work");
+
+        // Signed out: nothing to read with, and no Claude is started for it.
+        let beat = state.account_usage("claude", Some("work")).await.unwrap();
+        assert_eq!(beat["available"], false);
+        assert_eq!(beat["driving"], json!([]), "a beat must skip the scan");
+
+        let opened = state
+            .account_usage_with("claude", Some("work"), true)
+            .await
+            .unwrap();
+        assert_eq!(opened["available"], true);
+        assert_eq!(opened["driving"][0]["requests"], 7);
+
+        // The next beat's reading borrows the breakdown instead of scanning.
+        state.usage_cache.lock().await.remove(&key);
+        let later = state.account_usage("claude", Some("work")).await.unwrap();
+        assert_eq!(later["driving"][0]["requests"], 7);
+
+        // Opened again within the half hour, the view is not given a new scan.
+        let at = state.usage_breakdowns.lock().await[&key].0;
+        state
+            .account_usage_with("claude", Some("work"), true)
+            .await
+            .unwrap();
+        assert_eq!(state.usage_breakdowns.lock().await[&key].0, at);
+        assert_eq!(
+            crate::workbench::usage::claude_usage_request(false),
+            json!({"subtype":"get_usage","skip_behaviors":true})
+        );
+    }
+
+    /// A refused reading keeps the account's reads waiting, and meanwhile the
+    /// newer of Claude Code's own saved reading and the last one taken here
+    /// is drawn (bw-e3xt2.1).
+    #[tokio::test]
+    async fn a_refused_claude_reading_waits_and_draws_the_saved_one() {
+        let (_directory, state) = fixture();
+        let key = usage_key("claude", "work");
+        let directory = state.registry.profile_directory("claude", "work");
+        std::fs::create_dir_all(&directory).unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        std::fs::write(
+            directory.join(".claude.json"),
+            json!({
+                "oauthAccount": {"accountUuid": "a"},
+                "cachedUsageUtilization": {
+                    "fetchedAtMs": now - 60_000, "accountUuid": "a",
+                    "utilization": {"five_hour": {"utilization": 41, "resets_at": null}}
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        state.usage_cache.lock().await.insert(
+            key.clone(),
+            (
+                std::time::Instant::now() - Duration::from_secs(3600),
+                json!({"available": true, "at": "2020-01-01T00:00:00Z", "resets": {"available": 1}}),
+            ),
+        );
+        state.usage_paused.lock().await.insert(
+            key.clone(),
+            std::time::Instant::now() + Duration::from_secs(60),
+        );
+        let usage = state.account_usage("claude", Some("work")).await.unwrap();
+        assert_eq!(usage["session"]["percent"], 41.0);
+        assert_eq!(usage["resets"]["available"], 1, "the last resets stand");
+
+        // With no saved reading the last one taken here is drawn.
+        std::fs::remove_file(directory.join(".claude.json")).unwrap();
+        state.usage_cache.lock().await.insert(
+            key.clone(),
+            (
+                std::time::Instant::now() - Duration::from_secs(3600),
+                json!({"available": true, "at": "2020-01-01T00:00:00Z"}),
+            ),
+        );
+        let usage = state.account_usage("claude", Some("work")).await.unwrap();
+        assert_eq!(usage["at"], "2020-01-01T00:00:00Z");
     }
 
     #[tokio::test]

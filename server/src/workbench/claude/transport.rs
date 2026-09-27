@@ -470,7 +470,7 @@ fn receive_line(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, Write};
     use std::path::Path;
@@ -545,6 +545,15 @@ mod tests {
                     json!({"commands":[{"name":"compact"}],"models":[{"value":"sonnet"}]})
                 }
                 "echo" => request["value"].clone(),
+                // The breakdown is what costs Claude a read of every
+                // transcript, so it comes back only when it was not skipped.
+                "get_usage" => json!({
+                    "subscription_type":"max","rate_limits_available":true,
+                    "rate_limits":{"limits":[{"kind":"session","percent":12}]},
+                    "behaviors": if request["skip_behaviors"] == true { Value::Null } else {
+                        json!({"day":{"request_count":7,"session_count":2,"behaviors":[{"key":"cache_miss","pct":40}]}})
+                    }
+                }),
                 "fail" => {
                     writeln!(stdout, "{}", json!({
                         "type":"control_response",
@@ -568,7 +577,7 @@ mod tests {
         }
     }
 
-    fn fake_config() -> ClaudeTransportConfig {
+    pub(crate) fn fake_config() -> ClaudeTransportConfig {
         ClaudeTransportConfig {
             executable: std::env::current_exe().unwrap(),
             args: vec![

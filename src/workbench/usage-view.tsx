@@ -16,7 +16,7 @@
 'use client';
 
 import { RotateCcw, X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -468,6 +468,15 @@ export function Resets({
 
 export function UsageView({ brand = 'claude', profile, onClose }: { brand?: Brand; profile?: string | null; onClose: () => void }) {
   const usage = usePlanUsage(brand, profile);
+  // What is driving the usage costs Claude a read of every transcript of the
+  // last seven days, so the chip's beats go without it and only this view asks
+  // for it; the answer comes back on the stream (bw-xeeqg.17).
+  useEffect(() => {
+    if (brand !== 'claude') return;
+    const params = new URLSearchParams({ brand, breakdown: 'true' });
+    if (profile) params.set('profile', profile);
+    request(`/api/workbench/usage?${params}`).catch(() => {});
+  }, [brand, profile]);
   const now = new Date();
   const windows = [usage.session, usage.week, ...usage.perModel].filter((w): w is PlanWindow => w !== null);
 
