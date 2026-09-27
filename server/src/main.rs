@@ -530,6 +530,23 @@ async fn serve(open_browser: bool) {
         Err(error) => tracing::warn!(%error, "search index unavailable; searching messages only"),
     }
 
+    // Tool events stored before pictures were kept out of them still hold
+    // their base64; clean them slowly, a batch every two seconds, so the
+    // cleaning is never the heavy read it removes (bw-xeeqg.14).
+    {
+        let path = data_dir.join("workbench.db");
+        std::thread::spawn(move || loop {
+            match workbench::store::scrub_stored_base64(&path, 200) {
+                Ok(Some(_)) => std::thread::sleep(std::time::Duration::from_secs(2)),
+                Ok(None) => break,
+                Err(error) => {
+                    tracing::warn!(%error, "stored pictures not cleaned; trying again in a minute");
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
+            }
+        });
+    }
+
     // What tells a phone whose app is closed that a chat is waiting. The page
     // does the same while it is open; this is the half that survives the
     // operating system freezing it (push.rs).

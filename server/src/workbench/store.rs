@@ -1167,7 +1167,13 @@ fn held_in_its_project(
         let event_id = identity
             .and_then(|value| value.get("eventId"))
             .and_then(serde_json::Value::as_str);
-        let json = serde_json::to_string(event).map_err(json_error)?;
+        let mut json = serde_json::to_string(event).map_err(json_error)?;
+        if carries_pictures(event.kind) && json.len() > BASE64_KEPT {
+            let mut value = serde_json::to_value(event).map_err(json_error)?;
+            if scrub_base64(&mut value) > 0 {
+                json = serde_json::to_string(&value).map_err(json_error)?;
+            }
+        }
         // Cached, because this is the one statement an import runs thousands of
         // times in a row: opening one saved chat of the manager's writes 4,717
         // events, and re-parsing this SQL for each of them is work with nothing
@@ -3358,6 +3364,133 @@ fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
     })
 }
 
+/// The longest run of base64 a stored tool event keeps whole.
+///
+/// A screenshot or a PDF read came back from the agent as base64, and the
+/// tool event kept it: the raw ACP echo holds it twice (`rawOutput` and
+/// `content`), each progress report again, and the picture itself is already
+/// its own `image` event. One PDF read of twenty pages stored 5 MB per event;
+/// the manager's record reached 11 GB, and reading it filled the page cache
+/// the service is limited by (bw-xeeqg.14). Nothing reads these runs back —
+/// the transcript shows the `image` event — so they are kept as a note.
+const BASE64_KEPT: usize = 4096;
+
+fn carries_pictures(kind: EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::ToolStarted | EventKind::ToolProgress | EventKind::ToolCompleted
+    )
+}
+
+/// Whether `text` is one long run of base64, bare or as a `data:` URL.
+fn is_base64_run(text: &str) -> bool {
+    if text.len() <= BASE64_KEPT {
+        return false;
+    }
+    let body = match text.strip_prefix("data:") {
+        Some(rest) => match rest.find(";base64,") {
+            Some(at) => &rest[at + 8..],
+            None => return false,
+        },
+        None => text,
+    };
+    body.len() > BASE64_KEPT
+        && body.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'=' | b'-' | b'_' | b'\n' | b'\r')
+        })
+}
+
+/// Replace every long base64 run in `value` with a short note; how many were.
+fn scrub_base64(value: &mut Value) -> usize {
+    match value {
+        Value::String(text) if is_base64_run(text) => {
+            *text = format!("[{} bytes of base64 not stored]", text.len());
+            1
+        }
+        Value::Array(items) => items.iter_mut().map(scrub_base64).sum(),
+        Value::Object(fields) => fields.values_mut().map(scrub_base64).sum(),
+        _ => 0,
+    }
+}
+
+/// Clean tool events stored before `scrub_base64` ran on append, a few at a
+/// time, so the record stops being read in full for pictures nobody shows.
+///
+/// Walks the `event_by_type` index by key, so each batch reads only the rows
+/// it looks at; `octet_length` is read from the record header without
+/// loading the text. Where it got to is kept, so a restart carries on.
+/// Returns how many rows were rewritten; `None` once there is nothing left.
+pub fn scrub_stored_base64(path: &Path, batch: usize) -> rusqlite::Result<Option<usize>> {
+    let connection = Connection::open(path)?;
+    connection.busy_timeout(Duration::from_secs(10))?;
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS event_scrub (
+           type TEXT PRIMARY KEY, session_id TEXT NOT NULL, seq INTEGER NOT NULL, done INTEGER NOT NULL DEFAULT 0
+         );",
+    )?;
+    for kind in ["tool.started", "tool.progress", "tool.completed"] {
+        let (session, seq, done) = connection
+            .query_row(
+                "SELECT session_id, seq, done FROM event_scrub WHERE type = ?1",
+                [kind],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+            )
+            .optional()?
+            .unwrap_or_default();
+        if done == 1 {
+            continue;
+        }
+        let rows: Vec<(String, i64, i64)> = connection
+            .prepare(
+                "SELECT session_id, seq, octet_length(json) FROM event INDEXED BY event_by_type
+                  WHERE type = ?1 AND (session_id, seq) > (?2, ?3)
+                  ORDER BY session_id, seq LIMIT ?4",
+            )?
+            .query_map(params![kind, session, seq, batch as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let Some((last_session, last_seq, _)) = rows.last().cloned() else {
+            connection.execute(
+                "INSERT INTO event_scrub (type, session_id, seq, done) VALUES (?1, '', 0, 1)
+                 ON CONFLICT(type) DO UPDATE SET done = 1",
+                [kind],
+            )?;
+            continue;
+        };
+        let transaction = connection.unchecked_transaction()?;
+        let mut rewritten = 0;
+        for (session_id, seq, size) in rows {
+            if (size as usize) <= BASE64_KEPT {
+                continue;
+            }
+            let json: String = transaction.query_row(
+                "SELECT json FROM event WHERE session_id = ?1 AND seq = ?2",
+                params![session_id, seq],
+                |row| row.get(0),
+            )?;
+            let Ok(mut value) = serde_json::from_str::<Value>(&json) else {
+                continue;
+            };
+            if scrub_base64(&mut value) > 0 {
+                transaction.execute(
+                    "UPDATE event SET json = ?3 WHERE session_id = ?1 AND seq = ?2",
+                    params![session_id, seq, value.to_string()],
+                )?;
+                rewritten += 1;
+            }
+        }
+        transaction.execute(
+            "INSERT INTO event_scrub (type, session_id, seq) VALUES (?1, ?2, ?3)
+             ON CONFLICT(type) DO UPDATE SET session_id = ?2, seq = ?3",
+            params![kind, last_session, last_seq],
+        )?;
+        transaction.commit()?;
+        return Ok(Some(rewritten));
+    }
+    Ok(None)
+}
+
 fn event_string<'a>(event: &'a Event, field: &str) -> rusqlite::Result<&'a str> {
     event
         .fields
@@ -3789,6 +3922,68 @@ fn columns(transaction: &Transaction<'_>, table: &str) -> rusqlite::Result<Vec<S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A screenshot read by a tool is stored as a note, not as megabytes of
+    /// base64; rows stored before are cleaned by the background pass, and
+    /// short text and the `image` event are left alone (bw-xeeqg.14).
+    #[test]
+    fn tool_events_keep_no_base64_pictures_and_old_rows_are_cleaned() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        store
+            .create_session(&session("chat", "claude", None, "2026-09-27T00:00:00Z"))
+            .unwrap();
+        let picture = "/9j/".to_string() + &"A".repeat(200_000);
+        let data_url = format!("data:image/png;base64,{picture}");
+        let completed = |seq: i64| -> Event {
+            serde_json::from_value(json!({
+                "type":"tool.completed", "sessionId":"chat", "seq":seq, "at":"now",
+                "toolCallId":format!("call-{seq}"), "ok":true, "output":"read 1 page",
+                "acp":{"rawOutput":[{"type":"image","source":{"type":"base64","data":picture}}],
+                       "content":[{"content":{"type":"image","data":picture}}]}
+            }))
+            .unwrap()
+        };
+        let image: Event = serde_json::from_value(json!({
+            "type":"image", "sessionId":"chat", "seq":2, "at":"now", "image":{"dataUrl":data_url}
+        }))
+        .unwrap();
+        assert!(store.append_event(&completed(1)).unwrap());
+        assert!(store.append_event(&image).unwrap());
+        // As a build before this one stored it.
+        store
+            .connection
+            .execute(
+                "INSERT INTO event (session_id, seq, at, type, json) VALUES ('chat', 3, 'now', 'tool.completed', ?1)",
+                [serde_json::to_string(&completed(3)).unwrap()],
+            )
+            .unwrap();
+        let stored = |seq: i64| -> String {
+            store
+                .connection
+                .query_row("SELECT json FROM event WHERE session_id='chat' AND seq=?1", [seq], |row| row.get(0))
+                .unwrap()
+        };
+
+        let fresh: Value = serde_json::from_str(&stored(1)).unwrap();
+        assert!(stored(1).len() < 1_000, "{} bytes stored", stored(1).len());
+        assert_eq!(fresh["acp"]["rawOutput"][0]["source"]["data"], "[200004 bytes of base64 not stored]");
+        assert_eq!(fresh["output"], "read 1 page");
+        assert!(stored(2).len() > 200_000, "the picture itself is kept");
+        assert!(stored(3).len() > 400_000);
+
+        let mut rounds = 0;
+        while scrub_stored_base64(&path, 1).unwrap().is_some() {
+            rounds += 1;
+            assert!(rounds < 20, "the pass never finishes");
+        }
+        assert!(stored(3).len() < 1_000, "{} bytes left", stored(3).len());
+        assert!(stored(2).len() > 200_000);
+        // Finished passes are remembered, so a restart reads nothing again.
+        assert_eq!(scrub_stored_base64(&path, 1).unwrap(), None);
+        assert!(!is_base64_run(&"word ".repeat(2_000)));
+    }
 
     #[test]
     fn a_replaced_provider_id_still_resolves_to_its_original_chat() {
