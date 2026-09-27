@@ -981,14 +981,20 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = Pid::from_u32(child.id());
-        let open = || std::fs::read_dir("/proc/self/fd").unwrap().count();
-        scan();
-        let before = open();
+        // Other tests run in this process at the same time, so only files
+        // under the child's own entry are looked for.
         let mut found = Vec::new();
         for _ in 0..5 {
             found = scan();
         }
-        let after = open();
+        let inside = format!("/proc/{}/", pid.as_u32());
+        let held: Vec<_> = std::fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .flatten()
+            .filter_map(|fd| std::fs::read_link(fd.path()).ok())
+            .filter(|target| target.to_string_lossy().starts_with(&inside))
+            .collect();
+        sysinfo::set_open_files_limit(0);
         let mut system = System::new();
         system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
         let expected = system.process(pid).unwrap().start_time();
@@ -1005,7 +1011,7 @@ mod tests {
             found.iter().all(|row| row.pid.as_u32() == std::process::id() || row.parent.is_some()),
             "only this process and what descends from it"
         );
-        assert!(after <= before + 2, "scans left files open: {before} before, {after} after");
+        assert!(held.is_empty(), "scans left the child's files open: {held:?}");
     }
 
     #[cfg(unix)]
@@ -1017,6 +1023,7 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = Pid::from_u32(child.id());
+        sysinfo::set_open_files_limit(0);
         let mut system = System::new_all();
         system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
         let start_time = system.process(pid).unwrap().start_time();
