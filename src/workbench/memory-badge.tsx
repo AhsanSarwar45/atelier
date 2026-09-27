@@ -109,12 +109,12 @@ function processTree(processes: Process[]): Branch[] {
 }
 
 const ROLE_WORDS: Record<Process['role'], string> = {
-  app: 'Atelier app', accountReader: 'Usage reader', appService: 'Service',
+  app: 'Atelier app', accountReader: 'Account reader', appService: 'Service',
   chatAdapter: 'Chat adapter', provider: 'Agent', subprocess: 'Subprocess',
 };
 const APP_PARTS: Array<{ key: string; title: string; roles: Array<Process['role']> }> = [
   { key: 'main', title: 'Atelier app', roles: ['app'] },
-  { key: 'readers', title: 'Usage readers', roles: ['accountReader'] },
+  { key: 'readers', title: 'Account readers', roles: ['accountReader'] },
   { key: 'services', title: 'Services', roles: ['appService', 'chatAdapter', 'provider', 'subprocess'] },
 ];
 

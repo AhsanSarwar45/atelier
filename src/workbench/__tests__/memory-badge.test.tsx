@@ -150,7 +150,7 @@ describe('memory badge', () => {
       .toEqual([['claude-acp', '0'], ['claude', '1'], ['bash', '2'], ['cargo', '3']]);
     fireEvent.click(screen.getByRole('button', { name: /^App/ }));
     const parts = within(groups[1]).getAllByTestId('memory-subgroup');
-    expect(parts.map(part => part.textContent?.split(' (')[0])).toEqual(['Atelier app', 'Usage readers']);
+    expect(parts.map(part => part.textContent?.split(' (')[0])).toEqual(['Atelier app', 'Account readers']);
   });
 
   it('gives a process charged to a chat the report no longer lists an entry of its own', () => {

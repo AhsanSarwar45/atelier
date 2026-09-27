@@ -127,9 +127,11 @@ test('each chat and the app are one entry that opens to what they hold', async (
     await groups.nth(2).getByRole('button', { name: /App/ }).click();
     const app = groups.nth(2);
     await expect(app.getByTestId('memory-subgroup')).toHaveCount(3);
-    await expect(app.getByTestId('memory-subgroup').nth(1)).toContainText('Usage readers');
+    await expect(app.getByTestId('memory-subgroup').nth(1)).toContainText('Account readers');
     await expect(app.getByTestId('memory-subgroup').nth(1)).toContainText('290 MB');
     await page.screenshot({ path: join(SHOTS, 'open.png'), clip: { x: 288, y: 96, width: 560, height: 720 } });
+    await app.getByTestId('memory-subgroup').nth(1).scrollIntoViewIfNeeded();
+    await app.screenshot({ path: join(SHOTS, 'app.png') });
   } finally {
     discardFixture(run);
   }
