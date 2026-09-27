@@ -63,6 +63,9 @@ pub struct ProcessMemory {
     pub role: &'static str,
     pub killable: bool,
     pub start_time: u64,
+    /// Started by the chat, but its parent has exited, so it is no longer
+    /// under the app. It is still in the app's group and still the chat's.
+    pub outlived: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -275,7 +278,7 @@ fn group_is_ours(path: &str, all_ours: bool) -> bool {
 fn service_memory(ours: &[Found]) -> Option<ServiceMemory> {
     let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
     let path = cgroup_path(&own)?;
-    let group = std::path::Path::new("/sys/fs/cgroup").join(path.trim_start_matches('/'));
+    let group = own_group()?;
     let read = |name: &str| std::fs::read_to_string(group.join(name)).ok();
     let pids: HashSet<u32> = ours.iter().map(|found| found.pid.as_u32()).collect();
     let members: Vec<u32> = read("cgroup.procs")?
@@ -322,6 +325,9 @@ struct Found {
     name: String,
     chat: Option<String>,
     start_time: u64,
+    /// Not under the app: a chat's program whose parent exited, found in the
+    /// app's group by the chat id it inherited.
+    outlived: bool,
 }
 
 fn effective_chat(
@@ -382,6 +388,14 @@ fn role_of(
 /// and read megabytes a minute to find a dozen of its own processes.
 #[cfg(target_os = "linux")]
 fn scan() -> Vec<Found> {
+    let mut found = walk();
+    let own_chat = found.first().and_then(|app| app.chat.clone());
+    adopt_group(&mut found, own_chat.as_deref());
+    found
+}
+
+#[cfg(target_os = "linux")]
+fn walk() -> Vec<Found> {
     let root = std::process::id();
     let mut found = Vec::new();
     let mut seen = HashSet::new();
@@ -401,9 +415,66 @@ fn scan() -> Vec<Found> {
             chat: environ_chat(pid, stat.started),
             name: stat.name,
             start_time,
+            outlived: false,
         });
     }
     found
+}
+
+#[cfg(target_os = "linux")]
+fn adopt_group(found: &mut Vec<Found>, own_chat: Option<&str>) {
+    let members = own_group()
+        .and_then(|group| std::fs::read_to_string(group.join("cgroup.procs")).ok())
+        .unwrap_or_default();
+    adopt_outlived(found, own_chat, &members, |pid| {
+        let stat = read_stat(pid)?;
+        let chat = environ_chat(pid, stat.started)?;
+        Some(Found {
+            pid: Pid::from_u32(pid),
+            parent: stat.parent.map(Pid::from_u32),
+            chat: Some(chat),
+            start_time: stat.started_at(),
+            name: stat.name,
+            outlived: true,
+        })
+    });
+}
+
+/// A program a chat starts can outlive the process that started it: a server
+/// whose launcher was killed, or a pool of workers whose parent exited. The
+/// kernel then hands it to systemd, so a walk down from the app no longer
+/// finds it, but it stays in the app's group and keeps the chat id it was
+/// started with. 136 such Python workers, 13.7 GB, were shown as "Other
+/// programs" while the chat that started them was the one to blame
+/// (bw-xeeqg.20). An app itself started from a chat adopts nothing: every
+/// program in its group carries that other chat's id.
+#[cfg(any(test, target_os = "linux"))]
+fn adopt_outlived(
+    found: &mut Vec<Found>,
+    own_chat: Option<&str>,
+    members: &str,
+    read: impl Fn(u32) -> Option<Found>,
+) {
+    if own_chat.is_some() {
+        return;
+    }
+    let seen: HashSet<u32> = found.iter().map(|found| found.pid.as_u32()).collect();
+    for pid in members.lines().filter_map(|line| line.trim().parse::<u32>().ok()) {
+        if seen.contains(&pid) {
+            continue;
+        }
+        if let Some(outlived) = read(pid).filter(|outlived| outlived.chat.is_some()) {
+            found.push(outlived);
+        }
+    }
+}
+
+/// The app's own control group folder, when it runs in one of its own.
+#[cfg(target_os = "linux")]
+fn own_group() -> Option<std::path::PathBuf> {
+    let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let path = cgroup_path(&own)?;
+    Some(std::path::Path::new("/sys/fs/cgroup").join(path.trim_start_matches('/')))
 }
 
 #[cfg(target_os = "linux")]
@@ -534,6 +605,7 @@ fn scan() -> Vec<Found> {
                 name: process.name().to_string_lossy().into_owned(),
                 chat: chat_id(process),
                 start_time: process.start_time(),
+                outlived: false,
             })
         })
         .collect()
@@ -548,7 +620,7 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
     // built again, and it is file reading, so it runs off the request threads
     // (bw-fbzd.5).
     let running = super::docker::running().await;
-    let (ours, service, measured) = tokio::task::spawn_blocking(move || {
+    let (ours, mut service, measured) = tokio::task::spawn_blocking(move || {
         let ours = scan();
         let service = service_memory(&ours);
         let measured: Vec<(super::docker::Running, (u64, u64))> = running
@@ -589,6 +661,15 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
         .map(|session| (session.id.as_str(), session.cwd.as_str()))
         .collect();
     let known: HashSet<&str> = sessions.iter().map(|session| session.id.as_str()).collect();
+    // A program found only by the chat id it carries is this app's when the
+    // chat is: another copy of the app, started from a chat here, puts its
+    // own chats' ids on programs in this same group.
+    let strays: HashSet<Pid> = ours
+        .iter()
+        .filter(|found| found.outlived)
+        .filter(|found| !found.chat.as_deref().is_some_and(|chat| known.contains(chat)))
+        .map(|found| found.pid)
+        .collect();
     let containers: Vec<ContainerMemory> = measured
         .into_iter()
         .map(|(container, (total, cache))| {
@@ -626,6 +707,16 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
         let Some(cost) = process_cost(found.pid)? else {
             continue;
         };
+        if strays.contains(&found.pid) {
+            if let Some(service) = service.as_mut() {
+                service.others.push(OtherProcess {
+                    pid: found.pid.as_u32(),
+                    name: found.name.clone(),
+                    bytes: cost.total(),
+                });
+            }
+            continue;
+        }
         let bytes = cost.total();
         total = total.saturating_add(bytes);
         swapped_total = swapped_total.saturating_add(cost.swapped);
@@ -647,6 +738,7 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
             role,
             killable: role == "subprocess",
             start_time: found.start_time,
+            outlived: found.outlived,
         });
     }
     let mut containers = containers;
@@ -796,6 +888,35 @@ pub fn terminate(request: TerminateRequest) -> Result<usize, String> {
             }
         }
         Ok(stopped)
+    }
+}
+
+/// Stop every program a chat left running after its parent exited. Closing a
+/// chat stops what is still under its provider; these are not, and a chat
+/// stopped for its memory limit would otherwise be over it again at once.
+pub fn stop_outlived(session_id: &str) -> usize {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = session_id;
+        0
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // The id is named, so what carries it is the chat's even when this
+        // app was itself started from a chat.
+        let mut ours = walk();
+        adopt_group(&mut ours, None);
+        let parents: HashMap<Pid, Option<Pid>> =
+            ours.iter().map(|found| (found.pid, found.parent)).collect();
+        let mut victims: Vec<&Found> = ours
+            .iter()
+            .filter(|found| found.outlived && found.chat.as_deref() == Some(session_id))
+            .collect();
+        victims.sort_by_key(|found| std::cmp::Reverse(depth(found.pid, &parents)));
+        victims
+            .into_iter()
+            .filter(|victim| unsafe { libc::kill(victim.pid.as_u32() as i32, libc::SIGTERM) } == 0)
+            .count()
     }
 }
 
@@ -962,6 +1083,7 @@ mod tests {
                 name: "atelier".into(),
                 chat: None,
                 start_time: 1,
+                outlived: false,
             },
             Found {
                 pid: adapter,
@@ -969,6 +1091,7 @@ mod tests {
                 name: "claude-acp".into(),
                 chat: Some("chat-1".into()),
                 start_time: 2,
+                outlived: false,
             },
             Found {
                 pid: provider,
@@ -976,6 +1099,7 @@ mod tests {
                 name: "claude".into(),
                 chat: Some("chat-1".into()),
                 start_time: 3,
+                outlived: false,
             },
             Found {
                 pid: tool,
@@ -983,6 +1107,7 @@ mod tests {
                 name: "cargo".into(),
                 chat: None,
                 start_time: 4,
+                outlived: false,
             },
         ];
         let processes: HashMap<Pid, &Found> = found.iter().map(|row| (row.pid, row)).collect();
@@ -1084,5 +1209,60 @@ mod tests {
             1
         );
         assert!(!child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn a_program_in_the_group_is_the_chat_it_carries_unless_the_app_is_a_chat_s_own() {
+        let found_at = |pid: u32, chat: Option<&str>| Found {
+            pid: Pid::from_u32(pid),
+            parent: Some(Pid::from_u32(1)),
+            name: "python3.14".into(),
+            chat: chat.map(str::to_owned),
+            start_time: 1,
+            outlived: true,
+        };
+        let read = |pid: u32| match pid {
+            20 => Some(found_at(20, Some("chat-1"))),
+            21 => Some(found_at(21, None)),
+            _ => None,
+        };
+        let app = || Found { outlived: false, parent: None, name: "atelier".into(), ..found_at(10, None) };
+        let mut found = vec![app()];
+        adopt_outlived(&mut found, None, "10\n20\n21\n22\n", read);
+        assert_eq!(
+            found.iter().map(|found| (found.pid.as_u32(), found.outlived)).collect::<Vec<_>>(),
+            [(10, false), (20, true)],
+            "the app is not found twice, and a program no chat started stays out"
+        );
+        let mut found = vec![app()];
+        adopt_outlived(&mut found, Some("parent-chat"), "10\n20\n", read);
+        assert_eq!(found.len(), 1, "an app started from a chat adopts nothing");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_program_whose_parent_exited_is_found_by_its_chat_and_stopped_with_it() {
+        let launcher = std::process::Command::new("sh")
+            .args(["-c", "sleep 30 >/dev/null 2>&1 & echo $!"])
+            .env(CHAT_ENV, "outlived-test-chat")
+            .output()
+            .unwrap();
+        let pid: u32 = String::from_utf8(launcher.stdout).unwrap().trim().parse().unwrap();
+        let orphan = Pid::from_u32(pid);
+        assert!(!walk().iter().any(|found| found.pid == orphan), "no longer under this process");
+        let mut found = walk();
+        adopt_group(&mut found, None);
+        let adopted = found.iter().find(|found| found.pid == orphan);
+        let stopped = stop_outlived("outlived-test-chat");
+        // Reaped by whoever adopted it; only its absence is looked for.
+        let gone = (0..50).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            read_stat(pid).is_none_or(|stat| stat.name != "sleep")
+        });
+        let adopted = adopted.expect("found in this group by its chat id");
+        assert!(adopted.outlived);
+        assert_eq!(adopted.chat.as_deref(), Some("outlived-test-chat"));
+        assert_eq!(stopped, 1);
+        assert!(gone, "the program was stopped");
     }
 }

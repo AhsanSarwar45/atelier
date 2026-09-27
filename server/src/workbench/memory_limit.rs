@@ -221,6 +221,13 @@ async fn stop_and_tell(registry: &WorkbenchRegistry, session_id: &str, invoice: 
         tracing::warn!(chat = session_id, %error, "over-limit chat could not be closed");
         return;
     }
+    let id = session_id.to_owned();
+    let stopped = tokio::task::spawn_blocking(move || memory::stop_outlived(&id))
+        .await
+        .unwrap_or(0);
+    if stopped > 0 {
+        tracing::warn!(chat = session_id, stopped, "stopped what the over-limit chat left running");
+    }
     if let Err(error) =
         super::provider::append_notice(registry.database(), session_id, &invoice.notice()).await
     {

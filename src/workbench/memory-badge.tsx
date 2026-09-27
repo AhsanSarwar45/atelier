@@ -25,6 +25,8 @@ interface MemoryReport {
     sessionId: string | null; chatTitle: string | null;
     role: 'app' | 'accountReader' | 'appService' | 'chatAdapter' | 'provider' | 'subprocess';
     killable: boolean; startTime: number;
+    /** Started by the chat, but its parent has exited; absent from an older server. */
+    outlived?: boolean;
   }>;
   /** The kernel's account of the app's own control group, absent outside one. */
   service?: {
@@ -181,7 +183,7 @@ export function MemoryBadge() {
       data-testid="memory-process-row" data-depth={depth}>
       <span className="min-w-0 flex-1">
         <span className="block truncate">{depth > 0 && <span className="mr-1 text-muted-foreground/60" aria-hidden="true">└</span>}{process.name || 'Process'}</span>
-        <span className="block truncate text-xs text-muted-foreground" style={{ paddingLeft: depth > 0 ? '0.875rem' : undefined }}>{ROLE_WORDS[process.role]} · PID {process.pid}</span>
+        <span className="block truncate text-xs text-muted-foreground" style={{ paddingLeft: depth > 0 ? '0.875rem' : undefined }}>{ROLE_WORDS[process.role]} · PID {process.pid}{process.outlived ? ' · Parent exited' : ''}</span>
       </span>
       <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(process.bytes)}</span>
       {process.killable ? <Button variant={confirming === process.pid ? 'destructive' : 'ghost'} mode="icon" size="xs"
