@@ -13,6 +13,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::SystemTime;
 
 /// Process provenance carried through the ACP adapter into its provider.
 ///
@@ -189,18 +191,93 @@ impl ProviderActivity {
 /// move the file without the conversation moving, so an mtime cannot be used to
 /// decide whether a state a session announced is over.
 fn record_spoke_at(path: &Path) -> Option<i64> {
-    let mut file = File::open(path).ok()?;
-    let size = file.metadata().ok()?.len();
-    let length = size.min(1_048_576);
-    file.seek(SeekFrom::Start(size.saturating_sub(length)))
-        .ok()?;
-    let mut bytes = Vec::with_capacity(length as usize);
-    file.take(length).read_to_end(&mut bytes).ok()?;
-    let text = String::from_utf8_lossy(&bytes);
-    text.lines().rev().find_map(|line| {
-        let row: Value = serde_json::from_str(line).ok()?;
-        stamp_ms(row["timestamp"].as_str()?)
-    })
+    record_tail(path).spoke_at
+}
+
+/// What a record's last lines say: its last row, and the clock of the last
+/// row that carries one.
+#[derive(Clone, Default)]
+struct RecordTail {
+    row: Option<Arc<Value>>,
+    spoke_at: Option<i64>,
+}
+
+const TAIL_FIRST: u64 = 65_536;
+const TAIL_MOST: u64 = 1_048_576;
+
+/// A record's tail, read again only when the file changed.
+///
+/// The hold beat asks this of every live chat's record and every recent
+/// helper's, every two seconds. Each ask used to read the last megabyte and
+/// parse it, twice per record, whether or not a byte had been written since:
+/// several megabytes a beat for a few quiet chats (bw-xeeqg.8). An unchanged
+/// file now answers from memory, and a changed one is read from a small
+/// window that widens only while the rows it needs are not in it yet.
+fn record_tail(path: &Path) -> RecordTail {
+    static SEEN: LazyLock<Mutex<HashMap<PathBuf, (u64, SystemTime, RecordTail)>>> =
+        LazyLock::new(Default::default);
+    let Some((size, moved)) = fs::metadata(path)
+        .ok()
+        .and_then(|meta| Some((meta.len(), meta.modified().ok()?)))
+    else {
+        return RecordTail::default();
+    };
+    if let Some((seen_size, seen_moved, tail)) =
+        SEEN.lock().unwrap_or_else(|e| e.into_inner()).get(path)
+    {
+        if (*seen_size, *seen_moved) == (size, moved) {
+            return tail.clone();
+        }
+    }
+    let tail = read_record_tail(path, size);
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if seen.len() >= 512 {
+        seen.clear();
+    }
+    seen.insert(path.to_path_buf(), (size, moved, tail.clone()));
+    tail
+}
+
+fn read_record_tail(path: &Path, size: u64) -> RecordTail {
+    let mut tail = RecordTail::default();
+    let Ok(mut file) = File::open(path) else {
+        return tail;
+    };
+    let most = size.min(TAIL_MOST);
+    let mut length = size.min(TAIL_FIRST);
+    loop {
+        let mut bytes = Vec::with_capacity(length as usize);
+        if file.seek(SeekFrom::Start(size - length)).is_err()
+            || (&mut file).take(length).read_to_end(&mut bytes).is_err()
+        {
+            return tail;
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        let mut lines: Vec<&str> = text.lines().collect();
+        // A window that starts inside the file starts inside a line.
+        if length < size && !lines.is_empty() {
+            lines.remove(0);
+        }
+        for line in lines.into_iter().rev() {
+            let Ok(row) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            if tail.spoke_at.is_none() {
+                tail.spoke_at = row["timestamp"].as_str().and_then(stamp_ms);
+            }
+            if tail.row.is_none() {
+                tail.row = Some(Arc::new(row));
+            }
+            if tail.spoke_at.is_some() {
+                return tail;
+            }
+        }
+        if length >= most {
+            return tail;
+        }
+        length = (length * 4).min(most);
+        tail = RecordTail::default();
+    }
 }
 
 /// An RFC 3339 stamp as milliseconds since the epoch.
@@ -210,18 +287,8 @@ fn stamp_ms(text: &str) -> Option<i64> {
         .map(|when| when.timestamp_millis())
 }
 
-fn last_record_row(path: &Path) -> Option<Value> {
-    let mut file = File::open(path).ok()?;
-    let size = file.metadata().ok()?.len();
-    let length = size.min(1_048_576);
-    file.seek(SeekFrom::Start(size.saturating_sub(length)))
-        .ok()?;
-    let mut bytes = Vec::with_capacity(length as usize);
-    file.take(length).read_to_end(&mut bytes).ok()?;
-    let text = String::from_utf8_lossy(&bytes);
-    text.lines()
-        .rev()
-        .find_map(|line| serde_json::from_str(line).ok())
+fn last_record_row(path: &Path) -> Option<Arc<Value>> {
+    record_tail(path).row
 }
 
 fn words(message: &Value) -> String {
@@ -775,6 +842,19 @@ pub fn claude_holds(config: &Path, proc_root: &Path, now_ms: i64) -> Vec<Provide
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if !name.ends_with(".json") || name.ends_with(".doing.json") {
+            continue;
+        }
+        // Claude names each marker for its process and leaves it behind when
+        // the process exits, so the folder fills with hundreds of dead ones.
+        // Reading and parsing each of them every beat was most of what this
+        // beat read once the records were remembered; a process that is gone
+        // is told from the name alone (bw-xeeqg.8).
+        #[cfg(target_os = "linux")]
+        if name
+            .strip_suffix(".json")
+            .and_then(|pid| pid.parse::<u32>().ok())
+            .is_some_and(|pid| !proc_root.join(pid.to_string()).exists())
+        {
             continue;
         }
         let Some(marker) = fs::read(entry.path())
@@ -1419,8 +1499,33 @@ fn tail_lines(path: &Path, limit: u64) -> Vec<String> {
 /// paths learned from the provider index and uses this same bounded reader,
 /// matching the former runtime without loading the transcript.
 pub fn codex_activity_from_path(path: &Path) -> ProviderActivity {
+    // Asked of every live Codex chat every beat; a rollout that has not
+    // changed answers what it answered last time instead of its last 256 KB
+    // being read and parsed again (bw-xeeqg.8).
+    static SEEN: LazyLock<Mutex<HashMap<PathBuf, (u64, SystemTime, ProviderActivity)>>> =
+        LazyLock::new(Default::default);
+    let stamp = fs::metadata(path)
+        .ok()
+        .and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
+    if let Some((size, moved)) = stamp {
+        if let Some((seen_size, seen_moved, activity)) =
+            SEEN.lock().unwrap_or_else(|e| e.into_inner()).get(path)
+        {
+            if (*seen_size, *seen_moved) == (size, moved) {
+                return activity.clone();
+            }
+        }
+    }
     let lines = tail_lines(path, 256 * 1024);
-    codex_activity_from_lines(lines.iter().map(String::as_str))
+    let activity = codex_activity_from_lines(lines.iter().map(String::as_str));
+    if let Some((size, moved)) = stamp {
+        let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+        if seen.len() >= 512 {
+            seen.clear();
+        }
+        seen.insert(path.to_path_buf(), (size, moved, activity.clone()));
+    }
+    activity
 }
 
 pub fn codex_doing_from_path(path: &Path) -> HeldDoing {
@@ -1576,6 +1681,36 @@ impl LineTail {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn a_record_tail_is_read_again_only_when_the_file_changed() {
+        let directory = tempfile::tempdir().unwrap();
+        let record = directory.path().join("chat.jsonl");
+        // The clock sits 200 KB back, behind rows that carry none, so the
+        // first window misses it and the read must widen to find it.
+        let mut text = String::from("{\"type\":\"user\",\"timestamp\":\"2026-09-27T00:00:00Z\"}\n");
+        for _ in 0..2_000 {
+            text.push_str(&format!("{{\"type\":\"mode\",\"pad\":\"{}\"}}\n", "x".repeat(100)));
+        }
+        fs::write(&record, &text).unwrap();
+        let spoke = stamp_ms("2026-09-27T00:00:00Z");
+        assert_eq!(record_spoke_at(&record), spoke);
+        assert_eq!(last_record_row(&record).unwrap()["type"], "mode");
+
+        // Same size and the same modified time: the answer comes from memory,
+        // so even a different clock on disk is not read.
+        let moved = fs::metadata(&record).unwrap().modified().unwrap();
+        fs::write(&record, text.replacen("2026-09-27", "2026-09-28", 1)).unwrap();
+        File::options().write(true).open(&record).unwrap().set_modified(moved).unwrap();
+        assert_eq!(record_spoke_at(&record), spoke);
+
+        // A written line changes the file, and the new last row answers.
+        let mut file = File::options().append(true).open(&record).unwrap();
+        writeln!(file, "{{\"type\":\"assistant\",\"timestamp\":\"2026-09-27T00:00:05Z\"}}").unwrap();
+        drop(file);
+        assert_eq!(record_spoke_at(&record), stamp_ms("2026-09-27T00:00:05Z"));
+        assert_eq!(last_record_row(&record).unwrap()["type"], "assistant");
+    }
 
     const CHAT: &str = "6f729ab8-6b7d-4ad6-a78e-5dc8cc05eddb";
     const OTHER: &str = "33f85fdf-a589-44df-88d2-46f3ef386dbc";
