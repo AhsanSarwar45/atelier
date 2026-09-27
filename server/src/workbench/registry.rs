@@ -119,6 +119,70 @@ impl std::ops::Deref for Driver {
     }
 }
 
+/// The shortest time between two event-driven reconciles of one chat.
+const RECONCILE_GAP: Duration = Duration::from_millis(500);
+
+/// Kinds that only add to what is already on screen while a turn runs.
+fn streams_only(kind: super::protocol::EventKind) -> bool {
+    use super::protocol::EventKind::*;
+    matches!(
+        kind,
+        TextDelta | ThinkingDelta | ThinkingProgress | ToolProgress | AgentProgress
+    )
+}
+
+/// Holds each chat to one event-driven reconcile per [`RECONCILE_GAP`]. An
+/// event inside the gap is not dropped: the chat is reconciled once the gap
+/// has passed, so the last change of a burst is always read (bw-xeeqg.10).
+#[derive(Default)]
+struct ReconcilePace {
+    last: HashMap<String, std::time::Instant>,
+    waiting: std::collections::HashSet<String>,
+}
+
+impl ReconcilePace {
+    fn waiting(&self) -> bool {
+        !self.waiting.is_empty()
+    }
+
+    /// The chats to reconcile now that an event for `id` has arrived.
+    fn arrived(&mut self, id: String, now: std::time::Instant) -> Vec<String> {
+        match self.last.get(&id) {
+            Some(at) if now.duration_since(*at) < RECONCILE_GAP => {
+                self.waiting.insert(id);
+                Vec::new()
+            }
+            _ => {
+                self.waiting.remove(&id);
+                self.last.insert(id.clone(), now);
+                vec![id]
+            }
+        }
+    }
+
+    /// The waiting chats whose gap has passed.
+    fn due(&mut self, now: std::time::Instant) -> Vec<String> {
+        let due: Vec<String> = self
+            .waiting
+            .iter()
+            .filter(|id| {
+                self.last
+                    .get(*id)
+                    .map_or(true, |at| now.duration_since(*at) >= RECONCILE_GAP)
+            })
+            .cloned()
+            .collect();
+        for id in &due {
+            self.waiting.remove(id);
+            self.last.insert(id.clone(), now);
+        }
+        // Chats quiet for a while need no entry; the next event is on time.
+        self.last
+            .retain(|_, at| now.duration_since(*at) < RECONCILE_GAP * 4);
+        due
+    }
+}
+
 async fn reconcile_session(
     database: &ChatDb,
     drivers: &RwLock<HashMap<String, Driver>>,
@@ -546,22 +610,33 @@ impl WorkbenchRegistry {
             let mut events = database.subscribe_all();
             handle.spawn(async move {
                 let mut sweep = tokio::time::interval(Duration::from_secs(5));
+                let mut settle = tokio::time::interval(RECONCILE_GAP);
+                settle.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                let mut paced = ReconcilePace::default();
                 loop {
                     let changed = tokio::select! {
                         _ = sweep.tick() => None,
+                        _ = settle.tick(), if paced.waiting() => Some(paced.due(std::time::Instant::now())),
                         event = events.recv() => match event {
-                            Ok(event) => Some(event.session_id),
+                            // A streamed piece of text or progress cannot change
+                            // the chat's state, and one reconcile per piece read
+                            // the chat and asked its runtime dozens of times a
+                            // second while an answer streamed (bw-xeeqg.10).
+                            Ok(event) if event.batch_from.is_none() && streams_only(event.event.kind) => continue,
+                            Ok(event) => Some(paced.arrived(event.session_id, std::time::Instant::now())),
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => None,
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                         }
                     };
                     let Some(live) = live.upgrade() else { break };
-                    if let Some(id) = changed {
-                        // Initialization may publish events before the handle is
-                        // registered. Attached runtimes alone own event refreshes.
-                        if live.read().await.contains_key(&id) {
-                            let _ = reconcile_session(&db, &live, &starts, &id).await;
-                            drain_held(&db, &live, &id).await;
+                    if let Some(ids) = changed {
+                        for id in ids {
+                            // Initialization may publish events before the handle is
+                            // registered. Attached runtimes alone own event refreshes.
+                            if live.read().await.contains_key(&id) {
+                                let _ = reconcile_session(&db, &live, &starts, &id).await;
+                                drain_held(&db, &live, &id).await;
+                            }
                         }
                     } else if let Ok(active) = db.active_session_ids().await {
                         // The chats mid-turn and the ones with a runtime
@@ -2553,6 +2628,55 @@ mod tests {
     use serde_json::Map;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[test]
+    fn streamed_text_does_not_reconcile_and_a_burst_reconciles_once_per_gap() {
+        use super::super::protocol::EventKind;
+        for kind in [
+            EventKind::TextDelta,
+            EventKind::ThinkingDelta,
+            EventKind::ThinkingProgress,
+            EventKind::ToolProgress,
+            EventKind::AgentProgress,
+        ] {
+            assert!(streams_only(kind), "{kind:?} should not reconcile");
+        }
+        for kind in [
+            EventKind::SessionState,
+            EventKind::MessageCompleted,
+            EventKind::PromptHeld,
+            EventKind::AskPermission,
+            EventKind::SessionEnded,
+        ] {
+            assert!(!streams_only(kind), "{kind:?} can change state");
+        }
+
+        let start = std::time::Instant::now();
+        let mut pace = ReconcilePace::default();
+        assert_eq!(pace.arrived("a".into(), start), vec!["a".to_string()]);
+        // Forty events in the next 400 ms run nothing yet, but are not lost.
+        for step in 1..=40 {
+            let at = start + Duration::from_millis(step * 10);
+            assert!(pace.arrived("a".into(), at).is_empty());
+        }
+        assert!(pace.waiting());
+        // Another chat keeps its own gap.
+        assert_eq!(
+            pace.arrived("b".into(), start + Duration::from_millis(100)),
+            vec!["b".to_string()]
+        );
+        assert!(pace.due(start + Duration::from_millis(450)).is_empty());
+        assert_eq!(
+            pace.due(start + Duration::from_millis(500)),
+            vec!["a".to_string()]
+        );
+        assert!(!pace.waiting());
+        // A quiet chat is reconciled at once on its next event.
+        assert_eq!(
+            pace.arrived("a".into(), start + Duration::from_secs(2)),
+            vec!["a".to_string()]
+        );
+    }
+
     struct FakeDriver {
         calls: Arc<AtomicUsize>,
     }
@@ -2722,6 +2846,76 @@ mod tests {
         }
     }
 
+    /// A driver that counts how often the registry asks for its status.
+    struct CountingDriver {
+        probes: Arc<AtomicUsize>,
+    }
+    impl ProviderDriver for CountingDriver {
+        fn brand(&self) -> &'static str {
+            "claude"
+        }
+        fn reconciler(&self) -> Option<super::super::status::Reconciler> {
+            let probes = self.probes.clone();
+            Some(Arc::new(move || {
+                probes.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(Value::Null) })
+            }))
+        }
+        fn command<'a>(&'a mut self, _: &'a Command) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+        fn close<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+    }
+
+    /// bw-xeeqg.10: an answer streamed as many pieces asks the agent for its
+    /// status not once per piece, and a burst of state changes asks at most
+    /// once per gap and still once after the last of them.
+    #[tokio::test]
+    async fn a_streamed_answer_does_not_ask_the_agent_for_its_status_per_piece() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let probes = Arc::new(AtomicUsize::new(0));
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            paths(root.path()),
+            Arc::new(OneDriverFactory {
+                driver: std::sync::Mutex::new(Some(Box::new(CountingDriver { probes: probes.clone() }))),
+            }),
+        );
+        database.create_session(a_chat("thinking")).await.unwrap();
+        registry
+            .execute(&command(CommandKind::SessionStart, json!({"sessionId":"session-1","brand":"claude"})))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        probes.store(0, Ordering::SeqCst);
+
+        for piece in 0..60 {
+            database
+                .append(
+                    serde_json::from_value(json!({
+                        "type":"text.delta","sessionId":"session-1","seq":0,
+                        "at":"2026-09-19T00:00:02Z","messageId":"m1","text":format!("word {piece} ")
+                    }))
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert_eq!(probes.load(Ordering::SeqCst), 0, "streamed text asks nothing");
+
+        for _ in 0..10 {
+            say_state(&database, "thinking").await;
+        }
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        let asked = probes.load(Ordering::SeqCst);
+        assert!((1..=2).contains(&asked), "ten state changes asked {asked} times");
+        registry.shutdown().await;
+    }
+
     async fn stuck_chat(
         root: &Path,
     ) -> (ChatDb, Arc<WorkbenchRegistry>, Arc<tokio::sync::Notify>, Arc<std::sync::atomic::AtomicBool>) {
@@ -2872,7 +3066,10 @@ mod tests {
         assert_eq!(waiting.len(), 2, "a working chat is not interrupted: {waiting:?}");
         assert_eq!(waiting[0]["text"], json!("first thing"));
 
-        // The reader's own words, kept where a restart cannot lose them.
+        // The reader's own words, kept where a restart cannot lose them. A real
+        // restart ends every task of the old server; stop its agents so none of
+        // its work is still running against the reopened file.
+        registry.shutdown().await;
         drop(registry);
         drop(database);
         let database = ChatDb::open(&file).unwrap();
