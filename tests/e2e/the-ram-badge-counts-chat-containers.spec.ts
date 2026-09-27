@@ -88,10 +88,12 @@ test('the real server lists the running containers and charges none of them to a
   const run = await aChatOnScreen(page, request);
   try {
     await page.getByTestId('memory-badge').click();
-    const rows = page.getByTestId('memory-container-row');
+    const other = page.locator('[data-testid="memory-group"][data-kind="other"]');
+    await expect(other).toContainText('Not counted in the total');
+    await other.getByRole('button', { name: /Other containers/ }).click();
+    const rows = other.getByTestId('memory-container-row');
     await expect(rows.first()).toBeVisible();
     await expect(rows.first()).toContainText(/\d+(\.\d+)?\s(KB|MB|GB)/);
-    await expect(rows.first()).toContainText('No chat');
     await expect(page.getByTestId('memory-container-line')).toHaveCount(0);
     await page.screenshot({ path: join(SHOTS, 'live.png') });
   } finally {
@@ -107,14 +109,22 @@ test('a chat is charged for the containers it started, and a stranger container 
     // 1.5 GB of processes and the chat's 5 GB of containers; searxng's 0.2 GB is not Atelier's.
     await expect(badge).toHaveText('6.5 GB', { timeout: OPEN_MS });
     await badge.click();
-    const chat = page.getByTestId('memory-chat-row');
+    const chat = page.locator('[data-testid="memory-group"][data-kind="chat"]');
+    await expect(chat).toContainText('Grade the essays');
     await expect(chat).toContainText('6.0 GB');
-    await expect(chat.getByTestId('memory-chat-containers')).toHaveText('1.0 GB in processes · 5.0 GB in 2 containers');
-    const rows = page.getByTestId('memory-container-row');
-    await expect(rows).toHaveCount(3);
-    await expect(rows.nth(0)).toContainText('Grade the essays');
-    await expect(rows.nth(1)).toContainText('Grade the essays · matched by folder');
-    await expect(rows.nth(2)).toContainText('No chat');
+    await expect(chat).toContainText('2 processes · 2 containers');
+    await chat.getByRole('button', { name: /Grade the essays/ }).click();
+    const parts = chat.getByTestId('memory-subgroup');
+    await expect(parts.nth(0)).toContainText('Processes (2)');
+    await expect(parts.nth(0)).toContainText('1.0 GB');
+    await expect(parts.nth(1)).toContainText('Containers (2)');
+    await expect(parts.nth(1)).toContainText('5.0 GB');
+    const rows = chat.getByTestId('memory-container-row');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(1)).toContainText('Matched by folder');
+    const other = page.locator('[data-testid="memory-group"][data-kind="other"]');
+    await expect(other).toContainText('Not counted in the total · 1 container');
+    await expect(other).toContainText('205 MB');
     const line = page.getByTestId('memory-container-line');
     await expect(line).toContainText('Processes 1.5 GB');
     await expect(line).toContainText('Chat containers 5.0 GB');

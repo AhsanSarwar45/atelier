@@ -1,13 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
-import { MemoryStick, Square } from 'lucide-react';
+import { AppWindow, Box, ChevronRight, MemoryStick, MessageSquare, Square } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Separator } from '@/components/ui/separator';
 import { request } from '@/lib/api';
 
 interface MemoryReport {
@@ -43,6 +42,78 @@ function isMemoryReport(value: unknown): value is MemoryReport {
     && report.metric === 'pssWithSwap'
     && typeof report.processCount === 'number' && Array.isArray(report.chats) && Array.isArray(report.processDetails);
 }
+type Process = MemoryReport['processDetails'][number];
+type Container = NonNullable<MemoryReport['containers']>[number];
+
+/** One top-level entry of the popup: a chat, the app itself, or the containers nobody here started. */
+interface Group {
+  key: string;
+  kind: 'chat' | 'app' | 'other';
+  title: string;
+  /** What the entry adds to the chip's total; the other containers add nothing. */
+  bytes: number;
+  processes: Process[];
+  containers: Container[];
+}
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+const sum = (rows: Array<{ bytes: number }>) => rows.reduce((total, row) => total + row.bytes, 0);
+
+/**
+ * Sorts the report into one entry per chat, largest first, then the app's own
+ * processes, then the containers no chat started. A process or container
+ * charged to a chat the report no longer lists still gets an entry of its own,
+ * so nothing drops out of the tree.
+ */
+export function memoryGroups(report: MemoryReport): Group[] {
+  const chats = new Map<string, Group>();
+  const chatFor = (sessionId: string, title: string | null) => {
+    let group = chats.get(sessionId);
+    if (!group) {
+      group = { key: `chat:${sessionId}`, kind: 'chat', title: title || 'Chat no longer listed', bytes: 0, processes: [], containers: [] };
+      chats.set(sessionId, group);
+    }
+    return group;
+  };
+  for (const chat of report.chats) chatFor(chat.sessionId, chat.title);
+  const app: Group = { key: 'app', kind: 'app', title: 'App', bytes: 0, processes: [], containers: [] };
+  const other: Group = { key: 'other', kind: 'other', title: 'Other containers', bytes: 0, processes: [], containers: [] };
+  for (const process of report.processDetails) {
+    (process.sessionId ? chatFor(process.sessionId, process.chatTitle) : app).processes.push(process);
+  }
+  for (const container of report.containers ?? []) {
+    (container.sessionId ? chatFor(container.sessionId, container.chatTitle) : other).containers.push(container);
+  }
+  for (const group of [...chats.values(), app]) group.bytes = sum(group.processes) + sum(group.containers);
+  const listed = [...chats.values()].filter(group => group.processes.length + group.containers.length > 0)
+    .sort((a, b) => b.bytes - a.bytes);
+  return [...listed, ...(app.processes.length ? [app] : []), ...(other.containers.length ? [other] : [])];
+}
+
+interface Branch { process: Process; children: Branch[] }
+/** Nests processes under their parents; a process whose parent is not in the list is a root. */
+function processTree(processes: Process[]): Branch[] {
+  const branches = new Map(processes.map(process => [process.pid, { process, children: [] as Branch[] }]));
+  const roots: Branch[] = [];
+  for (const branch of branches.values()) {
+    const parent = branch.process.parentPid === null ? undefined : branches.get(branch.process.parentPid);
+    (parent && parent !== branch ? parent.children : roots).push(branch);
+  }
+  const order = (list: Branch[]) => { list.sort((a, b) => b.process.bytes - a.process.bytes); list.forEach(branch => order(branch.children)); };
+  order(roots);
+  return roots;
+}
+
+const ROLE_WORDS: Record<Process['role'], string> = {
+  app: 'Atelier app', accountReader: 'Usage reader', appService: 'Service',
+  chatAdapter: 'Chat adapter', provider: 'Agent', subprocess: 'Subprocess',
+};
+const APP_PARTS: Array<{ key: string; title: string; roles: Array<Process['role']> }> = [
+  { key: 'main', title: 'Atelier app', roles: ['app'] },
+  { key: 'readers', title: 'Usage readers', roles: ['accountReader'] },
+  { key: 'services', title: 'Services', roles: ['appService', 'chatAdapter', 'provider', 'subprocess'] },
+];
+
 export function memoryWords(bytes: number): string {
   if (bytes < 1024 ** 2) return `${Math.max(0, Math.round(bytes / 1024))} KB`;
   if (bytes < 1024 ** 3) return `${Math.round(bytes / 1024 ** 2)} MB`;
@@ -53,6 +124,11 @@ export function MemoryBadge() {
   const [confirming, setConfirming] = useState<number | null>(null);
   const [stopping, setStopping] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Top-level entries start closed so a busy machine reads as a short list;
+  // the parts inside an entry start open. Both survive the three-second
+  // refresh and a closed popup, because the state lives here.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   const read = useCallback(() => { void request('/api/workbench/memory', { cache: 'no-store' })
     .then(async response => { if (!response.ok) throw new Error(await response.text()); return response.json() as Promise<unknown>; })
     .then(value => { if (isMemoryReport(value)) setReport(value); }).catch(() => {}); }, []);
@@ -70,15 +146,11 @@ export function MemoryBadge() {
   // is measured apart. The chip counts the ones a chat is responsible for;
   // containers nobody here started are listed but not charged to Atelier.
   const containers = report.containers ?? [];
-  const chatContainerBytes = containers.reduce((sum, container) => sum + (container.sessionId ? container.bytes : 0), 0);
+  const chatContainerBytes = containers.reduce((total, container) => total + (container.sessionId ? container.bytes : 0), 0);
   const shownBytes = report.totalBytes + chatContainerBytes;
-  const owner = (container: (typeof containers)[number]) => {
-    if (container.chatTitle && container.owner === 'workingDir') return `${container.chatTitle} · matched by folder`;
-    if (container.chatTitle) return container.chatTitle;
-    if (container.sessionId) return 'Chat no longer listed';
-    return 'No chat';
-  };
-  const stop = (process: MemoryReport['processDetails'][number]) => {
+  const groups = memoryGroups(report);
+  const flip = (set: ReadonlySet<string>, key: string) => { const next = new Set(set); if (!next.delete(key)) next.add(key); return next; };
+  const stop = (process: Process) => {
     if (!process.sessionId || stopping !== null) return;
     if (confirming !== process.pid) { setConfirming(process.pid); setError(null); return; }
     setStopping(process.pid);
@@ -95,13 +167,60 @@ export function MemoryBadge() {
     }).catch(cause => setError(cause instanceof Error ? cause.message : 'Could not stop the process'))
       .finally(() => setStopping(null));
   };
-  const role = (process: MemoryReport['processDetails'][number]) => {
-    if (process.chatTitle) return process.chatTitle;
-    if (process.role === 'accountReader') return 'Account usage reader';
-    if (process.role === 'app') return 'Atelier app';
-    if (process.role === 'appService') return 'Atelier service';
-    return 'Chat runtime';
+  const branchRows = (branches: Branch[], depth: number): ReactNode[] => branches.flatMap(({ process, children }) => [
+    <div key={process.pid} className="flex items-center gap-2 rounded py-1 pr-1 hover:bg-muted/50" style={{ paddingLeft: `${0.5 + depth * 0.875}rem` }}
+      data-testid="memory-process-row" data-depth={depth}>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{depth > 0 && <span className="mr-1 text-muted-foreground/60" aria-hidden="true">└</span>}{process.name || 'Process'}</span>
+        <span className="block truncate text-xs text-muted-foreground" style={{ paddingLeft: depth > 0 ? '0.875rem' : undefined }}>{ROLE_WORDS[process.role]} · PID {process.pid}</span>
+      </span>
+      <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(process.bytes)}</span>
+      {process.killable ? <Button variant={confirming === process.pid ? 'destructive' : 'ghost'} mode="icon" size="xs"
+        disabled={stopping !== null} data-testid="memory-process-stop"
+        aria-label={confirming === process.pid ? `Confirm stopping ${process.name}` : `Stop ${process.name}`}
+        title={confirming === process.pid ? 'Click again to confirm' : 'Stop this subprocess without ending the chat'}
+        onClick={() => stop(process)}><Square className="size-3" aria-hidden="true" /></Button> : <span className="size-6 shrink-0" aria-hidden="true" />}
+    </div>,
+    ...branchRows(children, depth + 1),
+  ]);
+  const containerRows = (list: Container[]) => [...list].sort((a, b) => b.bytes - a.bytes).map(container =>
+    <div key={container.id} className="flex items-center gap-2 rounded py-1 pl-2 pr-1 hover:bg-muted/50" data-testid="memory-container-row">
+      <span className="min-w-0 flex-1"><span className="block truncate">{container.name}</span>
+        <span className="block truncate text-xs text-muted-foreground">{container.owner === 'workingDir' ? 'Matched by folder · ' : ''}{container.image}</span></span>
+      <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(container.bytes)}</span>
+      <span className="size-6 shrink-0" aria-hidden="true" />
+    </div>);
+  const part = (key: string, title: string, bytes: number, count: string, rows: ReactNode) => {
+    const open = !folded.has(key);
+    return <div key={key} data-testid="memory-subgroup">
+      <button type="button" className="flex w-full items-center gap-1.5 rounded py-1 pl-1 pr-8 text-left text-xs text-muted-foreground hover:bg-muted/50"
+        aria-expanded={open} onClick={() => setFolded(set => flip(set, key))}>
+        <ChevronRight className={`size-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate font-medium uppercase tracking-wide">{title} <span className="font-normal normal-case tracking-normal">({count})</span></span>
+        <span className="shrink-0 tabular-nums">{memoryWords(bytes)}</span>
+      </button>
+      {open && <div className="ml-2.5 border-l pl-1">{rows}</div>}
+    </div>;
   };
+  const inside = (group: Group) => {
+    if (group.kind === 'other') return containerRows(group.containers);
+    if (group.kind === 'app') return APP_PARTS.map(({ key, title, roles }) => {
+      const processes = group.processes.filter(process => roles.includes(process.role));
+      if (!processes.length) return null;
+      return part(`app:${key}`, title, sum(processes), String(processes.length), branchRows(processTree(processes), 0));
+    });
+    return <>
+      {group.processes.length > 0 && part(`${group.key}:processes`, 'Processes', sum(group.processes), String(group.processes.length), branchRows(processTree(group.processes), 0))}
+      {group.containers.length > 0 && part(`${group.key}:containers`, 'Containers', sum(group.containers), String(group.containers.length), containerRows(group.containers))}
+    </>;
+  };
+  const summary = (group: Group) => {
+    if (group.kind === 'other') return `Not counted in the total · ${plural(group.containers.length, 'container', 'containers')}`;
+    const words = [plural(group.processes.length, 'process', 'processes')];
+    if (group.containers.length) words.push(plural(group.containers.length, 'container', 'containers'));
+    return words.join(' · ');
+  };
+  const GroupIcon = { chat: MessageSquare, app: AppWindow, other: Box } as const;
   return <Popover onOpenChange={open => open && read()}>
     <PopoverTrigger asChild>
       <Badge asChild appearance="outline" size="sm" shape="circle" className="hidden shrink-0 md:inline-flex">
@@ -111,29 +230,24 @@ export function MemoryBadge() {
         </Button>
       </Badge>
     </PopoverTrigger>
-    <PopoverContent align="start" className="w-96 p-0" data-testid="memory-popup">
-      <div className="border-b px-3 py-2"><p className="text-sm font-medium">RAM usage</p><p className="text-xs text-muted-foreground">Proportional memory across {report.processCount} processes, resident and swapped{containers.length > 0 ? `, and ${containers.length} Docker ${containers.length === 1 ? 'container' : 'containers'}` : ''}</p></div>
-      <div className="max-h-80 overflow-y-auto p-2 text-sm">
-        {report.chats.length > 0 && <><p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Active chats</p>
-          {report.chats.map(chat => <div key={chat.sessionId} className="flex items-center gap-3 rounded px-2 py-1.5" data-testid="memory-chat-row"><span className="min-w-0 flex-1"><span className="block truncate">{chat.title}<span className="ml-1 text-xs text-muted-foreground">({chat.processes})</span></span>
-            {(chat.containers ?? 0) > 0 && <span className="block truncate text-xs text-muted-foreground" data-testid="memory-chat-containers">{memoryWords(chat.bytes)} in processes · {memoryWords(chat.containerBytes ?? 0)} in {chat.containers} {chat.containers === 1 ? 'container' : 'containers'}</span>}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(chat.bytes + (chat.containerBytes ?? 0))}</span></div>)}
-          <Separator className="my-1" /></>}
-        <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Processes</p>
-        {report.processDetails.map(process => <div key={process.pid} className="flex items-center gap-2 rounded px-2 py-1.5" data-testid="memory-process-row">
-          <span className="min-w-0 flex-1"><span className="block truncate">{process.name || 'Process'}</span><span className="block truncate text-xs text-muted-foreground">PID {process.pid} · {role(process)}</span></span>
-          <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(process.bytes)}</span>
-          {process.killable && <Button variant={confirming === process.pid ? 'destructive' : 'ghost'} mode="icon" size="xs"
-            disabled={stopping !== null} data-testid="memory-process-stop"
-            aria-label={confirming === process.pid ? `Confirm stopping ${process.name}` : `Stop ${process.name}`}
-            title={confirming === process.pid ? 'Click again to confirm' : 'Stop this subprocess without ending the chat'}
-            onClick={() => stop(process)}><Square className="size-3" aria-hidden="true" /></Button>}
-        </div>)}
-        {containers.length > 0 && <><Separator className="my-1" /><p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Docker containers</p>
-          {containers.map(container => <div key={container.id} className="flex items-center gap-2 rounded px-2 py-1.5" data-testid="memory-container-row">
-            <span className="min-w-0 flex-1"><span className="block truncate">{container.name}</span><span className="block truncate text-xs text-muted-foreground">{owner(container)} · {container.image}</span></span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">{memoryWords(container.bytes)}</span>
-          </div>)}</>}
+    <PopoverContent align="start" className="w-[26rem] p-0" data-testid="memory-popup">
+      <div className="border-b px-3 py-2"><p className="text-sm font-medium">RAM usage</p><p className="text-xs text-muted-foreground">Proportional memory across {report.processCount} processes, resident and swapped{containers.length > 0 ? `, and ${plural(containers.length, 'Docker container', 'Docker containers')}` : ''}</p></div>
+      <div className="max-h-[28rem] overflow-y-auto p-1.5 text-sm">
+        {groups.map(group => {
+          const open = opened.has(group.key);
+          const Icon = GroupIcon[group.kind];
+          return <div key={group.key} data-testid="memory-group" data-kind={group.kind}>
+            <button type="button" className="flex w-full items-center gap-2 rounded px-1.5 py-1.5 text-left hover:bg-muted/60"
+              aria-expanded={open} onClick={() => setOpened(set => flip(set, group.key))}>
+              <ChevronRight className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
+              <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="min-w-0 flex-1"><span className="block truncate">{group.title}</span>
+                <span className="block truncate text-xs text-muted-foreground">{summary(group)}</span></span>
+              <span className={`shrink-0 pr-1 tabular-nums ${group.kind === 'other' ? 'text-muted-foreground' : 'font-medium'}`}>{memoryWords(group.kind === 'other' ? sum(group.containers) : group.bytes)}</span>
+            </button>
+            {open && <div className="mb-1 ml-3 border-l pl-1.5">{inside(group)}</div>}
+          </div>;
+        })}
         {error && <p className="px-2 py-1 text-xs text-destructive" role="alert">{error}</p>}
       </div>
       <div className="border-t px-4 py-2 text-sm">

@@ -99,7 +99,9 @@ test('the badge draws a real figure and its popover opens on it', async ({ page,
     const popup = page.getByTestId('memory-popup');
     await expect(popup).toBeVisible();
     await expect(popup).toContainText('resident and swapped');
-    await expect(page.getByTestId('memory-process-row').first()).toBeVisible();
+    const app = page.locator('[data-testid="memory-group"][data-kind="app"]');
+    await app.getByRole('button', { name: /App/ }).click();
+    await expect(app.getByTestId('memory-process-row').first()).toBeVisible();
     await page.screenshot({ path: join(SHOTS, 'live.png') });
   } finally {
     discardFixture(run);
