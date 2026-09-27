@@ -81,6 +81,7 @@ enum Command {
     SavedAccountHandoff(String, Reply<Option<String>>),
     ClearAccountHandoff(String, Reply<()>),
     Append(Event, Reply<Option<Event>>),
+    AppendIfStateAt(Event, Option<i64>, Reply<Option<Event>>),
     AppendMany(Vec<Event>, bool, Reply<usize>),
     EventCount(String, Reply<i64>),
     TimelineCount(String, Reply<i64>),
@@ -426,6 +427,23 @@ impl ChatDb {
     /// A duplicate provider identity returns `None` and publishes nothing.
     pub async fn append(&self, event: Event) -> Result<Option<Event>, String> {
         self.request(|reply| Command::Append(event, reply)).await
+    }
+
+    /// `append`, unless the chat's newest state row is no longer the one at
+    /// `expected`: a status worked out from what the chat was then must not
+    /// land over a state written since (bw-cnlk9).
+    pub async fn append_if_state_at(
+        &self,
+        event: Event,
+        expected: Option<i64>,
+    ) -> Result<Option<Event>, String> {
+        self.request(|reply| Command::AppendIfStateAt(event, expected, reply))
+            .await
+    }
+
+    /// The seq of the chat's newest state row.
+    pub async fn latest_state_seq(&self, session_id: String) -> Result<Option<i64>, String> {
+        self.read(move |store, _| store.latest_state_seq(&session_id)).await
     }
 
     /// Persist a provider replay in one actor turn and one SQLite commit.
@@ -1183,6 +1201,30 @@ fn run(
     while let Some(command) = commands.blocking_recv() {
         // Held for one command at a time; a reader copies it and lets go.
         let mut live_menus = shared_menus.lock().unwrap();
+        // Checked here, in the writer, so nothing lands between the check and
+        // the append.
+        let command = match command {
+            Command::AppendIfStateAt(event, expected, reply) => {
+                let session_id = event
+                    .fields
+                    .get("sessionId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                match store.latest_state_seq(&session_id) {
+                    Ok(seq) if seq == expected => Command::Append(event, reply),
+                    Ok(_) => {
+                        let _ = reply.send(Ok(None));
+                        continue;
+                    }
+                    Err(error) => {
+                        let _ = reply.send(Err(error.to_string()));
+                        continue;
+                    }
+                }
+            }
+            other => other,
+        };
         match command {
             Command::CreateSession(session, reply) => {
                 respond(reply, store.create_session(&session))
@@ -1497,6 +1539,7 @@ fn run(
                 let _ = reply.send(result);
             }
             Command::Shutdown => break,
+            Command::AppendIfStateAt(..) => unreachable!("made an append above"),
         }
         drop(live_menus);
         for session_id in store.take_unfilled() {

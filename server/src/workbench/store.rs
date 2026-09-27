@@ -1524,6 +1524,14 @@ fn held_in_its_project(
         })
     }
 
+    pub fn latest_state_seq(&self, session_id: &str) -> rusqlite::Result<Option<i64>> {
+        self.connection.query_row(
+            "SELECT MAX(seq) FROM event WHERE type='session.state' AND session_id=?1",
+            [session_id],
+            |row| row.get(0),
+        )
+    }
+
     pub fn session_status(&self, session_id: &str) -> rusqlite::Result<Option<Value>> {
         self.connection
             .query_row(

@@ -290,11 +290,14 @@ pub async fn reconcile(
     session_id: &str,
     runtime: Option<&RuntimeFacts>,
 ) -> Result<Value, String> {
+    // Read before the chat, so a state written after the chat was read is
+    // seen at the write below and wins.
+    let expected = database.latest_state_seq(session_id.to_string()).await?;
     let Some(session) = database.get_session(session_id.to_string()).await? else {
         return Ok(Value::Null);
     };
     let record = record_of(&session);
-    reconcile_with(database, &session, runtime, record.as_deref(), Utc::now()).await
+    reconcile_from(database, &session, runtime, record.as_deref(), Utc::now(), expected).await
 }
 
 /// `reconcile` with the record and the clock given, for tests.
@@ -304,6 +307,21 @@ pub async fn reconcile_with(
     runtime: Option<&RuntimeFacts>,
     record: Option<&Path>,
     now: DateTime<Utc>,
+) -> Result<Value, String> {
+    let expected = database.latest_state_seq(session.id.clone()).await?;
+    reconcile_from(database, session, runtime, record, now, expected).await
+}
+
+/// The status as of the chat's state row at `expected`. Two reconciles of one
+/// chat can overlap — the sweep and a command's own — and the one that read
+/// the chat first must not write its older answer over the other's.
+async fn reconcile_from(
+    database: &ChatDb,
+    session: &Session,
+    runtime: Option<&RuntimeFacts>,
+    record: Option<&Path>,
+    now: DateTime<Utc>,
+    expected: Option<i64>,
 ) -> Result<Value, String> {
     static SETTLED_AT: LazyLock<Mutex<HashMap<String, (Instant, bool)>>> =
         LazyLock::new(Default::default);
@@ -355,7 +373,7 @@ pub async fn reconcile_with(
         fields.insert("source".into(), json!("runtime-reconciliation"));
         let event: Event =
             serde_json::from_value(status.clone()).map_err(|error| error.to_string())?;
-        database.append(event).await?;
+        database.append_if_state_at(event, expected).await?;
     }
     Ok(status)
 }

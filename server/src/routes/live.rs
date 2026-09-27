@@ -1331,6 +1331,9 @@ mod tests {
         assert!(at_end(&state, &record).await, "the cursor stayed where the driver was attached");
         assert!(shell_ended(&state, "bshell01").await, "a shell that ended unwatched still shows as running");
         assert_eq!(state.database().driven_from("chat-1".into()).await.unwrap(), None);
+        // Settled first, as in the test below: the status row a sweep writes
+        // whenever it comes is not what following the record adds.
+        state.reconcile_status("chat-1").await.unwrap();
 
         let before = event_count(&state).await;
         let (_lease, start) = state.chat_follow_subscription("chat-1").await;
