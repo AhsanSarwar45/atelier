@@ -1477,15 +1477,14 @@ fn held_in_its_project(
     pub fn session_activity(&self, session_id: &str) -> rusqlite::Result<SessionActivity> {
         let mut statement = self.connection.prepare(
             "SELECT json_extract(json,'$.state'), COALESCE(json_extract(json,'$.label'),''), json_extract(json,'$.at') FROM event WHERE session_id=?1 AND type='session.state' ORDER BY seq DESC")?;
-        let rows = statement.query_map([session_id], |row| {
+        let mut rows = statement.query_map([session_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
             ))
         })?;
-        let values: Vec<_> = rows.collect::<rusqlite::Result<_>>()?;
-        let Some((state, label, at)) = values.first() else {
+        let Some((state, label, at)) = rows.next().transpose()? else {
             return Ok(SessionActivity {
                 label: String::new(),
                 detail: String::new(),
@@ -1497,20 +1496,28 @@ fn held_in_its_project(
             state.as_str(),
             "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
         );
-        let shown = if state == "dormant" { "" } else { label };
-        let busy_since = counting.then(|| {
-            values
-                .iter()
-                .take_while(|(s, l, _)| s == state && l == label)
-                .last()
-                .map(|(_, _, at)| at.clone())
-                .unwrap_or_else(|| at.clone())
-        });
+        let shown = if state == "dormant" { "" } else { label.as_str() };
+        // Rows are read newest first and only while they repeat the newest:
+        // the first different one ends the run, and every row before the
+        // chat's current stretch is never read.
+        let busy_since = if counting {
+            let mut since = at.clone();
+            for row in rows {
+                let (s, l, earlier) = row?;
+                if s != state || l != label {
+                    break;
+                }
+                since = earlier;
+            }
+            Some(since)
+        } else {
+            None
+        };
         Ok(SessionActivity {
             label: shown.to_string(),
             // Read by the caller that has the row in front of it: this one
-            // walks back over every state the chat has been in, and the detail
-            // belongs to the latest of them alone.
+            // walks back over the chat's current stretch of states, and the
+            // detail belongs to the latest of them alone.
             detail: String::new(),
             call: Value::Null,
             busy_since,
