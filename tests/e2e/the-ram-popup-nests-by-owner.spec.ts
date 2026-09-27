@@ -45,7 +45,8 @@ const REPORT = {
     row(10, 1, 'atelier', 500 * MB, 'app'),
     row(11, 10, 'claude', 160 * MB, 'accountReader'),
     row(12, 10, 'codex', 130 * MB, 'accountReader'),
-    row(13, 10, 'node', 90 * MB, 'appService'),
+    // The Terminal panel's shell: the app starts it, and no chat does.
+    row(13, 10, 'bash', 90 * MB, 'appService'),
     row(20, 10, 'claude-acp', 100 * MB, 'chatAdapter', ESSAYS),
     row(21, 20, 'claude', 600 * MB, 'provider', ESSAYS),
     row(22, 21, 'bash', 20 * MB, 'subprocess', ESSAYS),
