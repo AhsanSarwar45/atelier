@@ -671,6 +671,11 @@ async fn import_claude_history(
         store_ms = opened.elapsed().as_millis() - normalized,
         "read a saved Claude record"
     );
+    // Said once it is read, or the next open reads the whole record again: a
+    // reset, then every row dropped as one already stored, and the reset left
+    // hiding the only copy — a chat that went blank on its second open. Before
+    // `remember_followed`, which this clears.
+    database.mark_imported(session.id.clone()).await?;
     if let Some(at) = followed_from {
         database.remember_followed(session.id.clone(), at).await?;
     }
@@ -779,12 +784,12 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
         imported.push(serde_json::from_value(value).map_err(|error| error.to_string())?);
     }
     database.append_replay(imported).await?;
+    // Read, whether or not there is a file to follow; see `import_claude_history`.
+    database.mark_imported(session.id.clone()).await?;
     if let Some(path) = thread["path"].as_str() {
         if let Ok(size) = std::fs::metadata(path).map(|meta| meta.len() as i64) {
             database.remember_followed(session.id.clone(), size).await?;
         }
-    } else {
-        database.mark_imported(session.id.clone()).await?;
     }
     Ok(())
 }
@@ -1370,6 +1375,65 @@ mod tests {
             .find(|event| event.kind == crate::workbench::protocol::EventKind::SessionPinned)
             .expect("reading a record pins what the chat runs as");
         assert_eq!(pinned.fields["effort"], "high");
+    }
+
+    /// A saved Claude chat is read once, not on every open.
+    ///
+    /// Reading never said it had read, so each open read the record again: a
+    /// reset, then every row dropped as one already stored, and the reset left
+    /// hiding the only copy. The chat went blank on its second open.
+    #[tokio::test]
+    async fn a_saved_claude_chat_opened_twice_is_read_once_and_stays_drawn() {
+        use crate::workbench::protocol::EventKind;
+        let root = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+
+        let external = "22222222-3333-4444-5555-666666666666";
+        let project = config.path().join("projects").join("a-project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join(format!("{external}.jsonl")),
+            format!(
+                "{}\n{}\n",
+                json!({"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"Hello"}}),
+                json!({"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"id":"turn-1","model":"m","content":[{"type":"text","text":"Hi there."}]}}),
+            ),
+        )
+        .unwrap();
+
+        let mut session = imported_session();
+        session.brand = "claude".into();
+        session.external_id = Some(external.into());
+        database.create_session(session.clone()).await.unwrap();
+
+        for _ in 0..2 {
+            import_claude_history(&database, config.path(), &session)
+                .await
+                .unwrap();
+        }
+
+        assert!(
+            database
+                .imported_by(session.id.clone())
+                .await
+                .unwrap()
+                .is_some(),
+            "reading the record did not say it was read"
+        );
+        let events = database.events_since(session.id.clone(), 0).await.unwrap();
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.kind == EventKind::TranscriptReset),
+            "the second open read the record again and reset the chat"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == EventKind::MessageCompleted),
+            "the chat's messages are not there after two opens"
+        );
     }
 
     /// Being on a setting is not being offered it.
