@@ -893,10 +893,14 @@ impl Store {
     pub fn session_by_external_id(&self, external_id: &str) -> rusqlite::Result<Option<Session>> {
         self.connection
             .query_row(
+                // Two lookups, one on each index; an OR across a join
+                // reads every row of the session table (bw-xeeqg.11).
                 r#"SELECT session.* FROM session
-                     LEFT JOIN session_external_alias AS alias
-                       ON alias.session_id = session.id
-                    WHERE session.external_id = ?1 OR alias.external_id = ?1
+                    WHERE session.id IN (
+                      SELECT id FROM session WHERE external_id = ?1
+                      UNION
+                      SELECT session_id FROM session_external_alias WHERE external_id = ?1
+                    )
                     ORDER BY session.last_active_at DESC LIMIT 1"#,
                 [external_id],
                 session_from_row,
@@ -3566,6 +3570,15 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     // because that list is replayed from whatever version a database is at
     // (bw-xeeqg.7).
     transaction.execute_batch("DROP INDEX IF EXISTS event_by_session;")?;
+    // A chat is found by the provider's own id without knowing its brand,
+    // and both keys that hold that id begin with the brand, so the lookup
+    // read every chat and every alias (bw-xeeqg.11).
+    transaction.execute_batch(
+        "CREATE INDEX IF NOT EXISTS session_by_external_id ON session(external_id)
+           WHERE external_id IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS session_external_alias_by_external_id
+           ON session_external_alias(external_id);",
+    )?;
     if !columns(transaction, "session")?
         .iter()
         .any(|name| name == "collaboration_mode")
@@ -3926,6 +3939,39 @@ mod tests {
     /// A screenshot read by a tool is stored as a note, not as megabytes of
     /// base64; rows stored before are cleaned by the background pass, and
     /// short text and the `image` event are left alone (bw-xeeqg.14).
+    /// Finding a chat by the provider's id reads the two indexes that hold it,
+    /// not every chat (bw-xeeqg.11).
+    #[test]
+    fn a_chat_is_found_by_its_provider_id_without_reading_every_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(&root.path().join("workbench.db")).unwrap();
+        let plan: Vec<String> = store
+            .connection
+            .prepare(
+                r#"EXPLAIN QUERY PLAN SELECT session.* FROM session
+                    WHERE session.id IN (
+                      SELECT id FROM session WHERE external_id = ?1
+                      UNION
+                      SELECT session_id FROM session_external_alias WHERE external_id = ?1
+                    )
+                    ORDER BY session.last_active_at DESC LIMIT 1"#,
+            )
+            .unwrap()
+            .query_map(["x"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(
+            plan.iter().all(|step| !step.starts_with("SCAN session")),
+            "{plan:?}"
+        );
+        assert!(plan.iter().any(|step| step.contains("session_by_external_id")), "{plan:?}");
+        assert!(
+            plan.iter().any(|step| step.contains("session_external_alias_by_external_id")),
+            "{plan:?}"
+        );
+    }
+
     #[test]
     fn tool_events_keep_no_base64_pictures_and_old_rows_are_cleaned() {
         let root = tempfile::tempdir().unwrap();
