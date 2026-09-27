@@ -77,8 +77,8 @@ async fn start_codex_app_server(
 }
 
 /// How long an app-server stays open with nothing asked of it. Plan usage no
-/// longer keeps one, so only a thread listing or a reset use starts one, and
-/// each is over in seconds; about 100 MB is not kept for the rest of the day.
+/// never uses one, so only a thread listing starts one; about 100 MB is not
+/// kept for the rest of the day.
 const CODEX_READER_IDLE: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
@@ -1181,8 +1181,11 @@ impl WorkbenchState {
             let outcome = if brand == "codex" {
                 let named = (profile != crate::workbench::profiles::SYSTEM)
                     .then(|| self.registry.profile_directory(brand, profile));
-                let transport = self.codex_reader(named.as_deref()).await?;
-                crate::workbench::usage::use_codex_reset(&transport, id, attempt).await
+                // Started for this one use and closed, like a login renewal.
+                let transport = start_codex_app_server(named.as_deref()).await?;
+                let outcome = crate::workbench::usage::use_codex_reset(&transport, id, attempt).await;
+                transport.close().await;
+                outcome
             } else if brand == "claude" {
                 let directory = self.registry.profile_directory(brand, profile);
                 crate::workbench::usage::use_claude_reset(&directory, id, attempt).await
