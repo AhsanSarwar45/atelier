@@ -1069,6 +1069,22 @@ pub(crate) fn usage_key(brand: &str, profile: &str) -> String {
     format!("{brand}/{profile}")
 }
 
+/// How long one account's reading stands before a beat reads it again.
+///
+/// Claude answers `get_usage` by reading every transcript the account has
+/// saved: 1.6 GB for one account, 557 MB for another, measured on the
+/// manager's machine, once for every beat of thirty seconds. That filled the
+/// page cache the service is limited by until the kernel stalled it and
+/// `systemd-oomd` killed it (bw-xeeqg.15). A plan's percentage moves slowly;
+/// a sign-in or a reset clears the reading and reads it at once.
+fn usage_max_age(key: &str) -> Duration {
+    if key.starts_with("claude/") {
+        Duration::from_secs(300)
+    } else {
+        Duration::from_secs(30)
+    }
+}
+
 async fn fresh_usage(
     cache: &tokio::sync::Mutex<HashMap<String, (std::time::Instant, Value)>>,
     key: &str,
@@ -1077,7 +1093,7 @@ async fn fresh_usage(
         .lock()
         .await
         .get(key)
-        .filter(|(at, _)| at.elapsed() < Duration::from_secs(30))
+        .filter(|(at, _)| at.elapsed() < usage_max_age(key))
         .map(|(_, value)| value.clone())
 }
 
@@ -4177,6 +4193,25 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    /// A Claude reading makes Claude read every transcript of the account, so
+    /// a beat reuses one for five minutes; Codex's stays thirty seconds
+    /// (bw-xeeqg.15).
+    #[tokio::test]
+    async fn a_claude_reading_stands_for_five_minutes_and_codex_for_thirty_seconds() {
+        let cache = tokio::sync::Mutex::new(HashMap::new());
+        let two_minutes_ago = std::time::Instant::now() - Duration::from_secs(120);
+        let six_minutes_ago = std::time::Instant::now() - Duration::from_secs(360);
+        {
+            let mut held = cache.lock().await;
+            held.insert(usage_key("claude", "work"), (two_minutes_ago, json!({"at":"then"})));
+            held.insert(usage_key("claude", "old"), (six_minutes_ago, json!({"at":"then"})));
+            held.insert(usage_key("codex", "work"), (two_minutes_ago, json!({"at":"then"})));
+        }
+        assert!(fresh_usage(&cache, &usage_key("claude", "work")).await.is_some());
+        assert!(fresh_usage(&cache, &usage_key("claude", "old")).await.is_none());
+        assert!(fresh_usage(&cache, &usage_key("codex", "work")).await.is_none());
     }
 
     #[tokio::test]
