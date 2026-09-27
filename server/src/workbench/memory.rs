@@ -3,7 +3,11 @@
 use super::actor::ChatDb;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use sysinfo::Pid;
+#[cfg(any(test, not(target_os = "linux")))]
+use sysinfo::{ProcessesToUpdate, System};
+#[cfg(not(target_os = "linux"))]
+use sysinfo::{ProcessRefreshKind, UpdateKind};
 
 pub const CHAT_ENV: &str = "ATELIER_CHAT_SESSION_ID";
 
@@ -112,6 +116,7 @@ fn belongs_to(pid: Pid, root: Pid, parents: &HashMap<Pid, Option<Pid>>) -> bool 
     false
 }
 
+#[cfg(not(target_os = "linux"))]
 fn chat_id(process: &sysinfo::Process) -> Option<String> {
     process.environ().iter().find_map(|entry| {
         let entry = entry.to_string_lossy();
@@ -333,6 +338,135 @@ fn role_of(
     "subprocess"
 }
 
+/// This app and every process under it, found by walking down from this
+/// process through the kernel's list of each thread's children. The badge
+/// asks every three seconds. Asking sysinfo for every process on the machine
+/// meant opening every thread's `stat`, thousands on a busy machine, and
+/// sysinfo kept each of those files open, so the app held thousands of files
+/// and read megabytes a minute to find a dozen of its own processes.
+#[cfg(target_os = "linux")]
+fn scan() -> Vec<Found> {
+    let root = std::process::id();
+    let mut found = Vec::new();
+    let mut seen = HashSet::new();
+    let mut queue = vec![(root, None)];
+    while let Some((pid, parent)) = queue.pop() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        let Some(stat) = read_stat(pid) else { continue };
+        for child in children(pid) {
+            queue.push((child, Some(pid)));
+        }
+        let start_time = stat.started_at();
+        found.push(Found {
+            pid: Pid::from_u32(pid),
+            parent: parent.or(stat.parent).map(Pid::from_u32),
+            chat: environ_chat(pid, stat.started),
+            name: stat.name,
+            start_time,
+        });
+    }
+    found
+}
+
+#[cfg(target_os = "linux")]
+struct Stat {
+    name: String,
+    parent: Option<u32>,
+    /// Clock ticks after boot, as the kernel writes it.
+    started: u64,
+}
+
+#[cfg(target_os = "linux")]
+impl Stat {
+    /// Seconds since the epoch, the same figure sysinfo gave, so a stop
+    /// request carrying a start time from an older report still matches.
+    fn started_at(&self) -> u64 {
+        static BOOT: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
+        let (boot, ticks) = *BOOT.get_or_init(|| {
+            let boot = std::fs::read_to_string("/proc/stat")
+                .ok()
+                .and_then(|stat| {
+                    stat.lines()
+                        .find_map(|line| line.strip_prefix("btime")?.trim().parse::<u64>().ok())
+                })
+                .unwrap_or(0);
+            // SAFETY: sysconf reads a constant and has no preconditions.
+            let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+            (boot, if ticks > 0 { ticks as u64 } else { 100 })
+        });
+        boot.saturating_add(self.started / ticks)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_stat(pid: u32) -> Option<Stat> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The name sits in parentheses and may itself hold spaces or parentheses,
+    // so the fields after it are counted from the last closing one.
+    let open = stat.find('(')?;
+    let close = stat.rfind(')')?;
+    let name = stat.get(open + 1..close)?.to_owned();
+    let fields: Vec<&str> = stat.get(close + 1..)?.split_whitespace().collect();
+    // After the name: state, ppid, ... starttime is field 22 overall, the
+    // 20th after the name.
+    let parent = fields.get(1)?.parse::<u32>().ok().filter(|pid| *pid != 0);
+    let started = fields.get(19)?.parse::<u64>().ok()?;
+    Some(Stat {
+        name,
+        parent,
+        started,
+    })
+}
+
+/// Every thread's children, since a child belongs to the thread that started
+/// it and not only to the main one.
+#[cfg(target_os = "linux")]
+fn children(pid: u32) -> Vec<u32> {
+    let Ok(threads) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+        return Vec::new();
+    };
+    let mut children = Vec::new();
+    for thread in threads.flatten() {
+        let Ok(list) = std::fs::read_to_string(thread.path().join("children")) else {
+            continue;
+        };
+        children.extend(list.split_whitespace().filter_map(|pid| pid.parse::<u32>().ok()));
+    }
+    children
+}
+
+/// A process's environment is fixed once it runs, so it is read once for each
+/// process and kept by its start, which a reused number does not share.
+#[cfg(target_os = "linux")]
+fn environ_chat(pid: u32, started: u64) -> Option<String> {
+    static KEPT: std::sync::LazyLock<std::sync::Mutex<HashMap<u32, (u64, Option<String>)>>> =
+        std::sync::LazyLock::new(Default::default);
+    let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, chat)) = kept.get(&pid) {
+        if *at == started {
+            return chat.clone();
+        }
+    }
+    let chat = std::fs::read(format!("/proc/{pid}/environ")).ok().and_then(|environ| {
+        let prefix = format!("{CHAT_ENV}=");
+        environ.split(|byte| *byte == 0).find_map(|entry| {
+            let entry = std::str::from_utf8(entry).ok()?;
+            entry
+                .strip_prefix(&prefix)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+        })
+    });
+    if kept.len() > 4096 {
+        kept.clear();
+    }
+    kept.insert(pid, (started, chat.clone()));
+    chat
+}
+
+#[cfg(not(target_os = "linux"))]
 fn scan() -> Vec<Found> {
     static KEPT: std::sync::OnceLock<std::sync::Mutex<System>> = std::sync::OnceLock::new();
     let kept = KEPT.get_or_init(|| std::sync::Mutex::new(System::new()));
@@ -836,6 +970,42 @@ mod tests {
             println!("{} {} total={total} cache={cache} in {}", container.name, container.image, group.display());
             assert!(total > 0);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_scan_walks_only_this_tree_and_keeps_no_file_open() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .env(CHAT_ENV, "scan-test-chat")
+            .spawn()
+            .unwrap();
+        let pid = Pid::from_u32(child.id());
+        let open = || std::fs::read_dir("/proc/self/fd").unwrap().count();
+        scan();
+        let before = open();
+        let mut found = Vec::new();
+        for _ in 0..5 {
+            found = scan();
+        }
+        let after = open();
+        let mut system = System::new();
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        let expected = system.process(pid).unwrap().start_time();
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        let row = found.iter().find(|row| row.pid == pid).expect("the child is found");
+        assert_eq!(row.parent, Some(Pid::from_u32(std::process::id())));
+        assert_eq!(row.name, "sleep");
+        assert_eq!(row.chat.as_deref(), Some("scan-test-chat"));
+        assert_eq!(row.start_time, expected, "the start time sysinfo gave, so old stop requests match");
+        assert!(found.iter().any(|row| row.pid.as_u32() == std::process::id()));
+        assert!(
+            found.iter().all(|row| row.pid.as_u32() == std::process::id() || row.parent.is_some()),
+            "only this process and what descends from it"
+        );
+        assert!(after <= before + 2, "scans left files open: {before} before, {after} after");
     }
 
     #[cfg(unix)]
