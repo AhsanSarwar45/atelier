@@ -152,6 +152,20 @@ fn parse_field(contents: &str, name: &str) -> Option<u64> {
     })
 }
 
+/// The pages a process holds itself: its anonymous memory and its share of
+/// shared memory. The program and library files it maps are left out. The
+/// service is charged for those as disk cache, and only when it was the first
+/// to read them. Counted per process, they made the entries add up to more
+/// than the Total (bw-xeeqg.21). A kernel older than 5.14 has no `Pss_Anon`,
+/// and all of `Pss` is the best it can say.
+#[cfg(target_os = "linux")]
+fn held(contents: &str) -> Option<u64> {
+    match parse_field(contents, "Pss_Anon:") {
+        Some(anon) => Some(anon.saturating_add(parse_field(contents, "Pss_Shmem:").unwrap_or(0))),
+        None => parse_field(contents, "Pss:"),
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn process_leader(pid: Pid) -> Result<Option<bool>, String> {
     let status_path = format!("/proc/{}/status", pid.as_u32());
@@ -203,8 +217,7 @@ fn process_cost(pid: Pid) -> Result<Option<ProcessCost>, String> {
     let path = format!("/proc/{}/smaps_rollup", pid.as_u32());
     match std::fs::read_to_string(&path) {
         Ok(contents) => Ok(Some(ProcessCost {
-            resident: parse_field(&contents, "Pss:")
-                .ok_or_else(|| format!("missing Pss in {path}"))?,
+            resident: held(&contents).ok_or_else(|| format!("missing Pss in {path}"))?,
             // A kernel built without swap, or a process with nothing paged out,
             // leaves this line out. Absent means none, not unreadable.
             swapped: parse_field(&contents, "SwapPss:").unwrap_or(0),
@@ -313,10 +326,11 @@ fn service_memory(_ours: &[Found]) -> Option<ServiceMemory> {
     None
 }
 
-/// Proportional set size, resident and swapped together. The name says both
-/// halves because a reader who saw "pss" would reasonably expect a number that
-/// ignores swap, which is the bug this replaced (bw-c4i2.2).
-const MEMORY_METRIC: &str = "pssWithSwap";
+/// The proportional share of the pages a process holds itself, resident and
+/// swapped together. The name says both halves because a reader who saw "pss"
+/// would reasonably expect a number that ignores swap, which is the bug this
+/// replaced (bw-c4i2.2). "Held" leaves out mapped files (bw-xeeqg.21).
+const MEMORY_METRIC: &str = "heldPssWithSwap";
 
 /// One of this app's own processes, with what the report shows of it.
 struct Found {
@@ -1050,10 +1064,22 @@ mod tests {
     #[test]
     fn a_process_costs_what_it_holds_plus_what_it_has_paged_out() {
         let cost = ProcessCost {
-            resident: parse_field(ROLLUP, "Pss:").unwrap(),
+            resident: held(ROLLUP).unwrap(),
             swapped: parse_field(ROLLUP, "SwapPss:").unwrap(),
         };
-        assert_eq!(cost.total(), 4_424_704 + 1_263_616);
+        assert_eq!(cost.total(), 4_096_000 + 1_263_616);
+    }
+
+    /// The files a process maps are the service's disk cache, not the
+    /// process's own memory, so the entries and the cache do not count them
+    /// twice (bw-xeeqg.21).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_process_holds_its_own_and_shared_memory_but_not_the_files_it_maps() {
+        let rollup = "Pss:                9000 kB\nPss_Anon:           4000 kB\nPss_File:           4500 kB\nPss_Shmem:           500 kB\n";
+        assert_eq!(held(rollup), Some(4_500 * 1024));
+        // An older kernel without the split says only Pss.
+        assert_eq!(held("Pss:                9000 kB\n"), Some(9_000 * 1024));
     }
 
     /// A rollup with no swap line is a machine that has never paged this

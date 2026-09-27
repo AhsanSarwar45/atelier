@@ -13,7 +13,7 @@ interface MemoryReport {
   totalBytes: number;
   /** The part of totalBytes the kernel has paged out rather than holding in RAM. */
   swapBytes: number;
-  metric: 'pssWithSwap';
+  metric: 'heldPssWithSwap';
   processCount: number;
   chats: Array<{
     sessionId: string; title: string; bytes: number; processes: number;
@@ -45,7 +45,7 @@ function isMemoryReport(value: unknown): value is MemoryReport {
   if (!value || typeof value !== 'object') return false;
   const report = value as Partial<MemoryReport>;
   return typeof report.totalBytes === 'number' && typeof report.swapBytes === 'number'
-    && report.metric === 'pssWithSwap'
+    && report.metric === 'heldPssWithSwap'
     && typeof report.processCount === 'number' && Array.isArray(report.chats) && Array.isArray(report.processDetails);
 }
 type Process = MemoryReport['processDetails'][number];
@@ -159,6 +159,10 @@ export function MemoryBadge() {
   // number that gets the app killed is the number on the chip (bw-xeeqg.16).
   const shownBytes = (report.service ? report.service.totalBytes : report.totalBytes) + chatContainerBytes;
   const otherBytes = sum(report.service?.others ?? []);
+  // The rest of the service's charge: what the kernel keeps for its processes,
+  // such as their page tables and network buffers.
+  const kernelBytes = report.service
+    ? Math.max(0, report.service.totalBytes - report.totalBytes - otherBytes - report.service.cacheBytes) : 0;
   const groups = memoryGroups(report);
   const flip = (set: ReadonlySet<string>, key: string) => { const next = new Set(set); if (!next.delete(key)) next.add(key); return next; };
   const stop = (process: Process) => {
@@ -275,17 +279,18 @@ export function MemoryBadge() {
           <span>In RAM {memoryWords(report.totalBytes - report.swapBytes)}</span>
           <span className="tabular-nums">Swapped {memoryWords(report.swapBytes)}</span>
         </div>}
-        {/* What the total is made of. The disk cache counts toward the
+        {/* What the total holds besides the entries above; with them it adds
+            up to the total (bw-xeeqg.21). The disk cache counts toward the
             service's limit: when the limit is reached the kernel stalls every
             process while it frees it, and that stall is the pressure
             systemd-oomd kills on. */}
         {report.service && <div className="mt-1.5 space-y-0.5 border-t pt-1.5 text-xs text-muted-foreground" data-testid="memory-service">
-          <div className="flex items-center justify-between"><span>Processes</span><span className="tabular-nums">{memoryWords(report.totalBytes)}</span></div>
           {otherBytes > 0 && <div className="flex items-center justify-between gap-2" data-testid="memory-others">
             <span className="min-w-0 truncate">Other programs ({[...new Set(report.service.others!.map(other => other.name))].join(', ')})</span>
             <span className="shrink-0 tabular-nums">{memoryWords(otherBytes)}</span>
           </div>}
           <div className="flex items-center justify-between"><span>Disk cache</span><span className="tabular-nums">{memoryWords(report.service.cacheBytes)}</span></div>
+          {kernelBytes > 0 && <div className="flex items-center justify-between" data-testid="memory-kernel"><span>Kernel</span><span className="tabular-nums">{memoryWords(kernelBytes)}</span></div>}
           {chatContainerBytes > 0 && <div className="flex items-center justify-between" data-testid="memory-container-line"><span>Chat containers</span><span className="tabular-nums">{memoryWords(chatContainerBytes)}</span></div>}
           <div className={`flex items-center justify-between ${report.service.pressure >= 40 ? 'font-medium text-destructive' : ''}`} data-testid="memory-pressure">
             <span>Memory pressure</span><span className="tabular-nums">{Math.round(report.service.pressure)}%</span>

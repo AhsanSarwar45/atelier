@@ -40,7 +40,7 @@ const GB = 1024 ** 3;
 const WITH_CONTAINERS = {
   totalBytes: 1.5 * GB,
   swapBytes: 0,
-  metric: 'pssWithSwap',
+  metric: 'heldPssWithSwap',
   processCount: 3,
   chats: [{ sessionId: 'chat-1', title: 'Grade the essays', bytes: 1 * GB, processes: 2, containerBytes: 5 * GB, containers: 2 }],
   processDetails: [

@@ -35,7 +35,7 @@ const DOCS: [string, string] = ['chat-2', 'Write the docs'];
 const REPORT = {
   totalBytes: 3.2 * GB,
   swapBytes: 0,
-  metric: 'pssWithSwap',
+  metric: 'heldPssWithSwap',
   processCount: 11,
   chats: [
     { sessionId: 'chat-1', title: 'Grade the essays', bytes: 1.6 * GB, processes: 5, containerBytes: 5 * GB, containers: 2 },

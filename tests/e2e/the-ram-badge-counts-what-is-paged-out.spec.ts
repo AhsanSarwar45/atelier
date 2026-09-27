@@ -47,7 +47,7 @@ const OPEN_MS = 60_000;
 const UNDER_PRESSURE = {
   totalBytes: 6.32 * 1024 ** 3,
   swapBytes: 3.08 * 1024 ** 3,
-  metric: 'pssWithSwap',
+  metric: 'heldPssWithSwap',
   processCount: 99,
   chats: [{ sessionId: 'chat-1', title: 'Fix the RAM badge', bytes: 1.2 * 1024 ** 3, processes: 4 }],
   processDetails: [

@@ -9,7 +9,7 @@ vi.mock('@/lib/api', () => ({ request: (...args: unknown[]) => request(...args) 
 describe('memory badge', () => {
   beforeEach(() => {
     request.mockResolvedValue({ ok: true, json: async () => ({
-      totalBytes: 200 * 1024 ** 2, swapBytes: 50 * 1024 ** 2, metric: 'pssWithSwap', processCount: 3,
+      totalBytes: 200 * 1024 ** 2, swapBytes: 50 * 1024 ** 2, metric: 'heldPssWithSwap', processCount: 3,
       chats: [{ sessionId: 'chat-1', title: 'Build the app', bytes: 100, processes: 2 }],
       processDetails: [
         { pid: 10, parentPid: null, name: 'atelier', bytes: 100, swapBytes: 0, sessionId: null, chatTitle: null, role: 'app', killable: false, startTime: 1 },
@@ -38,7 +38,7 @@ describe('memory badge', () => {
 
   it('leaves the split out when nothing is paged out', async () => {
     request.mockResolvedValue({ ok: true, json: async () => ({
-      totalBytes: 200 * 1024 ** 2, swapBytes: 0, metric: 'pssWithSwap', processCount: 1,
+      totalBytes: 200 * 1024 ** 2, swapBytes: 0, metric: 'heldPssWithSwap', processCount: 1,
       chats: [], processDetails: [
         { pid: 10, parentPid: null, name: 'atelier', bytes: 100, swapBytes: 0, sessionId: null, chatTitle: null, role: 'app', killable: false, startTime: 1 },
       ],
@@ -54,18 +54,21 @@ describe('memory badge', () => {
   // (bw-ifjt.3, bw-xeeqg.16).
   it('shows the service total on the chip and what it is made of', async () => {
     request.mockResolvedValue({ ok: true, json: async () => ({
-      totalBytes: 2 * 1024 ** 3, swapBytes: 0, metric: 'pssWithSwap', processCount: 1,
+      totalBytes: 2 * 1024 ** 3, swapBytes: 0, metric: 'heldPssWithSwap', processCount: 1,
       chats: [], processDetails: [],
-      service: { totalBytes: 9 * 1024 ** 3, cacheBytes: 6 * 1024 ** 3, pressure: 77.2,
+      service: { totalBytes: 9.5 * 1024 ** 3, cacheBytes: 6 * 1024 ** 3, pressure: 77.2,
         others: [{ pid: 30, name: 'dolt', bytes: 512 * 1024 ** 2 }, { pid: 31, name: 'dolt', bytes: 512 * 1024 ** 2 }] },
     }) });
     render(<MemoryBadge />);
-    expect(await screen.findByTestId('memory-badge')).toHaveTextContent('9.0 GB');
+    expect(await screen.findByTestId('memory-badge')).toHaveTextContent('9.5 GB');
     fireEvent.click(screen.getByTestId('memory-badge'));
     const service = await screen.findByTestId('memory-service');
-    expect(service).toHaveTextContent('Processes2.0 GB');
+    // The entries above count the processes; the lines below are the rest,
+    // and all of it adds up to the total (bw-xeeqg.21).
+    expect(service).not.toHaveTextContent('Processes');
     expect(screen.getByTestId('memory-others')).toHaveTextContent('Other programs (dolt)1.0 GB');
     expect(service).toHaveTextContent('Disk cache6.0 GB');
+    expect(screen.getByTestId('memory-kernel')).toHaveTextContent('Kernel512 MB');
     expect(screen.getByTestId('memory-pressure')).toHaveTextContent('Memory pressure77%');
     expect(screen.getByTestId('memory-pressure')).toHaveClass('text-destructive');
   });
@@ -97,7 +100,7 @@ describe('memory badge', () => {
   // lists the rest without charging Atelier for them (bw-meh1.2).
   it('charges a chat for the containers it started and lists the rest as nobody\'s', async () => {
     request.mockResolvedValue({ ok: true, json: async () => ({
-      totalBytes: 1024 ** 3, swapBytes: 0, metric: 'pssWithSwap', processCount: 1,
+      totalBytes: 1024 ** 3, swapBytes: 0, metric: 'heldPssWithSwap', processCount: 1,
       chats: [{ sessionId: 'chat-1', title: 'Build the app', bytes: 512 * 1024 ** 2, processes: 1, containerBytes: 2 * 1024 ** 3, containers: 1 }],
       processDetails: [
         { pid: 14, parentPid: 13, name: 'cargo', bytes: 512 * 1024 ** 2, swapBytes: 0, sessionId: 'chat-1', chatTitle: 'Build the app', role: 'subprocess', killable: true, startTime: 4 },
@@ -128,7 +131,7 @@ describe('memory badge', () => {
   it('nests each chat\'s processes under their parents and splits the app by role', async () => {
     const chat = { sessionId: 'chat-1', chatTitle: 'Build the app' };
     request.mockResolvedValue({ ok: true, json: async () => ({
-      totalBytes: 1024 ** 3, swapBytes: 0, metric: 'pssWithSwap', processCount: 6,
+      totalBytes: 1024 ** 3, swapBytes: 0, metric: 'heldPssWithSwap', processCount: 6,
       chats: [{ sessionId: 'chat-1', title: 'Build the app', bytes: 600, processes: 4 }],
       processDetails: [
         { pid: 10, parentPid: 1, name: 'atelier', bytes: 100, swapBytes: 0, sessionId: null, chatTitle: null, role: 'app', killable: false, startTime: 1 },
@@ -155,7 +158,7 @@ describe('memory badge', () => {
 
   it('gives a process charged to a chat the report no longer lists an entry of its own', () => {
     const groups = memoryGroups({
-      totalBytes: 1, swapBytes: 0, metric: 'pssWithSwap', processCount: 1, chats: [],
+      totalBytes: 1, swapBytes: 0, metric: 'heldPssWithSwap', processCount: 1, chats: [],
       processDetails: [{ pid: 5, parentPid: null, name: 'node', bytes: 9, swapBytes: 0, sessionId: 'gone', chatTitle: null, role: 'subprocess', killable: true, startTime: 1 }],
     });
     expect(groups.map(group => [group.title, group.bytes])).toEqual([['Closed chat', 9]]);
