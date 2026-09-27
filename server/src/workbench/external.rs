@@ -82,6 +82,31 @@ fn claude_folder_cwd(folder: &Path) -> Option<String> {
     })
 }
 
+/// The provider's id for the chat a written record path belongs to, lowercased.
+///
+/// A Claude chat writes `<project>/<id>.jsonl` and its helpers write under
+/// `<project>/<id>/`; a Codex rollout ends its name with the thread's id.
+pub(crate) fn record_chat_id(
+    path: &Path,
+    claude_projects: &[PathBuf],
+    codex_sessions: &[PathBuf],
+) -> Option<String> {
+    if let Some(relative) = claude_projects
+        .iter()
+        .find_map(|root| path.strip_prefix(root).ok())
+    {
+        let entry = Path::new(relative.components().nth(1)?.as_os_str());
+        let id = entry.file_stem()?.to_str()?;
+        return Some(id.to_lowercase());
+    }
+    if codex_sessions.iter().any(|root| path.starts_with(root)) {
+        let stem = path.file_stem()?.to_str()?;
+        let id = stem.get(stem.len().checked_sub(36)?..)?;
+        return Some(id.to_lowercase());
+    }
+    None
+}
+
 /// Scope a settled burst of provider record writes to affected projects.
 /// `None` means at least one path could not be placed, so consumers must
 /// conservatively refresh every visible project rather than miss a chat.
@@ -1681,6 +1706,27 @@ impl LineTail {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn a_written_record_is_placed_with_its_chat() {
+        let claude = PathBuf::from("/c/projects");
+        let codex = PathBuf::from("/x/sessions");
+        let id = |path: &str| {
+            record_chat_id(Path::new(path), std::slice::from_ref(&claude), std::slice::from_ref(&codex))
+        };
+        let chat = "7e57c0de-0000-4000-8000-00000000abcd";
+        assert_eq!(id(&format!("/c/projects/-work/{chat}.jsonl")).as_deref(), Some(chat));
+        assert_eq!(
+            id(&format!("/c/projects/-work/{}/subagents/agent-1.jsonl", chat.to_uppercase())).as_deref(),
+            Some(chat)
+        );
+        assert_eq!(
+            id(&format!("/x/sessions/2026/09/27/rollout-2026-09-27T10-00-00-{chat}.jsonl")).as_deref(),
+            Some(chat)
+        );
+        assert_eq!(id("/c/projects/-work"), None);
+        assert_eq!(id("/elsewhere/a.jsonl"), None);
+    }
 
     #[test]
     fn a_record_tail_is_read_again_only_when_the_file_changed() {

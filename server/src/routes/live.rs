@@ -1029,6 +1029,67 @@ mod tests {
         );
     }
 
+    /// A chat this app drives writing its own record is not news from outside,
+    /// and news from outside comes at most every five seconds (bw-xeeqg.9).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn only_outside_writes_reload_the_list_and_at_most_every_five_seconds() {
+        let (directory, state) = workbench_fixture();
+        let driven = "33333333-3333-4333-8333-333333333333";
+        let outside = "44444444-4444-4444-8444-444444444444";
+        let project = directory.path().join("claude/projects/project");
+        fs::create_dir_all(&project).unwrap();
+        let row = "{\"type\":\"meta\",\"cwd\":\"/work/project\"}\n";
+        for id in [driven, outside] {
+            fs::write(project.join(format!("{id}.jsonl")), row).unwrap();
+        }
+        let mut chat = a_saved_chat();
+        chat.brand = "claude".into();
+        chat.external_id = Some(driven.into());
+        state.database().create_session(chat).await.unwrap();
+        state.pretend_driver("chat-1").await;
+
+        let (mut frames, _lease) = state.watch_poll_subscription().await;
+        // The poller watches the folders once it is running.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let add = |id: &str| {
+            let mut file = fs::OpenOptions::new()
+                .append(true)
+                .open(project.join(format!("{id}.jsonl")))
+                .unwrap();
+            std::io::Write::write_all(&mut file, row.as_bytes()).unwrap();
+        };
+        let next_outside = |frames: &mut tokio::sync::broadcast::Receiver<serde_json::Value>, within: u64| {
+            let deadline = tokio::time::Instant::now() + Duration::from_millis(within);
+            let mut frames = frames.resubscribe();
+            async move {
+                loop {
+                    match tokio::time::timeout_at(deadline, frames.recv()).await {
+                        Ok(Ok(frame)) if frame["kind"] == "outside" => return true,
+                        Ok(_) => continue,
+                        Err(_) => return false,
+                    }
+                }
+            }
+        };
+
+        let heard = next_outside(&mut frames, 2_500);
+        for _ in 0..5 {
+            add(driven);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        assert!(!heard.await, "the app's own chat reloaded the list");
+
+        let heard = next_outside(&mut frames, 2_000);
+        add(outside);
+        assert!(heard.await, "a chat worked on outside did not reload the list");
+
+        let started = tokio::time::Instant::now();
+        let heard = next_outside(&mut frames, 7_000);
+        add(outside);
+        assert!(heard.await, "a second outside write was lost");
+        assert!(started.elapsed() >= Duration::from_millis(3_500), "reloaded again within five seconds");
+    }
+
     #[tokio::test]
     async fn a_driven_chats_shell_is_closed_by_the_note_in_its_record() {
         let (directory, state) = workbench_fixture();

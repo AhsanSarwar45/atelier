@@ -649,6 +649,9 @@ impl WorkbenchState {
         );
         let mut external_dirty = HashSet::new();
         let mut external_cwds = HashMap::new();
+        // The provider id of each chat this app drives, once it is known.
+        let mut driven_ids: HashMap<String, String> = HashMap::new();
+        let mut outside_sent: Option<tokio::time::Instant> = None;
         // The chats being worked in elsewhere that this task is keeping read.
         // Held here rather than in the state: the leases must be dropped when
         // this task ends, and its ending is what says nobody has the app open.
@@ -665,7 +668,40 @@ impl WorkbenchState {
                     }
                 },
                 _ = external_tick.tick() => {
+                    // A chat this app drives writes its own record on every
+                    // step, and each write used to send every open list to
+                    // reload itself, once a second for as long as it streamed.
+                    // Its own events already move the list, so its writes are
+                    // not news from outside. What is left comes at most every
+                    // five seconds; the first after a quiet spell still comes
+                    // within one (bw-xeeqg.9).
                     if !external_dirty.is_empty() {
+                        let driving = self.registry().driving().await;
+                        driven_ids.retain(|id, _| driving.contains(id));
+                        for id in driving {
+                            if driven_ids.contains_key(&id) {
+                                continue;
+                            }
+                            if let Ok(Some(session)) = self.database().get_session(id.clone()).await {
+                                if let Some(external) = session.external_id {
+                                    driven_ids.insert(id, external.to_lowercase());
+                                }
+                            }
+                        }
+                        let ours: HashSet<&String> = driven_ids.values().collect();
+                        external_dirty.retain(|path: &std::path::PathBuf| {
+                            crate::workbench::external::record_chat_id(
+                                path,
+                                &claude_projects,
+                                &codex_sessions,
+                            )
+                            .is_none_or(|id| !ours.contains(&id))
+                        });
+                    }
+                    let rested = outside_sent
+                        .is_none_or(|at| at.elapsed() >= Duration::from_secs(5));
+                    if !external_dirty.is_empty() && rested {
+                        outside_sent = Some(tokio::time::Instant::now());
                         let paths = std::mem::take(&mut external_dirty);
                         let folders = crate::workbench::external::changed_record_folders(
                             &paths,

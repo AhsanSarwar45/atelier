@@ -185,16 +185,25 @@ fn human_spoke_at(row: &Value) -> Option<String> {
 /// fixed tail window silently turns the agent's last write into the person's
 /// clock. Blocks are joined across their boundary and reading stops at the
 /// first matching row, so the common case remains one bounded tail read.
-fn last_spoke_at(path: &Path, tail: &[Value]) -> Option<String> {
+///
+/// `known` is what an earlier read found for the file's first `len` bytes,
+/// when those bytes are known unchanged. A record only grows, so the search
+/// then stops where that read ended rather than walking back megabytes of a
+/// working turn again every time a line is added (bw-xeeqg.9).
+fn last_spoke_at(path: &Path, tail: &[Value], known: Option<(u64, Option<String>)>) -> Option<String> {
     const BLOCK: u64 = 256 * 1024;
     if let Some(at) = tail.iter().rev().find_map(human_spoke_at) {
         return Some(at);
     }
     let mut file = fs::File::open(path).ok()?;
     let mut end = file.metadata().ok()?.len();
+    // Back far enough past the old end to take in a line it cut through.
+    let floor = known
+        .as_ref()
+        .map_or(0, |(len, _)| len.min(&end).saturating_sub(64 * 1024));
     let mut suffix = Vec::new();
-    while end > 0 {
-        let start = end.saturating_sub(BLOCK);
+    while end > floor {
+        let start = end.saturating_sub(BLOCK).max(floor);
         file.seek(SeekFrom::Start(start)).ok()?;
         let mut bytes = vec![0; (end - start) as usize];
         file.read_exact(&mut bytes).ok()?;
@@ -219,7 +228,18 @@ fn last_spoke_at(path: &Path, tail: &[Value]) -> Option<String> {
         }
         end = start;
     }
-    None
+    known.and_then(|(_, at)| at)
+}
+
+/// A fingerprint of the bytes just before `len`, to tell a record that only
+/// grew from one rewritten.
+fn seam(path: &Path, len: u64) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let start = len.saturating_sub(4096);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = vec![0; (len - start) as usize];
+    file.read_exact(&mut bytes).ok()?;
+    Some(format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&bytes)))
 }
 
 fn record_files(config: &Path) -> Vec<PathBuf> {
@@ -693,6 +713,8 @@ struct CachedSummary {
     len: u64,
     modified: SystemTime,
     summary: ClaudeSessionSummary,
+    #[serde(default)]
+    seam: Option<String>,
 }
 
 #[derive(Default)]
@@ -778,17 +800,27 @@ fn cached_summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
     let metadata = fs::metadata(&path).ok()?;
     let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
     let cache = summaries();
-    if let Some(summary) = cache
+    let earlier = cache
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .known
         .get(&path)
-        .filter(|cached| cached.len == metadata.len() && cached.modified == modified)
-        .map(|cached| cached.summary.clone())
-    {
-        return Some(summary);
+        .cloned();
+    if let Some(cached) = &earlier {
+        if cached.len == metadata.len() && cached.modified == modified {
+            return Some(cached.summary.clone());
+        }
     }
-    let summary = summary(path.clone())?;
+    let known = earlier.filter(|cached| {
+        cached.len < metadata.len()
+            && cached.seam.is_some()
+            && seam(&path, cached.len) == cached.seam
+    });
+    let summary = summary(
+        path.clone(),
+        known.map(|cached| (cached.len, cached.summary.last_spoke_at)),
+    )?;
+    let path_for_seam = path.clone();
     let mut cache = cache
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -798,13 +830,14 @@ fn cached_summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
             len: metadata.len(),
             modified,
             summary: summary.clone(),
+            seam: seam(&path_for_seam, metadata.len()),
         },
     );
     cache.unsaved = true;
     Some(summary)
 }
 
-fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
+fn summary(path: PathBuf, known: Option<(u64, Option<String>)>) -> Option<ClaudeSessionSummary> {
     let session_id = path.file_stem()?.to_str()?.to_string();
     let (rows, tail) = edge_jsonl(&path);
     let mut cwd = None;
@@ -891,7 +924,7 @@ fn summary(path: PathBuf) -> Option<ClaudeSessionSummary> {
         }),
         cwd,
         git_branch: branch,
-        last_spoke_at: last_spoke_at(&path, &tail),
+        last_spoke_at: last_spoke_at(&path, &tail, known),
         // Agent-SDK child sessions are sidechains throughout, and that was the
         // whole rule until it was measured: on the owner's own data it caught
         // none of the 512 review and harness chats filling Corsetta's list,
@@ -2199,6 +2232,53 @@ pub fn replay_lines(lines: &[String]) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    /// A record that only grew is searched back for the person's last words
+    /// only as far as the last search reached; one rewritten is searched whole
+    /// (bw-xeeqg.9).
+    #[test]
+    fn a_grown_record_is_searched_only_where_it_grew() {
+        let directory = tempfile::tempdir().unwrap();
+        let record = directory.path().join("11111111-1111-4111-8111-111111111111.jsonl");
+        let said = |at: &str, text: &str| {
+            json!({"type":"user","cwd":"/work","timestamp":at,"message":{"role":"user","content":text}})
+                .to_string()
+                + "\n"
+        };
+        // Agent rows long enough to put the prompt well behind the tail window.
+        let working = |count: usize| {
+            let row = json!({"type":"assistant","cwd":"/work","timestamp":"2026-09-27T00:00:01Z",
+                "message":{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"Bash",
+                "input":{"command":"x".repeat(10_000)}}]}})
+            .to_string()
+                + "\n";
+            row.repeat(count)
+        };
+        fs::write(&record, said("2026-09-27T00:00:00Z", "Build it") + &working(60)).unwrap();
+        let spoke = |path: &Path| cached_summary(path.to_path_buf()).unwrap().last_spoke_at;
+        assert_eq!(spoke(&record).as_deref(), Some("2026-09-27T00:00:00Z"));
+
+        // Grown: the old answer stands without the old bytes being searched.
+        // Proven by changing a byte the search would have had to read to
+        // find the prompt, under a seam that still matches.
+        let mut file = fs::OpenOptions::new().append(true).open(&record).unwrap();
+        std::io::Write::write_all(&mut file, working(40).as_bytes()).unwrap();
+        drop(file);
+        let text = fs::read_to_string(&record).unwrap();
+        fs::write(&record, text.replacen("2026-09-27T00:00:00Z", "2026-09-27T00:00:09Z", 1)).unwrap();
+        assert_eq!(spoke(&record).as_deref(), Some("2026-09-27T00:00:00Z"));
+
+        // New words from the person are found in what was added.
+        let mut file = fs::OpenOptions::new().append(true).open(&record).unwrap();
+        std::io::Write::write_all(&mut file, (said("2026-09-27T00:05:00Z", "Now ship it") + &working(40)).as_bytes()).unwrap();
+        drop(file);
+        assert_eq!(spoke(&record).as_deref(), Some("2026-09-27T00:05:00Z"));
+
+        // Rewritten, shorter and then longer again: the seam no longer matches,
+        // so the whole record is searched and the old answer is not trusted.
+        fs::write(&record, said("2026-09-27T01:00:00Z", "Start over") + &working(200)).unwrap();
+        assert_eq!(spoke(&record).as_deref(), Some("2026-09-27T01:00:00Z"));
+    }
+
     /// What the last run learned about a record is still known after a
     /// restart, and a record that is gone is not kept (bw-69sa.3).
     #[test]
@@ -2220,6 +2300,7 @@ mod tests {
                 programmatic: false,
                 record: path.to_path_buf(),
             },
+            seam: None,
         };
         let known = HashMap::from([
             (record.clone(), entry(&record)),

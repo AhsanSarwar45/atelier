@@ -883,6 +883,17 @@ impl WorkbenchRegistry {
         }
     }
 
+    /// The chats this app is driving right now.
+    pub async fn driving(&self) -> Vec<String> {
+        self.drivers
+            .read()
+            .await
+            .iter()
+            .filter(|(_, driver)| !driver.is_closed())
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
     pub async fn has_driver(&self, session_id: &str) -> bool {
         self.drivers
             .read()
