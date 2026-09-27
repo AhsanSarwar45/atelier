@@ -504,7 +504,9 @@ impl Store {
         }
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(10))?;
-        connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
+        connection.execute_batch(
+            "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA cache_size = -16384;",
+        )?;
         migrate(&mut connection)?;
         Ok(Self {
             connection,
@@ -524,7 +526,11 @@ impl Store {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         connection.busy_timeout(Duration::from_secs(10))?;
-        connection.execute_batch("PRAGMA query_only = 1;")?;
+        // SQLite's own default is a 2 MB page cache, too small to hold even
+        // the index pages one busy chat's reads walk, so every repeat read
+        // fetched them again: about 5 MB a beat on a big chat. 16 MB holds
+        // them; more measured no better (bw-xeeqg.7).
+        connection.execute_batch("PRAGMA query_only = 1; PRAGMA cache_size = -16384;")?;
         Ok(Self {
             connection,
             agents_folded: Default::default(),
@@ -3421,6 +3427,12 @@ fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
 }
 
 fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()> {
+    // The event table's own key is (session_id, seq), so this index was an
+    // exact copy of it: every append wrote it twice and it held a second
+    // copy of the key on disk. It is dropped here, not in the numbered list,
+    // because that list is replayed from whatever version a database is at
+    // (bw-xeeqg.7).
+    transaction.execute_batch("DROP INDEX IF EXISTS event_by_session;")?;
     if !columns(transaction, "session")?
         .iter()
         .any(|name| name == "collaboration_mode")
@@ -6082,6 +6094,44 @@ mod tests {
     /// by id or by kind. Each used to visit every row of the chat to test its
     /// type or JSON: on a 2.2 GB chat, 1 to 1.8 GB from a cold disk each time,
     /// and the first two on the writer, every sweep (bw-xeeqg.4).
+    #[test]
+    fn workbench_core_the_copy_of_the_event_key_is_dropped_and_caches_are_real() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        drop(Store::open(&path).unwrap());
+        // A database made before the drop still has the copy; opening it drops it.
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("CREATE INDEX event_by_session ON event(session_id, seq);")
+            .unwrap();
+        let store = Store::open(&path).unwrap();
+        let reader = Store::open_reader(&path).unwrap();
+        let copies: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='event_by_session'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(copies, 0);
+        let plan: String = store
+            .connection
+            .prepare("EXPLAIN QUERY PLAN SELECT json FROM event WHERE session_id=?1 ORDER BY seq DESC LIMIT 5")
+            .unwrap()
+            .query_map(["chat"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(plan.contains("USING PRIMARY KEY") || plan.contains("sqlite_autoindex_event_1"), "{plan}");
+        assert!(!plan.contains("TEMP B-TREE"), "{plan}");
+        for connection in [&store.connection, &reader.connection] {
+            let pages: i64 = connection.query_row("PRAGMA cache_size", [], |row| row.get(0)).unwrap();
+            assert_eq!(pages, -16384);
+        }
+    }
+
     #[test]
     fn workbench_core_a_chats_calls_are_found_by_their_ids() {
         let directory = tempfile::tempdir().unwrap();
