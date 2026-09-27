@@ -27,7 +27,11 @@ interface MemoryReport {
     killable: boolean; startTime: number;
   }>;
   /** The kernel's account of the app's own control group, absent outside one. */
-  service?: { totalBytes: number; cacheBytes: number; pressure: number } | null;
+  service?: {
+    totalBytes: number; cacheBytes: number; pressure: number;
+    /** Programs in the service the app did not start, such as a Dolt server; absent from an older server. */
+    others?: Array<{ pid: number; name: string; bytes: number }>;
+  } | null;
   /** Running Docker containers, each charged to the chat that started it when one did. */
   containers?: Array<{
     id: string; name: string; image: string; bytes: number; cacheBytes: number;
@@ -147,7 +151,12 @@ export function MemoryBadge() {
   // containers nobody here started are listed but not charged to Atelier.
   const containers = report.containers ?? [];
   const chatContainerBytes = containers.reduce((total, container) => total + (container.sessionId ? container.bytes : 0), 0);
-  const shownBytes = report.totalBytes + chatContainerBytes;
+  // The service total is what the kernel and systemd-oomd hold the app to:
+  // its processes, programs it did not start that run in its service, and
+  // the disk cache it read in. The chip shows that when there is one, so the
+  // number that gets the app killed is the number on the chip (bw-xeeqg.16).
+  const shownBytes = (report.service ? report.service.totalBytes : report.totalBytes) + chatContainerBytes;
+  const otherBytes = sum(report.service?.others ?? []);
   const groups = memoryGroups(report);
   const flip = (set: ReadonlySet<string>, key: string) => { const next = new Set(set); if (!next.delete(key)) next.add(key); return next; };
   const stop = (process: Process) => {
@@ -252,7 +261,7 @@ export function MemoryBadge() {
       </div>
       <div className="border-t px-4 py-2 text-sm">
         <div className="flex items-center justify-between font-medium"><span>Total</span><span className="tabular-nums">{memoryWords(shownBytes)}</span></div>
-        {chatContainerBytes > 0 && <div className="flex items-center justify-between pt-0.5 text-xs font-normal text-muted-foreground" data-testid="memory-container-line">
+        {!report.service && chatContainerBytes > 0 && <div className="flex items-center justify-between pt-0.5 text-xs font-normal text-muted-foreground" data-testid="memory-container-line">
           <span>Processes {memoryWords(report.totalBytes)}</span>
           <span className="tabular-nums">Chat containers {memoryWords(chatContainerBytes)}</span>
         </div>}
@@ -264,12 +273,18 @@ export function MemoryBadge() {
           <span>In RAM {memoryWords(report.totalBytes - report.swapBytes)}</span>
           <span className="tabular-nums">Swapped {memoryWords(report.swapBytes)}</span>
         </div>}
-        {/* The group total is what a system monitor reading the service sees;
-            most of the gap is file cache the kernel drops on demand. What gets
-            the app killed is pressure, so that is shown beside it. */}
+        {/* What the total is made of. The disk cache counts toward the
+            service's limit: when the limit is reached the kernel stalls every
+            process while it frees it, and that stall is the pressure
+            systemd-oomd kills on. */}
         {report.service && <div className="mt-1.5 space-y-0.5 border-t pt-1.5 text-xs text-muted-foreground" data-testid="memory-service">
-          <div className="flex items-center justify-between"><span>Service total</span><span className="tabular-nums">{memoryWords(report.service.totalBytes)}</span></div>
-          <div className="flex items-center justify-between"><span>Freeable cache</span><span className="tabular-nums">{memoryWords(report.service.cacheBytes)}</span></div>
+          <div className="flex items-center justify-between"><span>Processes</span><span className="tabular-nums">{memoryWords(report.totalBytes)}</span></div>
+          {otherBytes > 0 && <div className="flex items-center justify-between gap-2" data-testid="memory-others">
+            <span className="min-w-0 truncate">Other programs ({[...new Set(report.service.others!.map(other => other.name))].join(', ')})</span>
+            <span className="shrink-0 tabular-nums">{memoryWords(otherBytes)}</span>
+          </div>}
+          <div className="flex items-center justify-between"><span>Disk cache</span><span className="tabular-nums">{memoryWords(report.service.cacheBytes)}</span></div>
+          {chatContainerBytes > 0 && <div className="flex items-center justify-between" data-testid="memory-container-line"><span>Chat containers</span><span className="tabular-nums">{memoryWords(chatContainerBytes)}</span></div>}
           <div className={`flex items-center justify-between ${report.service.pressure >= 40 ? 'font-medium text-destructive' : ''}`} data-testid="memory-pressure">
             <span>Memory pressure</span><span className="tabular-nums">{Math.round(report.service.pressure)}%</span>
           </div>

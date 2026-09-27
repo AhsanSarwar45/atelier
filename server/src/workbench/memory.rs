@@ -99,6 +99,18 @@ pub struct ServiceMemory {
     /// Share of the last ten seconds every process in the group spent
     /// stalled waiting for memory, in percent. `systemd-oomd` kills on this.
     pub pressure: f64,
+    /// Programs in the group this app did not start, such as a Dolt server
+    /// `bd` left running: the kernel charges them to the app all the same.
+    pub others: Vec<OtherProcess>,
+}
+
+/// A process in the app's group that is not one of its descendants.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherProcess {
+    pub pid: u32,
+    pub name: String,
+    pub bytes: u64,
 }
 
 fn belongs_to(pid: Pid, root: Pid, parents: &HashMap<Pid, Option<Pid>>) -> bool {
@@ -235,8 +247,6 @@ fn full_pressure(pressure: &str) -> Option<f64> {
         .ok()
 }
 
-/// The group's own account, but only when the group is this app's alone: in a
-/// terminal or a desktop session scope it would count unrelated programs.
 /// A group's charge in RAM and swap, and the part of it that is file cache.
 fn group_memory(group: &std::path::Path) -> Option<(u64, u64)> {
     let read = |name: &str| std::fs::read_to_string(group.join(name)).ok();
@@ -249,23 +259,49 @@ fn group_memory(group: &std::path::Path) -> Option<(u64, u64)> {
     Some((current.saturating_add(swapped), cache))
 }
 
+/// Whether the group is the app's own to report: a systemd service is, and
+/// so is any group holding nothing but the app's own processes. A terminal or
+/// a desktop session scope is neither, and would count unrelated programs.
+fn group_is_ours(path: &str, all_ours: bool) -> bool {
+    all_ours || path.rsplit('/').next().is_some_and(|unit| unit.ends_with(".service"))
+}
+
+/// The group's own account, which is what the kernel and `systemd-oomd` hold
+/// the app to. It used to be dropped whenever the group held one process the
+/// app had not started — a Dolt server `bd` left behind is one — so the badge
+/// showed the app's own 2.6 GB while the service was killed at 16 GB with no
+/// sign of it (bw-xeeqg.16).
 #[cfg(target_os = "linux")]
 fn service_memory(ours: &[Found]) -> Option<ServiceMemory> {
     let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
-    let group = std::path::Path::new("/sys/fs/cgroup").join(cgroup_path(&own)?.trim_start_matches('/'));
+    let path = cgroup_path(&own)?;
+    let group = std::path::Path::new("/sys/fs/cgroup").join(path.trim_start_matches('/'));
     let read = |name: &str| std::fs::read_to_string(group.join(name)).ok();
     let pids: HashSet<u32> = ours.iter().map(|found| found.pid.as_u32()).collect();
-    let members = read("cgroup.procs")?;
-    let mut members = members.lines().filter_map(|line| line.trim().parse::<u32>().ok()).peekable();
-    members.peek()?;
-    if !members.all(|pid| pids.contains(&pid)) {
+    let members: Vec<u32> = read("cgroup.procs")?
+        .lines()
+        .filter_map(|line| line.trim().parse::<u32>().ok())
+        .collect();
+    if members.is_empty() {
+        return None;
+    }
+    let outside: Vec<u32> = members.into_iter().filter(|pid| !pids.contains(pid)).collect();
+    if !group_is_ours(path, outside.is_empty()) {
         return None;
     }
     let (total, cache) = group_memory(&group)?;
+    let others = outside
+        .into_iter()
+        .filter_map(|pid| {
+            let cost = process_cost(Pid::from_u32(pid)).ok().flatten()?;
+            Some(OtherProcess { pid, name: read_stat(pid)?.name, bytes: cost.total() })
+        })
+        .collect();
     Some(ServiceMemory {
         total_bytes: total,
         cache_bytes: cache,
         pressure: read("memory.pressure").as_deref().and_then(full_pressure).unwrap_or(0.0),
+        others,
     })
 }
 
@@ -801,6 +837,17 @@ mod tests {
         );
         assert_eq!(cgroup_path("0::/\n"), None);
         assert_eq!(cgroup_path("12:memory:/legacy\n"), None);
+    }
+
+    /// The app's service is reported even with a Dolt server `bd` left in it;
+    /// a terminal's scope only when nothing else runs there (bw-xeeqg.16).
+    #[test]
+    fn a_service_is_reported_with_programs_it_did_not_start() {
+        let service = "/user.slice/user-1000.slice/user@1000.service/app.slice/atelier.service";
+        let terminal = "/user.slice/user-1000.slice/user@1000.service/app.slice/app-ptyxis-1.scope";
+        assert!(group_is_ours(service, false));
+        assert!(!group_is_ours(terminal, false));
+        assert!(group_is_ours(terminal, true));
     }
 
     /// `file` is the cache; `file_mapped` and `file_dirty` are parts of it and
