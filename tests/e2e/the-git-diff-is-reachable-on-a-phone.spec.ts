@@ -243,8 +243,8 @@ test('the git diff on a phone is read with nothing over it, and one press brings
     await page.screenshot({ path: `${SHOTS}/02-back-to-the-conversation.png`, animations: 'disabled' });
     expect(transcriptBack, 'the way back left the reader on neither the diff nor the conversation').toBe(true);
 
-    // Above the breakpoint nothing has moved: the rail and the diff are read
-    // together, and shutting the rail is still putting the subject away.
+    // Above the breakpoint the rail and the diff are read together, and the
+    // diff has its own close, so shutting the rail leaves it (bw-v79ny.4).
     await page.setViewportSize({ width: 1024, height: 900 });
     await page.waitForTimeout(1000);
     await openTheDiff(page);
@@ -255,7 +255,9 @@ test('the git diff on a phone is read with nothing over it, and one press brings
     await expect(page.getByTestId('chat-diff-back')).toBeHidden();
     await page.getByTestId('chat-right-rail-toggle').click();
     await page.waitForTimeout(800);
-    await expect(page.getByTestId('git-diff-pane'), 'shutting the rail on a wide screen no longer puts the diff away').toHaveCount(0);
+    await expect(page.getByTestId('git-diff-pane'), 'shutting the rail on a wide screen took the diff away').toBeVisible();
+    await page.getByTestId('git-diff-close').click();
+    await expect(page.getByTestId('git-diff-pane')).toHaveCount(0);
   } finally {
     const report = ['', `======== THE GIT DIFF REACHED ON A PHONE (${STAGE}) ========`, '', ...measured.map((one) => `   * ${one}`), ''].join('\n');
     console.log(report);

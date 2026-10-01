@@ -12,7 +12,7 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, Folder, FolderGit2, Gauge, GitBranch, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
 
 import { BeadChip } from '@/components/bead-chip-row';
 import { ReferenceBadge } from '@/components/reference-badge';
@@ -127,6 +127,14 @@ const NO_ACCOUNTS: ProfileChoice[] = [];
 const NO_ITEMS: TranscriptItem[] = [];
 const LEFT_PANEL_WIDTH = 'workbench.left-panel-width';
 const RIGHT_PANEL_WIDTH = 'workbench.right-panel-width';
+/** How wide the diff beside a chat was last dragged (bw-v79ny.4). */
+const DIFF_PANE_WIDTH = 'workbench.diff-pane-width';
+/** A diff is laid beside the conversation until it would be narrower than this. */
+const MIN_DIFF_WIDTH = 420;
+/** The diff's width before anybody has dragged it: room for two columns of code. */
+const DEFAULT_DIFF_WIDTH = 640;
+/** A diff may take all the room the conversation leaves it. */
+const MAX_DIFF_WIDTH = 4000;
 const MIN_CHAT_WIDTH = 320;
 
 const CODEX_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'].map((value) => ({
@@ -935,10 +943,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [leftWidth, setLeftWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [resizingRight, setResizingRight] = useState(false);
+  const [diffWidth, setDiffWidth] = useState(DEFAULT_DIFF_WIDTH);
 
   useEffect(() => {
     setLeftWidth(rememberedPanelWidth(LEFT_PANEL_WIDTH));
     setRightWidth(rememberedPanelWidth(RIGHT_PANEL_WIDTH));
+    setDiffWidth(rememberedPanelWidth(DIFF_PANE_WIDTH, { fallback: DEFAULT_DIFF_WIDTH, largest: MAX_DIFF_WIDTH }));
   }, []);
 
   const changeLeftWidth = useCallback((width: number) => {
@@ -948,6 +958,25 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const changeRightWidth = useCallback((width: number) => {
     setRightWidth(width);
     localStorage.setItem(RIGHT_PANEL_WIDTH, String(Math.round(width)));
+  }, []);
+  /** How wide the chat and its diff have between them, read as it changes. */
+  const [splitWidth, setSplitWidth] = useState(0);
+  const splitObserver = useRef<ResizeObserver | null>(null);
+  const measureSplit = useCallback((node: HTMLDivElement | null) => {
+    splitObserver.current?.disconnect();
+    splitObserver.current = null;
+    if (!node) return;
+    setSplitWidth(node.clientWidth);
+    splitObserver.current = new ResizeObserver(() => setSplitWidth(node.clientWidth));
+    splitObserver.current.observe(node);
+  }, []);
+  /** Too narrow for both side by side: the diff goes above the conversation instead. */
+  const stacked = splitWidth > 0 && splitWidth < MIN_CHAT_WIDTH + MIN_DIFF_WIDTH;
+  /** The remembered width, given back only as much as the conversation can spare. */
+  const diffBeside = Math.max(MIN_DIFF_WIDTH, Math.min(diffWidth, splitWidth - MIN_CHAT_WIDTH));
+  const changeDiffWidth = useCallback((width: number) => {
+    setDiffWidth(width);
+    localStorage.setItem(DIFF_PANE_WIDTH, String(Math.round(width)));
   }, []);
   const router = useRouter();
   const params = useSearchParams();
@@ -1241,25 +1270,23 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const chatListId = useId();
   const detailsId = useId();
   /**
-   * Three switches on a wide screen, two on a phone, or the conversation stays
-   * where it is.
+   * Whether this chat's diff is on screen (bw-v79ny.4).
    *
-   * On a wide screen the rail and the diff are read together, so the rail being
-   * open is part of asking for the diff: the button that asks for it lives
-   * inside the Git panel, and shutting the panel or leaving the Git view is the
-   * reader putting the whole subject away, which must bring the conversation
-   * back without their having to remember a switch two panels deep.
+   * One switch, and the diff says so itself: it stands in a pane of its own
+   * beside the conversation, with its own header and its own close, so nothing
+   * else on the screen has to be open for it to be there and nothing else can
+   * be hiding it. It used to stand IN the conversation's place and hang off the
+   * rail's Git view, so a chat picked from the list seemed not to open at all —
+   * it had opened, behind the diff.
    *
-   * A phone cannot read them together. The rail there is a 288px sheet at x=102
-   * lying OVER the very column the diff is drawn in, so `rightOpen` meant a
-   * reader saw 102px of a 390px table and shutting the sheet to see the rest
-   * took the diff down with it — the whole diff was unreachable on a phone
-   * (bw-e3dw.14). So a phone asks only the two switches that are about the
-   * diff itself; the sheet is a door the reader walked through, not a thing the
-   * diff hangs off. `showTheDiff` below shuts that door on the way in, and the
-   * bar carries the one press back to the conversation.
+   * A phone has no room for two panes, so there the diff still takes the
+   * conversation's place, with the way back on the bar and in its header.
    */
-  const showDiff = Boolean(sessionId) && gitOpen && diffOpen && (phone || rightOpen);
+  const showDiff = Boolean(sessionId) && diffOpen;
+  /** The diff put away: its header's ×, Esc inside it, or the bar's way back on a phone. */
+  const closeDiff = useCallback(() => {
+    if (diffOpen) rememberDiff();
+  }, [diffOpen, rememberDiff]);
   /**
    * The diff button, with the phone's door shut behind it.
    *
@@ -1420,8 +1447,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    */
   const openFromList = useCallback((id: string) => {
     setRailOpen(false);
+    // A phone shows one thing at a time, and a chat picked from the list is
+    // the thing asked for, so the diff steps aside for it. A wide screen keeps
+    // the diff beside it, now showing the picked chat's own checkout.
+    if (phone) closeDiff();
     open(id);
-  }, [open]);
+  }, [open, phone, closeDiff]);
   const openSearch = useCallback(() => setShowing('search'), []);
   /**
    * Whether the list also holds the chats an agent started for another chat.
@@ -1546,13 +1577,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * conversation again is drawn.
    */
   const placeBeforeTheDiff = useRef(0);
+  // Only a phone hides the conversation for the diff; beside it, it never moves.
+  const diffInPlace = showDiff && phone;
   useLayoutEffect(() => {
-    if (showDiff) {
+    if (diffInPlace) {
       placeBeforeTheDiff.current = pane.current?.scrollTop ?? 0;
       return;
     }
     if (pane.current && placeBeforeTheDiff.current > 0) pane.current.scrollTop = placeBeforeTheDiff.current;
-  }, [showDiff]);
+    placeBeforeTheDiff.current = 0;
+  }, [diffInPlace]);
 
   /** The newest row present when he last left the end. */
   const marked = useRef<string | null>(null);
@@ -2156,10 +2190,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         {showDiff && (
           <ToolButton
             icon={<MessageSquare />}
-            label="Back to the conversation"
+            label="Back to chat"
             className="md:hidden"
             data-testid="chat-diff-back"
-            onClick={showTheDiff}
+            onClick={closeDiff}
           />
         )}
         {/* The Git button used to stand here, beside the rail's own door. It
@@ -2179,7 +2213,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
       </TabTrail>
     </>
-  ), [detailsId, flipRight, rightOpen, sessionId, showDiff, showTheDiff]);
+  ), [closeDiff, detailsId, flipRight, rightOpen, sessionId, showDiff]);
 
   const panels = useMemo(() => (
     <>
@@ -2893,6 +2927,64 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * becomes a drawer over it: a 288px rail beside a 390px screen leaves the
    * transcript unreadable, and the composer is what must stay in reach.
    */
+  /**
+   * The diff pane, with a header that says what it shows and how to put it
+   * away (bw-v79ny.4). One element for both places it stands: beside the
+   * conversation on a wide screen, in its place on a phone.
+   */
+  // The diff follows the chat, not the project: a chat in a worktree shows
+  // that worktree's changes (bw-rx1y.1).
+  const diffRoot = facts?.cwd ?? projectPath;
+  const diffPane = (
+    <div
+      data-testid="git-diff-pane"
+      // Focusable, so a click inside it gives Esc somewhere to land.
+      tabIndex={-1}
+      className="flex min-h-0 flex-1 flex-col outline-none"
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        event.preventDefault();
+        closeDiff();
+      }}
+    >
+      <div data-testid="git-diff-header" className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 pl-3 pr-1 md:h-9">
+        {openCommit ? (
+          <GitCommitHorizontal className="size-4 shrink-0 text-sky-400" aria-hidden="true" />
+        ) : (
+          <FileDiff className="size-4 shrink-0 text-sky-400" aria-hidden="true" />
+        )}
+        <span className="truncate text-sm font-medium">
+          {openCommit ? `Commit ${openCommit.slice(0, 7)}` : 'Uncommitted changes'}
+        </span>
+        {diffRoot && (
+          <Tooltip label={diffRoot} side="bottom">
+            <span className="truncate text-xs text-muted-foreground">
+              {diffRoot.split('/').filter(Boolean).pop()}
+            </span>
+          </Tooltip>
+        )}
+        <ToolButton
+          icon={<X />}
+          label="Close diff"
+          className="ml-auto"
+          data-testid="git-diff-close"
+          onClick={closeDiff}
+        />
+      </div>
+      {/* One diff per worktree, and never the last chat's: the open-and-shut
+          state inside is kept by file path, which means nothing in another
+          checkout. */}
+      <GitDiffView
+        key={diffRoot ?? ''}
+        path={diffRoot}
+        focus={diffFocus}
+        commit={openCommit}
+        onShowCommit={showCommitInDiff}
+        onShowWorkingTree={showWorkingTreeInDiff}
+      />
+    </div>
+  );
+
   const shell = (inner: React.ReactNode) => (
     // The height is the shell's to give: this box fills what the bars left.
     <div ref={shellRef} className="relative flex min-h-0 flex-1">
@@ -2992,8 +3084,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           Wrapped rather than indented: this is one element around six hundred
           lines that have not otherwise moved, and a diff of the whole pane
           would hide the one line that changed. */}
+      <div
+        ref={measureSplit}
+        data-testid="chat-split"
+        data-diff={showDiff && !phone ? (stacked ? 'stacked' : 'beside') : undefined}
+        className={cn('flex min-h-0 flex-1', stacked ? 'flex-col' : 'flex-row')}
+      >
       <FileDropTarget
-        className="flex min-h-0 flex-1 flex-col"
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
         onFiles={(files) => void absorb(files)}
         // Nothing to attach to while another program holds the chat: there is
         // no box on the screen to put a badge in.
@@ -3014,21 +3112,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           conversation stands (bw-rx1y.4). The status line above it and the box
           below it do not move, so the reader can go on talking to the agent
           while reading what it wrote. */}
-      {showDiff && (
-        <div data-testid="git-diff-pane" className="flex min-h-0 flex-1 flex-col">
-          {/* One diff per worktree, and never the last chat's: the open-and-shut
-              state inside is kept by file path, which means nothing in another
-              checkout. */}
-          <GitDiffView
-            key={facts?.cwd ?? projectPath ?? ''}
-            path={facts?.cwd ?? projectPath}
-            focus={diffFocus}
-            commit={openCommit}
-            onShowCommit={showCommitInDiff}
-            onShowWorkingTree={showWorkingTreeInDiff}
-          />
-        </div>
-      )}
+      {/* On a phone the diff stands where the conversation stands (bw-rx1y.4);
+          the status line above it and the box below it do not move. */}
+      {diffInPlace && diffPane}
       {/* The conversation and the one way back to it, which floats over its
           bottom corner rather than taking a line of its own.
 
@@ -3040,7 +3126,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           per-chat `key` on DrawnTranscript was added to stop (bw-t26l.20).
           `display: none` costs nothing to keep, and the one number a hidden box
           may not keep — where the reader was — is written down and put back. */}
-      <div className={cn('relative flex min-h-0 flex-1 flex-col', showDiff && 'hidden')}>
+      <div className={cn('relative flex min-h-0 flex-1 flex-col', diffInPlace && 'hidden')}>
       <div
         ref={paneRef}
         // The browser keeps a pane's place for it by moving the pane when
@@ -3206,6 +3292,32 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       </div>
 
       </FileDropTarget>
+      {/* What this chat's checkout has changed, beside the conversation rather
+          than over it, so both are read at once and either can be pointed at
+          (bw-v79ny.4). Above the conversation instead when the two would not
+          both fit across. */}
+      {showDiff && !phone && (
+        <>
+          {!stacked && (
+            <ResizeDivider
+              side="right"
+              value={diffBeside}
+              onChange={changeDiffWidth}
+              largest={MAX_DIFF_WIDTH}
+              label="Resize diff"
+              testId="git-diff-resizer"
+              maximum={() => splitWidth - MIN_CHAT_WIDTH}
+            />
+          )}
+          <div
+            className={cn('flex min-h-0 min-w-0 flex-col', stacked ? 'order-first h-1/2 border-b border-border/60' : 'shrink-0')}
+            style={stacked ? undefined : { width: diffBeside }}
+          >
+            {diffPane}
+          </div>
+        </>
+      )}
+      </div>
 
       {looking && <AttachmentViewer image={looking} onClose={() => setLooking(null)} />}
       {/* Read from the row as it stands right now, never from what was clicked:

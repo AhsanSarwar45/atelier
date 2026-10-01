@@ -202,9 +202,10 @@ test.describe('the diff standing where the conversation stands', () => {
       await expect(pane).toBeVisible({ timeout: 60_000 });
       await expect(page.getByTestId('git-diff-view')).toBeVisible();
       await expect(diffToggle).toHaveAttribute('aria-pressed', 'true');
-      // The conversation is not beside the diff, above it or below it: it has
-      // gone, and its box is still there holding the reader's place.
-      await expect(transcript, 'the conversation was still on screen beside the diff').toBeHidden();
+      // The conversation stays beside the diff, so both are read at once
+      // (bw-v79ny.4).
+      await expect(transcript, 'the diff hid the conversation').toBeVisible();
+      await expect(page.getByTestId('chat-split')).toHaveAttribute('data-diff', /beside|stacked/);
 
       // ---- one section per change, in git's own order ----------------------
       const files = page.getByTestId('git-diff-file');
@@ -316,19 +317,24 @@ test.describe('the diff standing where the conversation stands', () => {
 
       // ---- and the conversation comes back ----------------------------------
       await diffToggle.click();
-      await expect(transcript, 'the conversation did not come back').toBeVisible({ timeout: 30_000 });
-      await expect(pane).toHaveCount(0);
+      await expect(pane).toHaveCount(0, { timeout: 30_000 });
+      await expect(transcript).toBeVisible();
       await expect(diffToggle).toHaveAttribute('aria-pressed', 'false');
       await page.screenshot({ path: `${SHOTS}/bw-rx1y-back-to-chat.png` });
 
-      // Shutting the rail on Git is the same answer: the reader put the whole
-      // subject away, and must not have to remember a switch two panels deep.
+      // The diff no longer hangs off the rail: shutting the rail leaves it,
+      // and its own header puts it away (bw-v79ny.4).
       await diffToggle.click();
       await expect(pane).toBeVisible({ timeout: 30_000 });
       await page.getByTestId('chat-right-rail-toggle').click();
-      await expect(page.getByTestId('git-view')).toHaveCount(0);
-      await expect(pane).toHaveCount(0);
-      await expect(transcript, 'shutting Git left the conversation away').toBeVisible();
+      await expect(page.getByTestId('chat-right-rail')).toHaveAttribute('data-open', 'false');
+      await expect(pane, 'shutting the rail took the diff with it').toBeVisible();
+      await page.getByTestId('git-diff-close').click();
+      await expect(pane).toHaveCount(0, { timeout: 30_000 });
+      await page.getByTestId('chat-right-rail-toggle').click();
+      await openGitView(page);
+      await page.getByTestId('git-diff-toggle').click();
+      await expect(pane).toBeVisible({ timeout: 30_000 });
 
       // ---- and the choice is the reader's, not the page's -------------------
       await page.reload();

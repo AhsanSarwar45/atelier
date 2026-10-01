@@ -24,20 +24,36 @@ export const MAX_PANEL_WIDTH = 560;
  * written there. A width saved on a wider screen is brought back inside the
  * limits rather than trusted.
  */
-export function rememberedPanelWidth(key: string): number {
+export function rememberedPanelWidth(
+  key: string,
+  { fallback = DEFAULT_PANEL_WIDTH, largest = MAX_PANEL_WIDTH }: { fallback?: number; largest?: number } = {},
+): number {
   const width = Number(localStorage.getItem(key));
-  return Number.isFinite(width) && width >= MIN_PANEL_WIDTH ? Math.min(width, MAX_PANEL_WIDTH) : DEFAULT_PANEL_WIDTH;
+  return Number.isFinite(width) && width >= MIN_PANEL_WIDTH ? Math.min(width, largest) : fallback;
 }
 
-export function ResizeDivider({ side, value, onChange, maximum, onDragging }: {
+export function ResizeDivider({
+  side,
+  value,
+  onChange,
+  maximum,
+  onDragging,
+  largest = MAX_PANEL_WIDTH,
+  label = `Resize ${side} panel`,
+  testId = `${side}-panel-resizer`,
+}: {
   side: 'left' | 'right';
   value: number;
   onChange: (width: number) => void;
   maximum: () => number;
   onDragging?: (dragging: boolean) => void;
+  /** A pane that is more than a rail, such as the diff beside a chat, may grow past a rail's limit. */
+  largest?: number;
+  label?: string;
+  testId?: string;
 }) {
   const drag = useRef<{ x: number; width: number } | null>(null);
-  const resize = (width: number) => onChange(Math.max(MIN_PANEL_WIDTH, Math.min(width, MAX_PANEL_WIDTH, maximum())));
+  const resize = (width: number) => onChange(Math.max(MIN_PANEL_WIDTH, Math.min(width, largest, maximum())));
   const move = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;
     const distance = event.clientX - drag.current.x;
@@ -46,13 +62,13 @@ export function ResizeDivider({ side, value, onChange, maximum, onDragging }: {
   return (
     <div
       role="separator"
-      aria-label={`Resize ${side} panel`}
+      aria-label={label}
       aria-orientation="vertical"
       aria-valuemin={MIN_PANEL_WIDTH}
       aria-valuemax={Math.max(MIN_PANEL_WIDTH, maximum())}
       aria-valuenow={Math.round(value)}
       tabIndex={0}
-      data-testid={`${side}-panel-resizer`}
+      data-testid={testId}
       className="group relative z-40 -mx-1 hidden w-2 shrink-0 cursor-col-resize touch-none md:block"
       onPointerDown={(event) => {
         drag.current = { x: event.clientX, width: value };

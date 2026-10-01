@@ -103,12 +103,19 @@ const EXEMPT: { what: string; because: string }[] = [
  * so the card that fixes one comes here and deletes its line rather than
  * leaving a note about a fault nobody has.
  *
- * It is empty, and empty is the healthy state. It held two rows this walk
+ * Empty is the healthy state. It held two rows this walk
  * found — the name of a chat in the restore list at 32px and the diff's file
  * disclosure at 36px — which were filed as bw-e3dw.18; that card gave every
  * row of that kind a reach band and deleted both lines from here.
  */
-const KNOWN: { screen: string; control: string; card: string; why: string }[] = [];
+const KNOWN: { screen: string; control: string; card: string; why: string }[] = [
+  {
+    screen: 'the Files tab, the strip of kept files',
+    control: 'open-file-close',
+    card: 'bw-wl638.1',
+    why: 'a kept tab\'s × can be pressed over only 37px of its 44px width; already so before bw-v79ny',
+  },
+];
 const knownSeen = new Set<string>();
 
 /** Chips written into a sentence answer to a different rule than controls do. */

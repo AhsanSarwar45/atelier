@@ -1,23 +1,17 @@
 /**
- * The diff standing in the conversation's own place (bw-rx1y.4).
+ * The diff beside the conversation (bw-v79ny.4).
  *
- * The chat is the only thing on the screen wide enough to read a side-by-side
- * diff in, so the diff takes the centre rather than a third column — but on a
- * wide screen only while all three of the reader's switches say so: the rail
- * open, the rail on Git, and the diff asked for. Shutting the rail or leaving
- * the Git view is the reader putting the whole subject away, and the
- * conversation has to come back on its own, without their remembering a switch
- * two panels deep.
+ * It used to stand IN the conversation's place, and only while three switches
+ * agreed: the rail open, the rail on Git, and the diff asked for. A chat picked
+ * from the list then seemed not to open at all — it had opened, behind the
+ * diff. Now the diff is a pane of its own beside the conversation, with its own
+ * header and its own close, so one switch is all there is and nothing else on
+ * the screen can be hiding it.
  *
- * A phone drops the first of the three. There the rail is a sheet lying over
- * the very column the diff is drawn in, so a rail that had to stay open meant
- * 102px of a 390px table and shutting the sheet took the diff down with it
- * (bw-e3dw.14). A phone asks only the two switches that are about the diff, the
- * button shuts the sheet on the way in, and the bar carries the way back.
- *
- * The status line above and the box below do not move either way, and the place
- * the reader had got to in the conversation is still theirs when they come
- * back — which is why the transcript is hidden rather than unmounted.
+ * A phone has no room for two panes, so there the diff still takes the
+ * conversation's place (bw-rx1y.4), and the place the reader had got to in the
+ * conversation is still theirs when they come back — which is why the
+ * transcript is hidden there rather than unmounted.
  */
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -60,6 +54,8 @@ vi.mock('@/workbench/chat-sidebar', () => ({ ChatSidebar: () => null }));
 
 /** The three switches, held by the test so a case can set any of them. */
 const switches = vi.hoisted(() => ({ right: true, git: true, diff: true }));
+/** The diff's one switch, flipped. */
+const flipDiff = vi.hoisted(() => vi.fn());
 /** What the rail was handed, so the button's way home can be checked. */
 const railGot = vi.hoisted(() => vi.fn());
 
@@ -71,7 +67,7 @@ vi.mock('@/workbench/chat-right-rail', () => ({
   useLeftRail: (): [boolean, () => void] => [true, () => {}],
   useRightRail: (): [boolean, () => void] => [switches.right, () => {}],
   useGitPanel: (): [boolean, () => void] => [switches.git, () => {}],
-  useGitDiff: () => ({ diffOpen: switches.diff, flipDiff: () => {} }),
+  useGitDiff: () => ({ diffOpen: switches.diff, flipDiff }),
 }));
 
 /** The diff itself is proved next door; here only that it is drawn, and where. */
@@ -143,6 +139,7 @@ beforeEach(() => {
   switches.git = true;
   switches.diff = true;
   railGot.mockReset();
+  flipDiff.mockReset();
   diffPointedAt.mockReset();
   vi.stubGlobal('WebSocket', class {
     onmessage: ((e: { data: string }) => void) | null = null;
@@ -156,69 +153,63 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('the chat swaps its transcript for the diff, and only on all three switches', () => {
-  it('draws the diff in the conversation’s place when every switch is on', async () => {
+describe('the chat shows its diff beside the conversation', () => {
+  it('draws the diff beside the conversation, which stays in view', async () => {
     await chat();
 
     expect(screen.getByTestId('git-diff-pane')).toBeInTheDocument();
-    expect(transcriptShowing(), 'the conversation was drawn over the diff').toBe(false);
+    expect(screen.getByTestId('chat-split')).toHaveAttribute('data-diff', 'beside');
+    expect(transcriptShowing(), 'the diff hid the conversation').toBe(true);
+    expect(screen.getByTestId('composer-frame')).toBeInTheDocument();
     // Against the chat's OWN worktree, which for a chat in a worktree is not
     // the project's checkout.
     expect(diffPointedAt).toHaveBeenLastCalledWith(WORKTREE);
   });
 
-  it('leaves the status line above and the box below exactly where they were', async () => {
+  it('says in its header what it shows, and closes from there or with Esc', async () => {
     await chat();
 
-    expect(screen.getByTestId('git-diff-pane')).toBeInTheDocument();
-    // The reader can go on talking to the agent while reading what it wrote.
-    expect(screen.getByTestId('composer-frame')).toBeInTheDocument();
+    expect(screen.getByTestId('git-diff-header')).toHaveTextContent('Uncommitted changes');
+    expect(screen.getByTestId('git-diff-header')).toHaveTextContent('bw-rx1y.4');
+    fireEvent.click(screen.getByTestId('git-diff-close'));
+    expect(flipDiff).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByTestId('git-diff-pane'), { key: 'Escape' });
+    expect(flipDiff).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the conversation when the reader has not asked for the diff', async () => {
+  it('keeps the conversation alone when the reader has not asked for the diff', async () => {
     switches.diff = false;
     await chat();
 
     expect(screen.queryByTestId('git-diff-pane')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-split')).not.toHaveAttribute('data-diff');
     expect(transcriptShowing()).toBe(true);
   });
 
-  it('brings the conversation back when the rail leaves the Git view', async () => {
+  it('does not hang off the rail: shut, or on another view, the diff stays', async () => {
+    switches.right = false;
     switches.git = false;
     await chat();
 
     expect(
       screen.queryByTestId('git-diff-pane'),
-      'the diff outlived the panel whose button asked for it',
-    ).not.toBeInTheDocument();
+      'the diff went away with a panel the reader did not close it from',
+    ).toBeInTheDocument();
     expect(transcriptShowing()).toBe(true);
   });
 
-  it('brings the conversation back on a wide screen when the rail is shut', async () => {
-    // On a wide screen the rail and the diff are read side by side, so shutting
-    // the rail is the reader putting the whole subject away.
-    switches.right = false;
-    await chat();
-
-    expect(screen.queryByTestId('git-diff-pane')).not.toBeInTheDocument();
-    expect(transcriptShowing()).toBe(true);
-  });
-
-  it('keeps the diff on a phone whose rail is shut, because the rail was lying over it', async () => {
+  it('takes the conversation’s place on a phone, where there is room for one', async () => {
     phoneWidth();
     switches.right = false;
     await chat();
 
-    expect(
-      screen.queryByTestId('git-diff-pane'),
-      'shutting the sheet to see the rest of the table took the table away',
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('git-diff-pane')).toBeInTheDocument();
     expect(transcriptShowing()).toBe(false);
   });
 
-  // The one press back lives on the app's bar (`chat-diff-back`), which is a
-  // portal into the shell this test does not draw. It is proved where it is
-  // used, driven at 390px: tests/e2e/the-git-diff-on-a-phone.spec.ts.
+  // The one press back on a phone lives on the app's bar (`chat-diff-back`),
+  // which is a portal into the shell this test does not draw. It is proved
+  // where it is used, driven at 390px: tests/e2e/the-git-diff-on-a-phone.spec.ts.
 
   it('hands the rail the switch and the way to flip it', async () => {
     await chat();
@@ -228,7 +219,8 @@ describe('the chat swaps its transcript for the diff, and only on all three swit
     expect(typeof handed.onFlipDiff).toBe('function');
   });
 
-  it('gives the reader back the line they were on when the diff goes away', async () => {
+  it('gives a phone reader back the line they were on when the diff goes away', async () => {
+    phoneWidth();
     switches.diff = false;
     const drawn = await chat();
 
