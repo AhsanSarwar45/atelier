@@ -1,6 +1,6 @@
 /**
- * One of Atelier's own things — a card, a chat, a skill — as the one badge it is
- * drawn as wherever it is named.
+ * One of Atelier's own things — a card, a chat, a skill, a diff — as the one
+ * badge it is drawn as wherever it is named.
  *
  * A reference is written into the composer, sent, and read back in the
  * transcript, and the reader must see the same badge at every step: the card's
@@ -22,7 +22,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { CircleDot, MessageSquare, Sparkles } from 'lucide-react';
+import { CircleDot, FileDiff, MessageSquare, Sparkles } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils';
 import type { BeadStatus } from '@/types';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import type { Brand } from '@/workbench/protocol';
+import { parseDiffId, type DiffReference } from '@/workbench/references';
 
 /** What a badge needs to know to draw one reference. */
 export type Reference =
@@ -52,7 +53,28 @@ export type Reference =
       /** The skill's name in the library, or null to show its id. */
       name: string | null;
       description?: string;
+    }
+  | {
+      kind: 'diff';
+      /** What follows `@diff:`, as written. */
+      id: string;
+      /** What it says, or null for an id that names nothing. */
+      diff: DiffReference | null;
+      /** What happened to the file, when the `@` menu knew. */
+      status?: string;
     };
+
+/** The badge for a diff reference's id. */
+export function diffBadge(id: string, status?: string): Reference {
+  return { kind: 'diff', id, diff: parseDiffId(id), ...(status ? { status } : {}) };
+}
+
+/** A diff's lines as its badge says them: `+12-14`, `−30`. */
+function diffLines(diff: DiffReference): string {
+  if (diff.line === null) return '';
+  const range = diff.endLine === null ? `${diff.line}` : `${diff.line}-${diff.endLine}`;
+  return ` ${diff.side === 'old' ? '−' : '+'}${range}`;
+}
 
 /** Each provider's own colour, the same hues its provider badge mixes. */
 const BRAND_COLOR: Record<Brand, string> = {
@@ -61,12 +83,19 @@ const BRAND_COLOR: Record<Brand, string> = {
   local: 'border-[#8b5cf6]/40 bg-[#8b5cf6]/10 text-[#8b5cf6] hover:bg-[#8b5cf6]/15',
 };
 
+const DIFF_COLOR = 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400 hover:bg-sky-500/15';
+
 const SKILL_COLOR = 'border-[#e0a526]/40 bg-[#e0a526]/10 text-[#c98f10] dark:text-[#e0a526] hover:bg-[#e0a526]/15';
 
 /** The words a badge shows. */
 export function referenceLabel(ref: Reference): string {
   if (ref.kind === 'bead') return ref.id;
   if (ref.kind === 'chat') return ref.name || 'Chat';
+  if (ref.kind === 'diff') {
+    if (!ref.diff) return ref.id;
+    const name = ref.diff.path.split('/').pop() || ref.diff.path;
+    return `${ref.diff.commit ? `${ref.diff.commit.slice(0, 7)} ` : ''}${name}${diffLines(ref.diff)}`;
+  }
   return ref.name || ref.id;
 }
 
@@ -74,6 +103,10 @@ export function referenceLabel(ref: Reference): string {
 export function referenceTitle(ref: Reference): string {
   if (ref.kind === 'bead') return `Open ${ref.id}`;
   if (ref.kind === 'chat') return `Open chat${ref.brand ? ` · ${brandName(ref.brand)}` : ''}`;
+  if (ref.kind === 'diff') {
+    const what = ref.diff?.commit ? `Commit ${ref.diff.commit.slice(0, 7)}` : 'Uncommitted changes';
+    return `Open diff · ${what} · ${ref.diff?.path ?? ref.id}`;
+  }
   return ref.description ? `Skill · ${ref.description}` : 'Skill';
 }
 
@@ -87,6 +120,7 @@ const ONE_LINE = 'min-w-0 max-w-full';
 function referenceClass(ref: Reference): string {
   if (ref.kind === 'bead') return cn(ONE_LINE, classesFor(ref.status).badge);
   if (ref.kind === 'chat') return cn(ONE_LINE, ref.brand ? BRAND_COLOR[ref.brand] : classesFor(undefined).badge);
+  if (ref.kind === 'diff') return cn(ONE_LINE, DIFF_COLOR);
   return cn(ONE_LINE, SKILL_COLOR);
 }
 
@@ -105,6 +139,8 @@ export function ReferenceFace({ reference }: { reference: Reference }) {
   const icon =
     reference.kind === 'bead' ? (
       <CircleDot className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+    ) : reference.kind === 'diff' ? (
+      <FileDiff className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
     ) : reference.kind === 'chat' ? (
       reference.brand ? (
         <BrandIcon brand={reference.brand} className="mr-0.5 size-3" />
@@ -175,6 +211,12 @@ export function ReferenceBadge({
       // reader was reading, and Back closes it again.
       cardWasPushed();
       router.push(addressWith(params, { id: projectId, card: reference.id }));
+    } else if (reference.kind === 'diff') {
+      // Shown beside the chat, or as a tab in Files, by whichever tab is
+      // reading the address (bw-v79ny.1). A card's panel is shut on the way:
+      // the diff is what was asked for.
+      const tab = params.get('tab') === 'files' ? 'files' : 'chat';
+      router.push(addressWith(params, { id: projectId, tab, diff: reference.id, card: null }));
     } else if (reference.kind === 'chat') {
       router.push(addressWith(params, { id: reference.projectId ?? projectId, tab: 'chat', chat: reference.id, card: null }));
     } else {

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
-import { ReferenceBadge, referenceBadgeElement, type Reference } from '@/components/reference-badge';
+import { diffBadge, ReferenceBadge, referenceBadgeElement, type Reference } from '@/components/reference-badge';
 import { openableIn } from '@/workbench/mentions';
 import type { AtelierKind } from '@/workbench/references';
 
@@ -17,6 +17,7 @@ const CHAT = '0b8f6c1e-2d3a-4f5b-9c7d-1e2f3a4b5c6d';
 function describeRef(kind: AtelierKind, id: string): Reference {
   if (kind === 'bead') return { kind, id, status: 'in_progress' };
   if (kind === 'chat') return { kind, id, name: 'Standup notes', brand: 'claude', projectId: 'p2' };
+  if (kind === 'diff') return diffBadge(id);
   return { kind, id, name: 'Standup', description: 'Write the standup' };
 }
 
@@ -45,7 +46,7 @@ describe('a card, a chat or a skill named in a message', () => {
   });
 
   it('draws the same badge in the composer as in the sent message', () => {
-    for (const kind of ['bead', 'chat', 'skill'] as const) {
+    for (const kind of ['bead', 'chat', 'skill', 'diff'] as const) {
       const ref = describeRef(kind, kind === 'chat' ? CHAT : 'x-1');
       const { unmount } = render(<ReferenceBadge reference={ref} projectId="p1" testId="sent" />);
       const sent = face(screen.getByTestId('sent'));
@@ -64,6 +65,15 @@ describe('a card, a chat or a skill named in a message', () => {
     render(<ReferenceBadge reference={describeRef('chat', CHAT)} projectId="p1" testId="sent" />);
     screen.getByTestId('sent').click();
     expect(push).toHaveBeenCalledWith(`/project?id=p2&tab=chat&chat=${CHAT}`);
+  });
+
+  it('draws a diff as its file and lines, and opens it beside the chat', () => {
+    render(<MarkdownBody mentions={MENTIONS}>{'See @diff:src/a.ts:+12-14 and @diff:abc1234ff:src/b.ts:-30.'}</MarkdownBody>);
+    const [working, committed] = screen.getAllByTestId('mention-diff');
+    expect(working).toHaveTextContent('a.ts +12-14');
+    expect(committed).toHaveTextContent('abc1234 b.ts −30');
+    working!.click();
+    expect(push).toHaveBeenCalledWith(`/project?id=p1&tab=chat&diff=${encodeURIComponent('src/a.ts:+12-14').replace(/%2F/g, '%2F')}`);
   });
 
   it('stays words inside code', () => {
@@ -102,6 +112,11 @@ describe('a card, a chat or a skill named in the composer', () => {
   it('is left as words while it is still being typed at the end of the line', async () => {
     const { container } = await aComposer('Look at @bead:bw-1');
     expect(drawnIn(container)).toEqual([]);
+  });
+
+  it('draws a diff as its badge', async () => {
+    const { container } = await aComposer('Why @diff:src/a.ts:+3 here');
+    expect(drawnIn(container)).toEqual(['diff:a.ts +3']);
   });
 
   it('draws a skill command at the start as the same skill badge', async () => {

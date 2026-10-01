@@ -2875,6 +2875,18 @@ async fn mention_skills(cwd: &str) -> Arc<Vec<Value>> {
     MENTION_SKILLS.put(cwd, listed)
 }
 
+static MENTION_CHANGES: crate::workbench::mention::Kept<Vec<(String, String)>> =
+    crate::workbench::mention::Kept::new(std::time::Duration::from_secs(3));
+
+/// The checkout's changed files, kept for a few keystrokes.
+async fn mention_changes(cwd: &str) -> Arc<Vec<(String, String)>> {
+    if let Some(kept) = MENTION_CHANGES.get(cwd) {
+        return kept;
+    }
+    let changed = crate::routes::git::changed_paths(std::path::Path::new(cwd)).await;
+    MENTION_CHANGES.put(cwd, changed)
+}
+
 /// What the composer's `@` offers for what was typed after it: files, cards,
 /// chats and skills together, grouped by kind, best group first (bw-mi3s.4).
 /// See `workbench::mention` for how each kind is ranked.
@@ -2935,6 +2947,7 @@ async fn mention(
                 share(kind),
             ),
             Kind::Skill if !cwd.is_empty() => mention::skills(&mention_skills(&cwd).await, wanted, share(kind)),
+            Kind::Diff if !cwd.is_empty() => mention::diffs(&mention_changes(&cwd).await, wanted, share(kind)),
             _ => Vec::new(),
         };
         if !offers.is_empty() {

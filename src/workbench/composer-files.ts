@@ -54,12 +54,12 @@ import {
 import { Prec, StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, keymap, tooltips, type ViewUpdate } from '@codemirror/view';
 import { formatDistanceToNow } from 'date-fns';
-import { AtSign, CircleDot, File, MessageSquare, Sparkles, type LucideIcon } from 'lucide-react';
+import { AtSign, CircleDot, File, FileDiff, MessageSquare, Sparkles, type LucideIcon } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { iconForFile, iconForFolder } from '@/components/file-icon';
 import { ICON_FALLBACK, iconUrl } from '@/components/file-icons';
-import { referenceBadgeElement, type Reference } from '@/components/reference-badge';
+import { diffBadge, referenceBadgeElement, type Reference } from '@/components/reference-badge';
 import { tabsListVariants, tabsTriggerVariants } from '@/components/ui/tabs';
 import { mention, type FsFoundPath, type MentionOffer, type MentionPlace } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -116,6 +116,7 @@ function picture(found: FsFoundPath): Node {
 /** The heading over each kind, and where it sits: the server's order. */
 const HEADINGS: Record<MentionOffer['kind'], string> = {
   file: 'Files',
+  diff: 'Changes',
   bead: 'Cards',
   chat: 'Chats',
   skill: 'Skills',
@@ -130,9 +131,9 @@ const HEADINGS: Record<MentionOffer['kind'], string> = {
  * and narrows the menu by asking the server for that kind (bw-mydas.1).
  */
 type Scope = 'all' | MentionOffer['kind'];
-const SCOPES: readonly Scope[] = ['all', 'file', 'bead', 'chat', 'skill'];
+const SCOPES: readonly Scope[] = ['all', 'file', 'diff', 'bead', 'chat', 'skill'];
 const SCOPE_NAMES: Record<Scope, string> = { all: 'All', ...HEADINGS };
-const TYPED_KIND = /^@(bead|chat|skill):/;
+const TYPED_KIND = /^@(bead|chat|skill|diff):/;
 
 const setScope = StateEffect.define<Scope>();
 
@@ -194,6 +195,7 @@ function tabKey(step: 1 | -1) {
 const SCOPE_ICONS: Record<Scope, LucideIcon> = {
   all: AtSign,
   file: File,
+  diff: FileDiff,
   bead: CircleDot,
   chat: MessageSquare,
   skill: Sparkles,
@@ -349,6 +351,7 @@ function offer(found: FsFoundPath, rank = 0): Completion {
 function referenceOf(found: MentionOffer): Reference {
   const kind = found.kind as AtelierKind;
   if (kind === 'bead') return { kind, id: found.id, status: found.status as BeadStatus | undefined };
+  if (kind === 'diff') return diffBadge(found.id, found.status);
   if (kind === 'chat') {
     return { kind, id: found.id, name: found.label, brand: found.brand as Brand | undefined, projectId: found.projectId ?? null };
   }
@@ -387,7 +390,7 @@ function atelierOffer(found: MentionOffer, rank: number): Completion {
     // A card's badge says only its id, so its title is the line's words. A
     // chat's and a skill's badge already say their name.
     displayLabel: kind === 'bead' ? found.label : ' ',
-    detail: kind === 'skill' ? found.detail : kind === 'chat' ? chatDetail(found) : '',
+    detail: kind === 'skill' || kind === 'diff' ? found.detail : kind === 'chat' ? chatDetail(found) : '',
     type: kind,
     section: { name: HEADINGS[kind], rank },
     apply: (view: EditorView, _completion: Completion, from: number, to: number) => {

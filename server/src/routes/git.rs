@@ -2045,6 +2045,84 @@ async fn untracked_diff(repo: &Path, path: &str) -> Result<Option<DiffFile>, Ref
     Ok(Some(file))
 }
 
+/// Every file with an uncommitted change, and the word for what happened to
+/// it, for the composer's `@` menu (bw-v79ny.1). Paths are from the repository
+/// root, the form a `@diff:` reference names a file in.
+pub async fn changed_paths(repo: &Path) -> Vec<(String, String)> {
+    let Ok(listed) = run_git(repo, &["status", "--porcelain=v2", "-z", "--untracked-files=all"]).await else {
+        return Vec::new();
+    };
+    if !listed.status.success() {
+        return Vec::new();
+    }
+    let listed = read_porcelain_v2(&listed.stdout);
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut add = |path: &str, status: &str| {
+        if !out.iter().any(|(p, _)| p == path) {
+            out.push((path.to_string(), status.to_string()));
+        }
+    };
+    for file in &listed.conflicted {
+        add(&file.path, "conflicted");
+    }
+    for file in listed.staged.iter().chain(listed.unstaged.iter()) {
+        add(&file.path, &file.status);
+    }
+    for file in &listed.untracked {
+        add(&file.path, "untracked");
+    }
+    out.sort();
+    out
+}
+
+/// One file's patch, for a `@diff:` reference handed to an agent
+/// (`workbench::references`): the uncommitted change when `commit` is None,
+/// what that commit did to it otherwise. `path` is relative to the repository
+/// root, the way every diff here names files, whatever folder `repo` is.
+/// None when there is no such change, or git cannot say.
+pub async fn file_patch(repo: &Path, commit: Option<&str>, path: &str) -> Option<DiffFile> {
+    if path.starts_with('-') || commit.is_some_and(|c| c.starts_with('-')) {
+        return None;
+    }
+    let spec = format!(":(top,literal){path}");
+    let base = match commit {
+        Some(sha) => {
+            let parent = format!("{sha}^1");
+            if run_git(repo, &["rev-parse", "--verify", "--quiet", &parent]).await.ok()?.status.success() {
+                parent
+            } else {
+                THE_EMPTY_TREE.to_string()
+            }
+        }
+        None if has_commits(repo).await => "HEAD".to_string(),
+        None => THE_EMPTY_TREE.to_string(),
+    };
+    let mut args = vec!["diff", base.as_str()];
+    if let Some(sha) = commit {
+        args.push(sha);
+    }
+    args.extend_from_slice(PATCH_SWITCHES);
+    args.extend_from_slice(&["--", &spec]);
+    let patch = run_git(repo, &args).await.ok()?;
+    if !patch.status.success() {
+        return None;
+    }
+    if let Some(file) = read_unified_patch(&String::from_utf8_lossy(&patch.stdout)).into_iter().next() {
+        return Some(file);
+    }
+    if commit.is_some() {
+        return None;
+    }
+    // Not in the patch at all: perhaps a file git has never been told about.
+    let others = run_git(repo, &["ls-files", "--others", "--exclude-standard", "--", &spec]).await.ok()?;
+    if others.stdout.is_empty() {
+        return None;
+    }
+    let top = run_git(repo, &["rev-parse", "--show-toplevel"]).await.ok()?;
+    let top = String::from_utf8_lossy(&top.stdout).trim().to_string();
+    untracked_diff(Path::new(&top), path).await.ok().flatten()
+}
+
 // ----------------------------------------------------------------------------
 // GET /api/git/show
 // ----------------------------------------------------------------------------

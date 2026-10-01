@@ -16,7 +16,7 @@
  */
 import { useMemo, useSyncExternalStore } from 'react';
 
-import type { Reference } from '@/components/reference-badge';
+import { diffBadge, type Reference } from '@/components/reference-badge';
 import type { BeadStatus } from '@/types';
 import { useChatNames } from '@/workbench/live';
 import type { Brand, CommandInfo } from '@/workbench/protocol';
@@ -107,6 +107,7 @@ export function useDescribeReference(
     }
     return (kind, id) => {
       if (kind === 'bead') return { kind, id, status: statuses.get(id) };
+      if (kind === 'diff') return diffBadge(id);
       if (kind === 'chat') {
         const session = live.get(id);
         if (session) {

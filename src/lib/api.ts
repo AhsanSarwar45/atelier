@@ -446,8 +446,8 @@ export const projects = {
 
 /** One line of the composer's `@` menu (bw-mi3s.4). */
 export interface MentionOffer {
-  kind: 'file' | 'bead' | 'chat' | 'skill';
-  /** What goes after `@kind:` — or, for a file, after `@`. */
+  kind: 'file' | 'bead' | 'chat' | 'skill' | 'diff';
+  /** What goes after `@kind:` — or, for a file, after `@`. A diff's is its path. */
   id: string;
   /** A file's name, a card's title, a chat's or a skill's name. */
   label: string;

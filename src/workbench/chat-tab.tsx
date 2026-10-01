@@ -74,7 +74,7 @@ import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
 import { pathsIn, type Rooted } from '@/workbench/paths';
 import { useDescribeReference, type DescribeReference } from '@/workbench/reference-names';
-import type { AtelierKind } from '@/workbench/references';
+import { parseDiffId, type AtelierKind } from '@/workbench/references';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
@@ -1316,6 +1316,26 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     },
     [phone, diffOpen, rightOpen, flipRight, rememberDiff],
   );
+  /**
+   * A `@diff:` badge, pressed: the address names the change, and the diff
+   * comes up on that file, at those lines, out of that commit or out of the
+   * working tree (bw-v79ny.1). The ask is dropped from the address once it is
+   * answered, the way a search's `message` is.
+   */
+  const askedDiff = params.get('diff');
+  useEffect(() => {
+    if (!askedDiff || !sessionId) return;
+    router.replace(addressWith(params, { diff: null }));
+    const asked = parseDiffId(askedDiff);
+    if (!asked) return;
+    if (!gitOpen) flipGit();
+    if (phone ? rightOpen : !rightOpen) flipRight();
+    if (!diffOpen) rememberDiff();
+    setOpenCommit(asked.commit);
+    setDiffFocus({ path: asked.path, asked: Date.now(), line: asked.line, endLine: asked.endLine, side: asked.side });
+    // Answered once per ask; the switches it reads are what it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askedDiff, sessionId]);
   /**
    * Choosing which of the rail's two views is drawn.
    *

@@ -28,10 +28,11 @@ pub enum Kind {
     Bead,
     Chat,
     Skill,
+    Diff,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 4] = [Kind::File, Kind::Bead, Kind::Chat, Kind::Skill];
+    pub const ALL: [Kind; 5] = [Kind::File, Kind::Diff, Kind::Bead, Kind::Chat, Kind::Skill];
 
     pub fn parse(word: &str) -> Option<Kind> {
         match word {
@@ -39,6 +40,7 @@ impl Kind {
             "bead" => Some(Kind::Bead),
             "chat" => Some(Kind::Chat),
             "skill" => Some(Kind::Skill),
+            "diff" => Some(Kind::Diff),
             _ => None,
         }
     }
@@ -51,6 +53,7 @@ impl Kind {
             Kind::Bead => 6,
             Kind::Chat => 5,
             Kind::Skill => 5,
+            Kind::Diff => 4,
         }
     }
 }
@@ -227,6 +230,27 @@ pub fn files(found: Vec<crate::routes::fs::FoundPath>, wanted: &str) -> Vec<Offe
         .collect()
 }
 
+/// Changed files, as diffs to point at: the uncommitted change to each one
+/// whose name fits, best first, with what happened to it beside its folder.
+pub fn diffs(changed: &[(String, String)], wanted: &str, limit: usize) -> Vec<Offer> {
+    let wanted = wanted.to_lowercase();
+    let offers = changed
+        .iter()
+        .filter_map(|(path, status)| {
+            let (folder, name) = match path.rsplit_once('/') {
+                Some((folder, name)) => (folder, name),
+                None => ("", path.as_str()),
+            };
+            let score = fit(&name.to_lowercase(), &wanted).or_else(|| fit(&path.to_lowercase(), &wanted))?;
+            let mut offer = Offer::new(Kind::Diff, path.clone(), name.to_string(), score);
+            offer.detail = folder.to_string();
+            offer.status = Some(status.clone());
+            Some(offer)
+        })
+        .collect();
+    keep(offers, limit, |a, b| a.id.cmp(&b.id))
+}
+
 /// The groups in the order the menu draws them: the one with the best answer
 /// first once something is typed, and the fixed order before that.
 pub fn in_order(mut groups: Vec<(Kind, Vec<Offer>)>, typed: bool) -> Vec<Offer> {
@@ -244,11 +268,11 @@ pub fn in_order(mut groups: Vec<(Kind, Vec<Offer>)>, typed: bool) -> Vec<Offer> 
 }
 
 /// What the word after the composer's `@` asks for: a kind named with
-/// `bead:`, `chat:` or `skill:` narrows the menu to it, and the rest is the
+/// `bead:`, `chat:`, `skill:` or `diff:` narrows the menu to it, and the rest is the
 /// word to look for.
 pub fn scoped(typed: &str) -> (Option<Kind>, &str) {
     if let Some((word, rest)) = typed.split_once(':') {
-        if let Some(kind @ (Kind::Bead | Kind::Chat | Kind::Skill)) = Kind::parse(word) {
+        if let Some(kind @ (Kind::Bead | Kind::Chat | Kind::Skill | Kind::Diff)) = Kind::parse(word) {
             return (Some(kind), rest);
         }
     }

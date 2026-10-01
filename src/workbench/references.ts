@@ -331,10 +331,15 @@ export function resolveReference(ref: Reference, root: string | Rooted): string 
  *
  * `/skill:standup` at the very start of a message is the same skill, asked to be
  * run rather than consulted, and is drawn as the same badge.
+ *
+ * `@diff:src/a.ts:+12-14` names a change rather than a thing: the uncommitted
+ * change to a file, or with a commit in front, `@diff:abc1234:src/a.ts:-30`,
+ * what that commit did to it. Its id is a path and lines, so it has a grammar
+ * of its own (`parseDiffId`), read the same way on the server (bw-v79ny.1).
  */
-export type AtelierKind = 'bead' | 'chat' | 'skill';
+export type AtelierKind = 'bead' | 'chat' | 'skill' | 'diff';
 
-export const ATELIER_KINDS: readonly AtelierKind[] = ['bead', 'chat', 'skill'];
+export const ATELIER_KINDS: readonly AtelierKind[] = ['bead', 'chat', 'skill', 'diff'];
 
 /** An Atelier reference found inside a larger text, and where in it it sits. */
 export interface FoundAtelierReference {
@@ -354,10 +359,24 @@ export interface FoundAtelierReference {
  */
 const ATELIER_ID = '[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?';
 const KIND_BEGUN = new RegExp('^@(' + ATELIER_KINDS.join('|') + '):');
-const ATELIER_AT = new RegExp('@(' + ATELIER_KINDS.join('|') + '):(' + ATELIER_ID + ')(?![A-Za-z0-9_])', 'y');
+const ID_KINDS = ATELIER_KINDS.filter((kind) => kind !== 'diff');
+const ATELIER_AT = new RegExp('@(' + ID_KINDS.join('|') + '):(' + ATELIER_ID + ')(?![A-Za-z0-9_])', 'y');
+/**
+ * A diff's id: a path, perhaps a commit before it and lines after it. It starts
+ * the way a path does and ends on a letter or a digit, so the sentence keeps
+ * the full stop or colon after it.
+ */
+const DIFF_AT = /@diff:([A-Za-z0-9._/~][A-Za-z0-9._/~@+:-]*)/y;
 const LEADING_SKILL = new RegExp(`^/skill:(${ATELIER_ID})(?![A-Za-z0-9_])`);
 
 function atelierAt(text: string, at: number): FoundAtelierReference | null {
+  DIFF_AT.lastIndex = at;
+  const diff = DIFF_AT.exec(text);
+  if (diff) {
+    const id = diff[1]!.replace(/[^A-Za-z0-9]+$/, '');
+    if (!id || !parseDiffId(id)) return null;
+    return { kind: 'diff', id, start: at, end: at + '@diff:'.length + id.length, run: false };
+  }
   ATELIER_AT.lastIndex = at;
   const m = ATELIER_AT.exec(text);
   if (!m) return null;
@@ -415,3 +434,57 @@ export function referenceForAddress(pasted: string, origin: string): string | nu
   if (chat && whole.test(chat)) return formatAtelierReference('chat', chat);
   return null;
 }
+
+/* ------------------------------------------------------------------ *
+ * A reference to a change.
+ * ------------------------------------------------------------------ */
+
+/** What a `@diff:` reference names: which change, to which file, which lines. */
+export interface DiffReference {
+  /** The commit, or null for what is not committed yet. */
+  commit: string | null;
+  /** The path from the repository root. */
+  path: string;
+  /** Which version the lines are counted in: `new` (`+`) or `old` (`-`). */
+  side: 'new' | 'old';
+  line: number | null;
+  /** The last line of a range; null for a single line, and for none. */
+  endLine: number | null;
+}
+
+const DIFF_LINES = /^([+-]?)(\d+)(?:-(\d+))?$/;
+const COMMIT = /^[0-9a-f]{7,40}$/;
+
+/** The id after `@diff:` read back, or null when it names no file. */
+export function parseDiffId(id: string): DiffReference | null {
+  const segments = id.split(':');
+  let side: 'new' | 'old' = 'new';
+  let line: number | null = null;
+  let endLine: number | null = null;
+  const lines = segments.length > 1 ? DIFF_LINES.exec(segments[segments.length - 1]!) : null;
+  if (lines) {
+    segments.pop();
+    side = lines[1] === '-' ? 'old' : 'new';
+    line = Number(lines[2]);
+    endLine = lines[3] === undefined || Number(lines[3]) === line ? null : Number(lines[3]);
+  }
+  const commit = segments.length > 1 && COMMIT.test(segments[0]!) ? segments.shift()! : null;
+  const path = segments.join(':');
+  if (!path) return null;
+  return { commit, path, side, line, endLine };
+}
+
+/** The id a diff reference is written with, the inverse of `parseDiffId`. */
+export function diffId(ref: DiffReference): string {
+  const lines =
+    ref.line === null
+      ? ''
+      : `:${ref.side === 'old' ? '-' : '+'}${ref.line}${ref.endLine === null || ref.endLine === ref.line ? '' : `-${ref.endLine}`}`;
+  return `${ref.commit ? `${ref.commit}:` : ''}${ref.path}${lines}`;
+}
+
+/** A diff reference as it is written: `@diff:src/a.ts:+12-14`. */
+export function formatDiffReference(ref: DiffReference): string {
+  return formatAtelierReference('diff', diffId(ref));
+}
+

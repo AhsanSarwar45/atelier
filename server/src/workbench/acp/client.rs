@@ -3297,9 +3297,10 @@ impl AcpDriver {
             .map_err(|_| "ACP adapter stopped before replying".to_string())?
     }
 
-    /// What the cards, chats and skills a message names are, looked up now
-    /// (`references.rs`). Cards come from the board already held for this
-    /// chat's project; chats from this app's own store.
+    /// What the cards, chats, skills and diffs a message names are, looked up
+    /// now (`references.rs`). Cards come from the board already held for this
+    /// chat's project; chats from this app's own store; diffs from git in the
+    /// chat's own checkout.
     async fn references_block(&self, text: &str) -> Option<String> {
         use crate::workbench::references::{self, Kind, Looked};
         let found = references::find(text);
@@ -3316,6 +3317,16 @@ impl AcpDriver {
                 (crate::workbench::chat_name::name_session(&session), session.brand.clone())
             });
             looked.chats.push((id, chat));
+        }
+        for id in references::wanted(&found, Kind::Diff) {
+            let file = match references::DiffRef::parse(&id) {
+                Some(diff) => {
+                    crate::routes::git::file_patch(std::path::Path::new(&self.session.cwd), diff.commit.as_deref(), &diff.path)
+                        .await
+                }
+                None => None,
+            };
+            looked.diffs.push((id, file));
         }
         references::block(&found, &looked, &self.shared_library)
     }

@@ -190,10 +190,29 @@ const TOO_LONG_TO_COLOUR = 3_000;
 const ROW_GUESS = 20;
 const ROW_OVERSCAN = 20;
 
+/** Lines to mark and scroll to: a `@diff:` reference's, when one was opened. */
+export interface MarkedLines {
+  side?: 'new' | 'old';
+  line?: number | null;
+  endLine?: number | null;
+  /** Tells one ask from the next, so asking again scrolls again. */
+  asked: number;
+}
+
+/** Whether a row carries one of the marked lines. */
+function isMarked(row: DiffRow, marked: MarkedLines | null | undefined): boolean {
+  if (!marked?.line) return false;
+  const no = marked.side === 'old' ? row.leftNo : row.rightNo;
+  if (no === undefined || no === null) return false;
+  return no >= marked.line && no <= (marked.endLine ?? marked.line);
+}
+
 export function DiffTable({
   rows,
   language,
   path = null,
+  commit = null,
+  marked = null,
   className,
 }: {
   rows: DiffRow[];
@@ -204,6 +223,10 @@ export function DiffTable({
    * worse than the lines. Without it a copy is the browser's own copy.
    */
   path?: string | null;
+  /** The commit these rows are from, or null for uncommitted changes. */
+  commit?: string | null;
+  /** Lines to mark and bring into view. */
+  marked?: MarkedLines | null;
   className?: string;
 }) {
   // Each side is coloured whole and only then cut into its rows: painting a
@@ -249,6 +272,25 @@ export function DiffTable({
   /** The scroll the window is not filling, held open above it and below it. */
   const above = many ? (window_[0]?.start ?? 0) : 0;
   const below = many ? virtual.getTotalSize() - (window_[window_.length - 1]?.end ?? 0) : 0;
+  // The marked lines are brought into view once they are drawn, after the
+  // column around this table has scrolled to the file's heading: that scroll
+  // runs in the parent's effect, which comes after this one, so this waits a
+  // frame for it.
+  const firstMarked = useMemo(() => rows.findIndex((row) => isMarked(row, marked)), [rows, marked]);
+  useEffect(() => {
+    if (firstMarked < 0) return;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        if (many) virtual.scrollToIndex(firstMarked, { align: 'center' });
+        table.current
+          ?.querySelector<HTMLElement>(`tr[data-row-at="${firstMarked}"]`)
+          ?.scrollIntoView?.({ block: 'center' });
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+    // Asked again is scrolled again; a re-read that changes nothing is not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstMarked, marked?.asked]);
   /** Where the floating button sits, and what it would copy, while there is one. */
   const [offer, setOffer] = useState<{ at: PointerAt; copied: CopiedDiff } | null>(null);
 
@@ -384,8 +426,9 @@ export function DiffTable({
                   data-diff-kind={r.kind}
                   data-row-at={i}
                   data-index={i}
+                  data-marked={isMarked(r, marked) || undefined}
                   ref={many ? virtual.measureElement : undefined}
-                  className={STACKED_ROW}
+                  className={cn(STACKED_ROW, isMarked(r, marked) && 'outline outline-1 -outline-offset-1 outline-sky-500/70 [&>td]:!bg-sky-500/15')}
                 >
                   <td
                     className={cn(

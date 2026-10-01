@@ -87,11 +87,16 @@ function FileDiff({
   file,
   open,
   onFlip,
+  commit,
+  marked,
 }: {
   root: string;
   file: GitDiffFile;
   open: boolean;
   onFlip: () => void;
+  commit: string | null;
+  /** The lines a reference asked for, when it asked for some in this file. */
+  marked: DiffFocus | null;
 }) {
   // Worked out once a file: the read below runs every five seconds and the
   // rows are what the colouring is worked out from, so a file nothing has
@@ -164,7 +169,7 @@ function FileDiff({
             {/* The path the table copies with is the repository-relative one
                 the chat's own worktree knows this file by, which is the path a
                 reference has to carry for the agent to find it again. */}
-            <DiffTable rows={rows} language={languageOf(file.path)} path={file.path} />
+            <DiffTable rows={rows} language={languageOf(file.path)} path={file.path} commit={commit} marked={marked} />
           </Panel>
         )
       )}
@@ -237,6 +242,14 @@ function firstShape(files: GitDiffFile[]): Record<string, boolean> {
 export interface DiffFocus {
   path: string;
   asked: number;
+  /**
+   * Lines to scroll to and mark, as a `@diff:` reference names them
+   * (bw-v79ny.1): counted in the new version, or with `side: 'old'` in the
+   * old one. None for the file as a whole.
+   */
+  line?: number | null;
+  endLine?: number | null;
+  side?: 'new' | 'old';
 }
 
 export interface GitDiffViewProps {
@@ -380,7 +393,17 @@ export function GitDiffView({
 
   const section = (file: GitDiffFile) => {
     const open = said[file.path] ?? shape.current[file.path] ?? true;
-    return <FileDiff root={path ?? ''} file={file} open={open} onFlip={() => flip(file.path, open)} />;
+    const marked = focus && focus.path === file.path && focus.line ? focus : null;
+    return (
+      <FileDiff
+        root={path ?? ''}
+        file={file}
+        open={open}
+        onFlip={() => flip(file.path, open)}
+        commit={commit}
+        marked={marked}
+      />
+    );
   };
 
   return (
