@@ -1,10 +1,10 @@
 /**
- * Copying out of the file viewer copies a reference, and the code is still one
- * click away (bw-g3o3.10).
+ * The file viewer's "Copy reference" names the selected lines (bw-g3o3.10,
+ * bw-v79ny.2).
  *
  * Three things are proved here, and the fourth — a real Selection answered by a
- * real Ctrl-C, which is a browser's own behaviour being taken over — is proved
- * in a browser instead (tests/e2e/copying-from-the-viewer-copies-a-reference).
+ * real right-click, which is a browser's own behaviour being taken over — is
+ * proved in a browser instead (tests/e2e/right-click-in-the-viewer-copies-a-reference).
  *
  * The seam this leans on is `copiedSelection`: the one place that turns a range
  * of the document into the lines a reader would say they selected. It takes an

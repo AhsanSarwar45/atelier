@@ -112,7 +112,25 @@ export interface CodeEditorProps {
    * the bottom of the viewport.
    */
   onSelection?: (selection: CopiedSelection | null) => void;
+  /**
+   * A right-click in the text. Given where it was, the line under the pointer,
+   * what is selected, and a way to select everything; the browser's own menu
+   * is kept off. Without it a right-click is the browser's.
+   */
+  onContextMenu?: (asked: EditorMenuAsk) => void;
   className?: string;
+}
+
+/** What a right-click in the editor is told. */
+export interface EditorMenuAsk {
+  x: number;
+  y: number;
+  /** One-based: the line the pointer was over. */
+  line: number;
+  /** What is selected, or null when nothing is. */
+  selection: CopiedSelection | null;
+  /** Select the whole document, the way Ctrl+A would. */
+  selectAll: () => void;
 }
 
 /**
@@ -187,6 +205,7 @@ export function CodeEditor({
   onSave,
   onSelectionCopy,
   onSelection,
+  onContextMenu,
   className,
 }: CodeEditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -200,11 +219,13 @@ export function CodeEditor({
   const changed = useRef(onChange);
   const copied = useRef(onSelectionCopy);
   const moved = useRef(onSelection);
+  const menu = useRef(onContextMenu);
   const asked = useRef(onEditIntent);
   const saved = useRef(onSave);
   changed.current = onChange;
   copied.current = onSelectionCopy;
   moved.current = onSelection;
+  menu.current = onContextMenu;
   asked.current = onEditIntent;
   saved.current = onSave;
 
@@ -263,6 +284,25 @@ export function CodeEditor({
             text: copiedText,
           });
           return answer ?? copiedText;
+        }),
+        EditorView.domEventHandlers({
+          contextmenu: (event, editor) => {
+            if (!menu.current) return false;
+            event.preventDefault();
+            const at = editor.posAtCoords({ x: event.clientX, y: event.clientY }) ?? editor.state.selection.main.head;
+            const range = editor.state.selection.main;
+            menu.current({
+              x: event.clientX,
+              y: event.clientY,
+              line: editor.state.doc.lineAt(at).number,
+              selection: range.empty ? null : copiedSelection(editor.state, range),
+              selectAll: () => {
+                editor.dispatch({ selection: { anchor: 0, head: editor.state.doc.length } });
+                editor.focus();
+              },
+            });
+            return true;
+          },
         }),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet || update.docChanged) {

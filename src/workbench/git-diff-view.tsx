@@ -169,7 +169,15 @@ function FileDiff({
             {/* The path the table copies with is the repository-relative one
                 the chat's own worktree knows this file by, which is the path a
                 reference has to carry for the agent to find it again. */}
-            <DiffTable rows={rows} language={languageOf(file.path)} path={file.path} commit={commit} marked={marked} />
+            <DiffTable
+              rows={rows}
+              language={languageOf(file.path)}
+              path={file.path}
+              root={root}
+              commit={commit}
+              marked={marked}
+              onCollapse={onFlip}
+            />
           </Panel>
         )
       )}

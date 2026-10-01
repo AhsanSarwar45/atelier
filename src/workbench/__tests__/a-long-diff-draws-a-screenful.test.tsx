@@ -11,11 +11,12 @@
  * The thing most at risk in windowing a table is the copy. A selection used to
  * be read off each row's position in the tbody, which is no longer the row's
  * place in the file once two spacer rows are holding the scroll open, so the
- * cases below select inside a windowed table and ask what a copy names: once
+ * cases below select inside a windowed table and ask what the menu's "Copy
+ * reference" names (bw-v79ny.2): once
  * at the top, once after scrolling far enough that the drawn rows are nowhere
  * near their old positions, and once while the drag runs past what is drawn.
  */
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { DiffTable } from '@/workbench/diff-table';
@@ -54,14 +55,14 @@ function fileOf(howMany: number): DiffRow[] {
   })) as unknown as DiffRow[];
 }
 
-/** The copy a reader presses, and what it was handed for `text/plain`. */
-function copyFrom(table: HTMLElement): string | undefined {
-  const written: Record<string, string> = {};
-  const event = Object.assign(new Event('copy', { bubbles: true, cancelable: true }), {
-    clipboardData: { setData: (kind: string, value: string) => void (written[kind] = value) },
-  });
-  table.dispatchEvent(event);
-  return written['text/plain'];
+/** A right-click on the table, then "Copy reference": what the clipboard was handed. */
+function referenceFrom(table: HTMLElement): string | undefined {
+  const written = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: written }, configurable: true });
+  fireEvent.contextMenu(table, { clientX: 10, clientY: 10 });
+  fireEvent.click(screen.getByTestId('diff-menu-copy-reference'));
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+  return written.mock.calls[0]?.[0] as string | undefined;
 }
 
 /** Where a row sits in the tbody, counting the spacer that holds the top open. */
@@ -135,7 +136,7 @@ describe('a diff of thousands of lines', () => {
 
     const first = Number(from.dataset.rowAt) + 1;
     const last = Number(to.dataset.rowAt) + 1;
-    expect(copyFrom(table)).toBe(`@src/a.ts:${first}-${last}`);
+    expect(referenceFrom(table)).toBe(`@diff:src/a.ts:+${first}-${last}`);
   }, 60_000);
 
   it('names the lines a selection covered after the reader has scrolled', () => {
@@ -155,7 +156,7 @@ describe('a diff of thousands of lines', () => {
     expect(placeInBody(from)).not.toBe(first);
 
     select(from, to);
-    expect(copyFrom(table)).toBe(`@src/a.ts:${first}-${Number(to.dataset.rowAt) + 1}`);
+    expect(referenceFrom(table)).toBe(`@diff:src/a.ts:+${first}-${Number(to.dataset.rowAt) + 1}`);
   }, 60_000);
 
   it('names the whole stretch a drag covered, not the part still drawn', () => {
@@ -173,14 +174,14 @@ describe('a diff of thousands of lines', () => {
     const anchor = { anchorNode: pressed, anchorOffset: 0 };
     select(pressed, began[4]!, anchor);
     const first = Number(pressed.dataset.rowAt) + 1;
-    expect(copyFrom(table)).toBe(`@src/a.ts:${first}-${Number(began[4]!.dataset.rowAt) + 1}`);
+    expect(referenceFrom(table)).toBe(`@diff:src/a.ts:+${first}-${Number(began[4]!.dataset.rowAt) + 1}`);
 
     scrollTo(screen.getByTestId('diff-pane'), 4_000_000);
     const now = [...table.querySelectorAll<HTMLElement>('tr[data-row-at]')];
     const ended = now[4]!;
     select(now[0]!, ended, anchor);
 
-    expect(copyFrom(table)).toBe(`@src/a.ts:${first}-${Number(ended.dataset.rowAt) + 1}`);
+    expect(referenceFrom(table)).toBe(`@diff:src/a.ts:+${first}-${Number(ended.dataset.rowAt) + 1}`);
   }, 60_000);
 
   it('names where a drag came back to, not how far it went', () => {
@@ -194,11 +195,11 @@ describe('a diff of thousands of lines', () => {
     const anchor = { anchorNode: pressed, anchorOffset: 0 };
 
     select(pressed, lines[20]!, anchor);
-    expect(copyFrom(table)).toBe('@src/a.ts:13-21');
+    expect(referenceFrom(table)).toBe('@diff:src/a.ts:+13-21');
 
     // Back up the way it came, without letting go.
     select(pressed, lines[14]!, anchor);
-    expect(copyFrom(table)).toBe('@src/a.ts:13-15');
+    expect(referenceFrom(table)).toBe('@diff:src/a.ts:+13-15');
   });
 
   it('leaves an ordinary diff drawn whole', () => {

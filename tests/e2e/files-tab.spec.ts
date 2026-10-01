@@ -293,12 +293,13 @@ test('a path in a message opens the file at its line, and lines copied there go 
       selection.removeAllRanges();
       selection.addRange(range);
     });
-    await expect(page.getByTestId('file-copy-text')).toBeVisible({ timeout: WAIT });
     await page.evaluate(() => navigator.clipboard.writeText('nothing has been copied yet'));
-    await page.keyboard.press('ControlOrMeta+c');
+    // A right-click on the selection, and the menu's "Copy reference".
+    await page.getByTestId('file-viewer').locator('.cm-line').nth(4).click({ button: 'right' });
+    await page.getByTestId('file-viewer-menu-copy-reference').click();
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()), {
-        message: 'copying in the Files tab did not put a reference on the clipboard',
+        message: 'Copy reference in the Files tab did not put a reference on the clipboard',
         timeout: WAIT,
       })
       .toBe('@src/lib/deep.ts:4-7');
@@ -321,8 +322,10 @@ test('a path in a message opens the file at its line, and lines copied there go 
     await page.keyboard.press('Enter');
     await expect
       .poll(() => commands.filter((command) => command.type === 'prompt.send'), { timeout: WAIT })
-      .toEqual([{ type: 'prompt.send', sessionId: CHAT, text: typed, images: [], takeover: false }]);
+      .toMatchObject([{ type: 'prompt.send', sessionId: CHAT, text: typed, images: [], takeover: false }]);
     await expect(page.getByTestId('composer')).toHaveValue('');
+    // The id the composer gave the line, which the transcript draws it under.
+    const sentId = (commands.find((command) => command.type === 'prompt.send') as { messageId?: string }).messageId ?? 'asked';
 
     // The agent's side of it, pushed back the way the server would have, so the
     // last picture is the conversation the reader ends up looking at.
@@ -330,9 +333,9 @@ test('a path in a message opens the file at its line, and lines copied there go 
       (window as unknown as { pushChatSnapshot: (data: unknown) => void }).pushChatSnapshot(view);
     }, foldAll([
       ...events,
-      { ...base, seq: 6, type: 'message.started', messageId: 'asked', role: 'user' },
-      { ...base, seq: 7, type: 'text.delta', messageId: 'asked', text: typed },
-      { ...base, seq: 8, type: 'message.completed', messageId: 'asked' },
+      { ...base, seq: 6, type: 'message.started', messageId: sentId, role: 'user' },
+      { ...base, seq: 7, type: 'text.delta', messageId: sentId, text: typed },
+      { ...base, seq: 8, type: 'message.completed', messageId: sentId },
     ] as WbpEvent[]));
     const mine = page.getByTestId('transcript').getByText('why is this repeated?');
     await expect(mine).toBeVisible({ timeout: WAIT });

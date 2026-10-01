@@ -6,11 +6,13 @@
  * knows anything about the other, and both are drawn here, so a change to how
  * a removed line looks is one change (bw-rx1y.3).
  *
- * A table that knows which file it is showing also answers a copy with a
- * reference — `@src/a.ts:12-14` — rather than with the lines, so that reading a
- * diff and then pointing the agent at what you read is one gesture and not a
- * retyped path (bw-gr8y.8). The reader who wanted the code after all takes it
- * from the floating "Copy text" button the selection raises.
+ * A table that knows which file it is showing copies the lines a selection
+ * covered as they are written in the file, one side only, and answers a
+ * right-click with a menu: copy, select all, and a reference to the lines —
+ * `@diff:src/a.ts:+12-14` — to paste into the chat, where it becomes a badge
+ * that opens this diff at those lines (bw-v79ny.2). It used to answer the copy
+ * itself with the reference (bw-gr8y.8), which surprised anyone who wanted the
+ * code; the reference is now one right-click away instead.
  *
  * On a phone the same rows are stacked into one column instead — see
  * `STACKED_ROW` — because two columns of code at 390px are two columns nobody
@@ -20,26 +22,45 @@
  */
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Copy } from 'lucide-react';
+import { ChevronsDownUp, Copy, ExternalLink, Files, Quote, TextSelect } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
-import { PopoverAtPoint, type PointerAt } from '@/components/ui/point-anchor';
-import { Popover, PopoverContent } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
+import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { paintLines } from '@/workbench/colouring';
+import { under } from '@/workbench/git-view';
 import type { DiffRow } from '@/workbench/line-diff';
-import { formatReference } from '@/workbench/references';
+import { PointerAnchor } from '@/workbench/menu-anchor';
+import { useOpenPath } from '@/workbench/open-path';
+import { formatDiffReference, formatReference } from '@/workbench/references';
 import { Line } from '@/workbench/split-paths';
 
-/** What a copy out of a diff can put on the clipboard: either of the two. */
+/** What a selection out of a diff can put on the clipboard. */
 export interface CopiedDiff {
-  /** Our own form, `@path:12-14`, over the lines the selection touched. */
+  /** A reference to the file's lines, `@path:12-14` — the new side's numbers when there are any. */
   reference: string;
+  /** A reference to the diff's lines, `@diff:path:+12-14`, naming the side they are counted on. */
+  diff: string;
+  /** Which side the lines were read from. */
+  side: 'new' | 'old';
+  /** The first and last line, on that side. */
+  first: number;
+  last: number;
   /** Those same lines as they are written in the file. */
   text: string;
+}
+
+/** A commit as a reference writes it: short, the way git shows one. */
+function shortCommit(commit: string | null): string | null {
+  return commit ? commit.slice(0, 7) : null;
 }
 
 /**
@@ -56,7 +77,7 @@ export interface CopiedDiff {
  * Rows the selection only skipped over — the gaps standing in for unsent lines
  * — carry no line of their own and are left out of both answers.
  */
-export function copiedFromRows(rows: DiffRow[], path: string): CopiedDiff | null {
+export function copiedFromRows(rows: DiffRow[], path: string, commit: string | null = null): CopiedDiff | null {
   const touched = rows.filter((r) => r.kind !== 'gap');
   const side = touched.some((r) => r.right !== null && r.rightNo) ? 'right' : 'left';
   const lines = touched
@@ -66,10 +87,54 @@ export function copiedFromRows(rows: DiffRow[], path: string): CopiedDiff | null
 
   const first = lines[0]!.no;
   const last = lines[lines.length - 1]!.no;
+  const endLine = last === first ? null : last;
+  const at = side === 'right' ? 'new' : 'old';
   return {
-    reference: formatReference({ path, line: first, endLine: last === first ? null : last, kind: 'file' }),
+    reference: formatReference({ path, line: first, endLine, kind: 'file' }),
+    diff: formatDiffReference({ commit: shortCommit(commit), path, side: at, line: first, endLine }),
+    side: at,
+    first,
+    last,
     text: lines.map((l) => l.text).join('\n'),
   };
+}
+
+/**
+ * The one line a right-click landed on, when nothing was selected: the side is
+ * the column it landed in, so a changed row names its old line from the left
+ * and its new line from the right. A gap, or an empty side, names no line.
+ */
+function lineUnder(table: HTMLTableElement, target: EventTarget | null, rows: DiffRow[]): { side: 'new' | 'old'; no: number } | null {
+  const cell = (target as Element | null)?.closest?.('td');
+  const tr = cell?.closest('tr[data-row-at]') as HTMLElement | null;
+  if (!cell || !tr || !table.contains(tr)) return null;
+  const row = rows[Number(tr.dataset.rowAt)];
+  if (!row || row.kind === 'gap') return null;
+  const left = (cell as HTMLTableCellElement).cellIndex < 2;
+  if (left && row.leftNo) return { side: 'old', no: row.leftNo };
+  if (!left && row.rightNo) return { side: 'new', no: row.rightNo };
+  // The side it landed on is empty: the other side is the only line there is.
+  if (row.rightNo) return { side: 'new', no: row.rightNo };
+  if (row.leftNo) return { side: 'old', no: row.leftNo };
+  return null;
+}
+
+/** Put something on the clipboard and say so, since nothing on screen moves. */
+function copyOut(text: string, said: string): void {
+  const done = navigator.clipboard?.writeText(text);
+  if (done) void done.then(() => toast({ title: said }));
+}
+
+/** What a right-click in the table was about. */
+interface MenuAsk {
+  x: number;
+  y: number;
+  /** The selection it was made over, when there was one inside the table. */
+  copied: CopiedDiff | null;
+  /** The lines it names: the selection's, or the one line under the pointer. */
+  side: 'new' | 'old';
+  line: number | null;
+  endLine: number | null;
 }
 
 /**
@@ -211,8 +276,10 @@ export function DiffTable({
   rows,
   language,
   path = null,
+  root = null,
   commit = null,
   marked = null,
+  onCollapse,
   className,
 }: {
   rows: DiffRow[];
@@ -220,11 +287,16 @@ export function DiffTable({
   /**
    * The path a copy names, repository-relative — the git diff knows one, the
    * edit card does not always, and a reference to a path nobody can resolve is
-   * worse than the lines. Without it a copy is the browser's own copy.
+   * worse than the lines. Without it a copy is the browser's own copy, and a
+   * right-click is the browser's own menu.
    */
   path?: string | null;
+  /** The checkout `path` is under, so the menu can open the file itself. */
+  root?: string | null;
   /** The commit these rows are from, or null for uncommitted changes. */
   commit?: string | null;
+  /** Shuts the file these rows belong to, when something around them can. */
+  onCollapse?: () => void;
   /** Lines to mark and bring into view. */
   marked?: MarkedLines | null;
   className?: string;
@@ -291,8 +363,9 @@ export function DiffTable({
     // Asked again is scrolled again; a re-read that changes nothing is not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstMarked, marked?.asked]);
-  /** Where the floating button sits, and what it would copy, while there is one. */
-  const [offer, setOffer] = useState<{ at: PointerAt; copied: CopiedDiff } | null>(null);
+  const open = useOpenPath();
+  /** The right-click being answered, while its menu is open. */
+  const [asked, setAsked] = useState<MenuAsk | null>(null);
 
   /**
    * The line the selection being dragged right now was begun in.
@@ -332,29 +405,50 @@ export function DiffTable({
     const to = start === null ? ends.to : Math.max(start, ends.to);
     // Sliced out of `rows` and not out of the tbody: the lines between the two
     // ends are owed to the reader whether they are drawn at this moment or not.
-    const copied = copiedFromRows(rows.slice(from, to + 1), path);
+    const copied = copiedFromRows(rows.slice(from, to + 1), path, commit);
     return copied ? { range, copied } : null;
-  }, [path, rows]);
+  }, [path, rows, commit]);
 
-  // The button follows the selection rather than the pointer, so it is in the
-  // same place however the selection was made — a drag, a double-click, or a
-  // keyboard. It goes as soon as the selection does.
-  useEffect(() => {
-    if (!path) return;
-    const look = () => {
+  /** A right-click on the table: the selection it was made over, or the line under it. */
+  const onContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLTableElement>) => {
+      if (!path || !table.current) return;
+      event.preventDefault();
       const now = selected();
-      if (!now) {
-        setOffer(null);
+      if (now) {
+        const { copied } = now;
+        setAsked({
+          x: event.clientX,
+          y: event.clientY,
+          copied,
+          side: copied.side,
+          line: copied.first,
+          endLine: copied.last === copied.first ? null : copied.last,
+        });
         return;
       }
-      // A range has no box where there is no layout, which is every test; the
-      // button is still offered, it just has nowhere in particular to sit.
-      const box = now.range.getBoundingClientRect?.() ?? { left: 0, top: 0, width: 0, height: 0 };
-      setOffer({ at: { left: box.left, top: box.top, width: box.width, height: box.height }, copied: now.copied });
-    };
-    document.addEventListener('selectionchange', look);
-    return () => document.removeEventListener('selectionchange', look);
-  }, [path, selected]);
+      const under_ = lineUnder(table.current, event.target, rows);
+      setAsked({
+        x: event.clientX,
+        y: event.clientY,
+        copied: null,
+        side: under_?.side ?? 'new',
+        line: under_?.no ?? null,
+        endLine: null,
+      });
+    },
+    [path, rows, selected],
+  );
+
+  /** Everything in the table, selected the way a drag over all of it would. */
+  const selectAll = useCallback(() => {
+    if (!table.current) return;
+    const range = document.createRange();
+    range.selectNodeContents(table.current);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, []);
 
   return (
     <>
@@ -372,15 +466,16 @@ export function DiffTable({
         <table
           ref={table}
           data-testid="diff-table"
-          // The copy a reader presses is answered with the reference, because
-          // that is what they are about to paste into the chat; the lines
-          // themselves are one click away and never further.
+          // The copy a reader presses is the lines of one side, as they are
+          // written in the file. The browser's own copy of a table would take
+          // both sides of every row, one after the other.
           onCopy={(event) => {
             const now = selected();
             if (!now) return;
-            event.clipboardData.setData('text/plain', now.copied.reference);
+            event.clipboardData.setData('text/plain', now.copied.text);
             event.preventDefault();
           }}
+          onContextMenu={onContextMenu}
           // The gutter is a `col` width above the breakpoint and a grid track
           // below it, and it is the same measurement either way, so it is worked
           // out once and read from here by both. The `0.5rem` the track adds is
@@ -483,36 +578,129 @@ export function DiffTable({
           </tbody>
         </table>
       </div>
-      {/* Hung off the selection's own box by the library's popover, and gone
-          as soon as the selection is — never dismissed by a press elsewhere. */}
-      <Popover open={offer !== null}>
-        <PopoverAtPoint at={offer?.at ?? null} />
-        {offer && (
-          <PopoverContent
-            data-testid="diff-copy-text"
-            side="bottom"
-            align="end"
-            sideOffset={6}
-            // The keyboard stays where the selection was made.
-            onOpenAutoFocus={(event) => event.preventDefault()}
-            onCloseAutoFocus={(event) => event.preventDefault()}
-            // Pressing the button must not be what takes the selection away, or
-            // there would be nothing left to copy by the time the click lands.
-            onMouseDown={(event) => event.preventDefault()}
-            className="w-auto border-0 bg-transparent p-0 shadow-none"
-          >
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              className="shadow-md"
-              onClick={() => void navigator.clipboard?.writeText(offer.copied.text)}
-            >
-              <Copy /> Copy text
-            </Button>
-          </PopoverContent>
-        )}
-      </Popover>
+      {asked && path && (
+        <DiffMenu
+          asked={asked}
+          path={path}
+          root={root}
+          commit={commit}
+          onClose={() => setAsked(null)}
+          onSelectAll={selectAll}
+          onOpen={(line) => {
+            if (root) open({ absolute: under(root, path), line, endLine: null }, 'files');
+          }}
+          onOpenInEditor={(line) => {
+            if (root) open({ absolute: under(root, path), line, endLine: null }, 'editor');
+          }}
+          onCollapse={onCollapse}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * The menu behind a right-click in a diff: the common things to do with what
+ * was selected, or with the line the pointer was on, and with the file.
+ *
+ * "Copy reference" is the diff's own form, `@diff:src/a.ts:+12-14`, which
+ * pastes into the chat as a badge that opens this diff at these lines. "Copy
+ * file reference" is the file's, `@src/a.ts:12-14`, and is only offered for
+ * lines the file still has: a removed line is not in the file to point at.
+ */
+function DiffMenu({
+  asked,
+  path,
+  root,
+  commit,
+  onClose,
+  onSelectAll,
+  onOpen,
+  onOpenInEditor,
+  onCollapse,
+}: {
+  asked: MenuAsk;
+  path: string;
+  root: string | null;
+  commit: string | null;
+  onClose: () => void;
+  onSelectAll: () => void;
+  onOpen: (line: number | null) => void;
+  onOpenInEditor: (line: number | null) => void;
+  onCollapse?: () => void;
+}) {
+  const diff = formatDiffReference({
+    commit: shortCommit(commit),
+    path,
+    side: asked.side,
+    line: asked.line,
+    endLine: asked.endLine,
+  });
+  /** The line in the file as it is now, when the lines are on the new side. */
+  const newLine = asked.side === 'new' ? asked.line : null;
+  const file = formatReference({ path, line: newLine, endLine: newLine === null ? null : asked.endLine, kind: 'file' });
+  return (
+    <DropdownMenu open modal={false} onOpenChange={(now) => { if (!now) onClose(); }}>
+      <PointerAnchor at={{ left: asked.x, top: asked.y }} />
+      <DropdownMenuContent
+        align="start"
+        side="bottom"
+        sideOffset={0}
+        className="w-56"
+        data-testid="diff-menu"
+        // The keyboard and the selection stay where they were.
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
+        <DropdownMenuItem
+          data-testid="diff-menu-copy"
+          disabled={!asked.copied}
+          onSelect={() => asked.copied && copyOut(asked.copied.text, 'Copied')}
+        >
+          <Copy aria-hidden="true" /> Copy
+        </DropdownMenuItem>
+        <DropdownMenuItem data-testid="diff-menu-select-all" onSelect={onSelectAll}>
+          <TextSelect aria-hidden="true" /> Select all
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem data-testid="diff-menu-copy-reference" onSelect={() => copyOut(diff, 'Reference copied')}>
+          <Quote aria-hidden="true" /> Copy reference
+        </DropdownMenuItem>
+        {(asked.line === null || newLine !== null) && (
+          <DropdownMenuItem
+            data-testid="diff-menu-copy-file-reference"
+            onSelect={() => copyOut(file, 'File reference copied')}
+          >
+            <Quote aria-hidden="true" /> Copy file reference
+          </DropdownMenuItem>
+        )}
+        {root && (
+          <DropdownMenuItem data-testid="diff-menu-copy-path" onSelect={() => copyOut(under(root, path), 'Path copied')}>
+            <Copy aria-hidden="true" /> Copy path
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem data-testid="diff-menu-copy-relative-path" onSelect={() => copyOut(path, 'Relative path copied')}>
+          <Copy aria-hidden="true" /> Copy relative path
+        </DropdownMenuItem>
+        {root && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem data-testid="diff-menu-open" onSelect={() => onOpen(newLine)}>
+              <Files aria-hidden="true" /> Open in Files
+            </DropdownMenuItem>
+            <DropdownMenuItem data-testid="diff-menu-editor" onSelect={() => onOpenInEditor(newLine)}>
+              <ExternalLink aria-hidden="true" /> Open in editor
+            </DropdownMenuItem>
+          </>
+        )}
+        {onCollapse && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem data-testid="diff-menu-collapse" onSelect={onCollapse}>
+              <ChevronsDownUp aria-hidden="true" /> Collapse file
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

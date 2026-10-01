@@ -7,29 +7,35 @@
  * It is handed its file rather than fetching one, so the read route, the tab
  * around it and this can be built and tested apart from each other.
  *
- * Copying out of it copies a REFERENCE — `@src/a.ts:12-40` — and not the lines,
- * the same bargain the git diff strikes (bw-gr8y.8): what a reader usually
- * wants after reading a few lines is to say "these lines" to the agent, and
- * that is one gesture rather than a retyped path. The code itself is never
- * further than the "Copy text" button in the header or the one the selection
- * raises beside it (bw-g3o3.10).
+ * Copying out of it copies the text, as anywhere else. A right-click opens a
+ * menu with the common things to do and "Copy reference", which puts
+ * `@src/a.ts:12-40` on the clipboard — what the composer draws as a badge — so
+ * pointing the agent at the lines being read is one gesture rather than a
+ * retyped path. The diff's menu is the same (bw-v79ny.2). Copying used to give
+ * the reference instead (bw-gr8y.8), which surprised anyone after the code.
  */
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { Copy, ExternalLink, FolderOpen, Pencil } from 'lucide-react';
+import { Copy, ExternalLink, FolderOpen, Pencil, Quote, TextSelect } from 'lucide-react';
 
 import { isMarkdownPath } from '@/components/file-kinds';
 import { ToolButton } from '@/components/shell';
 import { BadgeDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
-import { PopoverAtPoint, type PointerAt } from '@/components/ui/point-anchor';
-import { Popover, PopoverContent } from '@/components/ui/popover';
 import { Tooltip } from '@/components/ui/tooltip';
+import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { CodeEditor, type CopiedSelection } from '@/workbench/code-editor';
+import { CodeEditor, type CopiedSelection, type EditorMenuAsk } from '@/workbench/code-editor';
 import { MarkdownPane, SourceSwitch } from '@/workbench/file-preview';
+import { PointerAnchor } from '@/workbench/menu-anchor';
 import { openLocalPath } from '@/workbench/open-local-path';
 import { referenceUnder, relativeToRoot } from '@/workbench/references';
 import { useFileEdits } from '@/workbench/use-file-edits';
@@ -197,41 +203,16 @@ export function FileViewer({
   /** What the rendered side draws: the words being typed, not the saved ones. */
   const live = file?.kind === 'text' ? (editableFile ? edits.text : file.text) : '';
 
-  /** What is selected in the editor now, and where the offer beside it sits. */
-  const [selection, setSelection] = useState<{ copied: CopiedSelection; at: PointerAt } | null>(null);
+  /** What is selected in the editor now, for the header's Copy text. */
+  const [selection, setSelection] = useState<{ copied: CopiedSelection } | null>(null);
+  const selected = useCallback((copied: CopiedSelection | null) => setSelection(copied ? { copied } : null), []);
+  /** The right-click being answered, while its menu is open. */
+  const [menu, setMenu] = useState<EditorMenuAsk | null>(null);
 
-  // Where the button goes is the browser's business — the selection CodeMirror
-  // reports is in document positions, and only the page knows where those are
-  // drawn. A selection has no box where there is no layout, which is every
-  // test; the offer still stands, it just has nowhere in particular to sit.
-  const selected = useCallback((copied: CopiedSelection | null) => {
-    if (!copied) return setSelection(null);
-    const range = typeof window === 'undefined' ? null : window.getSelection();
-    const box = (range?.rangeCount ? range.getRangeAt(0).getBoundingClientRect?.() : null) ?? {
-      left: 0,
-      top: 0,
-      width: 0,
-      height: 0,
-    };
-    setSelection({ copied, at: { left: box.left, top: box.top, width: box.width, height: box.height } });
-  }, []);
-
-  // A different file is a different selection; the one from the last file must
-  // not outlive it and offer up lines this file has never had. Turning a
-  // markdown file round to its rendered side takes the selection with it — the
-  // lines it named are not on screen any more.
-  useEffect(() => setSelection(null), [path, showing]);
-
-  /**
-   * The reference a copy is answered with. The whole point of the card: what
-   * lands on the clipboard is what the composer draws as a badge, written
-   * through the one grammar, so it cannot drift from the diff's answer.
-   */
-  const reference = useCallback(
-    (copied: CopiedSelection) =>
-      referenceUnder({ root, path, line: copied.fromLine, endLine: copied.toLine }),
-    [root, path],
-  );
+  useEffect(() => {
+    setSelection(null);
+    setMenu(null);
+  }, [path, showing]);
 
   /** The escape hatch: the code itself, the selection's or the whole file's. */
   const copyText = useCallback(() => {
@@ -412,40 +393,101 @@ export function FileViewer({
               onEditIntent={editableFile ? startEditing : undefined}
               onSave={editableFile ? () => void save() : undefined}
               onSelection={selected}
-              onSelectionCopy={reference}
+              onContextMenu={setMenu}
               className="h-full"
             />
             )}
           </div>
-          {/* The offer hangs off the selection's own box, placed by the
-              library's popover: under its end, and flipped when there is no
-              room below. It is not dismissed by a press elsewhere — it stands
-              exactly as long as the selection does. */}
-          <Popover open={selection !== null}>
-            <PopoverAtPoint at={selection?.at ?? null} />
-            {selection && (
-              <PopoverContent
-                data-testid="file-copy-text"
-                side="bottom"
-                align="end"
-                sideOffset={6}
-                // The keyboard stays in the editor, where the selection is.
-                onOpenAutoFocus={(event) => event.preventDefault()}
-                onCloseAutoFocus={(event) => event.preventDefault()}
-                // Pressing the button must not be what takes the selection away,
-                // or there would be nothing left to copy by the time the click
-                // lands.
-                onMouseDown={(event) => event.preventDefault()}
-                className="w-auto border-0 bg-transparent p-0 shadow-none"
-              >
-                <Button type="button" size="xs" variant="outline" className="shadow-md" onClick={copyText}>
-                  <Copy /> Copy text
-                </Button>
-              </PopoverContent>
-            )}
-          </Popover>
+          {menu && (
+            <ViewerMenu
+              asked={menu}
+              path={path}
+              reference={referenceUnder({
+                root,
+                path,
+                line: menu.selection?.fromLine ?? menu.line,
+                endLine: menu.selection ? menu.selection.toLine : null,
+              })}
+              relative={relative}
+              onClose={() => setMenu(null)}
+            />
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+/** Put something on the clipboard and say so, since nothing on screen moves. */
+function copyOut(text: string, said: string): void {
+  const done = navigator.clipboard?.writeText(text);
+  if (done) void done.then(() => toast({ title: said }));
+}
+
+/**
+ * The menu behind a right-click in the text: copy and select, a reference to
+ * the selected lines or the line under the pointer, the file's paths, and the
+ * ways out to the machine.
+ */
+function ViewerMenu({
+  asked,
+  path,
+  reference,
+  relative,
+  onClose,
+}: {
+  asked: EditorMenuAsk;
+  path: string;
+  reference: string;
+  relative: string;
+  onClose: () => void;
+}) {
+  const line = asked.selection?.fromLine ?? asked.line;
+  return (
+    <DropdownMenu open modal={false} onOpenChange={(now) => { if (!now) onClose(); }}>
+      <PointerAnchor at={{ left: asked.x, top: asked.y }} />
+      <DropdownMenuContent
+        align="start"
+        side="bottom"
+        sideOffset={0}
+        className="w-56"
+        data-testid="file-viewer-menu"
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
+        <DropdownMenuItem
+          data-testid="file-viewer-menu-copy"
+          disabled={!asked.selection}
+          onSelect={() => asked.selection && copyOut(asked.selection.text, 'Copied')}
+        >
+          <Copy aria-hidden="true" /> Copy
+        </DropdownMenuItem>
+        <DropdownMenuItem data-testid="file-viewer-menu-select-all" onSelect={asked.selectAll}>
+          <TextSelect aria-hidden="true" /> Select all
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          data-testid="file-viewer-menu-copy-reference"
+          onSelect={() => copyOut(reference, 'Reference copied')}
+        >
+          <Quote aria-hidden="true" /> Copy reference
+        </DropdownMenuItem>
+        <DropdownMenuItem data-testid="file-viewer-menu-copy-path" onSelect={() => copyOut(path, 'Path copied')}>
+          <Copy aria-hidden="true" /> Copy path
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          data-testid="file-viewer-menu-copy-relative-path"
+          onSelect={() => copyOut(relative, 'Relative path copied')}
+        >
+          <Copy aria-hidden="true" /> Copy relative path
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem data-testid="file-viewer-menu-editor" onSelect={() => openLocalPath(path, 'vscode', line)}>
+          <ExternalLink aria-hidden="true" /> Open in editor
+        </DropdownMenuItem>
+        <DropdownMenuItem data-testid="file-viewer-menu-reveal" onSelect={() => openLocalPath(path, 'finder')}>
+          <FolderOpen aria-hidden="true" /> Reveal in file manager
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

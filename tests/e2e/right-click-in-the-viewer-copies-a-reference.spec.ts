@@ -9,15 +9,15 @@ import { build, type RollupOutput } from 'vite';
 import { display } from '../../scripts/product-name.js';
 
 /**
- * Copying out of the file viewer copies a reference (bw-g3o3.10).
+ * A right-click in the file viewer copies a reference; Ctrl-C copies the code
+ * (bw-g3o3.10, bw-v79ny.2).
  *
- * This has to be proved in a browser and not only in jsdom, because the whole
- * feature is a browser's own behaviour being taken over: a real Selection over
- * the lines CodeMirror drew, a real Ctrl-C answered by the clipboard filter
- * rather than by the browser's own copy, and a real clipboard, read back
- * afterwards to see what is on it. The escape hatch is proved the same way —
- * the button beside the selection really does hand over the code — and so is
- * the tree's own Copy reference, for a file and for a folder.
+ * This has to be proved in a browser and not only in jsdom, because it is a
+ * browser's own behaviour being taken over: a real Selection over the lines
+ * CodeMirror drew, a real right-click answered by the viewer's menu rather than
+ * the browser's, a real Ctrl-C, and a real clipboard, read back afterwards to
+ * see what is on it. So is the tree's own Copy reference, for a file and for a
+ * folder.
  *
  * The selection is built through the DOM rather than by dragging the mouse: a
  * synthetic drag does not move the caret in this headless Chromium, and
@@ -30,7 +30,7 @@ import { display } from '../../scripts/product-name.js';
  * the Files tab does not put the viewer in its own pane yet — that is a card of
  * its own — and this behaviour is the viewer's wherever it is hung.
  *
- * Run: scripts/workbench-e2e.sh tests/e2e/copying-from-the-viewer-copies-a-reference.spec.ts
+ * Run: scripts/workbench-e2e.sh tests/e2e/right-click-in-the-viewer-copies-a-reference.spec.ts
  */
 
 /** Where a run leaves its proof; not the artifacts folder, which is emptied. */
@@ -157,7 +157,7 @@ test('a tree entry copies @src/ for a folder and @src/x.ts for a file', async ({
   }
 });
 
-test('a selection in the viewer copies @src/x.ts:4-7, and the code is one click away', async ({ page }) => {
+test('a right-click on a selection copies @src/x.ts:4-7, and Ctrl-C copies the code', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   page.on('pageerror', (error) => console.log(`page error: ${error.message}`));
   page.on('console', (message) => {
@@ -219,35 +219,43 @@ test('a selection in the viewer copies @src/x.ts:4-7, and the code is one click 
   await select(4, 7);
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? '')).toContain('const line4');
 
-  // The offer to take the code instead stands beside the selection.
-  const offer = page.getByTestId('file-copy-text');
-  await expect(offer).toBeVisible({ timeout: WAIT });
-  await page.screenshot({ path: `${SHOTS}/bw-g3o310-viewer-selected.png`, animations: 'disabled' });
-
+  // Ctrl-C copies the code, as anywhere else.
   await blank(page);
   await page.keyboard.press('ControlOrMeta+c');
   await expect
-    .poll(() => clipboard(page), { message: 'copying a selection in the viewer did not write a reference' })
-    .toBe('@src/x.ts:4-7');
-
-  // And the button beside it hands over the lines it was drawn on.
-  await offer.getByRole('button').click();
-  await expect
-    .poll(() => clipboard(page), { message: 'Copy text did not put the lines themselves on the clipboard' })
+    .poll(() => clipboard(page), { message: 'Ctrl-C in the viewer did not copy the selected lines' })
     .toBe(LINES_4_TO_7);
 
-  // As does the one in the header, which is where a reader looks for it.
+  // A right-click on the selection opens the viewer's own menu.
+  await page.locator('.cm-line').nth(4).click({ button: 'right' });
+  const menu = page.getByTestId('file-viewer-menu');
+  await expect(menu).toBeVisible({ timeout: WAIT });
+  await page.screenshot({ path: `${SHOTS}/bw-v79ny2-viewer-menu.png`, animations: 'disabled' });
+  await blank(page);
+  await menu.getByTestId('file-viewer-menu-copy-reference').click();
+  await expect
+    .poll(() => clipboard(page), { message: 'Copy reference did not write a reference to the selected lines' })
+    .toBe('@src/x.ts:4-7');
+
+  // The menu's Copy hands over the lines, as does the header's button.
+  await select(4, 7);
+  await page.locator('.cm-line').nth(4).click({ button: 'right' });
+  await blank(page);
+  await page.getByTestId('file-viewer-menu-copy').click();
+  await expect.poll(() => clipboard(page), { message: 'the menu did not copy the selected lines' }).toBe(LINES_4_TO_7);
   await blank(page);
   await page.getByTestId('file-viewer-copy-text').click();
   await expect
     .poll(() => clipboard(page), { message: 'the header button did not copy the selected lines' })
     .toBe(LINES_4_TO_7);
 
-  // One line is one number, never a range of one.
-  await select(9, 9);
+  // With nothing selected, the line under the pointer, as one number.
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await page.locator('.cm-line').nth(8).click();
+  await page.locator('.cm-line').nth(8).click({ button: 'right' });
   await blank(page);
-  await page.keyboard.press('ControlOrMeta+c');
+  await page.getByTestId('file-viewer-menu-copy-reference').click();
   await expect
-    .poll(() => clipboard(page), { message: 'one line was not copied as @src/x.ts:9' })
+    .poll(() => clipboard(page), { message: 'one line was not named as @src/x.ts:9' })
     .toBe('@src/x.ts:9');
 });

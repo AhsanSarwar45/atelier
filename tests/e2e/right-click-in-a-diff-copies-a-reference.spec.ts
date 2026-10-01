@@ -8,16 +8,17 @@ import { aChatSomebodyElseIsIn } from './fixture-held';
 import { openGitView } from './open-git-view';
 
 /**
- * Selecting lines in a diff and pressing copy puts a reference on the clipboard
- * (bw-gr8y.8).
+ * Selecting lines in a diff and pressing copy copies the lines; a right-click
+ * and "Copy reference" puts `@diff:path:+from-to` on the clipboard, which
+ * pastes into the chat as a badge (bw-gr8y.8, bw-v79ny.2).
  *
  * The reason this has to be proved in a browser and not only in jsdom is that
- * the whole feature is a browser's own behaviour being taken over: a real
- * Selection over real table cells, a real Ctrl-C answered by our handler rather
- * than by the browser's own copy, and a real clipboard, which is read back out
+ * it is a browser's own behaviour being taken over: a real Selection over real
+ * table cells, a real Ctrl-C and right-click answered by our handlers rather
+ * than by the browser's own, and a real clipboard, which is read back out
  * afterwards to see what is on it.
  *
- * Run: scripts/workbench-e2e.sh tests/e2e/copying-from-a-diff-copies-a-reference.spec.ts
+ * Run: scripts/workbench-e2e.sh tests/e2e/right-click-in-a-diff-copies-a-reference.spec.ts
  */
 
 /** Where a run leaves its proof; not the artifacts folder, which is emptied. */
@@ -129,7 +130,7 @@ test.describe('copying out of the git diff', () => {
     rmSync(FIXTURE, { recursive: true, force: true });
   });
 
-  test('a selection over the lines copies @path:from-to, and offers the lines too', async ({
+  test('Ctrl-C copies the lines, and a right-click copies @diff:path:+from-to', async ({
     page,
     request,
   }) => {
@@ -206,31 +207,55 @@ test.describe('copying out of the git diff', () => {
         .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
         .not.toBe('');
 
-      // The offer to take the code instead stands beside the selection.
-      const offer = page.getByTestId('diff-copy-text');
-      await expect(offer).toBeVisible();
-      await page.screenshot({ path: `${SHOTS}/bw-gr8y-diff-selected.png` });
-
-      expect(await copied(), 'copying a selection over the new side did not write a reference').toBe(
-        '@src/a.ts:12-14',
+      // Ctrl-C copies the lines of the side that was selected.
+      expect(await copied(), 'Ctrl-C did not copy the lines themselves').toBe(
+        'const line12 = 12;\nconst line13 = 1300;\nconst line14 = 14;',
       );
 
-      // And the button beside it hands over the lines it was drawn on.
-      await offer.getByRole('button').click();
-      await expect
-        .poll(() => page.evaluate(() => navigator.clipboard.readText()), {
-          message: 'Copy text did not put the lines themselves on the clipboard',
-        })
-        .toBe('const line12 = 12;\nconst line13 = 1300;\nconst line14 = 14;');
+      /** What the clipboard holds after a right-click and the menu item `item`. */
+      const fromMenu = async (which: ReturnType<typeof section>, column: 'left' | 'right', row: number, item: string) => {
+        await page.evaluate(() => navigator.clipboard.writeText('nothing has been copied yet'));
+        await which
+          .getByTestId('diff-table')
+          .locator('tr')
+          .nth(row)
+          .locator('td')
+          .nth(column === 'left' ? 1 : 3)
+          .click({ button: 'right' });
+        await expect(page.getByTestId('diff-menu')).toBeVisible();
+        await page.getByTestId(item).click();
+        return page.evaluate(() => navigator.clipboard.readText());
+      };
+
+      await select(section('src/a.ts'), 'right', 2, 4);
+      await section('src/a.ts').getByTestId('diff-table').locator('tr').nth(3).locator('td').nth(3).click({ button: 'right' });
+      await expect(page.getByTestId('diff-menu')).toBeVisible();
+      await page.screenshot({ path: `${SHOTS}/bw-v79ny2-diff-menu.png` });
+      await page.keyboard.press('Escape');
+      expect(
+        await fromMenu(section('src/a.ts'), 'right', 3, 'diff-menu-copy-reference'),
+        'Copy reference over the new side did not name the diff lines',
+      ).toBe('@diff:src/a.ts:+12-14');
 
       // A selection over nothing but removed lines is counted the old way,
       // because those lines are not in the new file to be counted the new way.
       const gone = section('src/b.ts');
       await expect(gone.getByTestId('diff-table')).toBeVisible();
       await select(gone, 'left', 3, 4);
-      expect(await copied(), 'copying a selection over removed lines did not use the old numbers').toBe(
-        '@src/b.ts:12-13',
-      );
+      expect(
+        await fromMenu(gone, 'left', 3, 'diff-menu-copy-reference'),
+        'Copy reference over removed lines did not use the old numbers',
+      ).toBe('@diff:src/b.ts:-12-13');
+
+      // Pasted into the chat, the reference is a badge.
+      const writing = page.getByTestId('composer-frame').locator('.cm-content');
+      await writing.click();
+      await page.keyboard.press('ControlOrMeta+v');
+      await page.keyboard.type(' — why?');
+      const badge = page.getByTestId('composer-reference');
+      await expect(badge).toHaveCount(1);
+      await expect(badge).toHaveAttribute('data-reference-id', 'src/b.ts:-12-13');
+      await expect(badge).toContainText('b.ts −12-13');
     } finally {
       chat.forget();
       await request.delete(`/api/projects/${project.id}`);
