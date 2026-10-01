@@ -32,7 +32,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 
-import { FileText, PanelLeft, PanelRight, PanelRightClose, Search } from 'lucide-react';
+import { PanelLeft, PanelRight, PanelRightClose, Search } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { TabLead, TabTrail, ToolButton } from '@/components/shell';
@@ -45,7 +45,7 @@ import type { GitTree } from '@/lib/api';
 import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import { useOpenSearch } from '@/search/opener';
-import { ChatRightRail, useGitDiff, useRightRail } from '@/workbench/chat-right-rail';
+import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
 import { FilePreview, PREVIEWS_NEEDING_TEXT, previewKind, viewerDraws } from '@/workbench/file-preview';
 import FileTree from '@/workbench/file-tree';
 import { FileViewer, type ViewedFile } from '@/workbench/file-viewer';
@@ -53,6 +53,8 @@ import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
 import {
   closing,
   closingCurrent,
+  diffTabKey,
+  diffTabOf,
   openFilesFrom,
   openFilesKey,
   pinning,
@@ -60,6 +62,7 @@ import {
   type OpenFiles,
 } from '@/workbench/open-files';
 import { OpenFilesStrip } from '@/workbench/open-files-strip';
+import { parseDiffId, relativeToRoot } from '@/workbench/references';
 import { ResizeDivider, DEFAULT_PANEL_WIDTH, rememberedPanelWidth } from '@/workbench/resize-divider';
 import { useUnsavedPaths } from '@/workbench/unsaved-files';
 import { useFolderReads } from '@/workbench/use-folder-reads';
@@ -83,7 +86,10 @@ export interface FilesTabProps {
   projectId: string | null;
   /** The project's own checkout — the root everything falls back to. */
   projectPath: string | null;
-  /** The file the address names, absolute, or null when it names none. */
+  /**
+   * The tab the address names: a file, absolute, or a diff's key
+   * (`diffTabKey`), or null when it names none.
+   */
   file: string | null;
   /** The line of that file to land on, counted from one. */
   line: number | null;
@@ -126,7 +132,11 @@ export function rootShown(roots: GitTree[], remembered: string | null, projectPa
   return roots.find((root) => root.isMain)?.path ?? projectPath;
 }
 
-export default function FilesTab({ projectId, projectPath, file, line }: FilesTabProps) {
+export default function FilesTab({ projectId, projectPath, file: current, line }: FilesTabProps) {
+  /** The diff the tab in front is showing, when it is a diff. */
+  const diffTab = useMemo(() => diffTabOf(current), [current]);
+  /** The file the tab in front is showing, when it is a file. */
+  const file = diffTab ? null : current;
   const router = useRouter();
   const params = useSearchParams();
   const openSearch = useOpenSearch();
@@ -148,7 +158,6 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
    * crossing from the chat to the files does not shut it.
    */
   const [rightOpen, flipRight] = useRightRail();
-  const { diffOpen, flipDiff } = useGitDiff();
   const phone = usePhoneScreen();
   // What the bar's two buttons name in `aria-controls`: the sheets they open,
   // which is also how a sheet knows a press on its own door is not a press
@@ -157,15 +166,13 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   const gitId = useId();
   /** The file the Git panel last asked the diff to show (bw-pstm.1). */
   const [diffFocus, setDiffFocus] = useState<DiffFocus | null>(null);
-  /** The commit the diff pane is showing, or null for the working tree. */
-  const [openCommit, setOpenCommit] = useState<string | null>(null);
   /*
-   * The same rule the chat reads by: on a wide screen the diff and the panel
-   * that asked for it stand side by side, and on a phone the panel is a sheet
-   * OVER the diff, so the diff is only readable with the sheet shut
-   * (bw-e3dw.14).
+   * A diff is a tab like a file (bw-v79ny.3): it used to stand over whatever
+   * file was open, until the small diff button in the Git panel was pressed
+   * again, and a reader picking a file in the tree saw nothing happen.
    */
-  const showDiff = diffOpen && (phone || rightOpen);
+  const showDiff = diffTab !== null;
+  const openCommit = diffTab?.commit ?? null;
   // The file the tab was opened on, read once: putting `file` in the effect
   // below would throw the sheet open again on every file the reader picks.
   const openedOn = useRef(file);
@@ -240,53 +247,6 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
     if (!showDiff) setDiffFocus(null);
   }, [showDiff]);
 
-  /**
-   * The diff button, with both of a phone's doors shut behind it.
-   *
-   * The chat shuts the sheet the button was pressed in (bw-e3dw.14); this tab
-   * has a second sheet, the tree, and on a phone that one was left standing
-   * over the diff it had just asked for — a reader who pressed a file in Git
-   * got a tree where the answer should have been.
-   */
-  const showTheDiff = useCallback(() => {
-    if (phone && !diffOpen) {
-      if (rightOpen) flipRight();
-      setRailOpen(false);
-    }
-    flipDiff();
-  }, [phone, diffOpen, rightOpen, flipRight, flipDiff]);
-
-  /** A file's name in the Git panel, clicked: the diff comes up on that file. */
-  const showFileInDiff = useCallback(
-    (file: string) => {
-      if (phone) {
-        if (rightOpen) flipRight();
-        setRailOpen(false);
-      }
-      if (!diffOpen) flipDiff();
-      // A file named here is a file in the working tree, so asking for one is
-      // also asking to come back out of a commit (bw-g6zy.5).
-      setOpenCommit(null);
-      setDiffFocus({ path: file, asked: Date.now() });
-    },
-    [phone, diffOpen, rightOpen, flipRight, flipDiff],
-  );
-
-  /** A commit in the Git panel, pressed: the diff comes up showing it. */
-  const showCommitInDiff = useCallback(
-    (sha: string) => {
-      if (phone) {
-        if (rightOpen) flipRight();
-        setRailOpen(false);
-      }
-      if (!diffOpen) flipDiff();
-      setDiffFocus(null);
-      setOpenCommit(sha);
-    },
-    [phone, diffOpen, rightOpen, flipRight, flipDiff],
-  );
-  const showWorkingTreeInDiff = useCallback(() => setOpenCommit(null), []);
-
   const chooseRoot = useCallback(
     (next: string) => {
       setRemembered(next);
@@ -315,19 +275,21 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
   // link, a path clicked somewhere else in the app — opens in the preview slot,
   // exactly as a single click in the tree will.
   useEffect(() => {
-    if (!file) return;
+    if (!current) return;
     setStrip((was) => {
-      if (was.files.some((open) => open.path === file)) return was;
+      if (was.files.some((open) => open.path === current)) return was;
+      // A diff was asked for by name, never glanced at: it is kept.
+      if (diffTabOf(current)) return { ...was, files: [...was.files, { path: current, preview: false }] };
       const slot = was.files.findIndex((open) => open.preview);
-      const opened: OpenFile = { path: file, preview: true };
+      const opened: OpenFile = { path: current, preview: true };
       return {
         ...was,
         files: slot === -1 ? [...was.files, opened] : was.files.map((open, at) => (at === slot ? opened : open)),
       };
     });
-  }, [file]);
+  }, [current]);
 
-  const open: OpenFiles = useMemo(() => ({ files: strip.files, current: file }), [strip.files, file]);
+  const open: OpenFiles = useMemo(() => ({ files: strip.files, current }), [strip.files, current]);
 
   // The strip's own way of naming a file, beside `openFile` above: the tree
   // pushes, because clicking through a tree is a journey Back should be able
@@ -370,13 +332,84 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
 
   const applied = useCallback((next: OpenFiles) => {
     setStrip((was) => ({ ...was, files: next.files }));
-    if (next.current !== file) show(next.current);
-  }, [file, show]);
+    if (next.current !== current) show(next.current);
+  }, [current, show]);
 
-  const preview = useCallback((path: string) => { if (path !== file) show(path); }, [file, show]);
+  const preview = useCallback((path: string) => { if (path !== current) show(path); }, [current, show]);
   const pin = useCallback((path: string) => applied(pinning(open, path)), [applied, open]);
   const close = useCallback((path: string) => applied(closing(open, path)), [applied, open]);
   const closeCurrent = useCallback(() => applied(closingCurrent(open)), [applied, open]);
+
+  /** The rail's sheets, shut on a phone so the diff they asked for is seen. */
+  const clearPhone = useCallback(() => {
+    if (!phone) return;
+    if (rightOpen) flipRight();
+    setRailOpen(false);
+  }, [phone, rightOpen, flipRight]);
+
+  /** A diff's tab, opened and kept, and put in front. */
+  const openDiff = useCallback(
+    (commit: string | null) => {
+      clearPhone();
+      applied(pinning(open, diffTabKey(commit)));
+    },
+    [clearPhone, applied, open],
+  );
+
+  /**
+   * The Git panel's diff button: the uncommitted changes' tab, or, when a diff
+   * is already in front, that tab closed again.
+   */
+  const showTheDiff = useCallback(() => {
+    if (current && diffTabOf(current)) applied(closing(open, current));
+    else openDiff(null);
+  }, [current, open, applied, openDiff]);
+
+  /** A file's name in the Git panel, clicked: the changes' tab, on that file. */
+  const showFileInDiff = useCallback(
+    (path: string) => {
+      openDiff(null);
+      setDiffFocus({ path, asked: Date.now() });
+    },
+    [openDiff],
+  );
+
+  /** A commit in the Git panel, pressed: its own tab. */
+  const showCommitInDiff = useCallback(
+    (sha: string) => {
+      setDiffFocus(null);
+      openDiff(sha);
+    },
+    [openDiff],
+  );
+  const showWorkingTreeInDiff = useCallback(() => openDiff(null), [openDiff]);
+
+  /** The viewer's "Show changes": the changes' tab, on the file being read. */
+  const showChangesOf = useCallback(
+    (path: string) => showFileInDiff(root ? relativeToRoot(root, path) : path),
+    [showFileInDiff, root],
+  );
+
+  // A `@diff:` badge clicked anywhere in the app asks for its diff in the
+  // address, once: it opens the tab at the lines it names and is dropped.
+  const askedDiff = params.get('diff');
+  useEffect(() => {
+    if (!askedDiff) return;
+    const asked = parseDiffId(askedDiff);
+    if (!asked) {
+      router.replace(addressWith(params, { diff: null }));
+      return;
+    }
+    clearPhone();
+    const key = diffTabKey(asked.commit);
+    setStrip((was) =>
+      was.files.some((one) => one.path === key) ? was : { ...was, files: [...was.files, { path: key, preview: false }] },
+    );
+    setDiffFocus({ path: asked.path, line: asked.line, endLine: asked.endLine, side: asked.side, asked: Date.now() });
+    router.replace(addressWith(params, { tab: 'files', file: key, line: null, diff: null }));
+    // Asked once per value; the rest is read as it stands then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askedDiff]);
 
   // Only the views that read as source need the file's text; a video or a PDF
   // is served straight out of the media route and is never read into the page.
@@ -453,18 +486,6 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
       {/* The far right of the bar, mirroring the chat's own: the door to the
           column that says what this checkout has changed (bw-rpgh.5). */}
       <TabTrail tab="files">
-        {/* The one press back to the file, and only on a phone, for the same
-            reason the chat carries one: a phone shut the column to read the
-            diff at all, so the way back cannot be inside it. */}
-        {showDiff && (
-          <ToolButton
-            icon={<FileText />}
-            label="Back to the file"
-            className="md:hidden"
-            data-testid="files-diff-back"
-            onClick={showTheDiff}
-          />
-        )}
         {/* The files' own search, the one Ctrl+K opens here (bw-21a2.8). */}
         <ToolButton icon={<Search />} label="Search files" data-testid="files-open-search" onClick={openSearch} />
         <ToolButton
@@ -538,6 +559,7 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
         className="flex min-h-0 min-w-0 flex-1 flex-col"
         data-testid="files-viewer"
         data-file={file ?? undefined}
+        data-diff={diffTab ? (diffTab.commit ?? 'working') : undefined}
         data-line={line ?? undefined}
       >
         <OpenFilesStrip
@@ -548,10 +570,10 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
           onCloseCurrent={closeCurrent}
           dirty={dirty}
         />
-        {/* What this checkout has changed, standing where the file stands —
-            the same swap the chat makes with its transcript (bw-rx1y.4). Keyed
-            on the root, because the open-and-shut state inside is kept by file
-            path and a path means nothing in another checkout. */}
+        {/* What this checkout has changed, as a tab of its own in the strip
+            (bw-v79ny.3). Keyed on the root, because the open-and-shut state
+            inside is kept by file path and a path means nothing in another
+            checkout. */}
         {showDiff ? (
           <div data-testid="files-diff-pane" className="flex min-h-0 flex-1 flex-col">
             <GitDiffView
@@ -582,6 +604,7 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
             error={read.error}
             onSaved={() => void readAgain()}
             onEditing={pin}
+            onShowChanges={showChangesOf}
           />
         ) : (
           <FilePreview
@@ -599,7 +622,7 @@ export default function FilesTab({ projectId, projectPath, file, line }: FilesTa
         projectPath={root}
         workingIn={root}
         desktopWidth={DEFAULT_PANEL_WIDTH}
-        diffOpen={diffOpen}
+        diffOpen={showDiff}
         onFlipDiff={showTheDiff}
         onShowFile={showFileInDiff}
         onShowCommit={showCommitInDiff}

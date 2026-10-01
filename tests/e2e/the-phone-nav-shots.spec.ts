@@ -204,7 +204,9 @@ test.describe('the navigation on a phone', () => {
       await expect(panelFile).toBeVisible({ timeout: 60_000 });
       await panelFile.click();
       await expect(page.getByTestId('files-diff-pane')).toBeVisible({ timeout: 60_000 });
-      await expect(page.getByTestId('files-diff-back')).toBeVisible();
+      // The diff is a tab of its own in the strip, put away with its × like a
+      // file (bw-v79ny.3), so there is no separate way back to stand over it.
+      await expect(page.locator('[data-testid="open-file"][data-diff="working"]')).toBeVisible();
       // Both of a phone's sheets are out of the way: the diff is what was
       // asked for, so nothing may be standing over it.
       await expect(page.getByTestId('files-rail')).toHaveAttribute('data-open', 'false');

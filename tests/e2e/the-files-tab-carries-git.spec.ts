@@ -134,7 +134,25 @@ test.describe('the Files tab carries Git', () => {
       ).toBeVisible();
       await page.screenshot({ path: `${SHOTS}/bw-rpgh-files-tab-git.png` });
 
-      // ---- and the same button puts it away again --------------------------
+      // ---- it is a tab in the strip, so a file picked in the tree opens ----
+      // over it rather than behind it (bw-v79ny.3)
+      const changes = page.locator('[data-testid="open-file"][data-diff="working"]');
+      await expect(changes).toHaveAttribute('data-current', 'true');
+      await expect(changes).toContainText('Changes');
+      await page.locator('[data-testid="files-tree-row"]', { hasText: 'alpha.txt' }).click();
+      await expect(pane).toHaveCount(0, { timeout: 30_000 });
+      await expect(page.getByTestId('file-viewer')).toBeVisible({ timeout: 30_000 });
+
+      // ---- the Changes tab is still there, and its × puts it away ----------
+      await changes.click();
+      await expect(pane).toBeVisible({ timeout: 30_000 });
+      await page.getByRole('button', { name: 'Close Changes' }).click();
+      await expect(changes).toHaveCount(0, { timeout: 30_000 });
+      await expect(pane).toHaveCount(0);
+
+      // ---- and the rail's button opens it again ----------------------------
+      await page.getByTestId('git-diff-toggle').click();
+      await expect(pane).toBeVisible({ timeout: 30_000 });
       await page.getByTestId('git-diff-toggle').click();
       await expect(pane).toHaveCount(0, { timeout: 30_000 });
     } finally {

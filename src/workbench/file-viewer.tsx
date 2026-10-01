@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { Copy, ExternalLink, FolderOpen, Pencil, Quote, TextSelect } from 'lucide-react';
+import { Copy, ExternalLink, FileDiff, FolderOpen, Pencil, Quote, TextSelect } from 'lucide-react';
 
 import { isMarkdownPath } from '@/components/file-kinds';
 import { ToolButton } from '@/components/shell';
@@ -155,6 +155,8 @@ export interface FileViewerProps {
    * typed by the next click in the tree (bw-g3o3.18).
    */
   onEditing?: (path: string) => void;
+  /** The menu's "Show changes": open the diff on this file. */
+  onShowChanges?: (path: string) => void;
   className?: string;
 }
 
@@ -167,6 +169,7 @@ export function FileViewer({
   error = null,
   onSaved,
   onEditing,
+  onShowChanges,
   className,
 }: FileViewerProps) {
   const relative = relativeToRoot(root, path);
@@ -409,6 +412,7 @@ export function FileViewer({
                 endLine: menu.selection ? menu.selection.toLine : null,
               })}
               relative={relative}
+              onShowChanges={onShowChanges}
               onClose={() => setMenu(null)}
             />
           )}
@@ -434,12 +438,14 @@ function ViewerMenu({
   path,
   reference,
   relative,
+  onShowChanges,
   onClose,
 }: {
   asked: EditorMenuAsk;
   path: string;
   reference: string;
   relative: string;
+  onShowChanges?: (path: string) => void;
   onClose: () => void;
 }) {
   const line = asked.selection?.fromLine ?? asked.line;
@@ -481,6 +487,11 @@ function ViewerMenu({
           <Copy aria-hidden="true" /> Copy relative path
         </DropdownMenuItem>
         <DropdownMenuSeparator />
+        {onShowChanges && (
+          <DropdownMenuItem data-testid="file-viewer-menu-changes" onSelect={() => onShowChanges(path)}>
+            <FileDiff aria-hidden="true" /> Show changes
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem data-testid="file-viewer-menu-editor" onSelect={() => openLocalPath(path, 'vscode', line)}>
           <ExternalLink aria-hidden="true" /> Open in editor
         </DropdownMenuItem>

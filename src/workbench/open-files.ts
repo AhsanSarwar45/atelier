@@ -17,7 +17,10 @@
  */
 
 export interface OpenFile {
-  /** The absolute path of the file on the machine. */
+  /**
+   * The absolute path of the file on the machine — or, for a diff open as a
+   * tab, its key (`diffTabKey`), which never starts with a slash.
+   */
   path: string;
   /** True while this is the one replaceable slot — drawn in italics. */
   preview: boolean;
@@ -31,6 +34,27 @@ export interface OpenFiles {
 }
 
 export const NOTHING_OPEN: OpenFiles = { files: [], current: null };
+
+/**
+ * A diff opens as a tab beside the files (bw-v79ny.3): the uncommitted changes
+ * as one tab, and each commit as its own. It is kept in the strip and in the
+ * address under a key in place of a path, so everything that already opens,
+ * pins, closes and remembers a tab does the same for a diff. A path is
+ * absolute, so a key — which is not — can never be mistaken for one.
+ */
+const DIFF_TAB = 'changes:';
+
+/** The key a diff's tab is kept under: `changes:` or `changes:<sha>`. */
+export function diffTabKey(commit: string | null): string {
+  return `${DIFF_TAB}${commit ?? ''}`;
+}
+
+/** What a tab key names when it names a diff, or null for a file. */
+export function diffTabOf(key: string | null): { commit: string | null } | null {
+  if (!key?.startsWith(DIFF_TAB)) return null;
+  const commit = key.slice(DIFF_TAB.length);
+  return { commit: commit === '' ? null : commit };
+}
 
 /**
  * Opened with a single click: it takes the preview slot.

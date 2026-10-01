@@ -16,12 +16,14 @@
 
 import { useEffect } from 'react';
 
+import { FileDiff, GitCommitHorizontal } from 'lucide-react';
+
 import { FILE_KINDS, fileKind } from '@/components/file-kinds';
 import { BadgeDot } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import type { OpenFiles } from '@/workbench/open-files';
+import { diffTabOf, type OpenFiles } from '@/workbench/open-files';
 
 /**
  * The kind's own ink, pulled out of the badge classes so a tab, a badge and a
@@ -35,6 +37,8 @@ function inkFor(path: string): string {
 
 /** What a tab is called: the file's own name, not the path that led to it. */
 export function tabName(path: string): string {
+  const diff = diffTabOf(path);
+  if (diff) return diff.commit ? diff.commit.slice(0, 7) : 'Changes';
   const parts = path.split('/').filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
@@ -92,15 +96,18 @@ export function OpenFilesStrip({
         {state.files.map((file) => {
           const current = file.path === state.current;
           const unsaved = dirty?.has(file.path) === true;
-          const Icon = FILE_KINDS[fileKind(file.path)].icon;
+          const diff = diffTabOf(file.path);
+          const Icon = diff ? (diff.commit ? GitCommitHorizontal : FileDiff) : FILE_KINDS[fileKind(file.path)].icon;
+          const label = diff ? (diff.commit ? `Commit ${diff.commit.slice(0, 7)}` : 'Uncommitted changes') : file.path;
           return (
             // The whole path on hover: a strip full of `index.ts` is otherwise
             // several files with one name.
-            <Tooltip key={file.path} label={file.path} side="bottom">
+            <Tooltip key={file.path} label={label} side="bottom">
               <TabsTrigger
                 value={file.path}
                 data-testid="open-file"
                 data-path={file.path}
+                data-diff={diff ? (diff.commit ?? 'working') : undefined}
                 data-preview={file.preview || undefined}
                 data-current={current || undefined}
                 data-dirty={unsaved || undefined}
@@ -119,7 +126,7 @@ export function OpenFilesStrip({
                   ) : undefined
                 }
               >
-                <Icon className={inkFor(file.path)} />
+                <Icon className={diff ? 'text-sky-400' : inkFor(file.path)} />
                 <span className={cn('truncate', file.preview && 'italic')}>{tabName(file.path)}</span>
               </TabsTrigger>
             </Tooltip>

@@ -17,6 +17,8 @@ import {
   NOTHING_OPEN,
   closing,
   closingCurrent,
+  diffTabKey,
+  diffTabOf,
   openFilesFrom,
   previewing,
   pinning,
@@ -216,5 +218,38 @@ describe('how a file is shown', () => {
     expect(previewKind('/p/notes.txt')).toBe('text');
     expect(previewKind('/p/release.tar.gz')).toBe('text');
     expect(previewKind('/p/Makefile')).toBe('text');
+  });
+});
+
+describe('a diff as a tab of its own (bw-v79ny.3)', () => {
+  const SHA = '38c17d0f30313b2fc4ed51439992d2ba00cde839';
+
+  it('keys the uncommitted changes and each commit apart from any file', () => {
+    expect(diffTabOf(diffTabKey(null))).toEqual({ commit: null });
+    expect(diffTabOf(diffTabKey(SHA))).toEqual({ commit: SHA });
+    expect(diffTabOf(A)).toBeNull();
+    expect(diffTabOf(null)).toBeNull();
+  });
+
+  it('names the tab Changes, or by the commit it shows', () => {
+    expect(tabName(diffTabKey(null))).toBe('Changes');
+    expect(tabName(diffTabKey(SHA))).toBe('38c17d0');
+  });
+
+  it('closes like a file and hands the strip to its neighbour', () => {
+    const open = pinning(pinning(NOTHING_OPEN, A), diffTabKey(null));
+    expect(open.current).toBe(diffTabKey(null));
+    const closed = closingCurrent(open);
+    expect(closed.files.map((file) => file.path)).toEqual([A]);
+    expect(closed.current).toBe(A);
+  });
+
+  it('draws the diff tabs with their own label for the close button', () => {
+    const open = pinning(pinning(NOTHING_OPEN, A), diffTabKey(SHA));
+    render(
+      <OpenFilesStrip state={open} onPreview={vi.fn()} onPin={vi.fn()} onClose={vi.fn()} onCloseCurrent={vi.fn()} />,
+    );
+    expect(screen.getByRole('button', { name: 'Close 38c17d0' })).toBeTruthy();
+    expect(document.querySelector('[data-diff]')?.getAttribute('data-diff')).toBe(SHA);
   });
 });
