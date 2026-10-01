@@ -179,6 +179,14 @@ fn diff_id_at(text: &str, from: usize) -> Option<usize> {
     (end > from && DiffRef::parse(&text[from..end]).is_some()).then_some(end)
 }
 
+/// Whether a change to `path` can be written as `@diff:path` and read back as
+/// the same path. A space, a letter outside ASCII or a `:` would end or split
+/// the reference, so such a path is never offered as one.
+pub fn diff_path_writable(path: &str) -> bool {
+    diff_id_at(path, 0) == Some(path.len())
+        && DiffRef::parse(path).is_some_and(|diff| diff.commit.is_none() && diff.line.is_none() && diff.path == path)
+}
+
 /// The id starting at `from`, ending on a letter or a digit, with nothing
 /// word-like after it — the longest that fits, the way the composer's pattern
 /// backtracks.

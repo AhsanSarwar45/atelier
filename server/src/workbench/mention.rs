@@ -236,6 +236,8 @@ pub fn diffs(changed: &[(String, String)], wanted: &str, limit: usize) -> Vec<Of
     let wanted = wanted.to_lowercase();
     let offers = changed
         .iter()
+        // A path the reference cannot carry whole would be inserted cut short.
+        .filter(|(path, _)| crate::workbench::references::diff_path_writable(path))
         .filter_map(|(path, status)| {
             let (folder, name) = match path.rsplit_once('/') {
                 Some((folder, name)) => (folder, name),
@@ -367,5 +369,17 @@ mod tests {
         assert_eq!(drawn, [skill.clone(), file.clone()]);
         let untyped = in_order(vec![(Kind::File, vec![file.clone()]), (Kind::Skill, vec![skill.clone()])], false);
         assert_eq!(untyped, [file, skill]);
+    }
+
+    #[test]
+    fn a_changed_file_a_reference_cannot_carry_whole_is_not_offered() {
+        let changed = [
+            ("docs/my notes.md".to_string(), "modified".to_string()),
+            ("src/café.ts".to_string(), "modified".to_string()),
+            ("src/a:12".to_string(), "modified".to_string()),
+            ("src/a.ts".to_string(), "modified".to_string()),
+        ];
+        let found = diffs(&changed, "", 10);
+        assert_eq!(found.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["src/a.ts"]);
     }
 }
