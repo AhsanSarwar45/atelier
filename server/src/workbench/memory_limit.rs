@@ -178,7 +178,7 @@ impl Invoice {
 
     /// The message the chat is restarted with, addressed to the agent that ran
     /// up the bill. It has to say what was spent, that everything was killed,
-    /// and that repeating the run is not what to do next.
+    /// and that it should carry on with the work while staying under the limit.
     fn message(&self) -> String {
         let largest = if self.largest.is_empty() {
             String::new()
@@ -190,11 +190,12 @@ impl Invoice {
              At the moment it was stopped this chat was holding {}, against a limit of {}.{}\n\n\
              Everything that run owned has been killed — the provider, every subagent and every \
              shell it had started — and you are now on a fresh process with none of it left. \
-             Do not pick that work back up and do not run it the same way again: whatever was \
-             holding that memory will hold it again and this chat will be stopped again.\n\n\
-             Wait to be asked before continuing. When you are asked, do it in a way that stays \
-             well under {}: smaller batches, fewer processes at once, and nothing left running \
-             in the background.",
+             Restarting it as it was will fail: do not run it the same way again, because \
+             whatever was holding that memory will hold it again and this chat will be stopped \
+             again.\n\n\
+             Please fix your memory consumption to stay under the limit of {} and continue what \
+             you were working on: smaller batches, fewer processes at once, and nothing left \
+             running in the background.",
             words(self.held),
             words(self.limit),
             largest,
@@ -500,6 +501,12 @@ mod tests {
                 "{}",
                 sent[0]
             );
+            assert!(
+                sent[0].contains("continue what you were working on"),
+                "{}",
+                sent[0]
+            );
+            assert!(!sent[0].contains("Wait to be asked"), "{}", sent[0]);
 
             let said = database.events_since("session-1".into(), 0).await.unwrap();
             let notices: Vec<String> = said
