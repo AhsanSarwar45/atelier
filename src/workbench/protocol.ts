@@ -750,7 +750,7 @@ export type WbpEvent = EventBase &
     | { type: 'context'; used: number; window: number }
     | { type: 'link.bead'; beadId: string; via: 'tool' | 'brief' | 'manual' }
     | { type: 'error'; message: string; fatal: boolean }
-    /** Current provider/service condition, already translated out of vendor vocabulary. */
+    /** A provider/service condition, already translated out of vendor vocabulary. */
     | { type: 'provider.message'; signal: ProviderMessageSignal }
     /**
      * A line the app says about the chat itself, not the agent's own words.

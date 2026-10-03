@@ -1123,6 +1123,81 @@ fn held_in_its_project(
         )
     }
 
+    /// The notices only this app recorded since the chat's last reset, as
+    /// fresh events to append after the next one.
+    ///
+    /// A reset replaces the transcript with the provider's own record. That
+    /// record re-derives what it holds, but not the sign-in, limit and other
+    /// notices this app saw happen, nor its own asides. Those are kept: they
+    /// are put back at the end of the new transcript, so no reload ever loses
+    /// one. A notice the replay itself carried is left to the replay.
+    pub fn kept_across_reset(&self, session_id: &str) -> rusqlite::Result<Vec<Event>> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT json FROM event
+                WHERE session_id=?1 AND type IN ('provider.message','notice')
+                  AND seq > COALESCE((SELECT MAX(seq) FROM event
+                    WHERE session_id=?1 AND type='transcript.reset'),0)
+                  AND COALESCE(json_extract(json,'$.providerEvent.delivery'),'') <> 'replay'
+                ORDER BY seq"#,
+        )?;
+        let rows = statement
+            .query_map([session_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|json| {
+                let mut event: Event = serde_json::from_str(&json).map_err(json_error)?;
+                // A copy, not the provider's event: its identity would make the
+                // store take it for the original and skip it.
+                event.fields.remove("providerEvent");
+                event.fields.insert("seq".into(), json!(0));
+                Ok(event)
+            })
+            .collect()
+    }
+
+    pub fn chats_told_to_sign_in(&self) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT DISTINCT session_id FROM event WHERE type='provider.message'
+                AND json_extract(json,'$.signal.kind')='authentication'"#,
+        )?;
+        let found = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(found)
+    }
+
+    /// The chat's notices whose condition still stands: for each condition,
+    /// its newest notice, unless that one says it cleared or the agent has
+    /// replied since. A reply is the turn going through.
+    ///
+    /// The same rule the chat draws by (`currentProviderMessages`), read off
+    /// the same rows, so the chat's status can never say something its
+    /// transcript does not.
+    pub fn current_notices(&self, session_id: &str) -> rusqlite::Result<Vec<Value>> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT json_extract(notice.json,'$.signal') FROM event AS notice
+                WHERE notice.session_id=?1 AND notice.seq IN (
+                  SELECT MAX(seq) FROM event
+                   WHERE session_id=?1 AND type='provider.message'
+                     AND seq > COALESCE((SELECT MAX(seq) FROM event
+                       WHERE session_id=?1 AND type='transcript.reset'),0)
+                   GROUP BY json_extract(json,'$.signal.id'))
+                  AND json_extract(notice.json,'$.signal.phase')='active'
+                  AND NOT EXISTS (SELECT 1 FROM event AS reply
+                    WHERE reply.session_id=?1 AND reply.type='message.started'
+                      AND reply.seq > notice.seq
+                      AND json_extract(reply.json,'$.role')='assistant'
+                      AND json_extract(reply.json,'$.parentToolCallId') IS NULL)
+                ORDER BY notice.seq"#,
+        )?;
+        let rows = statement
+            .query_map([session_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.iter()
+            .map(|json| serde_json::from_str(json).map_err(json_error))
+            .collect()
+    }
+
     /// Append once across live, replay, and snapshot delivery of one provider event.
     pub fn append_event(&self, event: &Event) -> rusqlite::Result<bool> {
         let owns_transaction = self.connection.is_autocommit();
@@ -2842,7 +2917,7 @@ fn held_in_its_project(
                        WHEN 'ask.permission' THEN 'ask:' || json_extract(json,'$.askId')
                        WHEN 'question.requested' THEN 'question:' || json_extract(json,'$.requestId')
                        WHEN 'plan.proposed' THEN 'plan:' || json_extract(json,'$.proposalId')
-                       WHEN 'provider.message' THEN 'provider_message:' || json_extract(json,'$.signal.id')
+                       WHEN 'provider.message' THEN 'provider_message:' || seq
                        WHEN 'notice' THEN 'notice:' || seq END AS item_key,
                        MIN(seq) AS started
                      FROM event
@@ -3200,8 +3275,8 @@ fn event_item_anchor(event: &Event) -> Option<String> {
         EventKind::QuestionRequested => Some(format!("question:{}", field("requestId")?)),
         EventKind::PlanProposed => Some(format!("plan:{}", field("proposalId")?)),
         EventKind::ProviderMessage => Some(format!(
-            "provider_message:{}",
-            event.fields.get("signal")?.get("id")?.as_str()?
+            "provider_message:provider-message-{}",
+            event.fields.get("seq")?.as_i64()?
         )),
         EventKind::Notice => Some(format!("notice-{}", event.fields.get("seq")?.as_i64()?))
             .map(|id| format!("notice:{id}")),
@@ -5933,6 +6008,72 @@ mod tests {
             .unwrap();
         assert_eq!(thought["text"], "early late");
         assert_eq!(thought["done"], true);
+    }
+
+    /// Every notice stays a row of the transcript; which one is current is
+    /// read off the order, by the same rule the chat draws by.
+    #[test]
+    fn notices_are_kept_and_only_the_newest_unanswered_one_is_current() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let mut seq = 0;
+        let mut append = |value: Value| {
+            seq += 1;
+            let mut value = value;
+            value["sessionId"] = json!("chat");
+            value["seq"] = json!(seq);
+            value["at"] = json!("2026-10-03T00:00:00Z");
+            assert!(store.append_event(&serde_json::from_value(value).unwrap()).unwrap());
+        };
+        let sign_in = |phase: &str| json!({"type":"provider.message","signal":{
+            "id":"condition:authentication","kind":"authentication","phase":phase,
+            "severity":"blocking","scope":"session"
+        }});
+        append(sign_in("active"));
+        append(sign_in("resolved"));
+        append(sign_in("active"));
+        assert_eq!(store.current_notices("chat").unwrap().len(), 1);
+        let page = store.transcript_items("chat", None, 40).unwrap();
+        let ids: Vec<_> = page.items.iter().map(|item| item["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, ["provider-message-1", "provider-message-2", "provider-message-3"]);
+
+        // The agent answering is the turn going through.
+        append(json!({"type":"message.started","messageId":"reply","role":"assistant"}));
+        assert!(store.current_notices("chat").unwrap().is_empty());
+        // A helper's words are not the chat's turn.
+        append(sign_in("active"));
+        append(json!({"type":"message.started","messageId":"helper","role":"assistant","parentToolCallId":"t"}));
+        assert_eq!(store.current_notices("chat").unwrap().len(), 1);
+    }
+
+    /// What only this app recorded survives the provider's record replacing
+    /// the transcript; what the replay itself carries is left to the replay.
+    #[test]
+    fn a_reset_keeps_the_notices_only_this_app_recorded() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let event = |seq: i64, value: Value| {
+            let mut value = value;
+            value["sessionId"] = json!("chat");
+            value["seq"] = json!(seq);
+            value["at"] = json!("2026-10-03T00:00:00Z");
+            serde_json::from_value::<Event>(value).unwrap()
+        };
+        let signal = json!({"id":"condition:authentication","kind":"authentication","phase":"active","severity":"blocking","scope":"session"});
+        store.append_event(&event(1, json!({"type":"provider.message","signal":signal,
+            "providerEvent":{"provider":"claude","threadId":"x","eventId":"live-1","delivery":"live"}}))).unwrap();
+        store.append_event(&event(2, json!({"type":"notice","text":"Signed in."}))).unwrap();
+        store.append_event(&event(3, json!({"type":"provider.message","signal":signal,
+            "providerEvent":{"provider":"claude","threadId":"x","eventId":"old-replay","delivery":"replay"}}))).unwrap();
+        let kept = store.kept_across_reset("chat").unwrap();
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].kind, EventKind::ProviderMessage);
+        assert!(kept[0].fields.get("providerEvent").is_none(), "a copy, so the store does not skip it");
+        assert_eq!(kept[1].kind, EventKind::Notice);
+
+        // After the reset only what came after it is the chat's newest generation.
+        store.append_event(&event(4, json!({"type":"transcript.reset"}))).unwrap();
+        assert!(store.kept_across_reset("chat").unwrap().is_empty());
     }
 
     #[test]

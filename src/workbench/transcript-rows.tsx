@@ -815,7 +815,7 @@ export const MachineLine = memo(
           {/* Said plainly, with the way out beside it: the provider's own
               sentence names a token, and what it means is that this account
               has to be signed in again (bw-lep5.1). */}
-          {NEEDS_SIGNING_IN.has(row.kind) && <ChatSignIn />}
+          {NEEDS_SIGNING_IN.has(row.kind) && row.current && <ChatSignIn />}
           {open &&
             row.lines.map((line, i) => (
               <Body
@@ -839,6 +839,7 @@ function sameRow(a: MachineRow, b: MachineRow): boolean {
     a.family === b.family &&
     a.kind === b.kind &&
     a.rank === b.rank &&
+    a.current === b.current &&
     a.lines.length === b.lines.length &&
     a.lines.every((line, i) => line.text === b.lines[i]?.text && line.body === b.lines[i]?.body)
   );

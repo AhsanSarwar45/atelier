@@ -41,7 +41,7 @@ import {
   whenItComesBack,
   whoFor,
 } from '@/workbench/machine-words';
-import { providerMessageIsCurrent, providerMessageReads } from '@/workbench/provider-messages';
+import { currentProviderMessages, providerMessageReads } from '@/workbench/provider-messages';
 import type { Audience, MachineFamily, NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -465,6 +465,8 @@ export interface MachineRow {
   kind: string;
   rank: NoteRank;
   lines: { text: string; body: string | null }[];
+  /** Whether the run ends on a notice whose condition still stands. */
+  current: boolean;
 }
 
 export type DrawnRow = MachineRow | { row: 'other'; item: TranscriptItem };
@@ -508,29 +510,28 @@ const SAME_FACT: Record<string, string> = {
 };
 
 /**
- * The kind whose line offers to sign this chat's account in again.
+ * The kind whose line offers to sign this chat's account in again, while it
+ * is current.
  *
- * The condition only, never the provider's sentence: the condition is current
- * state and goes away once the account is signed in, where the sentence stays
- * in the conversation as a record of what happened (bw-lep5.1).
+ * The condition only, never the provider's sentence: the condition is what
+ * clears once the account is signed in. Both stay in the conversation as a
+ * record of what happened (bw-lep5.1).
  */
 export const NEEDS_SIGNING_IN: ReadonlySet<string> = new Set(['provider/authentication']);
 
 /**
- * The kinds whose sentence this transcript no longer needs to draw, because the
- * condition it means is already on the page.
+ * The kinds whose sentence this transcript no longer needs to draw, because a
+ * notice saying the same thing is on the page.
  *
- * The condition wins, not the sentence: it carries the time the limit lifts
- * (`provider-messages.ts`), it keeps its own detail behind a chevron, and it is
- * current state — it replaces itself as the run goes on, where a sentence would
- * pile up one copy per attempt (bw-gao7).
+ * The notice wins, not the sentence: it carries the time the limit lifts
+ * (`provider-messages.ts`) and keeps its own detail behind a chevron (bw-gao7).
  */
 function saidBySignal(items: TranscriptItem[]): Set<string> {
   const said = new Set<string>();
   for (const item of items) {
-    if (item.kind !== 'provider_message') continue;
+    if (item.kind !== 'provider_message' || item.signal.phase !== 'active') continue;
     const also = SAME_FACT[`provider/${item.signal.kind}`];
-    if (also !== undefined && providerMessageIsCurrent(item.signal)) said.add(also);
+    if (also !== undefined) said.add(also);
   }
   return said;
 }
@@ -553,10 +554,16 @@ function saidBySignal(items: TranscriptItem[]): Set<string> {
  * reader could not reach and reported none where there were thirty-three
  * (bw-jkh2.13). What he does not want to see, he switches off by name.
  */
-export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
+export function drawnRows(
+  items: TranscriptItem[],
+  current: ReadonlySet<string> = currentProviderMessages(items),
+): DrawnRow[] {
   const rows: DrawnRow[] = [];
   const alreadySaid = saidBySignal(items);
   for (const item of items) {
+    // A notice that a condition cleared is not a line of its own: it is what
+    // makes the notice before it no longer current.
+    if (item.kind === 'provider_message' && item.signal.phase !== 'active') continue;
     const line = machineLine(item);
     if (line !== null && alreadySaid.has(line.kind)) continue;
     if (!line) {
@@ -572,6 +579,7 @@ export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
       last.audience === line.audience
     ) {
       last.lines.push({ text: line.text, body: line.body });
+      last.current = current.has(item.id);
       continue;
     }
     rows.push({
@@ -582,6 +590,7 @@ export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
       kind: line.kind,
       rank: line.rank,
       lines: [{ text: line.text, body: line.body }],
+      current: current.has(item.id),
     });
   }
   return rows;
@@ -630,7 +639,7 @@ function machineLine(item: TranscriptItem): {
 } | null {
   if (item.kind === 'provider_message') {
     const signal = item.signal;
-    if (!providerMessageIsCurrent(signal)) return null;
+    if (signal.phase !== 'active') return null;
     const family: MachineFamily = signal.severity === 'blocking' ? 'stopped'
       : signal.severity === 'error' ? 'failed'
         : signal.severity === 'warning' ? 'waiting' : 'breathing';

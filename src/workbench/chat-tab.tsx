@@ -65,11 +65,11 @@ import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
 import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
+import { currentProviderMessages } from '@/workbench/provider-messages';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { addressedBy, openableAsks, openableIn } from '@/workbench/mentions';
 import { loadNewChatDefaults, NO_DEFAULTS, saveNewChatProfile, saveNewChatProvider, type NewChatDefaults } from '@/workbench/new-chat-defaults';
-import { providerMessageIsCurrent } from '@/workbench/provider-messages';
 import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
 import { pathsIn, type Rooted } from '@/workbench/paths';
@@ -1478,7 +1478,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * conversation (bw-qdim).
    */
   const [offKinds, setOffKinds] = useState<ReadonlySet<KindId>>(EVERYTHING);
-  const [providerNow, setProviderNow] = useState(() => Date.now());
 
   useEffect(() => {
     setOffKinds(remembered());
@@ -1489,20 +1488,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     remember(off);
     setOffKinds(off);
   }, []);
-
-  const nextProviderExpiry = useMemo(() => view.items.reduce<number | null>((nearest, item) => {
-    if (item.kind !== 'provider_message' || !item.signal.retryAt || !providerMessageIsCurrent(item.signal, providerNow)) return nearest;
-    const at = new Date(item.signal.retryAt).getTime();
-    return Number.isFinite(at) && (nearest === null || at < nearest) ? at : nearest;
-  }, null), [view.items, providerNow]);
-
-  // A reset time is itself a clearing signal. Wake exactly then even if the
-  // provider sends no new packet and this chat is otherwise silent.
-  useEffect(() => {
-    if (nextProviderExpiry === null) return;
-    const timer = window.setTimeout(() => setProviderNow(Date.now()), Math.min(2_147_483_647, Math.max(0, nextProviderExpiry - Date.now() + 10)));
-    return () => window.clearTimeout(timer);
-  }, [nextProviderExpiry]);
 
   /**
    * Where each line on its way is drawn — the transcript's end or the queue —
@@ -1521,22 +1506,23 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** The rows this conversation draws, once the reader's switches and current conditions are obeyed. */
   const rows = useMemo(() => stillShowing(
     [
-      ...view.items.filter((item) =>
-        worthDrawing(item)
-        && (item.kind !== 'provider_message' || providerMessageIsCurrent(item.signal, providerNow))),
+      ...view.items.filter(worthDrawing),
       // At the end, which is where a line just sent belongs and where the
       // server's copy of it will land.
       ...lines.sent,
     ],
     offKinds,
-  ), [view.items, offKinds, providerNow, lines.sent]);
+  ), [view.items, offKinds, lines.sent]);
 
   /**
    * The same rows as they are drawn: every machine line carrying the family that
    * decides its colour and its mark, and a run of one kind folded into a single
    * chip (bw-jkh2).
    */
-  const drawn = useMemo(() => drawnRows(rows), [rows]);
+  // Read off the whole transcript, not the rows the reader's switches left:
+  // hiding replies must not bring a cleared notice back.
+  const current = useMemo(() => currentProviderMessages(view.items), [view.items]);
+  const drawn = useMemo(() => drawnRows(rows, current), [rows, current]);
 
   /** The pane the conversation scrolls in, which the window keeps the place of. */
   const pane = useRef<HTMLDivElement>(null);

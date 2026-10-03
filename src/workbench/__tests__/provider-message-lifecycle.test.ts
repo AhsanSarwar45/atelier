@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { foldAll } from '@/workbench/fold';
 import { drawnRows } from '@/workbench/machine-lines';
-import { providerMessageIsCurrent, type ProviderMessageSignal } from '@/workbench/provider-messages';
+import { currentProviderMessages, type ProviderMessageSignal } from '@/workbench/provider-messages';
 import type { WbpEvent } from '@/workbench/protocol';
 
 const signal = (phase: 'active' | 'resolved', extra: Partial<ProviderMessageSignal> = {}): ProviderMessageSignal => ({
@@ -12,13 +12,30 @@ const event = (seq: number, value: ProviderMessageSignal): WbpEvent => ({
 });
 
 describe('provider message lifecycle', () => {
-  it('replaces a condition by stable identity and removes it on recovery', () => {
+  // A notice is a line of the transcript like any other. Saying the same
+  // condition again, or saying it cleared, never takes an earlier line away,
+  // so a reload draws what the live chat drew.
+  it('keeps every notice where it happened, and only the newest is current', () => {
     const view = foldAll([
       event(1, signal('active', { detail: 'first observation' })),
       event(2, signal('active', { detail: 'new observation' })),
       event(3, signal('resolved')),
+      event(4, signal('active', { detail: 'again' })),
     ]);
-    expect(view.items.filter((item) => item.kind === 'provider_message')).toEqual([]);
+    expect(view.items.map((item) => item.id)).toEqual([
+      'provider-message-1', 'provider-message-2', 'provider-message-3', 'provider-message-4',
+    ]);
+    expect([...currentProviderMessages(view.items)]).toEqual(['provider-message-4']);
+    // One run of one kind, folded as any run is, ending on the current one.
+    expect(drawnRows(view.items)).toMatchObject([
+      { row: 'machine', current: true, lines: [{ body: 'first observation' }, { body: 'new observation' }, { body: 'again' }] },
+    ]);
+  });
+
+  it('leaves a cleared notice on the page, no longer current', () => {
+    const view = foldAll([event(1, signal('active')), event(2, signal('resolved'))]);
+    expect(currentProviderMessages(view.items).size).toBe(0);
+    expect(drawnRows(view.items)).toMatchObject([{ row: 'machine', current: false }]);
   });
 
   // A signal never deletes a message, however confidently it names one. It
@@ -40,14 +57,27 @@ describe('provider message lifecycle', () => {
     expect(view.items).toMatchObject([
       { kind: 'message', id: 'ordinary' },
       { kind: 'message', id: 'vendor-error' },
-      { kind: 'provider_message', id: 'usage:session' },
+      { kind: 'provider_message', id: 'provider-message-6' },
     ]);
   });
 
-  it('expires a timed condition and keeps untimed durable conditions', () => {
-    expect(providerMessageIsCurrent(signal('active', { retryAt: '2026-08-30T08:00:00Z' }), Date.parse('2026-08-30T08:00:01Z'))).toBe(false);
-    expect(providerMessageIsCurrent(signal('active', { retryAt: null }), Date.parse('2036-08-30T08:00:01Z'))).toBe(true);
-    expect(drawnRows(foldAll([event(1, signal('resolved'))]).items)).toEqual([]);
+  // A chat recorded before every clean turn said so still clears: the agent
+  // answering after the notice is the turn having gone through.
+  it('a reply after a notice means its condition no longer stands', () => {
+    const view = foldAll([
+      event(1, signal('active')),
+      { type: 'message.started', messageId: 'later', role: 'assistant', seq: 2, sessionId: 'chat', at: '2026-08-30T08:00:02Z' },
+      { type: 'message.completed', messageId: 'later', seq: 3, sessionId: 'chat', at: '2026-08-30T08:00:03Z' },
+    ]);
+    expect(currentProviderMessages(view.items).size).toBe(0);
+    expect(drawnRows(view.items)[0]).toMatchObject({ row: 'machine', current: false });
+  });
+
+  // A reset time passing is not the condition clearing: the notice keeps
+  // saying when it lifted, and the next turn says whether it did.
+  it('does not hide a notice when its reset time passes', () => {
+    const view = foldAll([event(1, signal('active', { retryAt: '2020-08-30T08:00:00Z' }))]);
+    expect(drawnRows(view.items)).toMatchObject([{ row: 'machine', current: true }]);
   });
 
   it('clears a generic transient error when the session recovers', () => {

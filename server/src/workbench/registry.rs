@@ -1588,7 +1588,10 @@ impl WorkbenchRegistry {
     /// alone; it is not the one that failed.
     pub async fn retire_idle_on_account(&self, brand: &str, profile_id: &str) {
         let chosen = (profile_id != super::profiles::SYSTEM).then(|| profile_id.to_string());
-        let ids: Vec<String> = self.drivers.read().await.keys().cloned().collect();
+        let mut ids: Vec<String> = self.drivers.read().await.keys().cloned().collect();
+        ids.extend(self.database.chats_told_to_sign_in().await.unwrap_or_default());
+        ids.sort();
+        ids.dedup();
         for session_id in ids {
             let Ok(Some(session)) = self.database.get_session(session_id.clone()).await else {
                 continue;
@@ -1602,17 +1605,24 @@ impl WorkbenchRegistry {
             {
                 continue;
             }
-            let Some(driver) = self.drivers.write().await.remove(&session_id) else {
-                continue;
-            };
-            let (reply, receive) = oneshot::channel();
-            if driver.send(DriverRequest::Retire(reply)).is_ok() {
-                let _ = receive.await;
+            let driver = self.drivers.write().await.remove(&session_id);
+            if let Some(driver) = driver {
+                let (reply, receive) = oneshot::channel();
+                if driver.send(DriverRequest::Retire(reply)).is_ok() {
+                    let _ = receive.await;
+                }
             }
-            // The process that raised "Sign in to continue" is gone, and a new
-            // one knows nothing of it, so nothing would ever take the notice
-            // down. It is taken down here, and the chat says what to do now.
-            if session.state == "stopped" {
+            // Every chat whose transcript still asks to sign in to this
+            // account, attached or not: its notice is cleared here, and the
+            // chat says what to do now.
+            let asks = self
+                .database
+                .current_notices(session_id.clone())
+                .await
+                .unwrap_or_default()
+                .iter()
+                .any(|signal| signal["kind"] == "authentication");
+            if asks {
                 let _ = self.after_signing_in(&session, profile_id).await;
             }
         }

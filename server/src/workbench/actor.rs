@@ -441,6 +441,16 @@ impl ChatDb {
             .await
     }
 
+    /// Every chat that was ever told to sign in, for the sweep after signing in.
+    pub async fn chats_told_to_sign_in(&self) -> Result<Vec<String>, String> {
+        self.read(move |store, _| store.chats_told_to_sign_in()).await
+    }
+
+    /// The chat's notices whose condition still stands (`Store::current_notices`).
+    pub async fn current_notices(&self, session_id: String) -> Result<Vec<serde_json::Value>, String> {
+        self.read(move |store, _| store.current_notices(&session_id)).await
+    }
+
     /// The seq of the chat's newest state row.
     pub async fn latest_state_seq(&self, session_id: String) -> Result<Option<i64>, String> {
         self.read(move |store, _| store.latest_state_seq(&session_id)).await
@@ -809,6 +819,31 @@ fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlit
     }
     let touch = said_at.or_else(|| happened.then(|| string(event, "at")).flatten());
     store.update_session(session_id, patch, touch.as_deref())
+}
+
+/// A batch that resets a chat's transcript, with the notices only this app
+/// recorded put back at its end (`Store::kept_across_reset`). Read before the
+/// batch is written, while they are still the chat's newest generation.
+fn with_kept_notices(store: &Store, mut events: Vec<Event>) -> Result<Vec<Event>, String> {
+    let mut reset: Vec<String> = Vec::new();
+    for event in &events {
+        if event.kind != EventKind::TranscriptReset {
+            continue;
+        }
+        if let Some(session_id) = event.fields.get("sessionId").and_then(serde_json::Value::as_str) {
+            if !reset.iter().any(|seen| seen == session_id) {
+                reset.push(session_id.to_string());
+            }
+        }
+    }
+    for session_id in reset {
+        events.extend(
+            store
+                .kept_across_reset(&session_id)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    Ok(events)
 }
 
 fn canonical_event(
@@ -1319,10 +1354,13 @@ fn run(
             }
             Command::AppendMany(events, replay, reply) => {
                 let lifecycle_before = agent_lifecycles.clone();
-                let prepared = events
-                    .into_iter()
-                    .map(|event| canonical_event(&store, &mut agent_lifecycles, event))
-                    .collect::<Result<Vec<_>, _>>();
+                let prepared = with_kept_notices(&store, events)
+                    .and_then(|events| {
+                        events
+                            .into_iter()
+                            .map(|event| canonical_event(&store, &mut agent_lifecycles, event))
+                            .collect::<Result<Vec<_>, _>>()
+                    });
                 let result = prepared.and_then(|prepared| {
                     store
                         .begin_event_batch()

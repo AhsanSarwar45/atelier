@@ -120,9 +120,25 @@ export function isProviderMessageKind(value: string): value is ProviderMessageKi
   return (PROVIDER_MESSAGE_KINDS as readonly string[]).includes(value);
 }
 
-export function providerMessageIsCurrent(signal: ProviderMessageSignal, now = Date.now()): boolean {
-  if (signal.phase !== 'active') return false;
-  if (!signal.retryAt) return true;
-  const retryAt = new Date(signal.retryAt).getTime();
-  return !Number.isFinite(retryAt) || retryAt > now;
+/**
+ * The rows whose condition still stands: for each condition, its newest
+ * notice, unless that one says it cleared or the agent has replied since. A
+ * reply is the turn going through.
+ *
+ * Read off the transcript's own order, so the chat, the Sign in button and the
+ * sidebar (`current_notices` on the server) all ask the same question of the
+ * same record. A notice that is no longer current stays on the page; it only
+ * stops offering a way out.
+ */
+export function currentProviderMessages(
+  items: readonly { kind: string; id: string; signal?: ProviderMessageSignal; role?: string; parentId?: string | null }[],
+): Set<string> {
+  const newest = new Map<string, { id: string; signal: ProviderMessageSignal }>();
+  for (const item of items) {
+    if (item.kind === 'provider_message' && item.signal) newest.set(item.signal.id, { id: item.id, signal: item.signal });
+    else if (item.kind === 'message' && item.role === 'assistant' && !item.parentId) newest.clear();
+  }
+  const current = new Set<string>();
+  for (const { id, signal } of newest.values()) if (signal.phase === 'active') current.add(id);
+  return current;
 }

@@ -733,27 +733,16 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
             EventKind::Error => {
                 view.insert("error".into(), value(event, "message"));
             }
+            // Every notice is a line of the transcript, kept where it
+            // happened. A later one for the same condition, cleared or not,
+            // never removes it; which one is current is read off the order
+            // (`store::current_notices`, `currentProviderMessages`). This is
+            // what a reload is served from, so nothing here may drop a row.
             EventKind::ProviderMessage => {
-                let signal = value(event, "signal");
-                let id = signal["id"].as_str().unwrap_or_default();
-                // The condition's own previous observation, and nothing else.
-                //
-                // This also took out the message named by `sourceMessageId`, to
-                // keep a limit from being said twice — and it is the half that
-                // made the removal permanent. A browser can be reloaded; this is
-                // what a reload is served FROM, so an answer dropped here never
-                // reached the page again. A signal filed against the wrong
-                // message therefore deleted a real answer from the record's own
-                // reading of itself, and the next clean turn resolved the
-                // condition and took the notice away too, leaving a gap with
-                // nothing to explain it (bw-by3w).
-                items.retain(|row| !(row["kind"] == "provider_message" && row["id"] == id));
+                let mut row = item("provider_message", format!("provider-message-{seq}"));
+                row.insert("signal".into(), value(event, "signal"));
                 view.insert("error".into(), Value::Null);
-                if signal["phase"] == "active" {
-                    let mut row = item("provider_message", id.to_string());
-                    row.insert("signal".into(), signal);
-                    items.push(Value::Object(row));
-                }
+                items.push(Value::Object(row));
             }
             EventKind::Notice => {
                 let mut row = item("notice", format!("notice-{seq}"));
@@ -937,14 +926,15 @@ mod tests {
         );
         assert_eq!(drawn.items()[0]["text"], said);
 
-        // And when the condition lifts, the notice goes and the answer stays.
+        // And when the condition lifts, nothing is taken away: the notice
+        // stays where it happened, and the clearing is a row of its own.
         let mut recovered = told;
         recovered.push(event(5, signal("resolved")));
         let drawn = fold_all(&recovered);
         assert_eq!(
             kinds(&drawn),
-            vec!["message"],
-            "resolving the condition left a gap where the answer had been"
+            vec!["message", "provider_message", "provider_message"],
+            "resolving the condition took a line off the page"
         );
         assert_eq!(drawn.items()[0]["text"], said);
     }

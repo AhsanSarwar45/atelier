@@ -352,6 +352,21 @@ async fn reconcile_from(
         }
     };
     let mut status = resolve(session, runtime, &evidence, now);
+    // A chat not at work wears the condition its transcript says still
+    // stands, read by the same rule the chat draws its notices by. So the
+    // sidebar cannot say "Sign-in required" while the chat shows nothing, nor
+    // "Stopped" while the chat asks the reader to sign in.
+    if !status["state"].as_str().is_some_and(is_active) {
+        let current = database.current_notices(session_id.to_string()).await?;
+        if let Some((state, label)) = current
+            .iter()
+            .max_by_key(|signal| super::provider_messages::loudness(signal))
+            .map(super::provider_messages::standing)
+            .filter(|(state, _)| matches!(*state, "stopped" | "errored"))
+        {
+            status = json!({"state":state,"label":label});
+        }
+    }
     let saved = database.session_status(session_id.to_string()).await?;
     let same_projection = status["state"] == session.state
         && saved.as_ref().is_some_and(|saved| {

@@ -2651,6 +2651,21 @@ impl AcpNormalizer {
     }
 
     pub fn finish_turn(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
+        let failure = Self::typed_failure(provider, raw);
+        self.end_turn(session_id, provider, raw, failure, false)
+    }
+
+    /// Close a turn. Only one that did not fail clears the conditions it saw:
+    /// a turn that failed again is not the condition going away, so it says
+    /// the condition once more and never clears it first.
+    fn end_turn(
+        &mut self,
+        session_id: &str,
+        provider: &str,
+        raw: &Value,
+        failure: Option<Value>,
+        errored: bool,
+    ) -> Vec<Event> {
         self.suppress_local_user = false;
         self.turn_finished = true;
         self.waiting_for_agents = false;
@@ -2661,7 +2676,6 @@ impl AcpNormalizer {
         // chat left saying it is folding itself up for ever is worse than one
         // that stops saying anything.
         self.compactions.clear();
-        let failure = Self::typed_failure(provider, raw);
         let mut events = Vec::new();
         // Activity belongs to this turn. A tool whose final update was lost
         // cannot become the next turn's activity or keep its old card spinning.
@@ -2755,9 +2769,10 @@ impl AcpNormalizer {
         }
         self.started_messages.clear();
         events.extend(self.prompt_usage(session_id, provider, raw));
-        let failed = failure.as_ref().is_some_and(|signal| {
-            matches!(signal["severity"].as_str(), Some("error" | "blocking"))
-        });
+        let failed = errored
+            || failure.as_ref().is_some_and(|signal| {
+                matches!(signal["severity"].as_str(), Some("error" | "blocking"))
+            });
         if let Some(signal) = failure {
             self.record_signal(&signal);
             events.push(self.envelope(
@@ -2766,7 +2781,7 @@ impl AcpNormalizer {
                 raw,
                 json!({"type":"provider.message","signal":signal}),
             ));
-        } else {
+        } else if !errored {
             events.extend(self.resolve_signals(session_id, provider, raw));
         }
         // Recorded after the resolving above, so it stands until the turn
@@ -2814,25 +2829,16 @@ impl AcpNormalizer {
     pub fn fail_turn(&mut self, session_id: &str, provider: &str, error: &Value) -> Vec<Event> {
         let said = Self::acp_error_reads(error);
         let raw = json!({"error":error});
-        let mut events = self.finish_turn(session_id, provider, &raw);
-        events.pop();
         // The kit's sentence alone, not `said`: that has the error's `data`
         // pretty-printed after a colon, and a clause read off the whole of it
         // runs on into the JSON — `resets 9pm (Asia/Karachi): { "errorKind":
         // "rate_limit" }`. `data` is structure and belongs to whatever reads
         // structure; prose is what this reads.
         let message = error["message"].as_str().unwrap_or_default();
-        if let Some(signal) = Self::acp_error_signal(error)
-            .or_else(|| Self::error_prose_signal(provider, message))
-        {
-            self.record_signal(&signal);
-            events.push(self.envelope(
-                session_id,
-                provider,
-                &raw,
-                json!({"type":"provider.message","signal":signal}),
-            ));
-        }
+        let signal = Self::acp_error_signal(error)
+            .or_else(|| Self::error_prose_signal(provider, message));
+        let mut events = self.end_turn(session_id, provider, &raw, signal, true);
+        events.pop();
         let spoken_for = events.iter().any(|event| {
             matches!(event.kind, EventKind::ProviderMessage)
                 && event
@@ -3145,6 +3151,25 @@ mod tests {
         assert_eq!(
             signal["signal"]["detail"],
             "This provider needs you to sign in."
+        );
+    }
+
+    /// A second refusal is the condition said again, never cleared and said
+    /// again: a failed turn is not the condition going away. And an error it
+    /// cannot name leaves standing what it already knew.
+    #[test]
+    fn a_failed_turn_never_clears_the_condition_first() {
+        let mut normalizer = AcpNormalizer::default();
+        let refused = json!({"code": -32000, "message": "Authentication required"});
+        normalizer.fail_turn("local", "claude", &refused);
+        let again = normalizer.fail_turn("local", "claude", &refused);
+        assert_eq!(kinds(&again), vec!["provider.message", "session.state"]);
+        assert_eq!(serde_json::to_value(&again[0]).unwrap()["signal"]["phase"], "active");
+
+        let unknown = normalizer.fail_turn("local", "claude", &json!({"code": -32603, "message": "boom"}));
+        assert!(
+            !kinds(&unknown).contains(&json!("provider.message")),
+            "nothing was cleared by a turn that failed"
         );
     }
 

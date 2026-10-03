@@ -410,12 +410,6 @@ pub(super) async fn append_notice(database: &ChatDb, session_id: &str, text: &st
     Ok(())
 }
 
-async fn append_reset(database: &ChatDb, session_id: &str) -> Result<(), String> {
-    let event = reset_event(session_id)?;
-    database.append(event).await?;
-    Ok(())
-}
-
 pub(super) fn reset_event(session_id: &str) -> Result<Event, String> {
     serde_json::from_value(json!({
         "type":"transcript.reset", "sessionId":session_id, "seq":0, "at":now()
@@ -766,10 +760,10 @@ async fn import_codex_history(database: &ChatDb, session: &Session) -> Result<()
     .await?;
     let mut normalizer = super::codex::normalize::CodexNormalizer::default();
     let replay = normalizer.replay_thread(&thread);
+    let mut imported = Vec::with_capacity(replay.len() + 1);
     if !replay.is_empty() && database.timeline_count(session.id.clone()).await? > 0 {
-        append_reset(database, &session.id).await?;
+        imported.push(reset_event(&session.id)?);
     }
-    let mut imported = Vec::with_capacity(replay.len());
     for mut value in replay {
         let event_id = super::protocol::provider_record_event_id("codex", &value);
         let Some(object) = value.as_object_mut() else {

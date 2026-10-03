@@ -1020,29 +1020,15 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.error = e.message;
       return next;
 
-    case 'provider.message': {
-      // A provider condition is current state, not an immutable chat utterance.
-      // Its stable id replaces the previous observation and resolution removes
-      // it.
-      //
-      // What it does NOT remove is a message. It used to take the answer named
-      // by `sourceMessageId` out of the transcript, so that a limit reported in
-      // prose was said once rather than twice — and that made a signal filed
-      // against the wrong message destructive: the answer was gone from the
-      // page, and gone for good, because the projection is what draws every
-      // reload. Then the next clean turn resolved the condition, which removed
-      // the notice as well, and the reader was left with a gap where his answer
-      // had been and nothing at all to say why (bw-by3w).
-      //
-      // Saying a limit twice costs a duplicated sentence. Removing a message
-      // costs the message. A notice stands beside what it is about.
-      const without = items.filter((it) => !(it.kind === 'provider_message' && it.id === e.signal.id));
+    case 'provider.message':
+      // Every notice is a line of the transcript, kept where it happened like
+      // any other line. A later notice with the same id, cleared or not, does
+      // not remove it; it only means this one is no longer the current one
+      // (`currentProviderMessages`). Nothing here ever removes a row, so a
+      // reload, a reconnect and a page read back all draw the same lines.
       next.error = null;
-      next.items = e.signal.phase === 'resolved'
-        ? without
-        : [...without, { kind: 'provider_message', id: e.signal.id, signal: e.signal }];
+      next.items = [...next.items, providerMessageRow(e)];
       return next;
-    }
 
     case 'notice':
       next.items = [...next.items, { kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family, audience: e.audience }];
@@ -1077,6 +1063,11 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
  * case by case in src/workbench/__tests__/reading-a-chat.test.ts against the
  * real fold.
  */
+
+/** A notice as its own row, named by where it happened, like `notice-<seq>`. */
+function providerMessageRow(e: { seq: number; signal: ProviderMessageSignal }): TranscriptItem {
+  return { kind: 'provider_message', id: `provider-message-${e.seq}`, signal: e.signal };
+}
 
 /**
  * The change the wire worked out, lifted off an event that may not carry one.
@@ -1542,18 +1533,10 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         view.error = e.message;
         break;
 
-      case 'provider.message': {
-        // The condition's own previous observation, and nothing else. Never a
-        // message: see the twin of this in `foldEvent` for why a notice that
-        // could delete an answer is a notice that can lose one (bw-by3w).
-        for (let at = items.length - 1; at >= 0; at -= 1) {
-          const item = items[at]!;
-          if (item.kind === 'provider_message' && item.id === e.signal.id) items.splice(at, 1);
-        }
+      case 'provider.message':
         view.error = null;
-        if (e.signal.phase === 'active') items.push({ kind: 'provider_message', id: e.signal.id, signal: e.signal });
+        items.push(providerMessageRow(e));
         break;
-      }
 
       case 'notice':
         items.push({ kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family, audience: e.audience });
