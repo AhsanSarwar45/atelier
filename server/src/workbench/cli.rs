@@ -129,12 +129,21 @@ fn server_url(path: &str) -> String {
     format!("http://127.0.0.1:{port}{path}")
 }
 
+/// Only `present widget` without `--input` takes its JSON from stdin. Every
+/// other form must not read it: an agent shell can hand over a stdin that
+/// never closes, and reading it to the end would hang the call forever.
+fn reads_stdin(rest: &[String]) -> bool {
+    rest.first().map(String::as_str) == Some("widget") && !rest.iter().any(|word| word == "--input")
+}
+
 pub async fn present(rest: &[String]) -> Result<i32, String> {
     use std::io::Read;
     let mut stdin = String::new();
-    std::io::stdin()
-        .read_to_string(&mut stdin)
-        .map_err(|error| format!("stdin: {error}"))?;
+    if reads_stdin(rest) {
+        std::io::stdin()
+            .read_to_string(&mut stdin)
+            .map_err(|error| format!("stdin: {error}"))?;
+    }
     let response = reqwest::Client::new()
         .post(server_url("/api/workbench/present"))
         .json(&presentation_request(rest, stdin)?)
@@ -209,4 +218,22 @@ pub async fn screen_check(rest: &[String]) -> Result<i32, String> {
         serde_json::to_string_pretty(&value["result"]).map_err(|error| error.to_string())?
     );
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reads_stdin;
+
+    fn words(line: &str) -> Vec<String> {
+        line.split_whitespace().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn only_a_widget_without_input_reads_stdin() {
+        assert!(reads_stdin(&words("widget")));
+        assert!(!reads_stdin(&words("widget --input w.json")));
+        assert!(!reads_stdin(&words("image --file a.png --alt A")));
+        assert!(!reads_stdin(&words("compare --before a.png --after b.png")));
+        assert!(!reads_stdin(&words("artifact --file a.json")));
+    }
 }
