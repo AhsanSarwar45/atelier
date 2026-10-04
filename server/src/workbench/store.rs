@@ -359,6 +359,9 @@ pub struct Session {
 /// `Some(None)` clears a nullable setting; `None` leaves it untouched.
 #[derive(Clone, Debug, Default)]
 pub struct SessionPatch {
+    /// Only ever changed together with `external_id`: a chat moves to another
+    /// provider by starting a new conversation there (`switch_profile`).
+    pub brand: Option<String>,
     pub external_id: Option<Option<String>>,
     pub title: Option<Option<String>>,
     pub state: Option<String>,
@@ -733,6 +736,10 @@ impl Store {
         nullable("effort", patch.effort);
         nullable("collaboration_mode", patch.collaboration_mode);
         nullable("profile", patch.profile);
+        if let Some(brand) = patch.brand {
+            sets.push("brand = ?".to_string());
+            values.push(SqlValue::Text(brand));
+        }
         if let Some(state) = patch.state {
             self.note_when_it_appeared(id, &state)?;
             sets.push("state = ?".to_string());

@@ -1673,9 +1673,11 @@ impl WorkbenchRegistry {
         Ok(())
     }
 
-    /// Move the next turn to another login while keeping this local chat.
-    /// Provider CLIs choose their account from an environment variable at
-    /// process startup, so this cannot be an in-process setting change.
+    /// Move the next turn to another login, or to another provider, while
+    /// keeping this local chat. Provider CLIs choose their account from an
+    /// environment variable at process startup, so this cannot be an
+    /// in-process setting change. A provider is changed the same way: the old
+    /// conversation is left, and a new one there is handed this chat's past.
     async fn switch_profile(&self, command: &Command) -> Result<Value, String> {
         let session_id = Self::field(command, "sessionId")?;
         let profile_id = Self::field(command, "profileId")?;
@@ -1684,17 +1686,24 @@ impl WorkbenchRegistry {
             .get_session(session_id.to_string())
             .await?
             .ok_or_else(|| format!("no session {session_id}"))?;
-        if super::profiles::variable(&session.brand).is_none() {
-            return Err(format!("{} has no account to switch", session.brand));
+        let brand = command
+            .fields
+            .get("brand")
+            .and_then(Value::as_str)
+            .unwrap_or(&session.brand)
+            .to_string();
+        if super::profiles::variable(&brand).is_none() {
+            return Err(format!("{brand} has no account to switch"));
         }
         let profile = self
             .profiles
-            .list(&session.brand)
+            .list(&brand)
             .into_iter()
             .find(|profile| profile.id == profile_id)
-            .ok_or_else(|| format!("no {} profile {profile_id}", session.brand))?;
+            .ok_or_else(|| format!("no {brand} profile {profile_id}"))?;
         let chosen = (!profile.system).then(|| profile.id.clone());
-        if session.profile == chosen {
+        let moving = brand != session.brand;
+        if !moving && session.profile == chosen {
             return Ok(json!({"ok":true,"profile":chosen}));
         }
         if matches!(
@@ -1730,28 +1739,62 @@ impl WorkbenchRegistry {
                 .await?;
         }
 
+        let mut patch = crate::workbench::store::SessionPatch {
+            external_id: Some(None),
+            profile: Some(chosen.clone()),
+            state: Some("dormant".into()),
+            ..Default::default()
+        };
+        if moving {
+            // Model, effort and permissions are the provider's own words, so
+            // the chat takes the ones a new chat there would start with.
+            let starting = super::provider::new_session(
+                &Command {
+                    kind: CommandKind::SessionProfile,
+                    fields: serde_json::Map::from_iter([
+                        ("brand".into(), json!(brand)),
+                        ("profileId".into(), json!(profile_id)),
+                        ("projectId".into(), json!(session.project_id)),
+                        ("projectPath".into(), json!(session.project_path)),
+                        ("cwd".into(), json!(session.cwd)),
+                    ]),
+                },
+                session.id.clone(),
+                None,
+                &self.paths.claude_config,
+            )?;
+            session.brand = starting.brand;
+            session.model = starting.model;
+            session.permission_mode = starting.permission_mode;
+            session.effort = starting.effort;
+            session.collaboration_mode = None;
+            patch.brand = Some(session.brand.clone());
+            patch.model = Some(session.model.clone());
+            patch.permission_mode = Some(session.permission_mode.clone());
+            patch.effort = Some(session.effort.clone());
+            patch.collaboration_mode = Some(None);
+        }
         session.profile = chosen.clone();
         session.external_id = None;
         session.state = "dormant".into();
         self.database
-            .update_session(
-                session_id.to_string(),
-                crate::workbench::store::SessionPatch {
-                    external_id: Some(None),
-                    profile: Some(chosen.clone()),
-                    state: Some("dormant".into()),
-                    ..Default::default()
-                },
-                None,
-            )
+            .update_session(session_id.to_string(), patch, None)
             .await?;
+        if moving {
+            // The past now lives only here. Reading the new provider's record
+            // back in would replace it with the part written there.
+            self.database.mark_imported(session_id.to_string()).await?;
+        }
         super::provider::append_started(&self.database, &session, false).await?;
-        super::provider::append_notice(
-            &self.database,
-            session_id,
-            &format!("Account changed to {}. The next message continues this conversation there.", profile.name),
-        )
-        .await?;
+        let notice = if moving {
+            format!(
+                "Switched to {}. The next message continues this conversation there.",
+                super::references::brand_name(&brand)
+            )
+        } else {
+            format!("Account changed to {}. The next message continues this conversation there.", profile.name)
+        };
+        super::provider::append_notice(&self.database, session_id, &notice).await?;
         self.database
             .append(serde_json::from_value(json!({
                 "type":"session.state", "sessionId":session_id, "seq":0,
@@ -3614,6 +3657,88 @@ mod tests {
         let handoff = database.saved_account_handoff("session-1".into()).await.unwrap().unwrap();
         assert!(handoff.contains("User: remember the blue door"), "{handoff}");
         assert!(database.timeline_count("session-1".into()).await.unwrap() >= 1);
+    }
+
+    #[tokio::test]
+    async fn changing_provider_is_changing_account_to_another_brand() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let registry = WorkbenchRegistry::new(
+            database.clone(),
+            RegistryPaths {
+                home: root.path().join("home"),
+                claude_config: root.path().join("claude"),
+                codex_home: root.path().join("codex"),
+                profiles: root.path().join("profiles"),
+                media: root.path().join("media"),
+            },
+            Arc::new(FakeFactory { calls: Arc::new(AtomicUsize::new(0)) }),
+        );
+        database.create_session(crate::workbench::store::Session {
+            id: "session-1".into(),
+            brand: "claude".into(),
+            external_id: Some("claude-thread".into()),
+            project_id: "project".into(),
+            project_path: "/project".into(),
+            cwd: "/project".into(),
+            model: Some("opus".into()),
+            permission_mode: "acceptEdits".into(),
+            effort: Some("high".into()),
+            collaboration_mode: Some("plan".into()),
+            profile: None,
+            title: Some("Existing chat".into()),
+            state: "idle".into(),
+            origin: "app".into(),
+            created_at: "2026-09-13T00:00:00Z".into(),
+            last_active_at: "2026-09-13T00:00:00Z".into(),
+            last_spoke_at: None,
+            begun_by: Some("person".into()),
+            named_by_owner: false,
+        }).await.unwrap();
+        for value in [
+            json!({"type":"message.started","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","role":"user"}),
+            json!({"type":"text.delta","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","text":"remember the blue door"}),
+            json!({"type":"message.completed","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1"}),
+        ] {
+            database.append(serde_json::from_value(value).unwrap()).await.unwrap();
+        }
+
+        registry.execute(&command(
+            CommandKind::SessionProfile,
+            json!({"sessionId":"session-1","brand":"codex","profileId":"system"}),
+        )).await.unwrap();
+
+        let stored = database.get_session("session-1".into()).await.unwrap().unwrap();
+        assert_eq!(stored.brand, "codex");
+        assert_eq!(stored.external_id, None, "the Claude conversation is not resumed under Codex");
+        assert_ne!(stored.model.as_deref(), Some("opus"), "Claude's model is not carried to Codex");
+        assert_ne!(stored.permission_mode, "acceptEdits");
+        assert_eq!(stored.collaboration_mode, None);
+        assert_eq!(stored.state, "dormant");
+        let handoff = database.saved_account_handoff("session-1".into()).await.unwrap().unwrap();
+        assert!(handoff.contains("User: remember the blue door"), "{handoff}");
+        assert_eq!(
+            super::super::provider_reconciliation::complete_history_choice(&database, "session-1").await.unwrap(),
+            super::super::provider_reconciliation::HistoryChoice::Leave,
+            "opening the chat keeps its past instead of reading the new provider's record over it",
+        );
+        let notices: Vec<String> = database.events_since("session-1".into(), 0).await.unwrap().into_iter()
+            .filter(|event| event.kind == crate::workbench::protocol::EventKind::Notice)
+            .filter_map(|event| event.fields.get("text").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        assert!(notices.iter().any(|text| text.starts_with("Switched to Codex.")), "{notices:?}");
+
+        // Claude reads its records under a newer recipe than Codex; moving
+        // back must not make an older Codex mark look stale and re-read.
+        registry.execute(&command(
+            CommandKind::SessionProfile,
+            json!({"sessionId":"session-1","brand":"claude","profileId":"system"}),
+        )).await.unwrap();
+        assert_eq!(database.get_session("session-1".into()).await.unwrap().unwrap().brand, "claude");
+        assert_eq!(
+            super::super::provider_reconciliation::complete_history_choice(&database, "session-1").await.unwrap(),
+            super::super::provider_reconciliation::HistoryChoice::Leave,
+        );
     }
 
     #[tokio::test]

@@ -2501,14 +2501,13 @@ async fn restore(
         // session/list after this chat has continued on a replacement thread.
         // Its durable alias resolves to the already-drawn local row; never
         // adopt that abandoned provider ID as a second dead conversation.
-        if let (Some(external_id), Some(brand)) =
-            (known["externalId"].as_str(), known["brand"].as_str())
-        {
+        // The chat may since have moved to another provider, so its brand is
+        // not the record's (registry.rs, `switch_profile`).
+        if let Some(external_id) = known["externalId"].as_str() {
             if let Some(cached) = state
                 .database()
                 .session_by_external_id(external_id.to_string())
                 .await?
-                .filter(|session| session.brand == brand)
             {
                 if rows
                     .iter()

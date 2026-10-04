@@ -568,6 +568,8 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
 
   switch (e.type) {
     case 'session.started':
+      // A menu is one provider's; a chat moved to another waits for that one's.
+      if (view.brand !== null && e.brand !== view.brand) next.menu = NO_MENU;
       next.brand = e.brand;
       next.permissionMode = e.permissionMode || null;
       next.collaborationMode = e.collaborationMode ?? null;
@@ -1121,6 +1123,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
 
     switch (e.type) {
       case 'session.started':
+        if (view.brand !== null && e.brand !== view.brand) view.menu = NO_MENU;
         view.brand = e.brand;
         view.permissionMode = e.permissionMode || null;
         view.model = e.model;

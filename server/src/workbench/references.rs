@@ -329,7 +329,7 @@ fn clipped(text: &str, limit: usize) -> String {
     format!("{cut}… (cut short)")
 }
 
-fn brand_name(brand: &str) -> &str {
+pub(super) fn brand_name(brand: &str) -> &str {
     match brand {
         "claude" => "Claude",
         "codex" => "Codex",

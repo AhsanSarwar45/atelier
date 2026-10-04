@@ -23,7 +23,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, ChevronDown, Copy, ExternalLink, MoreVertical, Pencil, Plus, Power, Search } from 'lucide-react';
+import { ArrowLeftRight, Bot, ChevronDown, Copy, ExternalLink, MoreVertical, Pencil, Plus, Power, Search } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -720,6 +720,8 @@ interface ChatSidebarProps {
   onSearch?: () => void;
   onToggleEverything?: () => void;
   onNewChat?: (brand?: Brand) => void;
+  /** Move a chat of ours to another provider; the tab owns that dialog. */
+  onSwitchProvider?: (chat: { sessionId: string; brand: Brand }) => void;
   startingNewChat?: boolean;
 }
 
@@ -732,6 +734,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onSearch,
   onToggleEverything,
   onNewChat,
+  onSwitchProvider,
   startingNewChat = false,
 }: ChatSidebarProps) {
   const providers = useProviders();
@@ -1111,6 +1114,18 @@ export const ChatSidebar = memo(function ChatSidebar({
           >
             <Copy aria-hidden="true" /> Copy ID
           </DropdownMenuItem>
+          {onSwitchProvider && (
+            <DropdownMenuItem
+              data-testid="chat-menu-switch-provider"
+              disabled={!menu?.row.sessionId}
+              onSelect={() => {
+                const sessionId = menu?.row.sessionId;
+                if (menu && sessionId) onSwitchProvider({ sessionId, brand: menu.row.brand });
+              }}
+            >
+              <ArrowLeftRight aria-hidden="true" /> Switch provider…
+            </DropdownMenuItem>
+          )}
           {/*
             Last and behind a rule, because it is the one item here that takes
             something away. Greyed rather than hidden on a row with nothing of
@@ -1127,7 +1142,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         </DropdownMenuContent>
       </DropdownMenu>
     </>
-  ), [askRename, copyId, end, menu]);
+  ), [askRename, copyId, end, menu, onSwitchProvider]);
 
   const renameDialog = useMemo(() => (
     <>

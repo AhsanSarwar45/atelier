@@ -3362,7 +3362,7 @@ impl AcpDriver {
                 if let Some(context) = handoff.as_deref().filter(|context| !context.is_empty()) {
                     content.insert(0, ContentBlock::Text(TextContent::new(added_by_atelier(
                         HANDOFF,
-                        &format!("The account changed during this chat. Continue from this prior conversation without repeating it:\n\n{context}"),
+                        &format!("This chat moved to another account or provider. Continue from this prior conversation without repeating it:\n\n{context}"),
                     ))));
                 }
                 let images = command

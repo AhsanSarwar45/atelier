@@ -272,7 +272,7 @@ fn a_place_to_work(project_path: &str, asked: &str) -> Result<String, String> {
     ))
 }
 
-fn new_session(
+pub(super) fn new_session(
     command: &Command,
     id: String,
     external_id: Option<String>,

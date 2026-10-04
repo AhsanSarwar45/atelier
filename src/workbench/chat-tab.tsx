@@ -84,6 +84,13 @@ import type { SessionMenu } from '@/workbench/fold';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
+
+/** Why a chat on `from` cannot move to `brand`, or null when it can. */
+function cannotMoveTo(brand: Brand, from: Brand): string | null {
+  if (brand === from) return `This chat already uses ${brandName(brand)}.`;
+  if (!ACCOUNTED_BRANDS.includes(brand)) return `A chat can't be switched to ${brandName(brand)}.`;
+  return null;
+}
 import { BRAND_DEFAULT_MODEL, newId, offeringAtelierAuto, startingChat } from '@/workbench/protocol';
 import { SectionHeading } from '@/workbench/section-heading';
 import { conversationOf, heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
@@ -1378,7 +1385,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     [gitOpen, flipGit],
   );
   /** The ways in that live in this tab, each a full-screen panel. */
-  const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | 'new-chat' | null>(null);
+  const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | 'new-chat' | 'switch-provider' | null>(null);
+  /**
+   * The chat being moved to another provider. The dialog is the New chat one:
+   * a chat moves by starting over on the agent and account picked there, with
+   * its past handed across (registry.rs, `switch_profile`).
+   */
+  const [switching, setSwitching] = useState<{ sessionId: string; brand: Brand } | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
   /**
    * Where the next chat will work. Not remembered between chats: a worktree is
    * made for a piece of work, so the place the last chat went is the wrong
@@ -1393,7 +1407,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // Read when the dialog opens, and again each time it opens: an account
   // added in settings while a chat was open is one the next chat can use.
   useEffect(() => {
-    if (showing !== 'new-chat') return;
+    if (showing !== 'new-chat' && showing !== 'switch-provider') return;
     let gone = false;
     setNewAccountsUnread(null);
     void Promise.all(
@@ -1441,6 +1455,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setNewBrand(providerIsAvailable(providers, wanted) ? wanted : availableBrand ?? wanted);
     setShowing('new-chat');
   }, [availableBrand, newBrand, newChatDefault, providers]);
+  /** Open the dialog on the first other agent a chat can move to. */
+  const switchProvider = useCallback((chat: { sessionId: string; brand: Brand }) => {
+    const other = providers.find(
+      (provider) => provider.available && provider.brand !== chat.brand && ACCOUNTED_BRANDS.includes(provider.brand),
+    );
+    if (other) setNewBrand(other.brand);
+    setSwitching(chat);
+    setSwitchError(null);
+    setShowing('switch-provider');
+  }, [providers]);
+  const confirmSwitch = useCallback(() => {
+    if (!switching) return;
+    setSwitchError(null);
+    void sendCommand({ type: 'session.profile', sessionId: switching.sessionId, brand: newBrand, profileId: newAccount })
+      .then(() => {
+        setShowing(null);
+        setSwitching(null);
+      })
+      .catch((error: unknown) => setSwitchError(error instanceof Error ? error.message : String(error)));
+  }, [newAccount, newBrand, switching]);
+  const moving = showing === 'switch-provider' ? switching : null;
   /**
    * The chat list's own handlers, held so the list is left alone while this
    * screen redraws for every word an agent writes (bw-4slk).
@@ -2208,15 +2243,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       {showing === 'tokens' && sessionId && (
         <TokenView sessionId={sessionId} onClose={() => setShowing(null)} />
       )}
-      <Dialog open={showing === 'new-chat'} onOpenChange={(opened) => { if (!opened) setShowing(null); }}>
-        <DialogContent className="sm:max-w-md" data-testid="new-chat-provider-dialog">
+      <Dialog
+        open={showing === 'new-chat' || showing === 'switch-provider'}
+        onOpenChange={(opened) => {
+          if (opened) return;
+          setShowing(null);
+          setSwitching(null);
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-md"
+          data-testid={moving ? 'switch-provider-dialog' : 'new-chat-provider-dialog'}
+        >
           <DialogHeader>
-            <DialogTitle>New chat</DialogTitle>
+            <DialogTitle>{moving ? 'Switch provider' : 'New chat'}</DialogTitle>
             {/* Said to a screen reader and to nobody else: the three headings
                 below already name what the dialog is asking, and a sentence
                 repeating them was one more line to read past (bw-ospn.3). */}
             <DialogDescription className="sr-only">
-              Choose the agent, the account and the worktree this chat starts on.
+              {moving
+                ? 'Choose the agent and the account this chat continues on.'
+                : 'Choose the agent, the account and the worktree this chat starts on.'}
             </DialogDescription>
           </DialogHeader>
           {/* Why a choice is grey, on the choice itself and only while the
@@ -2248,13 +2295,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 key={provider.brand}
                 value={provider.brand}
                 chosen={newBrand === provider.brand}
-                disabled={!provider.available}
+                disabled={!provider.available || (moving !== null && cannotMoveTo(provider.brand, moving.brand) !== null)}
                 why={
-                  provider.available ? null : (
+                  !provider.available ? (
                     <>
                       <span className="font-medium">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
                     </>
-                  )
+                  ) : moving ? cannotMoveTo(provider.brand, moving.brand) : null
                 }
                 testid={`new-chat-provider-${provider.brand}`}
                 star={{
@@ -2315,7 +2362,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               )}
             </div>
           )}
-          {projectPath && (
+          {projectPath && !moving && (
             <WhereToWork
               projectPath={projectPath}
               value={newWhere}
@@ -2324,7 +2371,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               disabled={starting !== null}
             />
           )}
+          {switchError && <p className="text-xs text-destructive">{switchError}</p>}
           <DialogFooter className="gap-2 sm:space-x-0">
+            {moving ? (
+              <Button
+                variant="primary"
+                data-testid="switch-provider-confirm"
+                disabled={!newBrandAvailable || cannotMoveTo(newBrand, moving.brand) !== null}
+                onClick={confirmSwitch}
+              >
+                Switch
+              </Button>
+            ) : (
             <Button
               variant="primary"
               data-testid="new-chat-start"
@@ -2339,11 +2397,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             >
               {starting ? 'Starting…' : 'Start chat'}
             </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
-  ), [newAccount, newAccounts, newAccountsUnread, newBrand, newBrandAvailable, newChatDefault, newChatDefaults.profiles, newWhere, projectId, projectPath, providers, sessionBrand, sessionId, setNewChatDefault, setNewChatProfile, showing, start, starting, view.profile, whereMissing]);
+  ), [confirmSwitch, moving, newAccount, newAccounts, newAccountsUnread, newBrand, newBrandAvailable, newChatDefault, newChatDefaults.profiles, newWhere, projectId, projectPath, providers, sessionBrand, sessionId, setNewChatDefault, setNewChatProfile, showing, start, starting, switchError, view.profile, whereMissing]);
 
   const chatList = useMemo(() => (
     <>
@@ -2390,6 +2449,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // its job is done once the chat it starts exists — left open, it would
           // sit over the transcript it just created (bw-81wt.5).
           onNewChat={newChat}
+          onSwitchProvider={switchProvider}
           startingNewChat={starting !== null}
         />
       </SheetContent>
@@ -2403,7 +2463,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         />
       )}
     </>
-  ), [changeLeftWidth, chatListId, everything, flipEverything, leftOpen, leftWidth, newChat, openFromList, openSearch, phone, projectId, projectPath, railOpen, rightOpen, rightWidth, sessionId, starting]);
+  ), [changeLeftWidth, chatListId, everything, flipEverything, leftOpen, leftWidth, newChat, openFromList, openSearch, phone, projectId, projectPath, railOpen, rightOpen, rightWidth, sessionId, starting, switchProvider]);
 
   const rail = useMemo(() => (
     <>
