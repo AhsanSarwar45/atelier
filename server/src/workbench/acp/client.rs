@@ -1004,17 +1004,18 @@ fn session_meta(brand: &str, policy: &str) -> Meta {
     meta
 }
 
-/// The message an ACP failure is recorded under, and whether it is a sign-in.
+/// The message an ACP failure is recorded under, and the condition it names.
 ///
 /// `Display` for the crate's error prints the message and drops the code, so
 /// anything that stringifies first can no longer tell -32000 from a crash. Read
-/// the code here, while it is still there.
-fn transport_failure(error: &agent_client_protocol::Error) -> (String, bool) {
+/// the error here, while it is still whole, and read it the way a failed turn
+/// is read: a login that expired while the chat was closed is refused while the
+/// chat is set up again, as `Internal error` with the reason in `data`, and it
+/// must reach the reader as the same sign-in a failed turn would raise.
+fn transport_failure(brand: &str, error: &agent_client_protocol::Error) -> (String, Option<Value>) {
     let code = i32::from(error.code);
-    let signing_in = code == -32000;
-    // Not `Display`: that prints the message and then the whole of `data`,
-    // pretty-printed, and this string is drawn in the chat (bw-m15v.3).
-    //
+    let wire = json!({"code":code, "message":error.message, "data":error.data});
+    let signal = super::normalize::AcpNormalizer::refusal_signal(brand, &wire);
     // Every refusal that reaches here answered an attempt to take up this
     // chat's own conversation, so the one thing the provider could not find is
     // the conversation. Elsewhere the same code can be about anything a turn
@@ -1028,53 +1029,47 @@ fn transport_failure(error: &agent_client_protocol::Error) -> (String, bool) {
             error.data.as_ref(),
         )
     };
-    if signing_in && said.trim().is_empty() {
-        return ("This provider needs you to sign in.".into(), true);
-    }
-    (said, signing_in)
+    (said, signal)
 }
 
 async fn record_transport_failure(database: &ChatDb, session: &Session, message: &str) {
-    record_failure(database, session, message, false).await
+    record_failure(database, session, message, None).await
 }
 
+/// A chat that could not go on, written as a failed turn is written: the
+/// condition as a notice in the transcript, and the chat wearing that
+/// condition's word. Only a failure nothing could name is a bare error.
 async fn record_failure(
     database: &ChatDb,
     session: &Session,
     message: &str,
-    signing_in: bool,
+    signal: Option<Value>,
 ) {
+    let (state, label) = signal
+        .as_ref()
+        .map(crate::workbench::provider_messages::standing)
+        .unwrap_or(("errored", "Provider unavailable"));
     let _ = database
         .update_session(
             session.id.clone(),
             SessionPatch {
-                state: Some("errored".into()),
+                state: Some(state.into()),
                 ..SessionPatch::default()
             },
             None,
         )
         .await;
-    // "Provider unavailable" for a provider that is perfectly available and
-    // simply wants signing into reads as a broken install, and it offered
-    // nothing to do about it. The app already knows how to draw a sign-in --
-    // `provider-messages.ts` has had the words for it all along -- it was only
-    // ever told by sniffing the provider's prose (bw-t26l.20).
-    let mut events = vec![
-        json!({"type":"error", "sessionId":session.id, "seq":0, "at":now(), "message":message, "fatal":true, "source":"acp"}),
-        json!({"type":"session.state", "sessionId":session.id, "seq":0, "at":now(), "state":"errored",
-            "label":if signing_in { "Sign in to continue" } else { "Provider unavailable" }}),
-    ];
-    if signing_in {
-        events.insert(
-            0,
-            json!({"type":"provider.message", "sessionId":session.id, "seq":0, "at":now(),
-                "signal":crate::workbench::provider_messages::needs_signing_in(message)}),
-        );
-    }
-    let events = events
-        .into_iter()
-        .filter_map(|value| serde_json::from_value(value).ok())
-        .collect();
+    let first = match signal {
+        Some(signal) => json!({"type":"provider.message", "sessionId":session.id, "seq":0, "at":now(), "signal":signal}),
+        None => json!({"type":"error", "sessionId":session.id, "seq":0, "at":now(), "message":message, "fatal":true, "source":"acp"}),
+    };
+    let events = [
+        first,
+        json!({"type":"session.state", "sessionId":session.id, "seq":0, "at":now(), "state":state, "label":label}),
+    ]
+    .into_iter()
+    .filter_map(|value| serde_json::from_value(value).ok())
+    .collect();
     let _ = database.append_many(events).await;
 }
 
@@ -3232,14 +3227,14 @@ impl AcpDriver {
             // Read before it is stringified: `Display` for an ACP error prints
             // the message and drops the code, and -32000 is the difference
             // between "this is broken" and "sign in" (bw-t26l.20).
-            let failure = result.as_ref().err().map(transport_failure);
+            let failure = result.as_ref().err().map(|error| transport_failure(brand, error));
             if let Some(ready) = ready.lock().await.take() {
                 let _ = ready.send(Err(failure.unwrap_or_else(|| {
-                    ("ACP adapter stopped during initialization".into(), false)
+                    ("ACP adapter stopped during initialization".into(), None)
                 })));
             } else if !stopped_closing.load(Ordering::Acquire) {
-                let (message, signing_in) = failure
-                    .unwrap_or_else(|| ("ACP adapter stopped unexpectedly".into(), false));
+                let (message, signal) = failure
+                    .unwrap_or_else(|| ("ACP adapter stopped unexpectedly".into(), None));
                 let mut settled = stopped_normalizer.lock().await.finish_turn(
                     &stopped_session.id, brand, &json!({"stopReason":"cancelled"}),
                 );
@@ -3247,16 +3242,16 @@ impl AcpDriver {
                 // the terminal state instead of finish_turn's ordinary Ready.
                 settled.pop();
                 let _ = stopped_database.append_many(settled).await;
-                record_failure(&stopped_database, &stopped_session, &message, signing_in).await;
+                record_failure(&stopped_database, &stopped_session, &message, signal).await;
                 let _ = ended_send.send(message);
             };
         });
         let initialized = initialized
             .await
-            .map_err(|_| ("ACP adapter stopped during initialization".to_string(), false))
+            .map_err(|_| ("ACP adapter stopped during initialization".to_string(), None))
             .and_then(|result| result);
-        if let Err((message, signing_in)) = initialized {
-            record_failure(&database, &session, &message, signing_in).await;
+        if let Err((message, signal)) = initialized {
+            record_failure(&database, &session, &message, signal).await;
             return Err(message);
         }
         let session = database
@@ -3738,7 +3733,7 @@ mod tests {
     /// a22f34ef-...: { "uri": "a22f34ef-..." }` on the screen (bw-m15v.3).
     #[test]
     fn a_refusal_reaches_the_reader_in_words_and_never_as_wire_text() {
-        let (said, _) = transport_failure(&agent_client_protocol::Error::resource_not_found(
+        let (said, _) = transport_failure("claude", &agent_client_protocol::Error::resource_not_found(
             Some("a22f34ef-a523-4ad5-a87b-1db7aec91a41".into()),
         ));
         assert!(!said.contains("a22f34ef"), "an id nobody can use: {said}");
@@ -3748,6 +3743,7 @@ mod tests {
         // A provider with more to say puts a sentence in `data`, and that is
         // the one thing there the reader is given.
         let (said, _) = transport_failure(
+            "claude",
             &agent_client_protocol::Error::internal_error().data("the model is overloaded"),
         );
         assert!(said.contains("the model is overloaded"), "{said}");
@@ -3755,6 +3751,7 @@ mod tests {
 
         // An object is structure and stays out of it.
         let (said, _) = transport_failure(
+            "claude",
             &agent_client_protocol::Error::internal_error()
                 .data(serde_json::json!({"errorKind":"rate_limit"})),
         );
@@ -4199,9 +4196,9 @@ mod tests {
         // What the adapter actually answers when nobody is signed in: the ACP
         // code for it, and a message too terse for any phrase-matcher to read.
         let refused = agent_client_protocol::Error::auth_required();
-        let (message, signing_in) = transport_failure(&refused);
-        assert!(signing_in, "-32000 is the sign-in code, not a crash");
-        record_failure(&database, &session, &message, signing_in).await;
+        let (message, signal) = transport_failure("claude", &refused);
+        assert!(signal.is_some(), "-32000 is the sign-in code, not a crash");
+        record_failure(&database, &session, &message, signal).await;
 
         let events = database.events_since(session.id.clone(), 0).await.unwrap();
         // The chat offers a way back in ...
@@ -4216,12 +4213,52 @@ mod tests {
             .iter()
             .find(|event| event.kind == crate::workbench::protocol::EventKind::SessionState)
             .expect("the session is marked");
-        assert_eq!(state.fields["label"], "Sign in to continue");
+        assert_eq!(state.fields["label"], "Sign-in required");
 
         // A genuine crash is still a crash: no sign-in is offered for it.
         let broken = agent_client_protocol::Error::internal_error();
-        let (_, crashed_signing_in) = transport_failure(&broken);
-        assert!(!crashed_signing_in);
+        let (_, crashed) = transport_failure("claude", &broken);
+        assert!(crashed.is_none());
+    }
+
+    /// What the Claude adapter answers, measured, when a chat whose login
+    /// expired while it was closed sets its model on the way back in: a bare
+    /// `Internal error`, with the reason in `data.details`. It used to be drawn
+    /// as exactly that, in red, with no way to sign in.
+    #[tokio::test]
+    async fn an_expired_login_refusing_the_chat_setup_asks_to_sign_in() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("idle");
+        database.create_session(session.clone()).await.unwrap();
+
+        let refused = agent_client_protocol::Error::internal_error().data(serde_json::json!({
+            "details":"Unable to validate model: OAuth refresh token is no longer valid; run /login to re-authenticate"
+        }));
+        let (message, signal) = transport_failure("claude", &refused);
+        assert!(message.contains("re-authenticate"), "the reason reaches the reader: {message}");
+        record_failure(&database, &session, &message, signal).await;
+
+        let events = database.events_since(session.id.clone(), 0).await.unwrap();
+        let notice = events
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::ProviderMessage)
+            .expect("the expired login is a sign-in notice in the transcript");
+        assert_eq!(notice.fields["signal"]["kind"], "authentication");
+        assert!(
+            !events.iter().any(|event| event.kind == crate::workbench::protocol::EventKind::Error),
+            "no bare error beside the notice"
+        );
+        let state = events
+            .iter()
+            .find(|event| event.kind == crate::workbench::protocol::EventKind::SessionState)
+            .unwrap();
+        assert_eq!(state.fields["label"], "Sign-in required");
+        assert_eq!(
+            database.current_notices(session.id.clone()).await.unwrap().len(),
+            1,
+            "the sidebar and the chat read the same current notice"
+        );
     }
 
     #[tokio::test]

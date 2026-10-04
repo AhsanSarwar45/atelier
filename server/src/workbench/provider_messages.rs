@@ -37,7 +37,9 @@ pub fn needs_signing_in(detail: &str) -> Value {
 ///
 /// So structure stays out. `data` reaches the reader only when it is itself a
 /// sentence, which is what a provider puts there when it has more to say than
-/// the message held; an object or a list is for whatever reads structure. And
+/// the message held, or a `details` sentence inside an object, which is where
+/// a bare `Internal error` can keep its whole account. Any other structure is
+/// for whatever reads structure. And
 /// the one condition the protocol names in a way the reader cares about gets
 /// the app's own words rather than the wire's, because the wire's are the
 /// code's name with an id after them.
@@ -46,7 +48,8 @@ pub fn in_plain_words(code: i32, message: &str, data: Option<&Value>) -> String 
         return "The provider could not find something this chat pointed it at.".into();
     }
     let said = message.trim();
-    match data.and_then(Value::as_str).map(str::trim).filter(|more| !more.is_empty()) {
+    let more = data.and_then(|data| data.as_str().or_else(|| data["details"].as_str()));
+    match more.map(str::trim).filter(|more| !more.is_empty()) {
         Some(more) if said.is_empty() => more.into(),
         Some(more) if !more.contains(said) => format!("{said}: {more}"),
         Some(more) => more.into(),

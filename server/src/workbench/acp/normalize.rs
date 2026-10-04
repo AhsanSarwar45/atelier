@@ -848,8 +848,15 @@ impl AcpNormalizer {
     /// place of it. It used to name the message as `sourceMessageId`, which
     /// meant "delete this", and nothing means that any more: a notice that can
     /// delete an answer is a notice that can lose one, and it did (bw-by3w).
-    fn error_prose_signal(brand: &str, said: &str) -> Option<Value> {
-        crate::workbench::kit_words::condition(brand, said)
+    ///
+    /// One reading for every refusal, whether it ended a turn or stopped the
+    /// chat from starting: a login that expired while a chat was closed is
+    /// refused when the chat is set up again, not in a turn, and it read as a
+    /// bare `Internal error` because only a turn was read this way.
+    pub fn refusal_signal(brand: &str, error: &Value) -> Option<Value> {
+        Self::acp_error_signal(error).or_else(|| {
+            crate::workbench::kit_words::condition(brand, &Self::acp_error_reads(error))
+        })
     }
 
     /// The error as a sentence, for the reader who gets no better account.
@@ -2829,14 +2836,7 @@ impl AcpNormalizer {
     pub fn fail_turn(&mut self, session_id: &str, provider: &str, error: &Value) -> Vec<Event> {
         let said = Self::acp_error_reads(error);
         let raw = json!({"error":error});
-        // The kit's sentence alone, not `said`: that has the error's `data`
-        // pretty-printed after a colon, and a clause read off the whole of it
-        // runs on into the JSON — `resets 9pm (Asia/Karachi): { "errorKind":
-        // "rate_limit" }`. `data` is structure and belongs to whatever reads
-        // structure; prose is what this reads.
-        let message = error["message"].as_str().unwrap_or_default();
-        let signal = Self::acp_error_signal(error)
-            .or_else(|| Self::error_prose_signal(provider, message));
+        let signal = Self::refusal_signal(provider, error);
         let mut events = self.end_turn(session_id, provider, &raw, signal, true);
         events.pop();
         let spoken_for = events.iter().any(|event| {
