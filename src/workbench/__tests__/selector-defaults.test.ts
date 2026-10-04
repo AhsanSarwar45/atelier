@@ -80,7 +80,7 @@ describe('new-chat provider default', () => {
   it('never starts a provider the installed backend says is unavailable', () => {
     expect(source).toContain('if (!providerIsAvailable(providers, brand))');
     expect(source).toContain('disabled={starting !== null || !newBrandAvailable || whereMissing !== null}');
-    expect(source).toContain('disabled={!provider.available}');
+    expect(source).toContain('disabled={!provider.available ||');
   });
 });
 
@@ -99,7 +99,7 @@ describe('the new-chat dialog’s three sections', () => {
   });
 
   it('says what it is asking in its headings rather than in a sentence', () => {
-    expect(source).toContain('<DialogTitle>New chat</DialogTitle>');
+    expect(source).toContain("<DialogTitle>{moving ? 'Switch provider' : 'New chat'}</DialogTitle>");
     expect(source).not.toContain('This choice applies to this new chat.');
   });
 
