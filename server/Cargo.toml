@@ -1,6 +1,6 @@
 [package]
 name = "atelier"
-version = "0.22.19"
+version = "0.22.20"
 edition = "2021"
 license = "MIT"
 
