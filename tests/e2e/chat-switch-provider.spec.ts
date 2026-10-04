@@ -70,6 +70,21 @@ test('a Claude chat switches to Codex and carries on', async ({ page, request })
     await expect(row).toHaveAttribute('data-brand', 'codex', { timeout: 30_000 });
     expect(await times(page)).toBe(1);
 
+    // Before the next message wakes it, the chat already offers Codex's own
+    // models, not the ones Claude announced, and one can be picked.
+    const model = page.getByTestId('model-picker');
+    await model.click();
+    const options = page.getByTestId('model-picker-option');
+    // More than the one "Default model" row the app draws before any list arrives.
+    await options.nth(1).waitFor({ timeout: 120_000 });
+    const values = await options.evaluateAll((rows) => rows.map((row) => (row as HTMLElement).dataset.value ?? ''));
+    expect(values.filter((value) => /claude|opus|sonnet|haiku/i.test(value)), values.join(', ')).toEqual([]);
+    await page.getByTestId('model-picker-menu').screenshot({ path: join(RESULTS, 'switch-provider-models.png') });
+    const current = await model.getAttribute('data-current');
+    const other = values.find((value) => value !== current);
+    await options.nth(values.indexOf(other!)).click();
+    await expect(model).toHaveAttribute('data-current', other!, { timeout: 30_000 });
+
     await say(page, 'What code word did I ask you to remember? Reply with only the code word.');
     await expect.poll(() => times(page), { timeout: 60_000 }).toBe(2);
     await page.screenshot({ path: join(RESULTS, 'switch-provider-after.png') });

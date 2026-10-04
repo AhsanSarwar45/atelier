@@ -3469,6 +3469,16 @@ async fn command(
             tokio::spawn(async move { state.account_signed_in(&brand, &profile).await });
         }
     }
+    // A chat moved to another provider has none of that provider's choices
+    // yet; ask for them now, as opening it would, so its model, effort and
+    // permissions can be set before the next message wakes it.
+    if command.kind == CommandKind::SessionProfile && reply["moved"] == true {
+        if let Some(session_id) = command.fields.get("sessionId").and_then(Value::as_str) {
+            if let Some(session) = state.database().get_session(session_id.to_string()).await? {
+                ask_provider_for_commands(state.database(), &session);
+            }
+        }
+    }
     if attaches {
         // Before the reply: the browser opens the chat on the reply, and the
         // hold set it opens it against must already say the chat is ours.

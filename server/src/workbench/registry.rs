@@ -1801,7 +1801,7 @@ impl WorkbenchRegistry {
                 "at":chrono::Utc::now().to_rfc3339(), "state":"dormant", "label":"Asleep"
             })).map_err(|error| error.to_string())?)
             .await?;
-        Ok(json!({"ok":true,"profile":chosen}))
+        Ok(json!({"ok":true,"profile":chosen,"moved":moving}))
     }
 
     /// Execute one already-decoded WBP command and return the exact JSON body
@@ -3699,14 +3699,19 @@ mod tests {
             json!({"type":"message.started","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","role":"user"}),
             json!({"type":"text.delta","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","text":"remember the blue door"}),
             json!({"type":"message.completed","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1"}),
+            json!({"type":"session.menu","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:02Z","models":[{"value":"opus","displayName":"Opus"}]}),
         ] {
             database.append(serde_json::from_value(value).unwrap()).await.unwrap();
         }
 
-        registry.execute(&command(
+        let moved = registry.execute(&command(
             CommandKind::SessionProfile,
             json!({"sessionId":"session-1","brand":"codex","profileId":"system"}),
         )).await.unwrap();
+        assert_eq!(moved["moved"], true, "the reply says so, for the new provider to be asked its choices");
+        let offered = database.offered_menu("session-1".into()).await.unwrap();
+        assert!(offered["models"].as_array().is_none_or(|models| models.iter().all(|m| m["value"] != "opus")),
+            "a chat moved to Codex is not offered Claude's models: {offered}");
 
         let stored = database.get_session("session-1".into()).await.unwrap().unwrap();
         assert_eq!(stored.brand, "codex");

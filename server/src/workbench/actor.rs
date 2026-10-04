@@ -1284,7 +1284,14 @@ fn run(
                 respond(reply, store.session_by_external_id(&id))
             }
             Command::UpdateSession(id, patch, touch_at, reply) => {
-                respond(reply, store.update_session(&id, patch, touch_at.as_deref()))
+                // A chat moved to another provider is offered that provider's
+                // choices, never the ones the one it left announced.
+                let moved = patch.brand.is_some();
+                let result = store.update_session(&id, patch, touch_at.as_deref());
+                if moved && result.is_ok() {
+                    live_menus.remove(&id);
+                }
+                respond(reply, result)
             }
             Command::MarkSpoke(id, at, reply) => respond(reply, store.mark_spoke(&id, &at)),
             Command::CorrectFolders(found, reply) => respond(reply, store.correct_folders(&found)),
