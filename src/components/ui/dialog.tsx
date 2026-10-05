@@ -16,17 +16,22 @@ const DialogPortal = DialogPrimitive.Portal
 
 const DialogClose = DialogPrimitive.Close
 
+/** How a window and the dim behind it come and go. */
+const FADE =
+  "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+
+const STILL_OVERLAY = "fixed inset-0 z-50 bg-black/80"
+
 /** The dim laid over the page behind every window, alert or not. */
-const dialogOverlayStyles =
-  "fixed inset-0 z-50 bg-black/80  data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+const dialogOverlayStyles = `${STILL_OVERLAY} ${FADE}`
 
 const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay> & { still?: boolean }
+>(({ className, still, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn(dialogOverlayStyles, className)}
+    className={cn(still ? STILL_OVERLAY : dialogOverlayStyles, className)}
     {...props}
   />
 ))
@@ -41,9 +46,16 @@ const SHEET_ON_A_PHONE =
   "max-sm:bottom-0 max-sm:top-auto max-sm:translate-y-0 max-sm:rounded-t-lg max-sm:pb-[max(1.5rem,env(safe-area-inset-bottom))] max-sm:data-[state=open]:slide-in-from-top-[100%]"
 
 const dialogVariants = cva(
-  "fixed z-50 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+  "fixed z-50 duration-200",
   {
     variants: {
+      still: {
+        false: FADE,
+        // Opens and closes at once. The fullscreen picture used to fade in, and
+        // a click or wheel during that fade could leave it stuck half
+        // transparent (bw-ux93q).
+        true: "",
+      },
       shape: {
         // `w-full max-w-lg` was missing here, which is what every `sm:max-w-*`
         // a caller passes is meant to narrow FROM — below `sm:` there was no
@@ -73,6 +85,7 @@ const dialogVariants = cva(
       },
     },
     defaultVariants: {
+      still: false,
       shape: "box",
     },
   }
@@ -90,12 +103,12 @@ interface DialogContentProps
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, shape, overlayClassName, hideClose, ...props }, ref) => (
+>(({ className, children, shape, still, overlayClassName, hideClose, ...props }, ref) => (
   <DialogPortal>
-    <DialogOverlay className={overlayClassName} />
+    <DialogOverlay still={still ?? false} className={overlayClassName} />
     <DialogPrimitive.Content
       ref={ref}
-      className={cn(dialogVariants({ shape }), className)}
+      className={cn(dialogVariants({ shape, still }), className)}
       {...props}
     >
       {children}

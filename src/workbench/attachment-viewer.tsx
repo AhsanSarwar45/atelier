@@ -83,6 +83,7 @@ export function AttachmentViewer({ image, onClose }: { image: LookableImage; onC
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
         shape="screen"
+        still
         hideClose
         overlayClassName="bg-black/80"
         aria-describedby={undefined}

@@ -223,7 +223,7 @@ export function PictureViewer({ image, onClose }: { image: LookableImage; onClos
   const label = comparison ? `${comparison.before.alt} and ${comparison.after.alt}` : single?.alt;
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent shape="screen" hideClose overlayClassName="bg-black/80" aria-describedby={undefined} aria-label={label || 'Picture'} data-testid="picture-viewer" className="flex h-full w-full flex-col items-center justify-center p-2 pb-16 pt-16 sm:p-6 sm:pb-16 sm:pt-16">
+      <DialogContent shape="screen" still hideClose overlayClassName="bg-black/80" aria-describedby={undefined} aria-label={label || 'Picture'} data-testid="picture-viewer" className="flex h-full w-full flex-col items-center justify-center p-2 pb-16 pt-16 sm:p-6 sm:pb-16 sm:pt-16">
         <DialogTitle className="sr-only">{label || 'Picture'}</DialogTitle>
         <Controls transform={transform} onChange={setTransform} />
         {comparison && <Panel asChild tone="media" inset="bar">
