@@ -284,16 +284,21 @@ impl WorkbenchState {
         }
     }
 
-    /// Every account a Codex app-server can be pointed at, the system one as
-    /// `None` so its process is left the environment it already has.
+    /// Every Codex account's folder, the system one as the folder the server
+    /// was started with. Never the person's own `~/.codex` behind its back: a
+    /// server started on another folder, a test's above all, would read every
+    /// conversation kept there.
     fn codex_account_homes(&self) -> Vec<Option<std::path::PathBuf>> {
+        let booted = self.registry.codex_home_directory().to_path_buf();
         let accounts = self.registry.every_account("codex");
         if accounts.is_empty() {
-            return vec![None];
+            return vec![Some(booted)];
         }
         accounts
             .into_iter()
-            .map(|(id, directory)| (id != crate::workbench::profiles::SYSTEM).then_some(directory))
+            .map(|(id, directory)| {
+                Some(if id == crate::workbench::profiles::SYSTEM { booted.clone() } else { directory })
+            })
             .collect()
     }
     /// The rollout file for one Codex chat, looked for under the account that
