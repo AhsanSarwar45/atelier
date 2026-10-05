@@ -1972,6 +1972,47 @@ fn offers_config_value(options: &Value, id: &str, value: &str) -> bool {
         })
 }
 
+/// The choices of a select option, grouped or not, as (value, name).
+fn config_choices(options: &Value, id: &str) -> Vec<(String, String)> {
+    let option = options.as_array().into_iter().flatten().find(|option| option["id"] == id);
+    let mut choices = Vec::new();
+    for choice in option.and_then(|option| option["options"].as_array()).into_iter().flatten() {
+        let inner = choice["options"].as_array();
+        for choice in inner.map(|inner| inner.iter().collect()).unwrap_or_else(|| vec![choice]) {
+            if let Some(value) = choice["value"].as_str() {
+                let name = choice["name"].as_str().filter(|name| !name.is_empty()).unwrap_or(value);
+                choices.push((value.to_string(), name.to_string()));
+            }
+        }
+    }
+    choices
+}
+
+/// Whether a select option lists this value among its choices. Unlike
+/// `offers_config_value`, the value it already holds does not count.
+fn lists_config_choice(options: &Value, id: &str, value: &str) -> bool {
+    config_choices(options, id).iter().any(|(choice, _)| choice == value)
+}
+
+fn config_choice_name(options: &Value, id: &str, value: &str) -> String {
+    config_choices(options, id)
+        .into_iter()
+        .find(|(choice, _)| choice == value)
+        .map(|(_, name)| name)
+        .unwrap_or_else(|| value.to_string())
+}
+
+/// The model a chat moves to when its own is not listed for the account: the
+/// first real model the account lists, else the account's own default entry.
+fn fallback_model(options: &Value, id: &str) -> Option<String> {
+    let choices = config_choices(options, id);
+    choices
+        .iter()
+        .find(|(value, _)| value != "default")
+        .or_else(|| choices.first())
+        .map(|(value, _)| value.clone())
+}
+
 fn desired_is_offered(options: &Value, id: &str, value: &Value) -> bool {
     value.as_str().is_some_and(|value| offers_config_value(options, id, value))
 }
@@ -2797,8 +2838,20 @@ impl AcpDriver {
                             connection.send_request(SetSessionModeRequest::new(remote_id.clone(), desired_mode.clone())).block_task().await?;
                             modes["currentModeId"] = json!(desired_mode);
                         }
+                        // Which models a provider offers depends on the
+                        // account. A model this account does not list -- the
+                        // owner's default, or a pin a stopped chat kept from
+                        // another account -- is not pushed; the chat moves to
+                        // one the account does list below. Only this chat
+                        // moves: the saved default is left alone.
+                        let checks_models = brand != super::super::local::BRAND;
+                        let unlisted_model = task_session.model.as_deref()
+                            .filter(|model| checks_models && !model.is_empty() && *model != "default")
+                            .filter(|model| config_option_id(&config_options, &ConfigTarget::Model)
+                                .is_some_and(|key| !lists_config_choice(&config_options, &key, model)))
+                            .map(str::to_string);
                         for (target, desired) in [
-                            (ConfigTarget::Model, task_session.model.as_deref()),
+                            (ConfigTarget::Model, task_session.model.as_deref().filter(|_| unlisted_model.is_none())),
                             (ConfigTarget::Effort, task_session.effort.as_deref()),
                             (ConfigTarget::Collaboration, task_session.collaboration_mode.as_deref()),
                         ] {
@@ -2816,6 +2869,31 @@ impl AcpDriver {
                                 } else { desired };
                                 let response = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key, desired)).block_task().await?;
                                 config_options = serde_json::to_value(response.config_options).map_err(acp_error)?;
+                            }
+                        }
+                        // The agent can also come up on an unlisted model by
+                        // itself, from the account's own configuration.
+                        if let Some(key) = config_option_id(&config_options, &ConfigTarget::Model).filter(|_| checks_models) {
+                            let current = current_option(&config_options, &["model"]).as_str().map(str::to_string);
+                            let stranded = current.as_deref().is_some_and(|model| !lists_config_choice(&config_options, &key, model));
+                            let missing = unlisted_model.clone().or_else(|| current.clone().filter(|_| stranded));
+                            if let Some(missing) = missing {
+                                if let Some(fallback) = fallback_model(&config_options, &key).filter(|_| stranded) {
+                                    let response = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key.clone(), fallback.as_str())).block_task().await?;
+                                    config_options = serde_json::to_value(response.config_options).map_err(acp_error)?;
+                                }
+                                let now_on = current_option(&config_options, &["model"]).as_str()
+                                    .filter(|model| lists_config_choice(&config_options, &key, model))
+                                    .map(|model| config_choice_name(&config_options, &key, model));
+                                // His to know, so drawn by default: an aside
+                                // with no audience starts hidden.
+                                if let Some(now_on) = now_on {
+                                    task_database.append(event(json!({
+                                        "type":"notice", "sessionId":task_session.id, "seq":0, "at":now(),
+                                        "text":format!("This account doesn't offer {missing}, so this chat uses {now_on}."),
+                                        "family":"background", "audience":"you"
+                                    }))?).await.map_err(acp_error)?;
+                                }
                             }
                         }
                         for saved in extra_config_options(&saved_menu["configOptions"]) {
@@ -3692,6 +3770,39 @@ pub async fn note_adapter_answer(brand: &str, refused: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Which models a provider offers depends on the account, so a chat on a
+    /// model its account does not list moves to one it does (bw-0a00g.1).
+    #[test]
+    fn a_model_the_account_does_not_list_falls_back_to_one_it_does() {
+        let options = json!([{
+            "id": "model", "category": "model", "type": "select",
+            "currentValue": "gpt-6-astra",
+            "options": [
+                {"value": "default", "name": "Default"},
+                {"group": "Recommended", "options": [
+                    {"value": "gpt-5.6-terra", "name": "GPT-5.6 Terra"},
+                    {"value": "gpt-5.5", "name": ""}
+                ]}
+            ]
+        }]);
+
+        // The value it holds is not a listed choice.
+        assert!(offers_config_value(&options, "model", "gpt-6-astra"));
+        assert!(!lists_config_choice(&options, "model", "gpt-6-astra"));
+        assert!(lists_config_choice(&options, "model", "gpt-5.6-terra"));
+        assert!(lists_config_choice(&options, "model", "default"));
+
+        // The first real model, not the account's default entry.
+        assert_eq!(fallback_model(&options, "model").as_deref(), Some("gpt-5.6-terra"));
+        assert_eq!(config_choice_name(&options, "model", "gpt-5.6-terra"), "GPT-5.6 Terra");
+        assert_eq!(config_choice_name(&options, "model", "gpt-5.5"), "gpt-5.5");
+
+        // A list holding only the default entry falls back to it.
+        let only_default = json!([{"id": "model", "options": [{"value": "default", "name": "Default"}]}]);
+        assert_eq!(fallback_model(&only_default, "model").as_deref(), Some("default"));
+        assert_eq!(fallback_model(&json!([]), "model"), None);
+    }
 
     /// The condition is the protocol's, so every provider recovers from it.
     ///

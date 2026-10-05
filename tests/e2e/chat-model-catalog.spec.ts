@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -193,6 +193,44 @@ test.describe('the model menu', () => {
       const durableMenu = JSON.parse(row.json) as Record<string, unknown>;
       expect(durableMenu.models, 'the existing chat retained a provider catalog').toBeUndefined();
       expect(durableMenu.configOptions, 'the existing chat retained provider options').toBeUndefined();
+    }
+  });
+
+  /**
+   * Which models a provider offers depends on the account. A default the
+   * chat's account does not list moves that chat to a model it does list, and
+   * says so; the owner's own default is left exactly as it was (bw-0a00g.1).
+   */
+  test('a default the account does not offer starts the chat on one it does, for that chat only', async ({ page, request }) => {
+    installProviderCatalog('claude', ['claude-account-one', 'claude-account-two']);
+    const settings = join(process.env.CLAUDE_CONFIG_DIR!, 'settings.json');
+    const owned = JSON.stringify({ model: 'claude-not-on-this-account' });
+    writeFileSync(settings, owned);
+    try {
+      const project = await fixtureProject(request);
+      await page.goto(`/project?id=${project.id}&tab=chat`);
+      await page.getByTestId('new-chat-tool').click();
+      const asking = page.getByTestId('new-chat-provider-dialog');
+      await asking.waitFor({ timeout: HELLO_MS });
+      await page.getByTestId('new-chat-provider-claude').click();
+      await asking.getByRole('button', { name: 'Start chat' }).click();
+      await page.waitForURL((url) => Boolean(url.searchParams.get('chat')), { timeout: HELLO_MS });
+
+      const model = page.getByTestId('model-picker');
+      await expect(model).toHaveAttribute('data-current', 'claude-account-one', { timeout: HELLO_MS });
+      await expect(page.getByText(
+        "This account doesn't offer claude-not-on-this-account, so this chat uses claude-account-one.",
+      )).toBeVisible({ timeout: HELLO_MS });
+      await page.getByTestId('chat-tab').screenshot({ path: `${SHOTS}/model-fallback-for-account.png` });
+
+      const sessionId = new URL(page.url()).searchParams.get('chat')!;
+      const database = new DatabaseSync(join(process.env.ATELIER_DATA_DIR!, 'workbench.db'), { readOnly: true });
+      const row = database.prepare('SELECT model FROM session WHERE id = ?').get(sessionId) as { model: string };
+      database.close();
+      expect(row.model).toBe('claude-account-one');
+      expect(readFileSync(settings, 'utf8'), 'the owner default was changed').toBe(owned);
+    } finally {
+      rmSync(settings, { force: true });
     }
   });
 });
