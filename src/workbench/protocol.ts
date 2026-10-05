@@ -962,7 +962,7 @@ export interface SignInProgress {
 }
 
 /** Whose provider settings a command is about: one account's directory or one checkout. */
-export type SettingsScope = { scope: 'account'; profileId?: string } | { scope: 'project'; projectPath: string };
+export type SettingsScope = { scope: 'account'; profileId?: string } | { scope: 'project'; projectPath: string; profileId?: string };
 
 /** Which file inside a scope a value is in. `managed` is read only. */
 export type SettingsLayer = 'managed' | 'user' | 'project' | 'local';

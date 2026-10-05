@@ -8,7 +8,7 @@
 //! the whole document parsed, one entry changed, a backup kept, the file
 //! replaced atomically.
 //!
-//! ## Where Claude Code keeps things (2.1.270, read from the docs and the binary)
+//! ## Where Claude Code keeps things (2.1.289, read from the docs and the binary)
 //!
 //! - user servers: `<cfg>/.claude.json` top-level `mcpServers`;
 //! - local servers: `<cfg>/.claude.json` `projects[<path>].mcpServers`;
@@ -19,11 +19,15 @@
 //! - approval of `.mcp.json` servers: `enabledMcpjsonServers`,
 //!   `disabledMcpjsonServers` and `enableAllProjectMcpServers` in the settings
 //!   files. The interactive dialog writes its answer to
-//!   `.claude/settings.local.json`, so that is where a toggle here goes too. A
-//!   server in no list is *pending*: an interactive session asks, a
-//!   non-interactive one (which is what a chat here is) loads it anyway, and
-//!   only `disabledMcpjsonServers` stops it. So `enabled` for a project server
-//!   means "not rejected", and `approval` says the rest.
+//!   `.claude/settings.local.json`, so that is where a toggle here goes too.
+//!   Since 2.1.289 an approval in the checkout's own settings files counts
+//!   only when the account's `.claude.json` has `hasTrustDialogAccepted` for
+//!   the folder (a worktree inside it counts as the folder). A server that is
+//!   not approved is *pending*, and a chat does not load it, so `enabled` for
+//!   a project server means "approved", and a toggle on also trusts the
+//!   folder for that account.
+//! - one name in more than one place: a local entry outranks a `.mcp.json`
+//!   one, which outranks a user one; a project lists only the one that wins.
 //!
 //! ## Where Codex keeps things (0.153.4)
 //!
@@ -446,6 +450,16 @@ pub fn set_enabled(
                 list_remove(settings, take_from, id);
                 Ok(())
             })?;
+            if enabled {
+                // The approval above is read only from a folder this account
+                // trusts, so switching a server on trusts the folder too, as
+                // answering Claude's own trust prompt would.
+                rewrite_json(&account.claude_json, |root| {
+                    project_entry(root, scope)?
+                        .insert("hasTrustDialogAccepted".into(), Value::Bool(true));
+                    Ok(())
+                })?;
+            }
         }
         ("claude", Scope::Project { .. }, _) => {
             if source == Source::Local && !claude_has(&path, scope, id)? {
@@ -609,7 +623,11 @@ fn claude_project(account: &Account, project: &Path) -> Result<Vec<Server>, Stri
         .and_then(|projects| projects.get(project_key(project)))
         .and_then(Value::as_object);
     let disabled = names(entry.and_then(|entry| entry.get("disabledMcpServers")));
-    let settings = provider_settings::read(
+    // Claude honors an approval written inside the checkout only once this
+    // account trusts the folder; until then only the account's own files and
+    // the managed ones count. A rejection counts wherever it is written.
+    let trusted = is_trusted(entry);
+    let repo = provider_settings::read(
         "claude",
         &Scope::Project {
             path: project.to_path_buf(),
@@ -618,21 +636,22 @@ fn claude_project(account: &Account, project: &Path) -> Result<Vec<Server>, Stri
     )?
     .files
     .into_iter()
-    .chain(
-        provider_settings::read("claude", &Scope::Account { profile_id: None }, &account.dir)?
-            .files,
-    )
     .map(|file| file.value)
     .collect::<Vec<_>>();
-    let rejected = settings
+    let own = provider_settings::read("claude", &Scope::Account { profile_id: None }, &account.dir)?
+        .files
+        .into_iter()
+        .map(|file| file.value)
+        .collect::<Vec<_>>();
+    let rejected = repo
         .iter()
+        .chain(own.iter())
         .flat_map(|value| names(value.get("disabledMcpjsonServers")))
         .collect::<Vec<_>>();
-    let approve_all = settings
-        .iter()
-        .any(|value| value.get("enableAllProjectMcpServers") == Some(&Value::Bool(true)));
-    let approved = settings
-        .iter()
+    let counted = || own.iter().chain(repo.iter().filter(|_| trusted));
+    let approve_all =
+        counted().any(|value| value.get("enableAllProjectMcpServers") == Some(&Value::Bool(true)));
+    let approved = counted()
         .flat_map(|value| names(value.get("enabledMcpjsonServers")))
         .collect::<Vec<_>>();
     let mut servers: Vec<Server> = entries(load_json(&mcp_json)?.get("mcpServers"))
@@ -649,7 +668,7 @@ fn claude_project(account: &Account, project: &Path) -> Result<Vec<Server>, Stri
                 config,
                 Source::Project,
                 &mcp_json,
-                approval != "rejected",
+                approval == "approved",
                 Some(approval),
             )
         })
@@ -666,7 +685,21 @@ fn claude_project(account: &Account, project: &Path) -> Result<Vec<Server>, Stri
             )
         }),
     );
+    // A local entry outranks a `.mcp.json` one of the same name, so a chat
+    // here gets only the local one; list only what a chat gets.
+    let local: Vec<String> = servers
+        .iter()
+        .filter(|server| server.source == Source::Local)
+        .map(|server| server.id.clone())
+        .collect();
+    servers.retain(|server| server.source != Source::Project || !local.contains(&server.id));
     Ok(servers)
+}
+
+/// Whether this account's `.claude.json` entry for a folder says the folder
+/// is trusted, which is what lets Claude read approvals from its settings.
+fn is_trusted(entry: Option<&Map<String, Value>>) -> bool {
+    entry.and_then(|entry| entry.get("hasTrustDialogAccepted")) == Some(&Value::Bool(true))
 }
 
 fn claude_server(
@@ -1211,6 +1244,73 @@ mod tests {
     }
 
     #[test]
+    fn claude_project_approval_counts_only_in_a_trusted_folder_and_one_name_is_one_row() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let account_files = account_in(home.path());
+        fs::create_dir_all(&account_files.dir).unwrap();
+        let scope = Scope::Project {
+            path: project.path().to_path_buf(),
+        };
+        let key = project.path().to_string_lossy().into_owned();
+        fs::write(
+            project.path().join(".mcp.json"),
+            r#"{"mcpServers": {"sentry": {"type": "http", "url": "https://mcp.sentry.dev/mcp"},
+                "twin": {"type": "http", "url": "https://shared"}}}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(project.path().join(".claude")).unwrap();
+        fs::write(
+            project.path().join(".claude/settings.local.json"),
+            r#"{"enableAllProjectMcpServers": true}"#,
+        )
+        .unwrap();
+        let write_account = |trusted: bool| {
+            fs::write(
+                &account_files.claude_json,
+                serde_json::to_string(&json!({"projects": {&key: {
+                    "hasTrustDialogAccepted": trusted,
+                    "mcpServers": {"twin": {"type": "http", "url": "https://mine"}}
+                }}}))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+
+        // The approval sits in the checkout, which this account never trusted.
+        write_account(false);
+        let listing = list("claude", &scope, &account_files).unwrap();
+        let sentry = listing.servers.iter().find(|s| s.id == "sentry").unwrap();
+        assert_eq!(sentry.approval, Some("pending"));
+        assert!(!sentry.enabled);
+        // The local twin is what a chat gets, so it is the only twin listed.
+        let twins: Vec<_> = listing.servers.iter().filter(|s| s.id == "twin").collect();
+        assert_eq!(twins.len(), 1, "{listing:?}");
+        assert_eq!(twins[0].source, Source::Local);
+        assert_eq!(twins[0].url.as_deref(), Some("https://mine"));
+
+        // Once the account trusts the folder the same file approves it.
+        write_account(true);
+        let listing = list("claude", &scope, &account_files).unwrap();
+        let sentry = listing.servers.iter().find(|s| s.id == "sentry").unwrap();
+        assert_eq!(sentry.approval, Some("approved"));
+        assert!(sentry.enabled);
+
+        // An approval in the account's own settings counts without trust.
+        write_account(false);
+        fs::write(
+            account_files.dir.join("settings.json"),
+            r#"{"enabledMcpjsonServers": ["sentry"]}"#,
+        )
+        .unwrap();
+        let listing = list("claude", &scope, &account_files).unwrap();
+        assert_eq!(
+            listing.servers.iter().find(|s| s.id == "sentry").unwrap().approval,
+            Some("approved")
+        );
+    }
+
+    #[test]
     fn native_workbench_services_mcp_claude_project_reads_mcp_json_local_entries_and_approvals() {
         let home = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
@@ -1264,8 +1364,8 @@ mod tests {
         assert_eq!(by_id("shared").transport, "sse");
         assert_eq!(by_id("shared").approval, Some("pending"));
         assert!(
-            by_id("shared").enabled,
-            "a pending server still loads in a chat"
+            !by_id("shared").enabled,
+            "a pending server is not loaded in a chat"
         );
         assert_eq!(by_id("rejected").approval, Some("rejected"));
         assert!(!by_id("rejected").enabled);
@@ -1333,6 +1433,13 @@ mod tests {
         .unwrap();
         assert_eq!(local["disabledMcpjsonServers"], json!([]));
         assert_eq!(local["enabledMcpjsonServers"], json!(["shared"]));
+        let root: Value =
+            serde_json::from_str(&fs::read_to_string(&account_files.claude_json).unwrap()).unwrap();
+        assert_eq!(
+            root["projects"][&key]["hasTrustDialogAccepted"],
+            json!(true),
+            "switching on trusts the folder, or Claude ignores the approval"
+        );
 
         // A local server is switched through .claude.json's project entry.
         let listing = set_enabled(

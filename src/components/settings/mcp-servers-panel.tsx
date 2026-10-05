@@ -32,7 +32,7 @@ function said(e: unknown): string {
 }
 
 export function wireScope(scope: Scope): SettingsScope {
-  return scope.kind === 'account' ? { scope: 'account', profileId: scope.profileId } : { scope: 'project', projectPath: scope.projectPath };
+  return scope.kind === 'account' ? { scope: 'account', profileId: scope.profileId } : { scope: 'project', projectPath: scope.projectPath, profileId: scope.profileId };
 }
 
 const SOURCE_NAME: Record<McpSource, string> = { user: 'Account', project: 'Project', local: 'Project, this computer' };

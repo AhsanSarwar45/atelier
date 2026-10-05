@@ -21,6 +21,7 @@ import { FolderBrowser } from '@/components/folder-browser';
 import { BranchSelect, BranchesPicker } from '@/components/settings/branch-picker';
 import { ChatNameEditor } from '@/components/settings/chat-name-editor';
 import { ExtensionsPanel } from '@/components/settings/extensions-panel';
+import { AccountPicker, useProfiles } from '@/components/settings/account-picker';
 import { McpServersPanel } from '@/components/settings/mcp-servers-panel';
 import { pagesFor, type Brand } from '@/components/settings/provider-schema';
 import { ProviderTabs, providerTabs } from '@/components/settings/provider-section';
@@ -48,6 +49,7 @@ import * as api from '@/lib/api';
 import type { ChatNamePart, ManifestStorage, ProjectManifest } from '@/lib/api';
 import { updateProject } from '@/lib/db';
 import { BrandIcon } from '@/workbench/brand-icon';
+import { readNewChatDefaults } from '@/workbench/new-chat-defaults';
 
 export const PROJECT_SETTINGS_SECTIONS: SettingsSectionDef[] = [
   { id: 'project', label: 'Project', hint: 'Name, folder', icon: <Settings2 /> },
@@ -87,6 +89,42 @@ export interface ProjectSettingsScreenProps {
   onUpdated: () => void;
   /** Called after the project was archived, restored or deleted, so the caller can leave. */
   onGone?: () => void;
+}
+
+/**
+ * A project's MCP servers as one account's chats get them.
+ *
+ * Which servers load, whether the folder is trusted and whether a server is
+ * signed in all live in the account's own files, so the list is drawn for one
+ * account: the one new chats open on, unless another is picked here.
+ */
+function ProjectMcp({ brand, folder }: { brand: Brand; folder: string }) {
+  const { profiles } = useProfiles(brand);
+  const [chosen, setChosen] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let live = true;
+    readNewChatDefaults()
+      .then((d) => live && setChosen((c) => c ?? d.profiles[brand] ?? null))
+      .catch(() => undefined)
+      .finally(() => live && setReady(true));
+    return () => {
+      live = false;
+    };
+  }, [brand]);
+  const scope: Scope = useMemo(() => ({ kind: 'project', projectPath: folder, profileId: chosen ?? undefined }), [folder, chosen]);
+  if (!ready) return <Spinner />;
+  return (
+    <div className="space-y-4">
+      {profiles && profiles.length > 1 && (
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-medium text-t-tertiary">Account</span>
+          <AccountPicker brand={brand} profiles={profiles} value={chosen} onChange={setChosen} />
+        </div>
+      )}
+      <McpServersPanel brand={brand} scope={scope} />
+    </div>
+  );
 }
 
 export function ProjectSettingsScreen({
@@ -285,7 +323,7 @@ export function ProjectSettingsScreen({
           {isPage ? (
             <ProviderSettingsPanel brand={brand} scope={projectScope} page={known} layer={layer} />
           ) : known === 'mcp' ? (
-            <McpServersPanel brand={brand} scope={projectScope} />
+            <ProjectMcp brand={brand} folder={folder} />
           ) : known === 'plugins' ? (
             <ExtensionsPanel brand={brand} scope={projectScope} />
           ) : null}

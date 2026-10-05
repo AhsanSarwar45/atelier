@@ -24,7 +24,12 @@ export interface SettingsView {
   files: SettingsFile[];
 }
 
-export type Scope = { kind: 'account'; profileId?: string } | { kind: 'project'; projectPath: string };
+/**
+ * Whose settings. A project's MCP servers also need the account a chat there
+ * runs on: that account's `.claude.json` holds the folder's trust and local
+ * servers, and its credentials hold the sign-ins.
+ */
+export type Scope = { kind: 'account'; profileId?: string } | { kind: 'project'; projectPath: string; profileId?: string };
 
 /** Highest precedence first, as the provider itself reads them. */
 const ORDER: Layer[] = ['managed', 'local', 'project', 'user'];

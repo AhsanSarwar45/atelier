@@ -33,7 +33,7 @@ import { sendCommand } from '@/workbench/use-session';
 
 /** The same wiring the panel does; spelled here so the two do not import each other. */
 function wireScope(scope: Scope): SettingsScope {
-  return scope.kind === 'account' ? { scope: 'account', profileId: scope.profileId } : { scope: 'project', projectPath: scope.projectPath };
+  return scope.kind === 'account' ? { scope: 'account', profileId: scope.profileId } : { scope: 'project', projectPath: scope.projectPath, profileId: scope.profileId };
 }
 
 function said(e: unknown): string {
