@@ -235,7 +235,18 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (method === 'session/set_config_option') {
     const sessionId = params?.sessionId;
-    if (params?.configId === 'model') selectedModels.set(sessionId, params?.value);
+    // A full dated ID is taken for the listed model it names, as the
+    // provider's own adapter takes IDs its list does not spell out. A model
+    // this account does not list at all is refused rather than quietly ignored.
+    const models = providerModels();
+    const model = params?.configId === 'model'
+      ? models.find((listed) => params?.value === listed || String(params?.value).startsWith(`${listed}-20`))
+      : undefined;
+    if (params?.configId === 'model' && !model) {
+      say({ id, error: { code: -32602, message: `Invalid params: no model ${params?.value} on this account` } });
+      return;
+    }
+    if (model) selectedModels.set(sessionId, model);
     say({ id, result: { configOptions: configOptions(selectedModels.get(sessionId)) } });
     return;
   }

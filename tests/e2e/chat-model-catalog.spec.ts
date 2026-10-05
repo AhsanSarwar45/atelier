@@ -233,4 +233,25 @@ test.describe('the model menu', () => {
       rmSync(settings, { force: true });
     }
   });
+
+  /** A full ID the adapter takes for a listed model is no reason to move. */
+  test('a default the adapter takes for a listed model keeps the chat on it, with no notice', async ({ page, request }) => {
+    installProviderCatalog('claude', ['claude-account-one', 'claude-account-two']);
+    const settings = join(process.env.CLAUDE_CONFIG_DIR!, 'settings.json');
+    writeFileSync(settings, JSON.stringify({ model: 'claude-account-two-20260101' }));
+    try {
+      const project = await fixtureProject(request);
+      await page.goto(`/project?id=${project.id}&tab=chat`);
+      await page.getByTestId('new-chat-tool').click();
+      const asking = page.getByTestId('new-chat-provider-dialog');
+      await asking.waitFor({ timeout: HELLO_MS });
+      await page.getByTestId('new-chat-provider-claude').click();
+      await asking.getByRole('button', { name: 'Start chat' }).click();
+      await page.waitForURL((url) => Boolean(url.searchParams.get('chat')), { timeout: HELLO_MS });
+      await expect(page.getByTestId('model-picker')).toHaveAttribute('data-current', 'claude-account-two', { timeout: HELLO_MS });
+      await expect(page.getByText("This account doesn't offer")).toHaveCount(0);
+    } finally {
+      rmSync(settings, { force: true });
+    }
+  });
 });

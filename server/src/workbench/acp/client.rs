@@ -2839,19 +2839,17 @@ impl AcpDriver {
                             modes["currentModeId"] = json!(desired_mode);
                         }
                         // Which models a provider offers depends on the
-                        // account. A model this account does not list -- the
-                        // owner's default, or a pin a stopped chat kept from
-                        // another account -- is not pushed; the chat moves to
-                        // one the account does list below. Only this chat
-                        // moves: the saved default is left alone.
+                        // account. The chat's own model -- the owner's
+                        // default, or a pin it kept from another account --
+                        // is still sent, since the adapter maps aliases and
+                        // full IDs its list does not spell out. One it refuses
+                        // or leaves unlisted moves this chat, and only this
+                        // chat, to a model the account does list below; the
+                        // saved default is left alone.
                         let checks_models = brand != super::super::local::BRAND;
-                        let unlisted_model = task_session.model.as_deref()
-                            .filter(|model| checks_models && !model.is_empty() && *model != "default")
-                            .filter(|model| config_option_id(&config_options, &ConfigTarget::Model)
-                                .is_some_and(|key| !lists_config_choice(&config_options, &key, model)))
-                            .map(str::to_string);
+                        let mut refused_model = None;
                         for (target, desired) in [
-                            (ConfigTarget::Model, task_session.model.as_deref().filter(|_| unlisted_model.is_none())),
+                            (ConfigTarget::Model, task_session.model.as_deref()),
                             (ConfigTarget::Effort, task_session.effort.as_deref()),
                             (ConfigTarget::Collaboration, task_session.collaboration_mode.as_deref()),
                         ] {
@@ -2867,7 +2865,14 @@ impl AcpDriver {
                                 let desired = if brand == super::super::local::BRAND && matches!(target, ConfigTarget::Model) {
                                     super::super::local::decode_model(desired).map(|(_, model)| model).unwrap_or(desired)
                                 } else { desired };
-                                let response = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key, desired)).block_task().await?;
+                                let sent = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key, desired)).block_task().await;
+                                let response = match sent {
+                                    Err(_) if checks_models && matches!(target, ConfigTarget::Model) => {
+                                        refused_model = Some(desired.to_string());
+                                        continue;
+                                    }
+                                    sent => sent?,
+                                };
                                 config_options = serde_json::to_value(response.config_options).map_err(acp_error)?;
                             }
                         }
@@ -2876,7 +2881,7 @@ impl AcpDriver {
                         if let Some(key) = config_option_id(&config_options, &ConfigTarget::Model).filter(|_| checks_models) {
                             let current = current_option(&config_options, &["model"]).as_str().map(str::to_string);
                             let stranded = current.as_deref().is_some_and(|model| !lists_config_choice(&config_options, &key, model));
-                            let missing = unlisted_model.clone().or_else(|| current.clone().filter(|_| stranded));
+                            let missing = refused_model.or_else(|| current.clone().filter(|_| stranded));
                             if let Some(missing) = missing {
                                 if let Some(fallback) = fallback_model(&config_options, &key).filter(|_| stranded) {
                                     let response = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key.clone(), fallback.as_str())).block_task().await?;
