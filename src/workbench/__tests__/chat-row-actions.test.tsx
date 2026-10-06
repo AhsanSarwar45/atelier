@@ -69,7 +69,8 @@ it('right-clicking a chat offers rename and copy ID without opening it', async (
 
   expect(within(screen.getByTestId('chat-context-menu')).getByText('Rename…')).toBeVisible();
   fireEvent.click(screen.getByTestId('chat-menu-copy-id'));
-  await waitFor(() => expect(clipboard).toHaveBeenCalledWith('atelier-session-1'));
+  // The reference the composer reads, so pasting it into the chatbox names this chat.
+  await waitFor(() => expect(clipboard).toHaveBeenCalledWith('@chat:atelier-session-1'));
 });
 
 it('renames the chosen chat and updates its row', async () => {

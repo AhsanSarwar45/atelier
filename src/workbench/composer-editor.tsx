@@ -68,7 +68,7 @@ import { opens as opensIt } from '@/workbench/attachment-look';
 import { drawnMarks } from '@/workbench/drawn-marks';
 import { referenceBadgeElement, type Reference } from '@/components/reference-badge';
 import type { DescribeReference } from '@/workbench/reference-names';
-import { findAtelierReferences, findReferences, referenceForAddress, referenceLabel } from '@/workbench/references';
+import { findAtelierReferences, findReferences, referenceForPaste, referenceLabel } from '@/workbench/references';
 
 /** What the chat holds this box by: the one thing it ever asks of it. */
 export interface ComposerHandle {
@@ -432,8 +432,9 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
           // lands in the box the ordinary way.
           paste: (event, editorView) => {
             // A card or a chat of this app, copied from the address bar, goes in
-            // as the reference it names (bw-mi3s.5).
-            const named = referenceForAddress(event.clipboardData?.getData('text/plain') ?? '', window.location.origin);
+            // as the reference it names (bw-mi3s.5); so does a reference copied
+            // whole, such as the sidebar's Copy ID (bw-93pyq).
+            const named = referenceForPaste(event.clipboardData?.getData('text/plain') ?? '', window.location.origin);
             if (named && !event.clipboardData?.files.length) {
               const { from, to } = editorView.state.selection.main;
               const insert = named + ' ';
@@ -513,7 +514,7 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
           if (menuKey(view.current, e.nativeEvent) || onKey(e)) e.preventDefault();
         }}
         onPaste={(e) => {
-          const named = referenceForAddress(e.clipboardData.getData('text/plain'), window.location.origin);
+          const named = referenceForPaste(e.clipboardData.getData('text/plain'), window.location.origin);
           if (named && !e.clipboardData.files.length) {
             e.preventDefault();
             const box = e.currentTarget;

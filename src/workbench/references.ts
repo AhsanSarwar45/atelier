@@ -435,6 +435,26 @@ export function referenceForAddress(pasted: string, origin: string): string | nu
   return null;
 }
 
+/**
+ * The reference a paste stands for, or nothing when the paste is ordinary text.
+ *
+ * Two things pasted whole are one of Atelier's references: an address of this
+ * app (`referenceForAddress`), and a reference already written as one, such as
+ * the `@chat:<id>` the sidebar's Copy ID puts on the clipboard (bw-93pyq). The
+ * composer gives either a space after it, so it is drawn as its badge at once
+ * rather than held as words still being typed. Anything longer, or anything
+ * else, is left as pasted.
+ */
+export function referenceForPaste(pasted: string, origin: string): string | null {
+  const text = pasted.trim();
+  if (!text || /\s/.test(text)) return null;
+  const whole = findAtelierReferences(text);
+  if (whole.length === 1 && whole[0]!.start === 0 && whole[0]!.end === text.length) {
+    return formatAtelierReference(whole[0]!.kind, whole[0]!.id);
+  }
+  return referenceForAddress(text, origin);
+}
+
 /* ------------------------------------------------------------------ *
  * A reference to a change.
  * ------------------------------------------------------------------ */

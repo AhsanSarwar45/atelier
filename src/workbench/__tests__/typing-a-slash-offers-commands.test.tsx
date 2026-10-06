@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { ComposerEditor } from '@/workbench/composer-editor';
 import { commandFeed, mentionCompletions, rankCommands } from '@/workbench/composer-files';
 import type { CommandInfo } from '@/workbench/protocol';
-import { referenceForAddress } from '@/workbench/references';
+import { referenceForAddress, referenceForPaste } from '@/workbench/references';
 
 const COMMANDS: CommandInfo[] = [
   { name: 'compact', description: 'Shrink the conversation', kind: 'command' },
@@ -124,6 +124,15 @@ describe('a pasted address of this app', () => {
     expect(referenceForAddress(`${HERE}/project?id=p1&card=bw-mi3s.5`, HERE)).toBe('@bead:bw-mi3s.5');
     expect(referenceForAddress(`${HERE}/project?id=p1&tab=chat&chat=${CHAT}`, HERE)).toBe(`@chat:${CHAT}`);
     expect(referenceForAddress(`/project?id=p1&card=bw-1`, HERE)).toBe('@bead:bw-1');
+  });
+
+  it('pasted whole as a reference, such as the sidebar copies, is that reference', () => {
+    expect(referenceForPaste(`@chat:${CHAT}`, HERE)).toBe(`@chat:${CHAT}`);
+    expect(referenceForPaste(`  @bead:bw-mi3s.5\n`, HERE)).toBe('@bead:bw-mi3s.5');
+    expect(referenceForPaste(`${HERE}/project?id=p1&tab=chat&chat=${CHAT}`, HERE)).toBe(`@chat:${CHAT}`);
+    expect(referenceForPaste(`see @chat:${CHAT}`, HERE)).toBeNull();
+    expect(referenceForPaste(`@chat:${CHAT} @bead:bw-1`, HERE)).toBeNull();
+    expect(referenceForPaste('hello', HERE)).toBeNull();
   });
 
   it('is left alone when it is somewhere else or something else', () => {

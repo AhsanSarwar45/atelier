@@ -57,6 +57,7 @@ import {
   type LiveSession,
 } from '@/workbench/live';
 import { byWhatIsWorking, laterOf, laterSpoke, whenHeSpoke, type Brand, type RestoreRow } from '@/workbench/protocol';
+import { formatAtelierReference } from '@/workbench/references';
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
@@ -993,8 +994,12 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   const openMenu = useCallback((row: RestoreRow, at: PointerAt) => setMenu({ row, at }), []);
 
+  // An Atelier chat is copied as the reference the composer understands,
+  // `@chat:<id>`, so pasting it into the chatbox names that chat. A chat the
+  // provider holds but Atelier has not imported has no such reference yet, so
+  // its bare provider ID is copied instead.
   const copyId = useCallback((row: RestoreRow) => {
-    const id = row.sessionId ?? row.externalId;
+    const id = row.sessionId ? formatAtelierReference('chat', row.sessionId) : row.externalId;
     if (!id) return;
     const copied = navigator.clipboard?.writeText(id);
     if (copied) void copied.then(() => toast({ title: 'Chat ID copied' }));
