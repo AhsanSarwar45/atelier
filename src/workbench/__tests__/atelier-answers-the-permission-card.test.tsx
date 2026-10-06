@@ -15,10 +15,9 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { composerMenu } from '@/workbench/chat-tab';
 import { asView, foldAll, reduce, EMPTY, type TranscriptAsk } from '@/workbench/fold';
 import { PERMISSION_MODE } from '@/workbench/machine-words';
-import { ATELIER_AUTO, offeringAtelierAuto, type AskOption, type WbpEvent } from '@/workbench/protocol';
+import { ATELIER_AUTO, type AskOption, type WbpEvent } from '@/workbench/protocol';
 import { PermissionCard } from '@/workbench/transcript-rows';
 
 vi.mock('@/workbench/commands', () => ({ sendCommand: vi.fn(async () => ({})) }));
@@ -55,47 +54,6 @@ describe('the mode is offered wherever the provider’s modes are', () => {
     // The picker is where a chat's owner finds out whether it will stop to ask
     // him. `atelierAuto` is not a sentence anyone should have to read (§8.2.4).
     expect(PERMISSION_MODE[ATELIER_AUTO].label).toBe('Atelier automatic');
-  });
-
-  it('offers it before the provider has said anything at all', () => {
-    const menu = composerMenu(
-      { ...EMPTY.menu, permissionModes: [] },
-      'claude',
-      null,
-      null,
-    );
-    expect(menu.permissionModes).toContain(ATELIER_AUTO);
-  });
-
-  it('offers it once when the provider’s menu already carries it', () => {
-    // The server puts it in the menu it builds, and the composer puts it in
-    // the menu it falls back to. A chat that gets both must not show two.
-    const menu = composerMenu(
-      { ...EMPTY.menu, permissionModes: ['default', 'plan', ATELIER_AUTO] },
-      'claude',
-      null,
-      null,
-    );
-    expect(menu.permissionModes.filter((mode) => mode === ATELIER_AUTO)).toHaveLength(1);
-  });
-
-  it('leaves it out of a live menu that left it out', () => {
-    // Whether an agent can be left asking is the server's to decide, and it
-    // decides it per agent. Adding the mode back on top of a menu that
-    // withheld it would offer it for the agents it cannot work on
-    // (`offer_in_menu`, bw-0z25.1).
-    const menu = composerMenu(
-      { ...EMPTY.menu, permissionModes: ['never'] },
-      'codex',
-      null,
-      null,
-    );
-    expect(menu.permissionModes).toEqual(['never']);
-  });
-
-  it('leaves a menu that already carries it untouched', () => {
-    expect(offeringAtelierAuto(['default', ATELIER_AUTO])).toEqual(['default', ATELIER_AUTO]);
-    expect(offeringAtelierAuto(['default'])).toEqual(['default', ATELIER_AUTO]);
   });
 });
 

@@ -1894,17 +1894,19 @@ fn held_in_its_project(
         let Some(session) = self.get_session(session_id)? else {
             return Ok(());
         };
-        let mut catalogue = menu
-            .as_object()
-            .into_iter()
-            .flatten()
-            .filter(|(field, _)| PROVIDER_CATALOGUE_FIELDS.contains(&field.as_str()))
-            .map(|(field, value)| (field.clone(), value.clone()))
+        let kept = self.stored_catalogue(&session)?.unwrap_or_default();
+        // A list a menu leaves empty is kept from before. An imported chat's
+        // menu names no models, and once it was written over the catalogue
+        // every stopped chat on that account lost its model and effort lists
+        // (bw-2m8so.1).
+        let mut catalogue = PROVIDER_CATALOGUE_FIELDS
+            .iter()
+            .filter_map(|field| {
+                let said = |source: &Value| source.get(*field).filter(|value| !value.is_null() && value.as_array().is_none_or(|list| !list.is_empty())).cloned();
+                said(menu).or_else(|| said(&kept)).map(|value| ((*field).to_string(), value))
+            })
             .collect::<serde_json::Map<_, _>>();
-        let mut folders = self
-            .stored_catalogue(&session)?
-            .and_then(|kept| kept.get(COMMANDS_BY_FOLDER).and_then(Value::as_object).cloned())
-            .unwrap_or_default();
+        let mut folders = kept.get(COMMANDS_BY_FOLDER).and_then(Value::as_object).cloned().unwrap_or_default();
         let commands = native_commands(menu);
         if !commands.is_empty() {
             folders.insert(session.cwd.clone(), Value::Array(commands));

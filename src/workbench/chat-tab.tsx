@@ -80,7 +80,6 @@ import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { Brand, HeldMessage, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
-import type { SessionMenu } from '@/workbench/fold';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
@@ -91,7 +90,7 @@ function cannotMoveTo(brand: Brand, from: Brand): string | null {
   if (!ACCOUNTED_BRANDS.includes(brand)) return `A chat can't be switched to ${brandName(brand)}.`;
   return null;
 }
-import { BRAND_DEFAULT_MODEL, newId, offeringAtelierAuto, startingChat } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL, newId, startingChat } from '@/workbench/protocol';
 import { SectionHeading } from '@/workbench/section-heading';
 import { conversationOf, heldElsewhere, sessionOwnership, streamStillAnswers } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -143,53 +142,6 @@ const DEFAULT_DIFF_WIDTH = 640;
 /** A diff may take all the room the conversation leaves it. */
 const MAX_DIFF_WIDTH = 4000;
 const MIN_CHAT_WIDTH = 320;
-
-const CODEX_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'].map((value) => ({
-  value,
-  displayName: value === 'xhigh' ? 'Extra high' : inWords(value),
-}));
-
-/**
- * Controls must exist before a dormant provider is woken by the next prompt.
- * A live session menu remains authoritative. On a cold server, use only the
- * stable vocabulary the app itself sends to that provider plus the chat's
- * pinned model; the provider's eventual menu replaces these conservative rows.
- */
-export function composerMenu(menu: SessionMenu, brand: Brand, model: string | null, collaborationMode: string | null): SessionMenu {
-  if (brand === 'local') return menu;
-  // The app's own mode is offered before the provider has said anything, so
-  // that a chat is not missing it for as long as the menu takes to arrive.
-  // Only in the fallback, though: once the provider's real menu is here the
-  // server has already decided whether this agent can be left asking, and
-  // adding it back over that decision would offer it for agents it cannot
-  // work on (`workbench::answering::offer_in_menu`).
-  const permissionModes = menu.permissionModes.length
-    ? menu.permissionModes
-    : offeringAtelierAuto(
-        brand === 'codex'
-          ? ['on-request', 'never']
-          : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto'],
-      );
-  const models = menu.models.length
-    ? menu.models
-    : [
-        { value: BRAND_DEFAULT_MODEL, displayName: 'Default' },
-        ...(model && model !== BRAND_DEFAULT_MODEL ? [{ value: model, displayName: modelName(model) ?? model }] : []),
-      ];
-  const efforts = menu.efforts.length
-    ? menu.efforts
-    : brand === 'codex'
-      ? CODEX_EFFORTS
-      : [];
-  const collaborationModes = menu.collaborationModes.length
-    ? menu.collaborationModes
-    : brand === 'codex'
-      ? [{ value: 'default', displayName: 'Default' }, { value: 'plan', displayName: 'Plan' }]
-      : collaborationMode
-        ? [{ value: collaborationMode, displayName: inWords(collaborationMode) }]
-        : [];
-  return { ...menu, permissionModes, models, efforts, collaborationModes };
-}
 
 /**
  * Everything one row of a conversation actually says, for going through once
@@ -1703,10 +1655,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
   /** A local chat with no model chosen cannot send anything, typed or not. */
   const cannotSend = sessionBrand === 'local' && !view.model;
-  const composer = useMemo(
-    () => composerMenu(view.menu, sessionBrand, view.model, view.collaborationMode),
-    [view.menu, sessionBrand, view.model, view.collaborationMode],
-  );
+  // What a chat can be set to is the server's to say, for a stopped chat as
+  // much as a woken one; nothing is made up here while it is on its way
+  // (bw-2m8so.1).
+  const composer = view.menu;
   const selectedModel = composer.models.find((model) => model.value === view.model);
   // The chat's own accounts are needed even on the system account: that is the
   // row from which somebody switches to a named one. Names belong to the

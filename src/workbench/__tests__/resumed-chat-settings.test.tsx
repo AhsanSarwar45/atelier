@@ -1,34 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { composerMenu, Picker } from '@/workbench/chat-tab';
-import { EMPTY } from '@/workbench/fold';
-import { ATELIER_AUTO } from '@/workbench/protocol';
+import { Picker } from '@/workbench/chat-tab';
 
 describe('a setting on a resumed chat', () => {
-  it('has every cold-start Codex control before a provider menu arrives', () => {
-    const menu = composerMenu(EMPTY.menu, 'codex', 'gpt-5.6-sol', 'default');
-
-    // Codex's own two, and the app's own last. That one is carried out here
-    // rather than by the provider, so it is offered whatever the provider
-    // says (`workbench::answering`, bw-0z25.1).
-    expect(menu.permissionModes).toEqual(['on-request', 'never', ATELIER_AUTO]);
-    expect(menu.models.map((choice) => choice.value)).toEqual(['default', 'gpt-5.6-sol']);
-    expect(menu.efforts.map((choice) => choice.value)).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh']);
-    expect(menu.collaborationModes.map((choice) => choice.value)).toEqual(['default', 'plan']);
-  });
-
-  it('never replaces a live provider menu with fallback choices', () => {
-    const live = {
-      ...EMPTY.menu,
-      permissionModes: ['live-mode'],
-      models: [{ value: 'live-model', displayName: 'Live model' }],
-      efforts: [{ value: 'live-effort', displayName: 'Live effort' }],
-      collaborationModes: [{ value: 'live-collaboration', displayName: 'Live collaboration' }],
-    };
-    expect(composerMenu(live, 'codex', 'old-model', 'old-mode')).toEqual(live);
-  });
-
   it.each([
     ['mode-picker', false],
     ['collaboration-mode-picker', false],

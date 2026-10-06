@@ -1019,25 +1019,50 @@ fn live_steering_menu(
     live_menus: &HashMap<String, Event>,
     session_id: &str,
 ) -> Option<Event> {
-    let Some(own) = live_menus.get(session_id) else {
-        return provider_menu(store, live_menus, session_id);
+    match live_menus.get(session_id) {
+        Some(own) => Some(with_what_the_provider_offers(store, live_menus, session_id, own.clone())),
+        None => provider_menu(store, live_menus, session_id),
+    }
+}
+
+/// A chat's own menu, with what it did not say taken from its provider's.
+///
+/// Not every menu a chat records is the provider's answer. An imported chat's
+/// is written before any agent is asked, and an adapter can name its `/`
+/// commands before its models. Such a menu said nothing about the lists it
+/// left empty; the provider never offers no models. Shown as it stands, it
+/// hid the provider's lists, so a reopened chat could set no effort and pick
+/// only the model it was already on (bw-2m8so.1). A menu that names models is
+/// the provider's whole answer and keeps its lists, an empty one included:
+/// some models take no effort. The provider's own `/` commands are listed
+/// beside any menu that names none (bw-zldt.2).
+fn with_what_the_provider_offers(
+    store: &Store,
+    live_menus: &HashMap<String, Event>,
+    session_id: &str,
+    mut own: Event,
+) -> Event {
+    let answered = said(&own, "models");
+    let has_commands = names_provider_commands(&own);
+    if answered && has_commands {
+        return own;
+    }
+    let Some(provider) = provider_menu(store, live_menus, session_id) else {
+        return own;
     };
-    let mut own = own.clone();
-    // A menu of its own that names none of the provider's commands -- one an
-    // import wrote, or one asked for before the adapter announced them -- is
-    // given the ones the provider announced elsewhere, to list (bw-zldt.2).
-    if super::store::native_commands(&serde_json::Value::Object(own.fields.clone())).is_empty() {
-        let known = provider_menu(store, live_menus, session_id)
-            .and_then(|menu| menu.fields.get("commands").cloned())
-            .and_then(|commands| commands.as_array().cloned())
-            .unwrap_or_default();
-        if !known.is_empty() {
-            let mut commands = known;
-            commands.extend(own.fields.get("commands").and_then(serde_json::Value::as_array).cloned().unwrap_or_default());
-            own.fields.insert("commands".into(), serde_json::json!(commands));
+    if !answered {
+        for field in super::store::PROVIDER_CATALOGUE_FIELDS {
+            if !said(&own, field) && said(&provider, field) {
+                own.fields.insert((*field).into(), provider.fields[*field].clone());
+            }
         }
     }
-    Some(own)
+    if !has_commands && said(&provider, "commands") {
+        let mut commands = provider.fields["commands"].as_array().cloned().unwrap_or_default();
+        commands.extend(own.fields.get("commands").and_then(serde_json::Value::as_array).cloned().unwrap_or_default());
+        own.fields.insert("commands".into(), serde_json::json!(commands));
+    }
+    own
 }
 
 /// What the provider of a chat with no menu of its own offers: another live
@@ -1147,6 +1172,23 @@ fn provider_menu(
         }
     }
     Some(menu)
+}
+
+fn said(menu: &Event, field: &str) -> bool {
+    menu.fields.get(field).and_then(serde_json::Value::as_array).is_some_and(|list| !list.is_empty())
+}
+
+fn names_provider_commands(menu: &Event) -> bool {
+    !super::store::native_commands(&serde_json::Value::Object(menu.fields.clone())).is_empty()
+}
+
+/// A menu a chat announced: remembered as what its provider offers, and
+/// shown with what it left unsaid filled in, so no chat open on it is handed
+/// a menu with fewer choices than it already had (bw-2m8so.1).
+fn take_menu(store: &Store, live_menus: &mut HashMap<String, Event>, session_id: &str, menu: &mut Event) {
+    remember_catalogue(store, session_id, menu);
+    *menu = with_what_the_provider_offers(store, live_menus, session_id, menu.clone());
+    live_menus.insert(session_id.to_string(), menu.clone());
 }
 
 fn remember_catalogue(store: &Store, session_id: &str, menu: &Event) {
@@ -1344,8 +1386,7 @@ fn run(
                     Ok(Some((session_id, seq, mut event))) => {
                         preserve_shared_library(&mut event, live_menus.get(&session_id));
                         if event.kind == EventKind::SessionMenu {
-                            remember_catalogue(&store, &session_id, &event);
-                            live_menus.insert(session_id.clone(), event.clone());
+                            take_menu(&store, &mut live_menus, &session_id, &mut event);
                         }
                         publish_event(&global, &sessions, session_id, seq, event.clone());
                         let _ = reply.send(Ok(Some(event)));
@@ -1409,8 +1450,7 @@ fn run(
                         for (session_id, _, event) in &mut stored {
                             preserve_shared_library(event, live_menus.get(session_id));
                             if event.kind == EventKind::SessionMenu {
-                                remember_catalogue(&store, session_id, event);
-                                live_menus.insert(session_id.clone(), event.clone());
+                                take_menu(&store, &mut live_menus, session_id, event);
                             }
                         }
                         if replay {
@@ -1531,15 +1571,15 @@ fn run(
                 if let Some(menu) = &menu {
                     remember_catalogue(&store, &session_id, menu);
                 }
-                // A chat whose own session named the provider's commands --
-                // one that woke meanwhile -- already shows them. Any other,
-                // asleep, stopped or failed, is offered these. Never made the
-                // chat's live menu: what it is set to stays its own, and what
-                // a sent command is checked against stays its own session's
-                // (bw-zldt.2).
-                let lacking = live_menus.get(&session_id).is_none_or(|own| {
-                    super::store::native_commands(&serde_json::Value::Object(own.fields.clone())).is_empty()
-                });
+                // A chat whose own session named the provider's models and
+                // commands -- one that woke meanwhile -- already shows them.
+                // Any other, asleep, stopped or failed, is offered these. Never
+                // made the chat's live menu: what it is set to stays its own,
+                // and what a sent command is checked against stays its own
+                // session's (bw-zldt.2, bw-2m8so.1).
+                let lacking = live_menus
+                    .get(&session_id)
+                    .is_none_or(|own| !said(own, "models") || !names_provider_commands(own));
                 let offered = lacking
                     .then(|| {
                         live_steering_menu(&store, &live_menus, &session_id).or_else(|| {
@@ -1758,6 +1798,69 @@ mod tests {
         // the value is the one this chat chose, not the chat it came from.
         assert_eq!(restored.fields["configOptions"], json!([{"id":"fast","currentValue":false}]));
         assert!(live_steering_menu(&store, &live, "other").is_none());
+    }
+
+    /// Reopening a chat imports its history, and the menu the import writes
+    /// names no models. It used to replace the full lists both in the open
+    /// chat and in what every stopped chat on the account is offered, so a
+    /// chat could pick only Default or the model it was on, and no effort
+    /// (bw-2m8so.1).
+    #[test]
+    fn an_imported_chats_menu_neither_hides_nor_erases_the_providers_lists() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let session = |id: &str| Session {
+            id: id.into(), brand: "claude".into(), external_id: Some(format!("thread-{id}")),
+            project_id: "here".into(), project_path: "/here".into(), cwd: "/here".into(),
+            model: Some("fable".into()), permission_mode: "default".into(), effort: None,
+            collaboration_mode: None, profile: Some("azeem".into()), title: None, state: "dormant".into(),
+            origin: "app".into(), created_at: "2026-10-06T00:00:00Z".into(),
+            last_active_at: "2026-10-06T00:00:00Z".into(), last_spoke_at: None, begun_by: None, named_by_owner: false,
+        };
+        for id in ["spoke", "imported", "haiku"] {
+            store.create_session(&session(id)).unwrap();
+        }
+        let menu = |id: &str, fields: serde_json::Value| -> Event {
+            let mut event = json!({"type":"session.menu", "sessionId":id, "seq":1, "at":"2026-10-06T01:00:00Z"});
+            event.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());
+            serde_json::from_value(event).unwrap()
+        };
+        let mut live = HashMap::new();
+        let mut spoke = menu("spoke", json!({
+            "models":[{"value":"default"},{"value":"opus"},{"value":"fable"}],
+            "efforts":[{"value":"low"},{"value":"high"}],
+            "permissionModes":["default","plan"],
+            "commands":[{"name":"review"}]
+        }));
+        take_menu(&store, &mut live, "spoke", &mut spoke);
+
+        // What an import writes before any agent is asked.
+        let mut imported = menu("imported", json!({
+            "commands":[], "skills":[], "models":[], "efforts":[],
+            "permissionModes":["default","acceptEdits"], "agentControls":["stop"]
+        }));
+        take_menu(&store, &mut live, "imported", &mut imported);
+
+        // The chat open on it is handed the provider's lists, not empty ones.
+        assert_eq!(imported.fields["models"].as_array().unwrap().len(), 3);
+        assert_eq!(imported.fields["efforts"][1]["value"], "high");
+        assert_eq!(imported.fields["commands"][0]["name"], "review");
+        // What the import did say stays its own.
+        assert_eq!(imported.fields["permissionModes"], json!(["default","acceptEdits"]));
+        assert_eq!(imported.fields["agentControls"], json!(["stop"]));
+        assert_eq!(live_steering_menu(&store, &live, "imported").unwrap().fields["models"], spoke.fields["models"]);
+        // And it did not wipe what every stopped chat is offered after a restart.
+        let restarted = live_steering_menu(&store, &HashMap::new(), "haiku").unwrap();
+        assert_eq!(restarted.fields["models"].as_array().unwrap().len(), 3);
+        assert_eq!(restarted.fields["efforts"].as_array().unwrap().len(), 2);
+
+        // A menu that names models is the provider's whole answer: a model
+        // with no effort levels shows none.
+        let mut haiku = menu("haiku", json!({
+            "models":[{"value":"haiku"}], "efforts":[], "commands":[{"name":"review"}]
+        }));
+        take_menu(&store, &mut live, "haiku", &mut haiku);
+        assert_eq!(haiku.fields["efforts"], json!([]));
     }
 
     /// A restart forgets every live menu. A stopped chat still has the

@@ -3204,11 +3204,13 @@ async fn with_atelier_commands(
         return Ok(());
     };
     let commands = crate::workbench::store::native_commands(menu);
-    // A chat with a driver is told its commands by that driver; one without,
-    // whatever state it stopped in, asks for them (bw-zldt.2).
-    // Until it answers, the menu says the provider's commands are on their
-    // way rather than that there are none.
-    if commands.is_empty() && ask_provider_for_commands(database, &session) {
+    let models = menu["models"].as_array().is_some_and(|models| !models.is_empty());
+    // A chat with a driver is told its menu by that driver; one without,
+    // whatever state it stopped in, asks for what nothing has told this app:
+    // the provider's commands (bw-zldt.2) or its models, efforts and modes
+    // (bw-2m8so.1). Until it answers, the menu says the provider's commands
+    // are on their way rather than that there are none.
+    if (commands.is_empty() || !models) && ask_provider_for_menu(database, &session) {
         if !menu.is_object() {
             *menu = json!({});
         }
@@ -3235,15 +3237,16 @@ fn with_library(menu: &mut Value, mut native: Vec<Value>, shared: Vec<Value>) {
     menu["commands"] = Value::Array(native);
 }
 
-/// Nothing has told this app what the provider of a stopped chat can run:
-/// no chat on it has spoken since the catalogue began keeping commands. Ask
+/// Nothing has told this app what the provider of a stopped chat offers: no
+/// chat on it has spoken since the catalogue began keeping commands, or none
+/// on this account and project has spoken at all. Ask
 /// the provider in the background, once at a time for each account, project
 /// and folder; every stopped chat that asked meanwhile is given the answer. A
 /// question that failed is asked again after a pause, a few times, for the
 /// chats already waiting; opening a chat after that starts over (bw-zldt.2).
 ///
 /// True while the provider is being asked for this chat.
-fn ask_provider_for_commands(database: &ChatDb, session: &crate::workbench::store::Session) -> bool {
+fn ask_provider_for_menu(database: &ChatDb, session: &crate::workbench::store::Session) -> bool {
     static ASKS: std::sync::LazyLock<std::sync::Mutex<CommandAsks>> = std::sync::LazyLock::new(Default::default);
     if !matches!(session.brand.as_str(), "claude" | "codex") {
         return false;
@@ -3496,7 +3499,7 @@ async fn command(
     if command.kind == CommandKind::SessionProfile && reply["moved"] == true {
         if let Some(session_id) = command.fields.get("sessionId").and_then(Value::as_str) {
             if let Some(session) = state.database().get_session(session_id.to_string()).await? {
-                ask_provider_for_commands(state.database(), &session);
+                ask_provider_for_menu(state.database(), &session);
             }
         }
     }

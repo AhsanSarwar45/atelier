@@ -44,9 +44,28 @@ function availableModes() {
 
 const EFFORTS = ['low', 'medium', 'high'];
 
+/**
+ * The models this agent offers, when a case wants it to offer any. Unset, it
+ * names none, which is what every case written before this list needed.
+ */
+const MODELS = (process.env.PINNED_ACP_MODELS ?? '').split(',').map((model) => model.trim()).filter(Boolean);
+
+function modelOption() {
+  if (!MODELS.length) return [];
+  return [{
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select',
+    currentValue: MODELS[0],
+    options: MODELS.map((value) => ({ value, name: value })),
+  }];
+}
+
 /** Fast mode is off in a fresh process, as it is in the real adapter. */
 function configOptions(effort, fastMode = false) {
   return [
+    ...modelOption(),
     {
       id: 'reasoning_effort',
       name: 'Reasoning effort',
