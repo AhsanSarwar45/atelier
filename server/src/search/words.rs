@@ -190,11 +190,14 @@ pub fn read<F: Copy + PartialEq>(
     let last = pieces.len().saturating_sub(1);
     let mut scope: Vec<F> = Vec::new();
     let mut joining = false;
+    // `OR` joins two words, so only a word just before it; a key between
+    // them would otherwise let it reach back past the key (bw-v10zq.1).
+    let mut after_word = false;
     let mut words: Vec<Word<F>> = Vec::new();
 
     for (index, piece) in pieces.into_iter().enumerate() {
         if piece.key.is_none() && !piece.quoted && !piece.negated && piece.value == "OR" {
-            joining = !words.is_empty();
+            joining = after_word;
             continue;
         }
         let prefix = index == last && !finished && !piece.quoted;
@@ -236,6 +239,7 @@ pub fn read<F: Copy + PartialEq>(
                 fields: Vec::new(),
             }),
         };
+        after_word = term.is_some();
         if let Some(term) = term {
             words.push(Word {
                 negated: piece.negated,
@@ -442,5 +446,11 @@ mod tests {
         assert_eq!(held("project:x OR bar", "project:Atelier", widens), "project:Atelier bar");
         let words = read(&held("OR bar", "title:foo", widens), |key| (key == "title").then_some(Part::Name), |_, _| Key::Words);
         assert_eq!(words.all.len(), 2);
+        // Nor can one that follows a key of the agent's own.
+        for asked in ["status:open OR bar", "in:body OR bar", "-type:x OR bar", "after:2020-01-01 OR bar"] {
+            let typed = held(asked, "title:foo", widens);
+            let words = read(&typed, |key| (key == "title").then_some(Part::Name), |_, _| Key::Taken);
+            assert_eq!(words.all.len(), 2, "{typed}");
+        }
     }
 }
