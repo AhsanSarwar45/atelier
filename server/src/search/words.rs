@@ -252,6 +252,9 @@ pub fn read<F: Copy + PartialEq>(
     // Aimed and grouped only now, because `in:` may come after the words it
     // aims.
     let (mut all, mut none): (Vec<Vec<Term<F>>>, Vec<Term<F>>) = (Vec::new(), Vec::new());
+    // The group the word just before went into: `OR` joins that one only,
+    // never a group further back past a left-out or empty word (bw-v10zq.1).
+    let mut last: Option<usize> = None;
     for Word {
         negated,
         joins,
@@ -262,12 +265,19 @@ pub fn read<F: Copy + PartialEq>(
             term.fields = scope.clone();
         }
         if term.fts().is_none() {
+            last = None;
             continue;
         }
-        match (negated, joins, all.last_mut()) {
-            (true, _, _) => none.push(term),
-            (false, true, Some(group)) => group.push(term),
-            (false, _, _) => all.push(vec![term]),
+        match (negated, joins, last) {
+            (true, _, _) => {
+                none.push(term);
+                last = None;
+            }
+            (false, true, Some(group)) => all[group].push(term),
+            (false, _, _) => {
+                all.push(vec![term]);
+                last = Some(all.len() - 1);
+            }
         }
     }
     Words { all, none, ignored }
@@ -447,10 +457,16 @@ mod tests {
         let words = read(&held("OR bar", "title:foo", widens), |key| (key == "title").then_some(Part::Name), |_, _| Key::Words);
         assert_eq!(words.all.len(), 2);
         // Nor can one that follows a key of the agent's own.
-        for asked in ["status:open OR bar", "in:body OR bar", "-type:x OR bar", "after:2020-01-01 OR bar"] {
+        // Nor one that follows a left-out word, or one with nothing to find.
+        for asked in ["status:open OR bar", "in:body OR bar", "-type:x OR bar", "after:2020-01-01 OR bar", "-x OR bar", "\"\" OR bar", ":: OR bar"] {
             let typed = held(asked, "title:foo", widens);
             let words = read(&typed, |key| (key == "title").then_some(Part::Name), |_, _| Key::Taken);
             assert_eq!(words.all.len(), 2, "{typed}");
+            assert_eq!(words.all[0].len(), 1, "{typed}");
         }
+        // Two words either side of `OR` are still either.
+        let words = read(&held("bar OR baz", "title:foo", widens), |key| (key == "title").then_some(Part::Name), |_, _| Key::Taken);
+        assert_eq!(words.all.len(), 2);
+        assert_eq!(words.all[1].len(), 2);
     }
 }
