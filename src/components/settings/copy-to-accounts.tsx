@@ -27,6 +27,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Tooltip } from '@/components/ui/tooltip';
 import { Spinner } from '@/components/ui/spinner';
 import { useToast } from '@/hooks/use-toast';
+import { SignedOutMark, useStanding } from '@/workbench/account-standing';
 import type { ExtensionItem, ExtensionKind, McpServer, ProfileChoice } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -62,6 +63,7 @@ export function CopyToAccounts({ brand, from, profiles, page }: { brand: Brand; 
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
   const others = profiles.filter((p) => p.id !== from);
+  const standing = useStanding(brand, open);
   if (others.length === 0) return null;
 
   const toggle = (set: (f: (was: Set<string>) => Set<string>) => void, id: string, on: boolean) =>
@@ -190,8 +192,9 @@ export function CopyToAccounts({ brand, from, profiles, page }: { brand: Brand; 
                       onCheckedChange={(c) => toggle(setAccounts, p.id, c === true)}
                       data-testid={`copy-to-${p.id}`}
                     />
-                    <label htmlFor={`copy-to-${p.id}`} className="flex-1 cursor-pointer text-sm text-t-primary">
+                    <label htmlFor={`copy-to-${p.id}`} className="flex flex-1 cursor-pointer items-center gap-2 text-sm text-t-primary">
                       {p.name}
+                      <SignedOutMark standing={standing?.[p.id]} />
                     </label>
                   </li>
                 ))}

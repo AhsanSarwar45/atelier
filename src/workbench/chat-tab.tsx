@@ -105,6 +105,7 @@ import { isBusy, isMidTurn, readAndKeep, sendCommand, useSession, useSessionFact
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProfileBadge, brandName } from '@/workbench/brand-icon';
 import { ChatAccount, useSignIn } from '@/workbench/sign-in-dialog';
+import { SignedOutMark, useStanding } from '@/workbench/account-standing';
 import { workingLine } from '@/workbench/working-line';
 import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { useEpicChecklist } from '@/workbench/epic-checklist';
@@ -379,7 +380,7 @@ export function Picker({
    * changes. `unavailable` says why a row cannot be picked, and is shown in
    * place of the hint, because why-not is the fact a reader needs first.
    */
-  options: { value: string; label: string; hint?: string; group?: string; unavailable?: string; icon?: ReactNode }[];
+  options: { value: string; label: string; hint?: string; group?: string; unavailable?: string; icon?: ReactNode; after?: ReactNode }[];
   testid: string;
   /** No agent is attached. Picks are stored and applied when the next message wakes it. */
   asleep: boolean;
@@ -425,7 +426,7 @@ export function Picker({
                 onSelect={() => onPick(o.value)}
                 className="group min-w-0 flex-1 flex-col items-start gap-0.5 px-2 py-1.5"
               >
-                <span className={cn('flex max-w-full items-center gap-2 truncate text-sm', o.value === current && 'font-semibold text-foreground')}>{o.icon}{o.label}</span>
+                <span className={cn('flex max-w-full items-center gap-2 truncate text-sm', o.value === current && 'font-semibold text-foreground')}>{o.icon}{o.label}{o.after}</span>
                 {(o.unavailable ?? o.hint) && (
                   <span
                     data-testid={`${testid}-option-hint`}
@@ -1382,6 +1383,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     };
   }, [showing]);
   const newAccounts = accounts[newBrand] ?? NO_ACCOUNTS;
+  const newStanding = useStanding(
+    ACCOUNTED_BRANDS.includes(newBrand) ? newBrand : null,
+    showing === 'new-chat' || showing === 'switch-provider',
+  );
   /**
    * The account the chat will start on: the one picked in this dialog, else
    * the starred one, else the system account. A starred account that has since
@@ -1684,6 +1689,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     };
   }, [accounts, sessionBrand]);
   const sessionAccounts = accounts[sessionBrand] ?? NO_ACCOUNTS;
+  const sessionStanding = useStanding(sessionBrand, sessionAccounts.length > 1);
   const sessionProfile = view.profile ?? 'system';
   const sessionProfileLabel =
     sessionAccounts.find((profile) => profile.id === sessionProfile)?.name ??
@@ -2308,6 +2314,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                       }}
                     >
                       <span className="truncate">{profile.name}</span>
+                      <SignedOutMark standing={newStanding?.[profile.id]} />
                     </ChoiceWithStar>
                   ))}
                 </ToggleGroup>
@@ -2354,7 +2361,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </DialogContent>
       </Dialog>
     </>
-  ), [confirmSwitch, moving, newAccount, newAccounts, newAccountsUnread, newBrand, newBrandAvailable, newChatDefault, newChatDefaults.profiles, newWhere, projectId, projectPath, providers, sessionBrand, sessionId, setNewChatDefault, setNewChatProfile, showing, start, starting, switchError, view.profile, whereMissing]);
+  ), [confirmSwitch, moving, newAccount, newAccounts, newAccountsUnread, newBrand, newStanding, newBrandAvailable, newChatDefault, newChatDefaults.profiles, newWhere, projectId, projectPath, providers, sessionBrand, sessionId, setNewChatDefault, setNewChatProfile, showing, start, starting, switchError, view.profile, whereMissing]);
 
   const chatList = useMemo(() => (
     <>
@@ -2650,6 +2657,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   value: profile.id,
                   label: profile.name,
                   hint: profile.system ? 'The account configured on this computer' : undefined,
+                  after: <SignedOutMark standing={sessionStanding?.[profile.id]} />,
                   unavailable: busy && profile.id !== sessionProfile
                     ? 'Wait for the current response to finish'
                     : undefined,
@@ -2786,7 +2794,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             />
           </div>
     </>
-  ), [asleep, busy, cannotSend, chatId, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, effortDefaults, holdSteady, makeProviderDefault, midTurn, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, submitSteady, switchAccount, view.collaborationMode, view.effort, view.menu.agentDefinitions, view.menu.configOptions, view.model, view.permissionMode]);
+  ), [asleep, busy, cannotSend, chatId, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, effortDefaults, holdSteady, makeProviderDefault, midTurn, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, sessionStanding, submitSteady, switchAccount, view.collaborationMode, view.effort, view.menu.agentDefinitions, view.menu.configOptions, view.model, view.permissionMode]);
 
   const mobileSettings = useMemo(() => (
     <>
@@ -2849,6 +2857,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                     value: profile.id,
                     label: profile.name,
                     hint: profile.system ? 'The account configured on this computer' : undefined,
+                    after: <SignedOutMark standing={sessionStanding?.[profile.id]} />,
                     unavailable: busy && profile.id !== sessionProfile
                       ? 'Wait for the current response to finish'
                       : undefined,
@@ -2914,7 +2923,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           </DialogContent>
         </Dialog>
     </>
-  ), [asleep, busy, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, composerSettingsOpen, effortDefaults, makeProviderDefault, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, chatId, sessionProfile, sessionProfileLabel, switchAccount, view.collaborationMode, view.effort, view.menu.configOptions, view.model, view.permissionMode]);
+  ), [asleep, busy, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, composerSettingsOpen, effortDefaults, makeProviderDefault, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, chatId, sessionProfile, sessionProfileLabel, sessionStanding, switchAccount, view.collaborationMode, view.effort, view.menu.configOptions, view.model, view.permissionMode]);
 
   if (!projectId || !projectPath) {
     return <div className="p-8 text-muted-foreground">Select a project</div>;

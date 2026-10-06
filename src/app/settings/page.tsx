@@ -27,6 +27,7 @@ import { SettingsScreen, type SettingsSectionDef } from '@/components/settings/s
 import { TagsSettings } from '@/components/settings/tags-settings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { stepsOut } from '@/lib/address';
+import { SignedOutMark, useStanding } from '@/workbench/account-standing';
 import { AccountsSettings } from '@/workbench/accounts-settings';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { DependenciesSettings } from '@/workbench/dependencies-settings';
@@ -85,6 +86,8 @@ function Settings() {
     ],
     [claude.profiles, codex.profiles],
   );
+  const claudeStanding = useStanding('claude', known === 'files');
+  const codexStanding = useStanding('codex', known === 'files');
   const filesAccount = accounts.find((a) => a.id === (account ?? SYSTEM_PROFILE)) ?? accounts[0];
 
   /** Changes one part of the address, keeping the rest; pushed so Back undoes it. */
@@ -141,7 +144,10 @@ function Settings() {
               <SelectContent>
                 {accounts.map((a) => (
                   <SelectItem key={a.id} value={a.id}>
-                    {a.label}
+                    <span className="flex items-center gap-2">
+                      {a.label}
+                      <SignedOutMark standing={(a.brand === 'claude' ? claudeStanding : a.brand === 'codex' ? codexStanding : null)?.[a.id]} />
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>

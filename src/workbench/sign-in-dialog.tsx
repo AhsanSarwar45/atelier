@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { forgetStanding } from '@/workbench/account-standing';
 import { brandName } from '@/workbench/brand-icon';
 import type { Brand, ProfileChoice, SignInProgress } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -124,6 +125,7 @@ export function useSignIn(onSettled?: (outcome: SignInProgress['state']) => void
     }
     if (settled.current || !watching) return;
     settled.current = true;
+    forgetStanding();
     told.current?.(watching);
   }, [done, watching]);
 

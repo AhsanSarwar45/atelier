@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react';
 
 import type { Brand } from '@/components/settings/provider-schema';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SignedOutMark, useStanding } from '@/workbench/account-standing';
 import { SYSTEM_PROFILE, type ProfileChoice } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -43,6 +44,7 @@ export function AccountPicker({
   onChange: (profileId: string) => void;
 }) {
   const chosen = value ?? SYSTEM_PROFILE;
+  const standing = useStanding(brand);
   return (
     <Select value={chosen} onValueChange={onChange}>
       <SelectTrigger className="w-full sm:w-64" aria-label="Account" data-testid={`account-picker-${brand}`}>
@@ -51,7 +53,10 @@ export function AccountPicker({
       <SelectContent>
         {profiles.map((p) => (
           <SelectItem key={p.id} value={p.id}>
-            {p.name}
+            <span className="flex items-center gap-2">
+              {p.name}
+              <SignedOutMark standing={standing?.[p.id]} />
+            </span>
           </SelectItem>
         ))}
       </SelectContent>
