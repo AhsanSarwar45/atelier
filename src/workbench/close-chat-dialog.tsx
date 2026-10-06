@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Panel } from '@/components/ui/panel';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
@@ -252,7 +253,7 @@ export function CloseChatDialog({ chat, onCancel, onBusy, onClosed }: Props) {
           </AlertDialogDescription>
         </AlertDialogHeader>
 
-        <div className="max-h-[50vh] min-h-16 overflow-auto rounded-md border border-b-subtle p-1" data-testid="close-chat-running">
+        <Panel inset="none" className="max-h-[50vh] min-h-16 overflow-auto p-1" data-testid="close-chat-running">
           {!running && !loadError && (
             <div className="flex items-center gap-2 px-2 py-3 text-sm text-t-tertiary">
               <Spinner className="size-4" /> Looking for running processes…
@@ -290,7 +291,7 @@ export function CloseChatDialog({ chat, onCancel, onBusy, onClosed }: Props) {
               ))}
             </div>
           )}
-        </div>
+        </Panel>
 
         {failed && (
           <p className="text-sm text-destructive" data-testid="close-chat-error">
