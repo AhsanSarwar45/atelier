@@ -3,13 +3,15 @@
  *
  * An agent, on the provider and model chosen in Settings, searches and reads
  * through the source's own tools, then names what it found and why. The server
- * checks that everything it names is real before it is shown. The run streams
- * one JSON object per line; Stop, or closing the panel, ends it
- * (server/src/search/agent.rs).
+ * checks that everything it names is real before it is shown. The box takes
+ * the same keys as a search in words: they are sent apart from the question,
+ * and the server adds them to every search the agent makes, so it cannot name
+ * anything outside them (bw-v10zq.1). The run streams one JSON object per
+ * line; Stop, or closing the panel, ends it (server/src/search/agent.rs).
  */
 'use client';
 
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { forwardRef, type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { CornerDownLeft, Sparkles, Square } from 'lucide-react';
 
@@ -19,6 +21,7 @@ import { Spinner } from '@/components/ui/spinner';
 import * as api from '@/lib/api';
 import { QueryBox } from '@/search/parts';
 import type { AskSearch, Found } from '@/search/source';
+import { type Grammar, split } from '@/search/syntax';
 
 export type AskEvent =
   | { type: 'started'; provider: string; model: string | null }
@@ -64,17 +67,26 @@ export async function* events(body: ReadableStream<Uint8Array>): AsyncGenerator<
   if (held.trim()) yield JSON.parse(held) as AskEvent;
 }
 
-export function Ask<Thing extends Found>({
-  source,
-  onClose,
-  aside,
-}: {
+interface AskProps<Thing extends Found> {
   source: AskSearch<Thing>;
+  /** The keys the box understands, the same as the search in words. */
+  grammar: Grammar;
+  /** The box, held by the panel so a switch of mode keeps its filters. */
+  question: string;
+  onQuestion: (question: string) => void;
+  /** A key the panel handles first, saying whether it did. */
+  onKey: (event: React.KeyboardEvent<HTMLInputElement>) => boolean;
+  /** The suggestions and filter controls, drawn under the box. */
+  below: ReactNode;
   onClose: () => void;
   /** The panel's own switch and close, drawn beside the box. */
   aside: ReactNode;
-}) {
-  const [question, setQuestion] = useState('');
+}
+
+export const Ask = forwardRef(function Ask<Thing extends Found>(
+  { source, grammar, question, onQuestion, onKey, below, onClose, aside }: AskProps<Thing>,
+  ref: React.ForwardedRef<HTMLInputElement>,
+) {
   const [running, setRunning] = useState(false);
   const [by, setBy] = useState<string | null>(null);
   const [steps, setSteps] = useState<string[]>([]);
@@ -87,13 +99,15 @@ export function Ask<Thing extends Found>({
 
   useEffect(() => () => run.current?.abort(), []);
 
+  const { filters, words } = split(question, grammar);
+
   const ask = async () => {
-    const asked = question.trim();
+    const asked = words.trim();
     if (!asked) return;
     run.current?.abort();
     const mine = new AbortController();
     run.current = mine;
-    lastAsked.current = asked;
+    lastAsked.current = question.trim();
     setRunning(true);
     setBy(null);
     setSteps([]);
@@ -105,7 +119,7 @@ export function Ask<Thing extends Found>({
       const answer = await api.request(source.url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...source.body, question: asked }),
+        body: JSON.stringify({ ...source.body?.(filters), question: asked, filters }),
         signal: mine.signal,
         deadlineMs: DEADLINE_MS,
       });
@@ -144,6 +158,7 @@ export function Ask<Thing extends Found>({
   };
 
   const keyed = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (onKey(event)) return;
     if (event.key === 'ArrowDown' && rows.length) {
       event.preventDefault();
       setActive((i) => Math.min(rows.length - 1, i + 1));
@@ -164,14 +179,16 @@ export function Ask<Thing extends Found>({
         <div className="flex flex-wrap items-center gap-2">
           {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
           <QueryBox
+            ref={ref}
             autoFocus
             icon={<Sparkles aria-hidden="true" />}
             data-testid="ai-search-input"
             value={question}
-            onChange={(e) => setQuestion(e.target.value)}
+            onChange={(e) => onQuestion(e.target.value)}
             onKeyDown={keyed}
             placeholder={source.placeholder}
             aria-label={source.label}
+            spellCheck={false}
           />
           {running ? (
             <Button size="xs" variant="outline" data-testid="ai-search-stop" className="shrink-0" onClick={stop}>
@@ -186,7 +203,7 @@ export function Ask<Thing extends Found>({
               className="shrink-0"
               aria-label="Ask"
               title="Ask (Enter)"
-              disabled={!question.trim()}
+              disabled={!words.trim()}
               onClick={() => void ask()}
             >
               <CornerDownLeft className="h-3.5 w-3.5" aria-hidden="true" />
@@ -194,6 +211,7 @@ export function Ask<Thing extends Found>({
           )}
           {aside}
         </div>
+        {below}
         {(running || by) && (
           <div data-testid="ai-search-by" className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
             {running && <Spinner size="2xs" />}
@@ -244,4 +262,4 @@ export function Ask<Thing extends Found>({
       </div>
     </>
   );
-}
+}) as <Thing extends Found>(props: AskProps<Thing> & { ref?: React.Ref<HTMLInputElement> }) => React.ReactElement;

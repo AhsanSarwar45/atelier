@@ -87,6 +87,19 @@ impl Query {
     }
 }
 
+/// The keys whose every value is one more a chat may match, by the one name
+/// each alias means: the keys an agent repeating one would widen the search
+/// with (words::held).
+pub fn widens(key: &str) -> Option<&'static str> {
+    match key {
+        "project" | "proj" | "repo" => Some("project"),
+        "provider" | "brand" | "with" => Some("provider"),
+        "card" | "bead" | "ticket" | "issue" => Some("card"),
+        "from" | "origin" | "started" => Some("from"),
+        _ => None,
+    }
+}
+
 /// Read the box. `now` is the reader's own clock, which decides what
 /// `yesterday` means.
 pub fn parse(input: &str, now: DateTime<Local>) -> Query {
@@ -275,5 +288,27 @@ mod tests {
         assert_eq!(query.projects, ["my app"]);
         assert_eq!(query.all[0][0].text, "two words");
         assert!(!query.all[0][0].prefix, "a quoted phrase is never a prefix");
+    }
+
+    #[test]
+    fn an_agent_cannot_search_past_the_chats_the_person_narrowed_to() {
+        let now = Local::now();
+        let held = |asked: &str, fixed: &str| parse(&words::held(asked, fixed, widens), now);
+        // Another project, provider, card or origin, by any of their names, is dropped.
+        let query = held(
+            "repo:other with:codex bead:bw-9 origin:terminal loader",
+            "project:web provider:claude card:bw-1 from:app",
+        );
+        assert_eq!(query.projects, ["web"]);
+        assert_eq!(query.providers, ["claude"]);
+        assert_eq!(query.cards, ["bw-1"]);
+        assert_eq!(query.origins, ["app"]);
+        assert_eq!(query.all.len(), 1);
+        // The person's `in:` aims the agent's words, and the agent's own is dropped.
+        let query = held("in:agent loader", "in:title");
+        assert_eq!(query.all[0][0].fields, [Field::Title]);
+        // Dates only narrow, so the agent's are kept beside the person's.
+        let query = held("before:2026-01-01 loader", "after:2025-12-01");
+        assert!(query.after.is_some() && query.before.is_some());
     }
 }

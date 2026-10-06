@@ -14,6 +14,8 @@ use super::{projects_named, ApiError, WorkbenchState};
 use crate::routes::search_settings::{search_settings, SearchSettings, DEFAULT_TIME_LIMIT};
 use crate::search::agent::{self, read_only, tool_error, tool_text, Called, Source, Steps};
 use crate::search::named::Named;
+use crate::search::words;
+use crate::workbench::search_query;
 use crate::workbench::search_index::{SearchIndex, Sort};
 use axum::{extract::State, http::StatusCode, response::Response, Json};
 use futures::future::BoxFuture;
@@ -30,6 +32,8 @@ struct Chats {
     projects: Option<Arc<crate::db::Database>>,
     /// The project the panel was opened on: its id, and its name for the agent.
     here: Option<(String, String)>,
+    /// The filters the person set, added to every search the agent makes.
+    fixed: String,
 }
 
 /// Where a search is made: the project it is held in, or the ones its own words
@@ -97,14 +101,14 @@ impl Source for Chats {
                     return Ok(tool_error("query is required"));
                 };
                 let _ = steps.send(format!("Searched {}", query.trim()));
+                let query = words::held(&query, &self.fixed, search_query::widens);
                 let sort = match arguments["sort"].as_str() {
                     Some("newest") => Sort::Newest,
                     _ => Sort::Relevance,
                 };
                 let limit = number("limit").unwrap_or(10).clamp(1, 30);
                 let found = tokio::task::spawn_blocking(move || {
-                    let parsed =
-                        crate::workbench::search_query::parse(query.trim_start(), chrono::Local::now());
+                    let parsed = search_query::parse(query.trim_start(), chrono::Local::now());
                     let named = match (&self.projects, parsed.projects.is_empty()) {
                         (Some(projects), false) => projects_named(projects, &parsed.projects),
                         _ => Vec::new(),
@@ -199,6 +203,9 @@ pub(super) struct Asking {
     /// The project the panel was opened on, if it was opened on one.
     #[serde(default)]
     project: Option<String>,
+    /// The filters the person set in the box: `project:web after:7d`.
+    #[serde(default)]
+    filters: String,
 }
 
 pub(super) async fn ask(
@@ -240,9 +247,10 @@ pub(super) async fn ask(
         index,
         projects: state.projects.clone(),
         here,
+        fixed: asking.filters.clone(),
     });
     let registry = &state.registry;
-    agent::start(source, &asking.question, settings, |brand| {
+    agent::start(source, &asking.question, &asking.filters, settings, |brand| {
         if brand == "claude" {
             registry.claude_config_directory().to_path_buf()
         } else {
@@ -258,7 +266,7 @@ mod tests {
 
     #[test]
     fn a_chat_search_gives_its_agent_two_read_only_tools_and_the_chat_skill() {
-        let skill = agent::prompt(SKILL, "where we fixed the loader");
+        let skill = agent::prompt(SKILL, "where we fixed the loader", "");
         assert!(skill.starts_with("# Finding the chat someone describes"), "{skill}");
         let index = SearchIndex::open(
             &tempfile::tempdir().unwrap().keep().join("search.db"),
@@ -266,7 +274,7 @@ mod tests {
             Arc::new(|_: &str| Vec::new()),
         );
         let Ok(index) = index else { return };
-        let tools = Chats { index, projects: None, here: None }.tools();
+        let tools = Chats { index, projects: None, here: None, fixed: String::new() }.tools();
         let tools = tools.as_array().unwrap();
         assert_eq!(tools.len(), 2);
         assert!(tools.iter().all(|tool| tool["annotations"]["readOnlyHint"] == true));
@@ -301,6 +309,7 @@ mod tests {
             index,
             projects: None,
             here: Some(("p-1".to_string(), "beads-web".to_string())),
+            fixed: String::new(),
         };
         let tools = chats.tools();
         let said = tools[0]["description"].as_str().unwrap().to_string();

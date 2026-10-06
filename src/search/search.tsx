@@ -7,8 +7,10 @@
  * keys are, finds a page of matches and draws each with the places in it that
  * matched (source.ts); this draws the box, the controls, the list and the keys
  * that move through it. A switch beside the box hands the search to an agent
- * asked in plain words instead (ask.tsx). The controls say every key there is
- * a control for, so the empty box offers only what none of them writes.
+ * asked in plain words instead (ask.tsx). Its box takes the same keys and the
+ * same controls, and the agent is held to them; switching carries them across.
+ * The controls say every key there is a control for, so the empty box offers
+ * only what none of them writes.
  */
 'use client';
 
@@ -26,7 +28,7 @@ import { cn } from '@/lib/utils';
 import { Ask } from '@/search/ask';
 import { QueryBox } from '@/search/parts';
 import type { Choice, Found, Page, Place, SearchSource, Segment, Tip } from '@/search/source';
-import { controlsOf, suggestionsFor, taking, withFilter, withScopes } from '@/search/syntax';
+import { carried, controlsOf, suggestionsFor, taking, withFilter, withScopes } from '@/search/syntax';
 
 /** Words with the matched ones marked. */
 /** What every source's box understands, whatever its keys. */
@@ -146,6 +148,8 @@ export function Search<Item, Thing extends Found = Found>({
   const [searched, setSearched] = useState(false);
   const [active, setActive] = useState(0);
   const [mode, setMode] = useState<'words' | 'ai'>('words');
+  // The question for the AI: its own box, with the same keys as this one.
+  const [question, setQuestion] = useState('');
   const box = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const asked = useRef(0);
@@ -183,11 +187,14 @@ export function Search<Item, Thing extends Found = Found>({
 
   const scopeKeys = useMemo(() => words.scopes.map((s) => s.value), [words.scopes]);
   const filterKeys = useMemo(() => words.filters.map((f) => f.key), [words.filters]);
+  // Whichever box is shown is the one the controls read and write.
+  const text = mode === 'ai' ? question : q;
+  const setText = mode === 'ai' ? setQuestion : setQ;
   const controls = useMemo(
-    () => controlsOf(q, words.grammar, scopeKeys, filterKeys),
-    [q, words.grammar, scopeKeys, filterKeys],
+    () => controlsOf(text, words.grammar, scopeKeys, filterKeys),
+    [text, words.grammar, scopeKeys, filterKeys],
   );
-  const suggestions = useMemo(() => suggestionsFor(q, words.grammar), [q, words.grammar]);
+  const suggestions = useMemo(() => suggestionsFor(text, words.grammar), [text, words.grammar]);
 
   const groups = useMemo(() => words.groups(page.items), [words, page.items]);
   const choices = useMemo<Place[]>(() => groups.flatMap((group) => [group.head, ...group.places]), [groups]);
@@ -196,9 +203,24 @@ export function Search<Item, Thing extends Found = Found>({
     list.current?.querySelector(`[data-choice="${active}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [active]);
 
-  const change = (text: string) => {
-    setQ(text);
+  const change = (changed: string) => {
+    setText(changed);
     box.current?.focus();
+  };
+
+  /** Tab takes the first suggestion, in either box. */
+  const tabbed = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Tab' || event.shiftKey || !suggestions) return false;
+    event.preventDefault();
+    setText(taking(text, suggestions, suggestions.items[0]!));
+    return true;
+  };
+
+  const switchTo = (next: 'words' | 'ai') => {
+    if (next === mode) return;
+    if (next === 'ai') setQuestion(carried(q, question, words.grammar));
+    else setQ(carried(question, q, words.grammar));
+    setMode(next);
   };
 
   const open = (place: Place) => {
@@ -216,9 +238,8 @@ export function Search<Item, Thing extends Found = Found>({
     } else if (event.key === 'Enter' && choices[active]) {
       event.preventDefault();
       open(choices[active]!);
-    } else if (event.key === 'Tab' && !event.shiftKey && suggestions) {
-      event.preventDefault();
-      setQ(taking(q, suggestions, suggestions.items[0]!));
+    } else {
+      tabbed(event);
     }
   };
 
@@ -226,7 +247,7 @@ export function Search<Item, Thing extends Found = Found>({
     const now = controls.scopes.includes(scope)
       ? controls.scopes.filter((s) => s !== scope)
       : [...controls.scopes, scope];
-    change(withScopes(q, words.grammar, now));
+    change(withScopes(text, words.grammar, now));
   };
 
   // One switch between the two ways of looking; a search in words is typed and
@@ -235,7 +256,7 @@ export function Search<Item, Thing extends Found = Found>({
   const modes = (
     <Tabs
       value={mode}
-      onValueChange={(value) => setMode(value === 'ai' ? 'ai' : 'words')}
+      onValueChange={(value) => switchTo(value === 'ai' ? 'ai' : 'words')}
       className="order-last basis-full sm:order-none sm:basis-auto"
     >
       <TabsList aria-label="Search mode" className="w-full sm:h-8 sm:w-auto">
@@ -264,6 +285,79 @@ export function Search<Item, Thing extends Found = Found>({
     </Button>
   );
 
+  // Under either box: what the word being typed could become, then the
+  // controls. The AI orders what it finds itself, so it has no order to pick.
+  const below = (
+    <>
+      {suggestions && (
+        <div data-testid="search-suggestions" className={STRIP}>
+          {suggestions.items.map((suggestion, i) => (
+            <Button
+              key={suggestion.insert}
+              size="xs"
+              variant="outline"
+              data-testid="search-suggestion"
+              className="shrink-0 font-mono"
+              onClick={() => change(taking(text, suggestions, suggestion))}
+            >
+              {suggestion.label}
+              {i === 0 && <kbd className="ml-1 hidden text-[10px] text-muted-foreground sm:inline">Tab</kbd>}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      <div data-testid="search-controls" className={STRIP}>
+        {words.scopes.length > 0 && (
+          <div role="group" aria-label="Look in" className="flex shrink-0 items-center gap-0.5">
+            {words.scopes.map((scope) => {
+              const on = controls.scopes.includes(scope.value);
+              return (
+                <Button
+                  key={scope.value}
+                  size="xs"
+                  variant={on ? 'secondary' : 'ghost'}
+                  aria-pressed={on}
+                  data-testid={`search-scope-${scope.value}`}
+                  className="shrink-0"
+                  onClick={() => toggleScope(scope.value)}
+                >
+                  {scope.label}
+                </Button>
+              );
+            })}
+          </div>
+        )}
+        {words.scopes.length > 0 && words.filters.length > 0 && (
+          <Separator orientation="vertical" className="mx-1 h-4" aria-hidden="true" />
+        )}
+        {words.filters.map((filter) => (
+          <FilterMenu
+            key={filter.key}
+            label={filter.label}
+            value={controls.filters[filter.key] ?? null}
+            choices={filter.choices}
+            testId={`search-filter-${filter.key}`}
+            onChange={(value) => change(withFilter(text, words.grammar, filter.key, value))}
+          />
+        ))}
+        {mode === 'words' && words.sorts.length > 1 && (
+          <div className="ml-auto shrink-0">
+            <FilterMenu
+              label="Order"
+              value={sort}
+              choices={words.sorts}
+              testId="search-sort"
+              any={false}
+              icon={<ArrowDownUp className="h-3 w-3" aria-hidden="true" />}
+              onChange={(value) => value && setSort(value)}
+            />
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   const row = (place: Place, index: number) => (
     <Row
       key={place.key}
@@ -286,7 +380,13 @@ export function Search<Item, Thing extends Found = Found>({
       <div className={cn(overlayPanel, 'max-w-4xl')}>
         {mode === 'ai' ? (
           <Ask
+            ref={box}
             source={source.ask}
+            grammar={words.grammar}
+            question={question}
+            onQuestion={setQuestion}
+            onKey={tabbed}
+            below={below}
             onClose={onClose}
             aside={
               <>
@@ -317,72 +417,7 @@ export function Search<Item, Thing extends Found = Found>({
                 {close}
               </div>
 
-              {suggestions && (
-                <div data-testid="search-suggestions" className={STRIP}>
-                  {suggestions.items.map((suggestion, i) => (
-                    <Button
-                      key={suggestion.insert}
-                      size="xs"
-                      variant="outline"
-                      data-testid="search-suggestion"
-                      className="shrink-0 font-mono"
-                      onClick={() => change(taking(q, suggestions, suggestion))}
-                    >
-                      {suggestion.label}
-                      {i === 0 && <kbd className="ml-1 hidden text-[10px] text-muted-foreground sm:inline">Tab</kbd>}
-                    </Button>
-                  ))}
-                </div>
-              )}
-
-              <div data-testid="search-controls" className={STRIP}>
-                {words.scopes.length > 0 && (
-                  <div role="group" aria-label="Look in" className="flex shrink-0 items-center gap-0.5">
-                    {words.scopes.map((scope) => {
-                      const on = controls.scopes.includes(scope.value);
-                      return (
-                        <Button
-                          key={scope.value}
-                          size="xs"
-                          variant={on ? 'secondary' : 'ghost'}
-                          aria-pressed={on}
-                          data-testid={`search-scope-${scope.value}`}
-                          className="shrink-0"
-                          onClick={() => toggleScope(scope.value)}
-                        >
-                          {scope.label}
-                        </Button>
-                      );
-                    })}
-                  </div>
-                )}
-                {words.scopes.length > 0 && words.filters.length > 0 && (
-                  <Separator orientation="vertical" className="mx-1 h-4" aria-hidden="true" />
-                )}
-                {words.filters.map((filter) => (
-                  <FilterMenu
-                    key={filter.key}
-                    label={filter.label}
-                    value={controls.filters[filter.key] ?? null}
-                    choices={filter.choices}
-                    testId={`search-filter-${filter.key}`}
-                    onChange={(value) => change(withFilter(q, words.grammar, filter.key, value))}
-                  />
-                ))}
-                {words.sorts.length > 1 && (
-                  <div className="ml-auto shrink-0">
-                    <FilterMenu
-                      label="Order"
-                      value={sort}
-                      choices={words.sorts}
-                      testId="search-sort"
-                      any={false}
-                      icon={<ArrowDownUp className="h-3 w-3" aria-hidden="true" />}
-                      onChange={(value) => value && setSort(value)}
-                    />
-                  </div>
-                )}
-              </div>
+              {below}
             </div>
 
             {/* On a phone the panel is the screen, so the results take whatever

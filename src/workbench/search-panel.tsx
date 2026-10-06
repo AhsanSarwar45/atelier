@@ -22,7 +22,7 @@ import * as api from '@/lib/api';
 import { Excerpt, Heading, PLACE, TITLE } from '@/search/parts';
 import { Marked, Search } from '@/search/search';
 import type { FilterSpec, Found, SearchSource, Segment } from '@/search/source';
-import { CHAT_GRAMMAR, SCOPES, withFilter } from '@/workbench/search-syntax';
+import { CHAT_GRAMMAR, controlsOf, SCOPES, withFilter } from '@/workbench/search-syntax';
 
 export type { Segment } from '@/search/source';
 
@@ -219,10 +219,14 @@ export function useChatSearch(here: Here | null): { source: SearchSource<ChatMat
         placeholder: 'Ask about chats…',
         nothing: 'No chats.',
         url: '/api/workbench/search/ask',
-        // Said to the server, not to the agent: an agent handed a suggestion
-        // drops it. While this is sent, every search it makes stays here. The
-        // id, not the name, because nothing has to guess which project it is.
-        body: here ? { project: here.projectId } : undefined,
+        // While the box still names the project the panel was opened on, the
+        // server is told it by id, so nothing has to guess which project a
+        // name means; every search the agent makes then stays there. A box
+        // that names another project, or none, is searched as it says.
+        body: (filters) =>
+          here && mine && controlsOf(filters).project?.toLowerCase() === mine.toLowerCase()
+            ? { project: here.projectId }
+            : {},
         row: (chat) => ({
           key: chat.sessionId,
           testId: 'ai-search-chat',

@@ -367,6 +367,8 @@ pub async fn search_files(Query(params): Query<SearchParams>) -> Response {
 
 struct Files {
     root: PathBuf,
+    /// The filters the person set, added to every search the agent makes.
+    fixed: String,
 }
 
 impl Files {
@@ -429,6 +431,8 @@ impl Source for Files {
                 };
                 let _ = steps.send(format!("Searched {}", query.trim()));
                 let number = |name: &str| arguments[name].as_u64().map(|n| n as usize);
+                // Every key a file is narrowed by must all hold, so only `in:` could widen it.
+                let query = words::held(query, &self.fixed, |_| None);
                 let parsed = parse(query.trim_start());
                 let sort = Sort::from(arguments["sort"].as_str());
                 let (offset, limit) = (number("offset").unwrap_or(0), number("limit").unwrap_or(10).clamp(1, 30));
@@ -501,6 +505,9 @@ impl Source for Files {
 pub struct Asking {
     root: String,
     question: String,
+    /// The filters the person set in the box: `ext:rs path:server`.
+    #[serde(default)]
+    filters: String,
 }
 
 pub async fn ask(Extension(db): Extension<Arc<Database>>, Json(asking): Json<Asking>) -> Response {
@@ -515,7 +522,7 @@ pub async fn ask(Extension(db): Extension<Arc<Database>>, Json(asking): Json<Ask
         Ok(settings) => settings,
         Err(error) => return refusal((StatusCode::INTERNAL_SERVER_ERROR, error)),
     };
-    agent::start(Arc::new(Files { root }), &asking.question, settings, |brand| {
+    agent::start(Arc::new(Files { root, fixed: asking.filters.clone() }), &asking.question, &asking.filters, settings, |brand| {
         crate::workbench::profiles::system_dir(brand).unwrap_or_default()
     })
     .unwrap_or_else(|refusal| refusal.into_response())
@@ -578,11 +585,11 @@ mod tests {
     #[tokio::test]
     async fn the_agent_reads_only_what_the_listing_holds() {
         let (root, _) = tree();
-        let files = Files { root: root.path().canonicalize().unwrap() };
+        let files = Files { root: root.path().canonicalize().unwrap(), fixed: String::new() };
         assert_eq!(files.listed("./src/importer.rs").await.as_deref(), Some("src/importer.rs"));
         assert_eq!(files.listed("ignored/secret.rs").await, None);
         assert_eq!(files.listed("../etc/passwd").await, None);
         assert_eq!(files.listed("src").await, None);
-        assert!(agent::prompt(SKILL, "the file with the cobalt cache").starts_with("# Finding the file someone describes"));
+        assert!(agent::prompt(SKILL, "the file with the cobalt cache", "").starts_with("# Finding the file someone describes"));
     }
 }

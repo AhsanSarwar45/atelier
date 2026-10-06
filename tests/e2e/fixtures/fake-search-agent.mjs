@@ -9,7 +9,7 @@
 const args = process.argv.slice(2);
 const prompt = args[args.indexOf('-p') + 1];
 const [[name, { url, headers }]] = Object.entries(JSON.parse(args[args.indexOf('--mcp-config') + 1]).mcpServers);
-const question = prompt.split('The person is looking for:')[1].trim();
+const question = prompt.split('The person is looking for:')[1].split('\n## Filters')[0].trim();
 
 let asked = 0;
 async function rpc(method, params) {

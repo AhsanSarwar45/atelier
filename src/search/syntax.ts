@@ -145,3 +145,21 @@ export function taking(text: string, at: { start: number; end: number }, suggest
   const tail = suggestion.insert.endsWith(':') ? '' : ' ';
   return text.slice(0, at.start) + suggestion.insert + tail + text.slice(at.end);
 }
+
+/**
+ * The box in two: the keys it sets, and the words left. A question for the AI
+ * is asked in the words, and held to the keys (bw-v10zq.1).
+ */
+export function split(text: string, grammar: Grammar): { filters: string; words: string } {
+  const filters: string[] = [];
+  const words: string[] = [];
+  for (const token of tokens(text, grammar)) (token.key ? filters : words).push(text.slice(token.start, token.end));
+  return { filters: filters.join(' '), words: words.join(' ') };
+}
+
+/** `to` with the keys of `from` in place of its own, so a switch of box keeps the filters. */
+export function carried(from: string, to: string, grammar: Grammar): string {
+  const filters = split(from, grammar).filters;
+  const words = split(to, grammar).words;
+  return [filters, words].filter(Boolean).join(' ') + (filters && !words ? ' ' : '');
+}

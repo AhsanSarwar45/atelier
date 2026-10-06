@@ -51,7 +51,7 @@ test('a word inside a file finds it, opens it at the line highlighted, and the A
     // The tab's own search button opens the files' search.
     await page.getByTestId('files-open-search').click();
     const box = page.getByTestId('search-panel').getByTestId('search-input');
-    await expect(box).toHaveAttribute('aria-label', 'Search the files');
+    await expect(box).toHaveAttribute('aria-label', 'Search files');
     await expect(box).toBeFocused();
     await box.fill(`${word} `);
 
@@ -82,7 +82,7 @@ test('a word inside a file finds it, opens it at the line highlighted, and the A
     // Ctrl+K on the Files tab opens the files' search, and the AI search names the file.
     await page.getByTestId('files-tab').click({ position: { x: 5, y: 5 } });
     await page.keyboard.press('Control+k');
-    await expect(page.getByTestId('search-panel').getByTestId('search-input')).toHaveAttribute('aria-label', 'Search the files');
+    await expect(page.getByTestId('search-panel').getByTestId('search-input')).toHaveAttribute('aria-label', 'Search files');
     await page.getByTestId('search-mode-ai').click();
     await page.getByTestId('ai-search-input').fill(word);
     await page.getByTestId('ai-search-ask').click();

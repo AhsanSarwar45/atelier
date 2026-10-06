@@ -98,8 +98,8 @@ export interface AskSearch<Thing extends Found = Found> {
   nothing: string;
   /** Where the question is posted; it answers with one JSON event per line. */
   url: string;
-  /** Anything else the source's ask needs beside the question. */
-  body?: Record<string, unknown>;
+  /** Anything else the source's ask needs beside the question, given the filters set in the box. */
+  body?: (filters: string) => Record<string, unknown>;
   /** The found thing's row. The reason is drawn under it. */
   row: (found: Thing) => Place;
 }

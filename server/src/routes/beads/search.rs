@@ -404,6 +404,8 @@ struct Cards {
     dolt_manager: Arc<DoltManager>,
     db: Arc<Database>,
     path: String,
+    /// The filters the person set, added to every search the agent makes.
+    fixed: String,
 }
 
 impl Cards {
@@ -468,6 +470,8 @@ impl Source for Cards {
                 };
                 let _ = steps.send(format!("Searched {}", query.trim()));
                 let number = |name: &str| arguments[name].as_u64().map(|n| n as usize);
+                // Every key a card is narrowed by must all hold, so only `in:` could widen it.
+                let query = words::held(query, &self.fixed, |_| None);
                 let parsed = parse(query.trim_start(), Local::now());
                 let (cards, next) = search(
                     &board,
@@ -562,6 +566,9 @@ impl Source for Cards {
 pub struct Asking {
     path: String,
     question: String,
+    /// The filters the person set in the box: `status:open type:bug`.
+    #[serde(default)]
+    filters: String,
 }
 
 pub async fn ask(
@@ -579,8 +586,8 @@ pub async fn ask(
         Ok(settings) => settings,
         Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     };
-    let source = Arc::new(Cards { dolt_manager, db, path: asking.path });
-    agent::start(source, &asking.question, settings, |brand| {
+    let source = Arc::new(Cards { dolt_manager, db, path: asking.path, fixed: asking.filters.clone() });
+    agent::start(source, &asking.question, &asking.filters, settings, |brand| {
         crate::workbench::profiles::system_dir(brand).unwrap_or_default()
     })
     .unwrap_or_else(|refusal| refusal.into_response())
@@ -648,7 +655,7 @@ mod tests {
 
     #[test]
     fn a_board_search_gives_its_agent_two_read_only_tools_and_the_board_skill() {
-        let skill = agent::prompt(SKILL, "the card about the stalling loader");
+        let skill = agent::prompt(SKILL, "the card about the stalling loader", "");
         assert!(skill.starts_with("# Finding the card someone describes"), "{skill}");
     }
 }

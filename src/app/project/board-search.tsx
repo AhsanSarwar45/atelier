@@ -237,7 +237,7 @@ export function useBoardSearch(projectPath: string): SearchSource<CardMatch, Fou
         placeholder: 'Ask about cards…',
         nothing: 'No cards.',
         url: '/api/beads/search/ask',
-        body: { path: projectPath },
+        body: () => ({ path: projectPath }),
         row: (card) => ({
           key: card.id,
           testId: 'ai-search-card',

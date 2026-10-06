@@ -63,6 +63,8 @@ pub struct Piece {
     pub key: Option<String>,
     pub value: String,
     pub quoted: bool,
+    /// The piece as it was typed, sign and quotes and all.
+    pub typed: String,
 }
 
 /// What a source made of a key that aims no word.
@@ -86,9 +88,13 @@ fn pieces(input: &str) -> Vec<Piece> {
             break;
         }
         let mut raw = String::new();
+        let mut typed = String::new();
         let mut quoted = false;
         let mut in_quotes = false;
         while let Some(&c) = chars.peek() {
+            if !c.is_whitespace() || in_quotes {
+                typed.push(c);
+            }
             if c == '"' {
                 in_quotes = !in_quotes;
                 quoted = true;
@@ -122,9 +128,42 @@ fn pieces(input: &str) -> Vec<Piece> {
             key,
             value,
             quoted,
+            typed,
         });
     }
     found
+}
+
+/// An agent's query, held to what the person fixed (bw-v10zq.1).
+///
+/// The person's keys go first, so they narrow every search the agent makes:
+/// `in:` aims the agent's plain words, and every other key narrows as it does
+/// in the box. Most keys can only narrow further when the agent repeats them,
+/// so the agent keeps those. `in:` and the keys a source reads as "any of
+/// these" would widen the search instead; `widens` names those, by the one
+/// name each alias means, and when the person set one the agent's own is
+/// dropped.
+pub fn held(asked: &str, fixed: &str, widens: impl Fn(&str) -> Option<&'static str>) -> String {
+    let class = |key: &str| if key == "in" { Some("in") } else { widens(key) };
+    let pinned: Vec<&'static str> = pieces(fixed)
+        .iter()
+        .filter_map(|piece| piece.key.as_deref().and_then(class))
+        .collect();
+    let fixed = fixed.trim();
+    if fixed.is_empty() {
+        return asked.to_string();
+    }
+    let kept: Vec<String> = pieces(asked)
+        .into_iter()
+        .filter(|piece| !piece.key.as_deref().and_then(class).is_some_and(|c| pinned.contains(&c)))
+        .map(|piece| piece.typed)
+        .collect();
+    // The agent's last word stays last, and so as finished as it was.
+    let tail = if asked.ends_with(char::is_whitespace) { " " } else { "" };
+    match kept.join(" ") {
+        words if words.is_empty() => format!("{fixed} "),
+        words => format!("{fixed} {words}{tail}"),
+    }
 }
 
 /// A word as typed, before `in:` has aimed it and `OR` has grouped it.
@@ -369,5 +408,31 @@ mod tests {
         assert_eq!(words.all[1][0].text, "std::fs");
         assert_eq!(words.all[1][0].fields, [Part::Body]);
         assert_eq!(words.all[2][0].fields, [Part::Body]);
+    }
+
+    fn widens(key: &str) -> Option<&'static str> {
+        match key {
+            "project" | "repo" => Some("project"),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn an_agent_query_is_held_to_what_the_person_fixed() {
+        // Nothing fixed: the agent's words as written.
+        assert_eq!(held("loader crash", "", widens), "loader crash");
+        // The person's keys go first and narrow every search.
+        assert_eq!(held("loader crash", "in:title after:7d", widens), "in:title after:7d loader crash");
+        // A key that would widen the search is the person's alone, by any name.
+        assert_eq!(
+            held("repo:other -project:x \"slow load\" in:me", "project:Atelier in:title", widens),
+            "project:Atelier in:title \"slow load\""
+        );
+        // A key that only narrows further is the agent's to add.
+        assert_eq!(held("before:2026-01-01 project:web", "after:7d", widens), "after:7d before:2026-01-01 project:web");
+        // An unfinished last word stays unfinished; one the agent finished stays finished.
+        assert_eq!(held("load", "in:title", widens), "in:title load");
+        assert_eq!(held("load ", "in:title", widens), "in:title load ");
+        assert_eq!(held("project:x", "project:Atelier", widens), "project:Atelier ");
     }
 }

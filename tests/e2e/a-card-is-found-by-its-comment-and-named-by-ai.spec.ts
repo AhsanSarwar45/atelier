@@ -96,7 +96,7 @@ test('a word only in a comment finds its card, opens it, and the AI search names
 
     // Ctrl+K on the board opens the board's search, and the AI search names the card.
     await page.keyboard.press('Control+k');
-    await expect(page.getByTestId('search-panel').getByTestId('search-input')).toHaveAttribute('aria-label', 'Search the board');
+    await expect(page.getByTestId('search-panel').getByTestId('search-input')).toHaveAttribute('aria-label', 'Search cards');
     await page.getByTestId('search-mode-ai').click();
     await page.getByTestId('ai-search-input').fill(word);
     await page.getByTestId('ai-search-ask').click();

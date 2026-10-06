@@ -184,7 +184,7 @@ export function useFileSearch(root: string): SearchSource<FileMatch, FoundFile> 
         placeholder: 'Ask about files…',
         nothing: 'No files.',
         url: '/api/fs/search/ask',
-        body: { root },
+        body: () => ({ root }),
         row: (file) => {
           const line = Number(file.at) > 0 ? Number(file.at) : null;
           return {

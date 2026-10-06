@@ -97,15 +97,28 @@ fn refused(message: impl Into<String>) -> Refusal {
     (StatusCode::UNPROCESSABLE_ENTITY, message.into())
 }
 
-/// The skill without its front matter, then the question.
-pub fn prompt(skill: &str, question: &str) -> String {
+/// The skill without its front matter, then the question, then the filters
+/// the person set, if any. The source holds every search to those filters
+/// itself (words::held); the agent is told so it does not spend searches
+/// trying to step outside them.
+pub fn prompt(skill: &str, question: &str, fixed: &str) -> String {
     let body = skill
         .strip_prefix("---")
         .and_then(|rest| rest.split_once("\n---"))
         .map(|(_, body)| body.trim_start())
         .unwrap_or(skill);
+    let fixed = fixed.trim();
+    let filters = if fixed.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n## Filters\n\nThe person set these filters: `{fixed}`. They are added to every search \
+             you run, so do not repeat them, and keep to them: only name things they allow. \
+             Your own query cannot widen them.\n"
+        )
+    };
     format!(
-        "{body}\n## The request\n\nToday is {}. The person is looking for:\n\n{question}\n",
+        "{body}\n## The request\n\nToday is {}. The person is looking for:\n\n{question}\n{filters}",
         chrono::Local::now().format("%Y-%m-%d")
     )
 }
@@ -115,6 +128,7 @@ pub fn prompt(skill: &str, question: &str) -> String {
 pub fn start(
     source: Arc<dyn Source>,
     question: &str,
+    fixed: &str,
     settings: SearchSettings,
     system: impl Fn(&str) -> PathBuf,
 ) -> Result<Response, Refusal> {
@@ -161,7 +175,7 @@ pub fn start(
         answer_file: &answer_file,
         url: &url,
         token: &token,
-        prompt: &prompt(source.skill(), &question),
+        prompt: &prompt(source.skill(), &question, fixed),
     });
 
     let (out, lines) = mpsc::channel::<String>(64);
@@ -576,9 +590,18 @@ mod tests {
 
     #[test]
     fn the_agent_is_given_the_skill_without_its_front_matter_and_then_the_question() {
-        let said = prompt(Echo.skill(), "where we fixed the loader");
+        let said = prompt(Echo.skill(), "where we fixed the loader", "");
         assert!(said.starts_with("# Finding things"), "{said}");
         assert!(said.trim_end().ends_with("where we fixed the loader"));
+    }
+
+    #[test]
+    fn the_agent_is_told_the_filters_the_person_set() {
+        let said = prompt(Echo.skill(), "where we fixed the loader", "project:web in:title");
+        assert!(said.contains("where we fixed the loader"), "{said}");
+        assert!(said.contains("## Filters"), "{said}");
+        assert!(said.contains("`project:web in:title`"), "{said}");
+        assert!(!prompt(Echo.skill(), "loader", "  ").contains("## Filters"));
     }
 
     #[tokio::test]
