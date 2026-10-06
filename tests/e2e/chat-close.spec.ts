@@ -128,6 +128,7 @@ test.describe('closing a chat', () => {
       // Kept off the rail until the reader is on the row, the same as the pill.
       await row.hover();
       await row.getByTestId('row-close').click();
+      await page.getByTestId('close-chat-confirm').click();
 
       await expect.poll(async () => row.getAttribute('data-state'), { timeout: 60_000 }).toBe('dormant');
       // And it says nothing about it, because there is nothing to say that the
@@ -164,6 +165,7 @@ test.describe('closing a chat', () => {
       const plainRow = await theRowFor(page, project, plain);
       await plainRow.hover();
       await plainRow.getByTestId('row-close').click();
+      await page.getByTestId('close-chat-confirm').click();
       await expect.poll(async () => plainRow.getAttribute('data-state'), { timeout: 60_000 }).toBe('dormant');
       await expect(plainRow.getByTestId('row-close')).toHaveCount(0, { timeout: 30_000 });
 
@@ -199,6 +201,7 @@ test.describe('closing a chat', () => {
       const row = await theRowFor(page, project, id);
       await row.hover();
       await row.getByTestId('row-close').click();
+      await page.getByTestId('close-chat-confirm').click();
       await expect.poll(async () => row.getAttribute('data-state'), { timeout: 60_000 }).toBe('dormant');
 
       // And now there is nothing of ours left holding it. This is the whole
@@ -219,6 +222,7 @@ test.describe('closing a chat', () => {
       const row = await theRowFor(page, project, id);
       await row.hover();
       await row.getByTestId('row-close').click();
+      await page.getByTestId('close-chat-confirm').click();
       await expect.poll(async () => row.getAttribute('data-state'), { timeout: 60_000 }).toBe('dormant');
 
       // Nothing was deleted and nothing was hidden. A fresh load is the honest
@@ -242,6 +246,93 @@ test.describe('closing a chat', () => {
         'a sleeping chat still offers to be closed',
       ).toHaveCount(0, { timeout: 30_000 });
     } finally {
+      await project.remove();
+    }
+  });
+});
+
+/**
+ * What a chat left running, offered when it is closed (bw-fbtyy.1).
+ *
+ * Closing reaches only the agent's own process group. A program whose shell
+ * exited, or a container, goes on running with the chat's id on it. Planted
+ * here exactly as a tool would leave them: detached processes carrying the id
+ * in their environment, and a container carrying it as a label.
+ */
+test.describe('closing a chat with things still running', () => {
+  test.describe.configure({ timeout: 300_000 });
+
+  test('lists them as a tree and stops only what stays ticked', async ({ page, request }) => {
+    const { spawn, execFileSync } = await import('node:child_process');
+    const project = await aProjectToWorkIn(request, 'leftovers');
+    const planted: number[] = [];
+    let container: string | null = null;
+    // A run started from inside an Atelier chat has that chat's Docker
+    // socket, which would put its own chat's label on the container in
+    // place of this one; the daemon behind it is asked directly instead.
+    const dockerEnv = { ...process.env };
+    if (dockerEnv.ATELIER_CHAT_SESSION_ID) delete dockerEnv.DOCKER_HOST;
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      const id = await aChatToClose(request, page, project);
+      for (let i = 0; i < 2; i++) {
+        const child = spawn('sleep', ['300'], {
+          detached: true,
+          stdio: 'ignore',
+          env: { ...process.env, ATELIER_CHAT_SESSION_ID: id },
+        });
+        child.unref();
+        planted.push(child.pid!);
+      }
+      try {
+        container = execFileSync(
+          'docker',
+          ['run', '-d', '--rm', '--label', `atelier.chat=${id}`, 'alpine:latest', 'sleep', '300'],
+          { encoding: 'utf8', env: dockerEnv },
+        )
+          .trim()
+          .slice(0, 12);
+      } catch {
+        container = null;
+      }
+
+      const row = await theRowFor(page, project, id);
+      await row.hover();
+      await row.getByTestId('row-close').click();
+      const dialog = page.getByTestId('close-chat-dialog');
+      const line = (key: string) => dialog.locator(`[data-testid="close-chat-line"][data-key="${key}"]`);
+      await expect(line(`p:${planted[0]}`)).toHaveAttribute('data-state', 'on', { timeout: 30_000 });
+      await expect(line(`p:${planted[1]}`)).toHaveAttribute('data-state', 'on');
+      if (container) await expect(line(`c:${container}`)).toHaveAttribute('data-state', 'on');
+
+      // The second one is kept.
+      await line(`p:${planted[1]}`).getByTestId('close-chat-tick').click();
+      await expect(line(`p:${planted[1]}`)).toHaveAttribute('data-state', 'off');
+      mkdirSync(join(__dirname, '..', 'results'), { recursive: true });
+      await dialog.screenshot({ path: join(__dirname, '..', 'results', 'close-chat-dialog.png') });
+      await page.getByTestId('close-chat-confirm').click();
+      await expect(dialog).toHaveCount(0, { timeout: 60_000 });
+
+      expect(alive(planted[0]), 'the ticked process is still running').toBe(false);
+      expect(alive(planted[1]), 'the process left unticked was stopped').toBe(true);
+      if (container) {
+        const running = execFileSync('docker', ['ps', '-q', '--filter', `id=${container}`], {
+          encoding: 'utf8',
+          env: dockerEnv,
+        });
+        expect(running.trim(), 'the ticked container is still running').toBe('');
+        container = null;
+      }
+    } finally {
+      for (const pid of planted) if (alive(pid)) process.kill(pid, 'SIGKILL');
+      if (container) execFileSync('docker', ['rm', '-f', container], { env: dockerEnv, stdio: 'ignore' });
       await project.remove();
     }
   });

@@ -197,19 +197,19 @@ fn process_leader(_pid: Pid) -> Result<Option<bool>, String> {
 /// every process had tens of megabytes paged out that nobody was charged for,
 /// and the app looked half its real size (bw-c4i2.1).
 #[derive(Debug, Clone, Copy, Default)]
-struct ProcessCost {
+pub(super) struct ProcessCost {
     resident: u64,
     swapped: u64,
 }
 
 impl ProcessCost {
-    fn total(self) -> u64 {
+    pub(super) fn total(self) -> u64 {
         self.resident.saturating_add(self.swapped)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn process_cost(pid: Pid) -> Result<Option<ProcessCost>, String> {
+pub(super) fn process_cost(pid: Pid) -> Result<Option<ProcessCost>, String> {
     if process_leader(pid)? != Some(true) {
         return Ok(None);
     }
@@ -492,18 +492,22 @@ fn own_group() -> Option<std::path::PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-struct Stat {
-    name: String,
-    parent: Option<u32>,
+pub(super) struct Stat {
+    pub(super) name: String,
+    pub(super) parent: Option<u32>,
+    /// The process group it is in, which is what a group kill reaches.
+    pub(super) group: Option<u32>,
+    /// The kernel's one-letter state; `Z` is exited but not yet reaped.
+    pub(super) state: char,
     /// Clock ticks after boot, as the kernel writes it.
-    started: u64,
+    pub(super) started: u64,
 }
 
 #[cfg(target_os = "linux")]
 impl Stat {
     /// Seconds since the epoch, the same figure sysinfo gave, so a stop
     /// request carrying a start time from an older report still matches.
-    fn started_at(&self) -> u64 {
+    pub(super) fn started_at(&self) -> u64 {
         static BOOT: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
         let (boot, ticks) = *BOOT.get_or_init(|| {
             let boot = std::fs::read_to_string("/proc/stat")
@@ -522,7 +526,7 @@ impl Stat {
 }
 
 #[cfg(target_os = "linux")]
-fn read_stat(pid: u32) -> Option<Stat> {
+pub(super) fn read_stat(pid: u32) -> Option<Stat> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     // The name sits in parentheses and may itself hold spaces or parentheses,
     // so the fields after it are counted from the last closing one.
@@ -532,11 +536,15 @@ fn read_stat(pid: u32) -> Option<Stat> {
     let fields: Vec<&str> = stat.get(close + 1..)?.split_whitespace().collect();
     // After the name: state, ppid, ... starttime is field 22 overall, the
     // 20th after the name.
+    let state = fields.first()?.chars().next()?;
     let parent = fields.get(1)?.parse::<u32>().ok().filter(|pid| *pid != 0);
+    let group = fields.get(2)?.parse::<u32>().ok().filter(|pid| *pid != 0);
     let started = fields.get(19)?.parse::<u64>().ok()?;
     Some(Stat {
         name,
         parent,
+        group,
+        state,
         started,
     })
 }
@@ -561,7 +569,7 @@ fn children(pid: u32) -> Vec<u32> {
 /// A process's environment is fixed once it runs, so it is read once for each
 /// process and kept by its start, which a reused number does not share.
 #[cfg(target_os = "linux")]
-fn environ_chat(pid: u32, started: u64) -> Option<String> {
+pub(super) fn environ_chat(pid: u32, started: u64) -> Option<String> {
     static KEPT: std::sync::LazyLock<std::sync::Mutex<HashMap<u32, (u64, Option<String>)>>> =
         std::sync::LazyLock::new(Default::default);
     let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());

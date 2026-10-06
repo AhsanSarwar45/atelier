@@ -47,6 +47,7 @@ import { git, request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, HOLDER_WORD, type HeldChat } from '@/workbench/chat-state';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
+import { CloseChatDialog } from '@/workbench/close-chat-dialog';
 import {
   useHeardFromOutside,
   useHeldFactsAreOld,
@@ -759,6 +760,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [rows]);
   const [busy, setBusy] = useState<string | null>(null);
   const [ending, setEnding] = useState<string | null>(null);
+  const [closing, setClosing] = useState<RestoreRow | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ row: RestoreRow; at: PointerAt } | null>(null);
   const [renaming, setRenaming] = useState<RestoreRow | null>(null);
@@ -935,25 +937,33 @@ export const ChatSidebar = memo(function ChatSidebar({
   );
 
   /**
-   * Ends a chat: the agent is torn down and the row is marked `ended`.
+   * Asks to end a chat. The window that opens lists what the chat still has
+   * running, processes and Docker containers, and stops what is ticked along
+   * with the agent: closing alone reaches only the agent's own process group,
+   * and everything else was left running with nobody to stop it (bw-fbtyy.1).
    *
-   * Nothing is deleted and nothing is hidden, so this needs no confirming — the
-   * row it acts on stays exactly where it is, still carrying every word said in
-   * it, and a click opens it again (the manager, 2026-08-25).
+   * Nothing is deleted and nothing is hidden: the row stays where it is, still
+   * carrying every word said in it, and a click opens it again.
    *
    * Only ever a chat this app has a row for. The list also carries chats begun
    * in a terminal that we have never opened, and those have no id of ours and
    * no state of ours to end; the control is not drawn on them.
    */
-  const end = useCallback(
-    (row: RestoreRow) => {
-      const sessionId = row.sessionId;
-      if (!sessionId) return;
+  const end = useCallback((row: RestoreRow) => {
+    if (!row.sessionId) return;
+    setFailed(null);
+    setClosing(row);
+  }, []);
+
+  const closed = useCallback(
+    (failures: string[]) => {
+      const row = closing;
+      setClosing(null);
+      if (failures.length) setFailed(`Some items did not stop: ${failures.join('; ')}`);
+      if (!row) return;
       setEnding(rowKey(row));
-      setFailed(null);
       void (async () => {
         try {
-          await sendCommand({ type: 'session.close', sessionId });
           // Asked again for the same reason opening asks: the row's own state
           // is what the list was handed, and nothing else would move it off
           // whatever it said before the click.
@@ -965,7 +975,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         }
       })();
     },
-    [load],
+    [closing, load],
   );
 
   const askRename = useCallback((row: RestoreRow) => {
@@ -1149,6 +1159,15 @@ export const ChatSidebar = memo(function ChatSidebar({
     </>
   ), [askRename, copyId, end, menu, onSwitchProvider]);
 
+  const closeDialog = useMemo(() => (
+    <CloseChatDialog
+      chat={closing?.sessionId ? { sessionId: closing.sessionId, name: closing.name } : null}
+      onCancel={() => setClosing(null)}
+      onBusy={(busy) => setEnding(busy && closing ? rowKey(closing) : null)}
+      onClosed={closed}
+    />
+  ), [closing, closed]);
+
   const renameDialog = useMemo(() => (
     <>
       <Dialog open={renaming !== null} onOpenChange={(open) => { if (!open) setRenaming(null); }}>
@@ -1248,6 +1267,7 @@ export const ChatSidebar = memo(function ChatSidebar({
       {rowMenu}
 
       {renameDialog}
+      {closeDialog}
     </aside>
   );
 });

@@ -67,6 +67,13 @@ const rowNamed = (title: string) =>
   rows().find((r) => within(r).queryByText(title) !== null)!;
 const closeOn = (title: string) => within(rowNamed(title)).queryByTestId('row-close');
 
+/** Clicks Close on the row, then confirms in the window it opens (bw-fbtyy.1). */
+async function closeAndConfirm(title: string) {
+  await act(async () => void fireEvent.click(closeOn(title)!));
+  await waitFor(() => expect(screen.getByTestId('close-chat-nothing')).toBeInTheDocument());
+  await act(async () => void fireEvent.click(screen.getByTestId('close-chat-confirm')));
+}
+
 async function draw() {
   vi.resetModules();
   const { ChatSidebar } = await import('@/workbench/chat-sidebar');
@@ -87,6 +94,9 @@ beforeEach(() => {
         asked.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>);
         if (refuse !== null) return { ok: false, status: 500, text: async () => refuse } as unknown as Response;
         return { ok: true, json: async () => ({ ok: true }) } as unknown as Response;
+      }
+      if (url.includes('/running')) {
+        return { ok: true, json: async () => ({ processes: [], containers: [] }) } as unknown as Response;
       }
       return { ok: true, json: async () => list } as unknown as Response;
     }),
@@ -193,10 +203,20 @@ describe('clicking it', () => {
     ];
     await draw();
 
-    await act(async () => void fireEvent.click(closeOn('Another chat')!));
+    await closeAndConfirm('Another chat');
 
     expect(asked.filter((command) => command.type !== 'providers.list'))
       .toEqual([{ type: 'session.close', sessionId: 'other' }]);
+  });
+
+  it('asks first, and closes nothing when the window is cancelled', async () => {
+    await draw();
+
+    await act(async () => void fireEvent.click(closeOn('A chat of ours')!));
+    expect(screen.getByTestId('close-chat-dialog')).toBeInTheDocument();
+    await act(async () => void fireEvent.click(screen.getByTestId('close-chat-cancel')));
+
+    expect(asked.filter((command) => command.type !== 'providers.list')).toEqual([]);
   });
 
   it('does not open the chat it is closing', async () => {
@@ -220,10 +240,10 @@ describe('clicking it', () => {
     refuse = 'the helper is not running';
     await draw();
 
-    await act(async () => void fireEvent.click(closeOn('A chat of ours')!));
+    await closeAndConfirm('A chat of ours');
 
-    await waitFor(() => expect(screen.queryByTestId('restore-error')).not.toBeNull());
-    expect(screen.getByTestId('restore-error').textContent).toMatch(/not running/);
+    await waitFor(() => expect(screen.queryByTestId('close-chat-error')).not.toBeNull());
+    expect(screen.getByTestId('close-chat-error').textContent).toMatch(/not running/);
   });
 });
 
@@ -262,7 +282,7 @@ describe('what the row says afterwards', () => {
     });
     await draw();
 
-    await act(async () => void fireEvent.click(closeOn('A chat of ours')!));
+    await closeAndConfirm('A chat of ours');
 
     const pill = within(rowNamed('A chat of ours')).queryByTestId('row-pill');
     expect(pill, 'the row said nothing while its chat was being closed').not.toBeNull();

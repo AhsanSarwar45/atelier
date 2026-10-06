@@ -374,6 +374,28 @@ async fn group_of(upstream: &Path, id: &str) -> Option<PathBuf> {
     Some(group)
 }
 
+/// Stop one container, giving it `grace` seconds to exit before the daemon
+/// kills it. One that has already stopped counts as stopped.
+pub async fn stop(id: &str, grace: u32) -> Result<(), String> {
+    let upstream = upstream().ok_or("Docker is not available")?;
+    let stopped = async {
+        let stream = UnixStream::connect(&upstream).await?;
+        let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream)).await?;
+        tokio::spawn(connection);
+        let request = Request::post(format!("/containers/{id}/stop?t={grace}"))
+            .header(hyper::header::HOST, "docker")
+            .body(Full::new(Bytes::new()))?;
+        let response = sender.send_request(request).await?;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(response.status())
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(u64::from(grace) + 10), stopped).await {
+        Ok(Ok(status)) if status.is_success() || status == StatusCode::NOT_MODIFIED => Ok(()),
+        Ok(Ok(status)) => Err(format!("Docker answered {status}")),
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(_) => Err("Docker did not answer in time".into()),
+    }
+}
+
 async fn get(upstream: &Path, path: &str) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let stream = UnixStream::connect(upstream).await?;
     let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream)).await?;

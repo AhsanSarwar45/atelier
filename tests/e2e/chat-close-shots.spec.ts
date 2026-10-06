@@ -58,6 +58,8 @@ test('the chat list, before a closing and after it', async ({ page, request }) =
     await list.screenshot({ path: join(SHOTS, 'close-before.png') });
 
     await row.getByTestId('row-close').click();
+
+    await page.getByTestId('close-chat-confirm').click();
     await expect.poll(async () => row.getAttribute('data-state'), { timeout: 60_000 }).toBe('dormant');
     await page.mouse.move(0, 0);
     await expect(row.getByTestId('row-pill')).toHaveCount(0, { timeout: 30_000 });

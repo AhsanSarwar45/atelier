@@ -1163,6 +1163,8 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/notifications/read", post(notifications_read))
         .route("/restore", get(restore))
         .route("/session/:id", get(session))
+        .route("/session/:id/running", get(session_running))
+        .route("/session/:id/running/stop", post(stop_session_running))
         .route("/search", get(search))
         .route("/search/chats", get(search_chats))
         .route("/search/ask", post(ai_search::ask))
@@ -1214,6 +1216,20 @@ async fn terminate_memory_process(
         .await
         .map_err(|error| format!("process termination failed: {error}"))??;
     Ok(Json(json!({"stopped": stopped})))
+}
+
+/// What a chat has running, for the window that closes it (bw-fbtyy.1).
+async fn session_running(Path(id): Path<String>) -> Result<Json<Value>, ApiError> {
+    let running = crate::workbench::leftover_tree::running(&id).await?;
+    Ok(Json(serde_json::to_value(running).map_err(|error| error.to_string())?))
+}
+
+async fn stop_session_running(
+    Path(id): Path<String>,
+    Json(request): Json<crate::workbench::leftover_tree::StopRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let stopped = crate::workbench::leftover_tree::stop(&id, request).await?;
+    Ok(Json(serde_json::to_value(stopped).map_err(|error| error.to_string())?))
 }
 
 #[derive(Deserialize)]
