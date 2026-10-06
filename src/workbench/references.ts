@@ -449,7 +449,9 @@ export function referenceForPaste(pasted: string, origin: string): string | null
   const text = pasted.trim();
   if (!text || /\s/.test(text)) return null;
   const whole = findAtelierReferences(text);
-  if (whole.length === 1 && whole[0]!.start === 0 && whole[0]!.end === text.length) {
+  // A leading `/skill:<id>` is a command to run, not a reference to read; it
+  // stays as pasted.
+  if (whole.length === 1 && !whole[0]!.run && whole[0]!.start === 0 && whole[0]!.end === text.length) {
     return formatAtelierReference(whole[0]!.kind, whole[0]!.id);
   }
   return referenceForAddress(text, origin);

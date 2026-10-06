@@ -133,6 +133,8 @@ describe('a pasted address of this app', () => {
     expect(referenceForPaste(`see @chat:${CHAT}`, HERE)).toBeNull();
     expect(referenceForPaste(`@chat:${CHAT} @bead:bw-1`, HERE)).toBeNull();
     expect(referenceForPaste('hello', HERE)).toBeNull();
+    // A command to run a skill is not a reference to read it.
+    expect(referenceForPaste('/skill:review', HERE)).toBeNull();
   });
 
   it('is left alone when it is somewhere else or something else', () => {
