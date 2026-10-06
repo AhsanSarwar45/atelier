@@ -156,6 +156,9 @@ pub fn held(asked: &str, fixed: &str, widens: impl Fn(&str) -> Option<&'static s
     let kept: Vec<String> = pieces(asked)
         .into_iter()
         .filter(|piece| !piece.key.as_deref().and_then(class).is_some_and(|c| pinned.contains(&c)))
+        // An `OR` the agent starts with would make the person's last key one
+        // of a choice, so it is dropped.
+        .skip_while(|piece| piece.key.is_none() && !piece.quoted && !piece.negated && piece.value == "OR")
         .map(|piece| piece.typed)
         .collect();
     // The agent's last word stays last, and so as finished as it was.
@@ -434,5 +437,10 @@ mod tests {
         assert_eq!(held("load", "in:title", widens), "in:title load");
         assert_eq!(held("load ", "in:title", widens), "in:title load ");
         assert_eq!(held("project:x", "project:Atelier", widens), "project:Atelier ");
+        // An `OR` the agent starts with cannot make the person's key a choice.
+        assert_eq!(held("OR bar OR baz", "title:foo", widens), "title:foo bar OR baz");
+        assert_eq!(held("project:x OR bar", "project:Atelier", widens), "project:Atelier bar");
+        let words = read(&held("OR bar", "title:foo", widens), |key| (key == "title").then_some(Part::Name), |_, _| Key::Words);
+        assert_eq!(words.all.len(), 2);
     }
 }
