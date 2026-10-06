@@ -124,6 +124,9 @@ it('closes a running chat from the row menu', async () => {
   await waitFor(() => expect(screen.queryByTestId('chat-context-menu')).not.toBeNull());
 
   await act(async () => void fireEvent.click(screen.getByTestId('chat-menu-close')));
+  // Closing asks first, in a window listing what else is running (bw-fbtyy.1).
+  await waitFor(() => expect(screen.getByTestId('close-chat-confirm')).toBeInTheDocument());
+  await act(async () => void fireEvent.click(screen.getByTestId('close-chat-confirm')));
   await waitFor(() => expect(commands).toContainEqual({ type: 'session.close', sessionId: 'atelier-session-1' }));
 });
 

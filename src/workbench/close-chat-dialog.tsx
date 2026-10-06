@@ -29,6 +29,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { memoryWords } from '@/workbench/memory-badge';
@@ -181,7 +182,11 @@ export function CloseChatDialog({ chat, onCancel, onBusy, onClosed }: Props) {
           deadlineMs: 15_000,
         });
         if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
-        const found = (await res.json()) as ChatRunning;
+        const answer = (await res.json()) as Partial<ChatRunning> | null;
+        const found: ChatRunning = {
+          processes: Array.isArray(answer?.processes) ? answer.processes : [],
+          containers: Array.isArray(answer?.containers) ? answer.containers : [],
+        };
         if (!live) return;
         setRunning(found);
         setTicked(allTickable(runningTree(found)));
@@ -367,12 +372,15 @@ function Line({
           onClick={() => {
             if (!fixed && !disabled) onFlip(node);
           }}
-          title={node.detail}
         >
           <span className={cn('shrink-0', group && 'font-medium', state === 'off' && 'text-t-tertiary')}>
             {node.label}
           </span>
-          {node.detail && <span className="min-w-0 truncate font-mono text-xs text-t-tertiary">{node.detail}</span>}
+          {node.detail && (
+            <Tooltip label={node.detail}>
+              <span className="min-w-0 truncate font-mono text-xs text-t-tertiary">{node.detail}</span>
+            </Tooltip>
+          )}
           <span className="ml-auto flex shrink-0 items-baseline gap-2 pl-2 text-xs text-t-tertiary">
             {node.locked && !group && <span data-testid="close-chat-locked">Stops with chat</span>}
             {node.bytes ? <span className="tabular-nums">{memoryWords(node.bytes)}</span> : null}
