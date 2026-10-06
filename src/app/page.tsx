@@ -127,18 +127,17 @@ export default function ProjectsPage() {
                         asChild
                         size="sm"
                         color={tag.color}
-                        colorFill={isSelected ? "solid" : "faint"}
+                        colorFill={isSelected ? "solid" : "tint"}
                       >
                         <Button
                           type="button"
                           variant="foreground"
-                          size="inherit"
-                          className="p-0"
+                          size="none"
                           onClick={() => toggleTag(tag.id)}
                           aria-pressed={isSelected}
                           aria-label={`Filter by ${tag.name}`}
                         >
-                          {tag.name}
+                          <span>{tag.name}</span>
                         </Button>
                       </Badge>
                     );
