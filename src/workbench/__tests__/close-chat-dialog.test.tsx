@@ -94,4 +94,17 @@ describe('closing a chat with things running', () => {
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0].body).toEqual({ type: 'session.close', sessionId: 's1' });
   });
+
+  it('opened for another chat, offers nothing of the last one while its list loads', async () => {
+    const { rerender } = render(
+      <CloseChatDialog chat={{ sessionId: 's1', name: 'A chat' }} onCancel={() => {}} onClosed={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByTestId('close-chat-confirm')).toHaveTextContent('Close and stop 4'));
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+
+    rerender(<CloseChatDialog chat={null} onCancel={() => {}} onClosed={() => {}} />);
+    rerender(<CloseChatDialog chat={{ sessionId: 's2', name: 'Another' }} onCancel={() => {}} onClosed={() => {}} />);
+
+    expect(screen.getByTestId('close-chat-confirm')).toHaveTextContent('Close chat');
+  });
 });

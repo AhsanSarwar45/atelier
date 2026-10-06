@@ -171,6 +171,7 @@ export function CloseChatDialog({ chat, onCancel, onBusy, onClosed }: Props) {
     setRunning(null);
     setLoadError(null);
     setFailed(null);
+    setTicked(new Set());
     setFolded(new Set());
     if (!sessionId) return;
     let live = true;
@@ -231,7 +232,9 @@ export function CloseChatDialog({ chat, onCancel, onBusy, onClosed }: Props) {
     onClosed(failures);
   }, [sessionId, running, ticked, onBusy, onClosed]);
 
-  const count = ticked.size;
+  // Counted from the list on screen, so the button never promises to stop
+  // something the window is not showing.
+  const count = useMemo(() => [...allTickable(tree)].filter((key) => ticked.has(key)).length, [tree, ticked]);
 
   return (
     <AlertDialog open={chat !== null} onOpenChange={(open) => { if (!open && !busy) onCancel(); }}>
