@@ -46,6 +46,11 @@ const inputSlotVariants = cva(
       { size: "sm", side: "start", className: "left-2" },
       { size: "sm", side: "end", className: "right-0.5" },
     ],
+    // The field's own default, so a field given no size still sizes and
+    // places its icon.
+    defaultVariants: {
+      size: "md",
+    },
   }
 )
 
