@@ -80,12 +80,14 @@ struct Seen {
 }
 
 /// Name each process's role and whether the close itself reaches it. The
-/// adapter is the app's own child; the provider is the adapter's. The adapter
-/// leads its own group, and the close kills that group.
+/// adapter is the app's own `-acp` child, as the memory report names it; the
+/// provider is the adapter's. A terminal the agent opens is also the app's
+/// own child, but it is a tool the close does not reach. The adapter leads
+/// its own group, and the close kills that group.
 fn placed(seen: Vec<Seen>, app: u32) -> Vec<ChatProcess> {
     let adapters: HashSet<u32> = seen
         .iter()
-        .filter(|process| process.parent == Some(app))
+        .filter(|process| process.parent == Some(app) && process.name.ends_with("-acp"))
         .map(|process| process.pid)
         .collect();
     seen.into_iter()
@@ -327,8 +329,12 @@ mod tests {
         // 10 is the app; 20 the adapter, leading group 20; 21 the provider;
         // 22 a tool in the adapter's group; 30 a server that left for its own
         // group, now a child of systemd.
+        let mut adapter = seen(20, 10, 20);
+        adapter.name = "claude-acp".into();
+        // 40 is a terminal the agent opened: the app's own child, in the
+        // app's group, and not the agent.
         let placed = placed(
-            vec![seen(20, 10, 20), seen(21, 20, 20), seen(22, 21, 20), seen(30, 1, 30)],
+            vec![adapter, seen(21, 20, 20), seen(22, 21, 20), seen(30, 1, 30), seen(40, 10, 10)],
             10,
         );
         let by: HashMap<u32, &ChatProcess> = placed.iter().map(|process| (process.pid, process)).collect();
@@ -338,6 +344,8 @@ mod tests {
         assert_eq!(by[&30].role, "subprocess");
         assert!(by[&22].closes_with_chat);
         assert!(!by[&30].closes_with_chat);
+        assert_eq!(by[&40].role, "subprocess");
+        assert!(!by[&40].closes_with_chat);
     }
 
     #[test]
