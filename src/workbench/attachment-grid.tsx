@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils';
 import { AttachmentFace } from '@/workbench/attachment-tile';
 import { lookOf, opens } from '@/workbench/attachment-look';
 import { inlineMediaBounds } from '@/workbench/media-bounds';
-import type { ImagePayload } from '@/workbench/protocol';
+import type { ImagePayload, OnLook } from '@/workbench/protocol';
 import { attachmentSrc } from '@/workbench/attachment-store';
 import { fileKind } from '@/components/file-kinds';
 
@@ -74,14 +74,18 @@ const THUMB =
 
 export interface AttachmentGridProps {
   files: ImagePayload[];
-  /** Open one whole, over the chat. */
-  onLook: (image: ImagePayload) => void;
+  /** Open one whole, over the chat, with the rest of the block to step through. */
+  onLook: OnLook;
 }
 
 export function AttachmentGrid({ files, onLook }: AttachmentGridProps): JSX.Element | null {
   if (files.length === 0) return null;
   const across = acrossFor(files.length);
   const alone = files.length === 1;
+  // What the viewer steps through once one is open: the block's files that
+  // open at all, in the order they are drawn. A zip that opens nothing would
+  // be a step that shows nothing.
+  const set = files.filter(opens);
 
   return (
     <div
@@ -96,7 +100,7 @@ export function AttachmentGrid({ files, onLook }: AttachmentGridProps): JSX.Elem
       {files.map((file, i) => {
         const look = lookOf(file);
         const openable = opens(file);
-        const press = openable ? () => onLook(file) : undefined;
+        const press = openable ? () => onLook(file, set) : undefined;
 
         // A picture keeps the drawing it has always had, and the reason is a
         // layout one rather than a drawing one: a picture ALONE has a shape of

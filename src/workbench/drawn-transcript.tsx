@@ -15,7 +15,7 @@ import { useVirtualizer, type VirtualItem } from '@tanstack/react-virtual';
 import type { Mentions } from '@/components/markdown-body';
 import { NEAR, type HeldAtTheEnd } from '@/hooks/held-at-the-end';
 import type { DrawnRow } from '@/workbench/machine-lines';
-import type { LookableImage } from '@/workbench/protocol';
+import type { OnLook } from '@/workbench/protocol';
 import { MachineLine, TranscriptRow } from '@/workbench/transcript-rows';
 
 /** Two ordinary screens of complete transcript items per storage request. */
@@ -29,7 +29,7 @@ interface DrawnTranscriptProps {
   primaryItems?: number;
   sessionId: string;
   mentions: Mentions;
-  onLook: (image: LookableImage) => void;
+  onLook: OnLook;
   pane: React.RefObject<HTMLElement | null>;
   onOlder?: (() => Promise<{ added: number; hasOlder: boolean }>) | null;
   /** A message to open the chat at — one a search found — named by its id. */

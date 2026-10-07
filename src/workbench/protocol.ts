@@ -278,6 +278,13 @@ export interface ImageComparison {
 export type LookableImage = ImagePayload | ImageComparison;
 
 /**
+ * Opens one of those full screen. `set` is the run of files it was clicked
+ * among — a message's grid, the writing box's tray — so the viewer can step to
+ * the one before and the one after without closing.
+ */
+export type OnLook = (image: LookableImage, set?: readonly ImagePayload[]) => void;
+
+/**
  * One entry in the writing box's `/` menu: a command the install has, or a skill
  * it can run. Both are typed the same way, so both are listed the same way
  * (docs/agent-workbench.md §7).

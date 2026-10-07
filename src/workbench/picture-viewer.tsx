@@ -215,8 +215,20 @@ function Wipe({ comparison, transform, onChange }: { comparison: ImageComparison
   );
 }
 
-export function PictureViewer({ image, onClose }: { image: LookableImage; onClose: () => void }) {
+/**
+ * `children` is drawn inside the dialog, over the picture — which is where the
+ * steps to the next and the previous picture go (`attachment-viewer.tsx`).
+ * Drawn outside, they would sit behind the dialog's overlay and take no click.
+ */
+export function PictureViewer({ image, onClose, children }: { image: LookableImage; onClose: () => void; children?: ReactNode }) {
   const [transform, setTransform] = useState<ImageTransform>(RESET);
+  // A step to another picture starts it fitted: the zoom was taken for the
+  // last one and means nothing on this.
+  const [shown, setShown] = useState(image);
+  if (shown !== image) {
+    setShown(image);
+    setTransform(RESET);
+  }
   const comparison: ImageComparison | null = 'mode' in image ? image : null;
   const [comparisonMode, setComparisonMode] = useState<ImageComparison['mode'] | null>(comparison?.mode ?? null);
   const single: ImagePayload | null = 'mode' in image ? null : image;
@@ -235,6 +247,7 @@ export function PictureViewer({ image, onClose }: { image: LookableImage; onClos
         {comparison && comparisonMode === 'side_by_side' && <SideBySide comparison={comparison} transform={transform} onChange={setTransform} />}
         {comparison && comparisonMode === 'wipe' && <Wipe comparison={comparison} transform={transform} onChange={setTransform} />}
         {single && <Single image={single} transform={transform} onChange={setTransform} />}
+        {children}
         <Button variant="media" mode="icon" size="sm" aria-label="Close the picture" data-testid="picture-viewer-close" className="absolute right-4 top-4 z-20" onClick={onClose}><X /></Button>
       </DialogContent>
     </Dialog>

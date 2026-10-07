@@ -23,9 +23,9 @@
  * out for itself: an attachment lives in the content-addressed store under a
  * digest, not at a path in the checkout, which is what `src` overrides.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
-import { X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -65,7 +65,64 @@ function useWords(src: string, wanted: boolean) {
   return { said, failed };
 }
 
-export function AttachmentViewer({ image, onClose }: { image: LookableImage; onClose: () => void }) {
+/**
+ * The steps to the file before and the file after, when the one opened was
+ * clicked among others — a message's grid of pictures, the writing box's tray.
+ *
+ * The arrow keys step too, unless the key is already somebody else's: the wipe's
+ * split moves on them, a focused video seeks on them, and the text reader moves
+ * its caret on them.
+ */
+function Steps({ at, count, onStep }: { at: number; count: number; onStep: (to: number) => void }) {
+  useEffect(() => {
+    const step = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const by = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+      if (!by) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('input, textarea, select, video, audio, [contenteditable="true"], [role="slider"], .cm-editor')) return;
+      const to = at + by;
+      if (to < 0 || to >= count) return;
+      event.preventDefault();
+      onStep(to);
+    };
+    window.addEventListener('keydown', step);
+    return () => window.removeEventListener('keydown', step);
+  }, [at, count, onStep]);
+
+  return (
+    <>
+      <Button variant="media" mode="icon" aria-label="Previous" data-testid="attachment-viewer-previous"
+        disabled={at === 0} onClick={() => onStep(at - 1)}
+        className="absolute left-2 top-1/2 z-20 -translate-y-1/2 rounded-full bg-black/50 sm:left-4">
+        <ChevronLeft className="size-6" />
+      </Button>
+      <Button variant="media" mode="icon" aria-label="Next" data-testid="attachment-viewer-next"
+        disabled={at === count - 1} onClick={() => onStep(at + 1)}
+        className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-full bg-black/50 sm:right-4">
+        <ChevronRight className="size-6" />
+      </Button>
+      <span data-testid="attachment-viewer-position" className="absolute left-4 top-5 z-20 text-xs text-white">
+        {at + 1} of {count}
+      </span>
+    </>
+  );
+}
+
+/**
+ * One file opened full size, and — when it was opened from among others —
+ * the steps through the rest of them without closing.
+ */
+export function AttachmentViewer({ image, set, onClose }: { image: LookableImage; set?: readonly ImagePayload[]; onClose: () => void }) {
+  const [shown, setShown] = useState<LookableImage>(image);
+  const at = set && !('mode' in shown) ? set.indexOf(shown) : -1;
+  const steps = set && set.length > 1 && at >= 0
+    ? <Steps at={at} count={set.length} onStep={(to) => setShown(set[to]!)} />
+    : null;
+  return <OneAttachment image={shown} onClose={onClose}>{steps}</OneAttachment>;
+}
+
+function OneAttachment({ image, onClose, children }: { image: LookableImage; onClose: () => void; children?: ReactNode }) {
   const single: ImagePayload | null = 'mode' in image ? null : image;
   const look = single ? lookOf(single) : 'picture';
   const name = single?.path ?? single?.alt ?? '';
@@ -77,7 +134,7 @@ export function AttachmentViewer({ image, onClose }: { image: LookableImage; onC
 
   // A comparison, and a picture, are the picture viewer's own: it has the zoom,
   // the pan and the wipe, and none of that is this dialog's business.
-  if (!single || look === 'picture') return <PictureViewer image={image} onClose={onClose} />;
+  if (!single || look === 'picture') return <PictureViewer image={image} onClose={onClose}>{children}</PictureViewer>;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -121,6 +178,7 @@ export function AttachmentViewer({ image, onClose }: { image: LookableImage; onC
           />
         )}
 
+        {children}
         <Button
           variant="ghost"
           mode="icon"

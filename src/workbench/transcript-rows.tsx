@@ -54,7 +54,7 @@ import { widgetSpecs } from '@/workbench/chat-widgets';
 import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { ranOfAcp, whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { ANSWERED_BY_APP, NOBODY_ANSWERED, refuses } from '@/workbench/protocol';
-import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
+import type { AskOption, ImagePayload, OnLook } from '@/workbench/protocol';
 import { Chipped, Line, SplitPaths, withChips } from '@/workbench/split-paths';
 import { ChipsInAControl, PathChip } from '@/workbench/path-chip';
 import { sendCommand, useLatestItem, type TranscriptItem } from '@/workbench/use-session';
@@ -563,7 +563,7 @@ export const ToolRow = memo(function ToolRow({
   item: Extract<TranscriptItem, { kind: 'tool' }>;
   nested: boolean;
   sessionId?: string;
-  onLook?: (image: LookableImage) => void;
+  onLook?: OnLook;
 }) {
   // What the row IS, asked of the row itself rather than of what a click has
   // fetched: a paged transcript keeps the kind and drops the diff, so this is
@@ -1052,7 +1052,7 @@ const MessageRow = memo(function MessageRow({
 }: {
   item: Extract<TranscriptItem, { kind: 'message' }>;
   mentions: Mentions;
-  onLook: (image: LookableImage) => void;
+  onLook: OnLook;
 }) {
   const sentBy = item.parentId;
   return (
@@ -1154,7 +1154,7 @@ function withChipMarkers(text: string, chips: { at: number; image: ImagePayload 
  * app and this is it — a second one built by hand is exactly the drift
  * bw-e9p5.1 closed.
  */
-function AttachmentChip({ image, onLook }: { image: ImagePayload; onLook: (image: LookableImage) => void }) {
+function AttachmentChip({ image, onLook }: { image: ImagePayload; onLook: OnLook }) {
   const kind = fileKind(image.alt);
   const Icon = FILE_KINDS[kind].icon;
   return (
@@ -1202,7 +1202,7 @@ const RICH_BLOCK = /```(atelier-widget|atelier-image-compare)\s*\n([\s\S]*?)\n``
 function RichMessageContent({ item, mentions, onLook }: {
   item: Extract<TranscriptItem, { kind: 'message' }>;
   mentions: Mentions;
-  onLook: (image: LookableImage) => void;
+  onLook: OnLook;
 }) {
   const parts: ReactNode[] = [];
   const comparisons = item.comparisons ?? [];
@@ -1560,7 +1560,7 @@ export const TranscriptRow = memo(function TranscriptRow({
   item: TranscriptItem;
   sessionId: string;
   mentions: Mentions;
-  onLook: (image: LookableImage) => void;
+  onLook: OnLook;
 }) {
   // The transcript is drawn from the chat's shape, which stands still while an
   // answer is written; the answer's own row reads its words here (bw-j29w).

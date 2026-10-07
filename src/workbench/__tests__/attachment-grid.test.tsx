@@ -117,7 +117,7 @@ describe('a message’s pictures on the page', () => {
   it('opens the picture that was clicked, not the first one', () => {
     const { thumbs, looked } = drawn(5);
     fireEvent.click(thumbs[4]!);
-    expect(looked).toHaveBeenCalledWith(expect.objectContaining({ alt: 'Picture 5' }));
+    expect(looked).toHaveBeenCalledWith(expect.objectContaining({ alt: 'Picture 5' }), expect.any(Array));
   });
 
   it('holds each picture in a button named for it, so a keyboard can open it too', () => {
@@ -125,7 +125,7 @@ describe('a message’s pictures on the page', () => {
     const second = screen.getByRole('button', { name: 'Picture 2' });
     expect(second.querySelector('img[data-testid="message-image"]')).not.toBeNull();
     fireEvent.click(second);
-    expect(looked).toHaveBeenCalledWith(expect.objectContaining({ alt: 'Picture 2' }));
+    expect(looked).toHaveBeenCalledWith(expect.objectContaining({ alt: 'Picture 2' }), expect.any(Array));
   });
 
   it('draws nothing at all for a message with no pictures in it', () => {
@@ -174,6 +174,6 @@ describe('what a message shows above its words', () => {
     const looked = vi.fn();
     render(<AttachmentGrid files={shownFrom('user', CARRIED)} onLook={looked} />);
     fireEvent.click(screen.getAllByTestId('message-attachment')[0]!);
-    expect(looked).toHaveBeenCalledWith(CARRIED[1]);
+    expect(looked).toHaveBeenCalledWith(CARRIED[1], expect.any(Array));
   });
 });

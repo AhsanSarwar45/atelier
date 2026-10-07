@@ -281,6 +281,20 @@ test.describe('a picture in a chat that already happened', () => {
       await thumbs.last().click();
       await expect(page.getByTestId('picture-viewer')).toBeVisible();
       await expect(page.getByTestId('picture-viewer-image')).toBeVisible();
+
+      // 4. From inside it, the rest of the message is a step away (bw-6xsa5.1).
+      const position = page.getByTestId('attachment-viewer-position');
+      await expect(position).toHaveText('5 of 5');
+      await expect(page.getByTestId('attachment-viewer-next')).toBeDisabled();
+      const last = await page.getByTestId('picture-viewer-image').getAttribute('src');
+      await page.keyboard.press('ArrowLeft');
+      await expect(position).toHaveText('4 of 5');
+      await page.getByTestId('attachment-viewer-previous').click();
+      await expect(position).toHaveText('3 of 5');
+      expect(await page.getByTestId('picture-viewer-image').getAttribute('src')).not.toBe(last);
+      await page.screenshot({ path: join(SHOTS, 'chat-picture-steps.png'), fullPage: false });
+      await page.getByTestId('attachment-viewer-next').click();
+      await expect(position).toHaveText('4 of 5');
       await page.keyboard.press('Escape');
       await expect(page.getByTestId('picture-viewer')).toHaveCount(0);
       await page.screenshot({ path: join(SHOTS, 'chat-picture-grid.png'), fullPage: false });

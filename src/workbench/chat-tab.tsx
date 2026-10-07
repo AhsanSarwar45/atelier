@@ -79,7 +79,8 @@ import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, HeldMessage, LookableImage, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+import type { Brand, HeldMessage, ImagePayload, LookableImage, OnLook, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+import { opens } from '@/workbench/attachment-look';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
 const ACCOUNTED_BRANDS: readonly Brand[] = ['claude', 'codex'];
@@ -681,7 +682,7 @@ const ComposerBody = memo(function ComposerBody({
   where: Rooted;
   attached: DraftPicture[];
   setAttached: Dispatch<SetStateAction<DraftPicture[]>>;
-  onLook: (picture: LookableImage) => void;
+  onLook: OnLook;
   steerError: string | null;
   sendError: string | null;
   picker: RefObject<HTMLInputElement>;
@@ -703,6 +704,7 @@ const ComposerBody = memo(function ComposerBody({
    * names, and a second list kept alongside it is a second thing to go stale.
    */
   const tray = useMemo(() => draftFiles(draft, attached, where), [draft, attached, where]);
+  const trayFiles = useMemo(() => tray.map((named) => named.file).filter(opens), [tray]);
 
   return (
     <>
@@ -716,7 +718,7 @@ const ComposerBody = memo(function ComposerBody({
             <AttachmentTile
               key={named.key}
               file={named.file}
-              onOpen={() => onLook(named.file)}
+              onOpen={() => onLook(named.file, trayFiles)}
               onRemove={() => {
                 if (named.picture) setAttached((all) => all.filter((picture) => picture.id !== named.picture!.id));
                 setDraft((text) => withoutFile(text, named));
@@ -1197,7 +1199,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   );
   const [attached, setAttached] = useUnsentPictures(sessionId ?? '');
   /** The picture being looked at, from the tray or from a message. */
-  const [looking, setLooking] = useState<LookableImage | null>(null);
+  const [looking, setLookingAt] = useState<{ image: LookableImage; set?: readonly ImagePayload[] } | null>(null);
+  const setLooking = useCallback<OnLook>((image, set) => setLookingAt({ image, set }), []);
   /** Which sent-off agent's own conversation is open, by the call that sent it. */
   const [openAgent, setOpenAgent] = useState<string | null>(null);
   /**
@@ -3326,7 +3329,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       )}
       </div>
 
-      {looking && <AttachmentViewer image={looking} onClose={() => setLooking(null)} />}
+      {looking && <AttachmentViewer image={looking.image} set={looking.set} onClose={() => setLookingAt(null)} />}
       {/* Read from the row as it stands right now, never from what was clicked:
           an agent opened while it works goes on working, and its clock, its
           spend and its answer keep arriving behind the pane. */}
