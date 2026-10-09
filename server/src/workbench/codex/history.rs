@@ -273,32 +273,34 @@ fn last_row_timestamp(path: &Path, floor: u64, accept: impl Fn(&Value) -> bool) 
 /// when nothing does.
 ///
 /// Codex writes the answer into the first line of the rollout, `session_meta`:
-/// `source` is `"cli"`, `"vscode"` or `"exec"` for a person's own thread and
+/// `source` is `"cli"` or `"vscode"` for a person's own thread and
 /// an object naming the subagent kind for one another thread started —
 /// `{"subagent":{"other":"guardian"}}` is what every one of the owner's 144
 /// guardian review threads carried. The index's `thread/list` answers the
 /// same field on the thread when it has it, and is asked first (bw-p61.17).
 ///
-/// `"exec"` is the exception, and is asked again: a non-interactive run is
-/// listed as `"exec"` whoever began it, and the app itself begins one for
-/// every external review. The kind it was given is in the record instead, so
-/// an `"exec"` thread with a record is placed by the record (bw-s7cd).
+/// `"exec"` is a non-interactive `codex exec` run, and a program begins
+/// those: the app for every external review (bw-s7cd), and scripts and skills
+/// by the thousand — 4,733 of the owner's threads were one image-generation
+/// script's runs, every one `"exec"` with `thread_source` `"user"`, and they
+/// buried the person's own chats in the sidebar (bw-6usxb). Nothing in the
+/// record tells a run typed by hand from one a script started, so every
+/// `"exec"` thread is the agents' own; the switch that shows every chat still
+/// shows them.
 pub fn begun_by(thread: &Value) -> &'static str {
-    let listed = thread.get("source").filter(|source| !source.is_null());
-    let recorded = || {
-        thread["path"]
-            .as_str()
-            .and_then(|path| session_source(Path::new(path)))
-    };
-    let source = match listed {
-        Some(source) if source.as_str() == Some("exec") => {
-            recorded().unwrap_or_else(|| source.clone())
-        }
-        Some(source) => source.clone(),
-        None => recorded().unwrap_or(Value::Null),
-    };
+    let source = thread
+        .get("source")
+        .filter(|source| !source.is_null())
+        .cloned()
+        .or_else(|| {
+            thread["path"]
+                .as_str()
+                .and_then(|path| session_source(Path::new(path)))
+        })
+        .unwrap_or(Value::Null);
     match source {
         Value::Null => "unknown",
+        Value::String(kind) if kind == "exec" => "agent",
         source if by_a_subagent(&source) => "agent",
         _ => "person",
     }
@@ -1019,15 +1021,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(begun_by(&json!({"path": worker})), "agent");
-        // A person's own `codex exec` run is still a person's chat.
-        assert_eq!(begun_by(&json!({"path": by_hand})), "person");
-        // The index lists every non-interactive run as "exec" whoever began
-        // it, so that answer is not the end of the question: the record is
-        // still read, and it is the record that separates the two.
+        // A run whose kind is "user" is a script's as often as not — 4,733
+        // image-generation runs carried exactly this — so it is the agents'
+        // own too (bw-6usxb).
+        assert_eq!(begun_by(&json!({"path": by_hand})), "agent");
         assert_eq!(begun_by(&json!({"path": worker, "source": "exec"})), "agent");
-        assert_eq!(begun_by(&json!({"path": by_hand, "source": "exec"})), "person");
-        // An "exec" thread with no record left says only what the index said.
-        assert_eq!(begun_by(&json!({"source": "exec"})), "person");
+        assert_eq!(begun_by(&json!({"path": by_hand, "source": "exec"})), "agent");
+        assert_eq!(begun_by(&json!({"source": "exec"})), "agent");
+        // An interactive thread is still the person's.
+        assert_eq!(begun_by(&json!({"source": "cli"})), "person");
     }
 
     use super::*;
