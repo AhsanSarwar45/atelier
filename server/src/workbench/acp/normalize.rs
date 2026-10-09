@@ -96,9 +96,17 @@ pub struct AcpNormalizer {
     waiting_for_agents: bool,
     outcome: Value,
     prompt_generation: u64,
-    /// When the person last sent this chat something. A provider record that
-    /// says the reply ended before then is about the reply before (bw-1fw6).
+    /// When the current turn began: the person sending this chat something,
+    /// or the agent starting a turn of its own. A provider record that says
+    /// the reply ended before then is about the reply before (bw-1fw6).
     prompted_at: Option<chrono::DateTime<Utc>>,
+    /// A turn the agent started by itself is going. Claude wakes when a
+    /// background command ends or a wakeup fires, and that turn answers no
+    /// prompt of ours, so the request lease that stands for every other turn
+    /// is not there to say it is going: the chat read Ready while it ran
+    /// thirty-seven commands. The adapter passes on the CLI's own `running`
+    /// and `idle` for it (`scripts/claude-turn-phase.mjs`).
+    unprompted: bool,
     event_serial: Cell<u64>,
     stream_id: String,
     active_messages: HashMap<String, (String, String)>,
@@ -177,6 +185,7 @@ impl Default for AcpNormalizer {
             outcome: json!({"state":"idle","label":"Ready"}),
             prompt_generation: 0,
             prompted_at: None,
+            unprompted: false,
             event_serial: Cell::new(0),
             stream_id: uuid::Uuid::new_v4().to_string(),
             active_messages: HashMap::new(),
@@ -938,6 +947,27 @@ impl AcpNormalizer {
             }
             events.extend(self.says_standing(session_id, provider, raw));
         }
+        let cycle = update.pointer("/_meta/atelier/cycle").and_then(Value::as_str);
+        match cycle {
+            // A cycle with no prompt of ours behind it is a turn the agent
+            // began itself. One inside our prompt, the followups of a held
+            // turn included, is that prompt's and changes nothing.
+            Some("running") if !self.suppress_local_user && !self.unprompted => {
+                self.unprompted = true;
+                self.turn_finished = false;
+                self.waiting_for_agents = false;
+                self.prompted_at = Some(Utc::now());
+            }
+            // The CLI's turn-over signal. Only the agent's own turn ends on
+            // it: a held prompt sees one per followup and is still going.
+            Some("idle") if self.unprompted => {
+                let mut end = raw.clone();
+                end["stopReason"] = json!("end_turn");
+                end["_meta"] = Value::Null;
+                events.extend(self.finish_turn(session_id, provider, &end));
+            }
+            _ => {}
+        }
         if let Some(signal) = Self::typed_failure(provider, update) {
             self.record_signal(&signal);
             events.push(self.envelope(
@@ -1068,7 +1098,9 @@ impl AcpNormalizer {
                 }),
             ));
         }
-        if events.is_empty() {
+        // A cycle is a fact for the status and nothing for the record: two of
+        // them a turn would each leave a note saying metadata changed.
+        if events.is_empty() && cycle.is_none() {
             events.push(self.opaque_note(
                 session_id,
                 provider,
@@ -1440,8 +1472,16 @@ impl AcpNormalizer {
         requests.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|generation| self.owns_prompt(*generation))
     }
 
+    /// Whether something stands behind the open turn: our prompt's request,
+    /// or the agent's own word that it began one. A turn the agent began has
+    /// no request; it ends on the CLI's idle, failing that on the record
+    /// ending its reply (status::resolve), or with the process.
+    pub fn turn_is_owned(&self, requests: &super::super::status::Requests) -> bool {
+        self.request_is_active(requests) || self.unprompted
+    }
+
     pub fn runtime_facts(&self, connected: bool, pending_answer: bool, requests: &super::super::status::Requests) -> super::super::status::RuntimeFacts {
-        let turn_open = self.request_is_active(requests);
+        let turn_open = self.turn_is_owned(requests);
         super::super::status::RuntimeFacts {
             connected,
             turn_open,
@@ -2674,6 +2714,7 @@ impl AcpNormalizer {
         errored: bool,
     ) -> Vec<Event> {
         self.suppress_local_user = false;
+        self.unprompted = false;
         self.turn_finished = true;
         self.waiting_for_agents = false;
         self.said_standing = None;
@@ -2900,6 +2941,7 @@ impl AcpNormalizer {
         self.prompted_at = Some(Utc::now());
         self.signal_standing = None;
         self.suppress_local_user = true;
+        self.unprompted = false;
         self.turn_finished = false;
         self.waiting_for_agents = false;
     }
@@ -2914,6 +2956,72 @@ mod tests {
             .iter()
             .map(|event| serde_json::to_value(event).unwrap()["type"].clone())
             .collect()
+    }
+
+    /// A background command ended, Claude woke and started a turn of its own,
+    /// and the chat read Ready for the two minutes it worked: no prompt of
+    /// ours stood behind the turn, so nothing counted it (bw-hlu1o).
+    #[test]
+    fn a_turn_the_agent_starts_itself_is_open_until_its_idle() {
+        let mut n = AcpNormalizer::default();
+        let requests = super::super::super::status::Requests::default();
+        let cycle = |state: &str| json!({"sessionId":"remote","update":{
+            "sessionUpdate":"session_info_update","_meta":{"atelier":{"cycle":state}}
+        }});
+        let call = json!({"sessionId":"remote","update":{
+            "sessionUpdate":"tool_call","toolCallId":"woken-call","title":"Run tests",
+            "kind":"execute","status":"pending","rawInput":{"command":"cargo test"}
+        }});
+        let states = |events: &[Event]| {
+            events
+                .iter()
+                .filter(|e| e.kind == EventKind::SessionState)
+                .map(|e| e.fields["state"].clone())
+                .collect::<Vec<_>>()
+        };
+        n.begin_local_prompt();
+        n.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
+        assert!(!n.runtime_facts(true, false, &requests).turn_open);
+
+        n.update("local", "claude", &cycle("running"));
+        assert!(n.runtime_facts(true, false, &requests).turn_open);
+        assert_eq!(states(&n.update("local", "claude", &call)), vec![json!("running_tool")]);
+        assert_eq!(n.runtime_facts(true, false, &requests).activity.unwrap()["state"], "running_tool");
+
+        let over = n.update("local", "claude", &cycle("idle"));
+        assert_eq!(states(&over), vec![json!("idle")]);
+        assert!(!n.runtime_facts(true, false, &requests).turn_open);
+        assert!(n.running_calls.is_empty());
+    }
+
+    /// Our prompt's own cycles, the followups of a held turn among them, are
+    /// that prompt's: their idles do not end it and their running does not
+    /// make it the agent's.
+    #[test]
+    fn a_cycle_inside_our_prompt_is_the_prompts() {
+        let mut n = AcpNormalizer::default();
+        let requests = super::super::super::status::Requests::default();
+        let cycle = |state: &str| json!({"sessionId":"remote","update":{
+            "sessionUpdate":"session_info_update","_meta":{"atelier":{"cycle":state}}
+        }});
+        let generation = n.begin_prompt();
+        requests.lock().unwrap().insert(generation);
+        assert!(n.update("local", "claude", &cycle("running")).is_empty());
+        assert!(!n.unprompted);
+        assert!(n.update("local", "claude", &cycle("idle")).is_empty());
+        assert!(n.runtime_facts(true, false, &requests).turn_open);
+
+        // The person writes while the agent's own turn runs: the turn is the
+        // prompt's from then on, and the agent's idle no longer ends it.
+        let mut n = AcpNormalizer::default();
+        n.update("local", "claude", &cycle("running"));
+        assert!(n.unprompted);
+        let generation = n.begin_prompt();
+        let requests = super::super::super::status::Requests::default();
+        requests.lock().unwrap().insert(generation);
+        assert!(!n.unprompted);
+        assert!(n.update("local", "claude", &cycle("idle")).is_empty());
+        assert!(n.runtime_facts(true, false, &requests).turn_open);
     }
 
     #[test]

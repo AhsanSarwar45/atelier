@@ -147,6 +147,30 @@ Idle. Permission and question answers update their pending-request facts; the sh
 reconciler then derives the current activity. They contain no separate status
 restoration rule that could overwrite the helper phase or revive a finished turn.
 
+## Turns the agent starts by itself
+
+A background shell never holds the prompt (upstream's shells-never-defer rule).
+When it ends, or a scheduled wakeup fires, the CLI wakes the agent and runs a
+turn of its own. No prompt of ours stands behind that turn, so the request lease
+said nothing was going. The sweep then settled the turn's activity, and the chat
+read Idle while it ran 37 commands (bw-hlu1o).
+
+The CLI announces every processing cycle with `session_state_changed`:
+`running` before it and `idle` after it. A probe of the real CLI confirmed the
+pattern for a cycle woken by a task notification. The same patch file makes the adapter
+pass that on as `_meta.atelier.cycle`. A `running` with no prompt of ours open
+starts an unprompted turn. It counts as owned in `runtime_facts` and in the
+sweep (`turn_is_owned`), and it is dated, so a record ending written before it
+is about the turn before. It ends on its `idle`. If that is lost, it ends on
+the record ending the reply, or when the process goes away. A message sent
+during it makes the turn the prompt's. Cycles inside our own prompt, including
+the followups of a held turn, change nothing.
+
+`claude-background-query.mjs` plays the woken shape for the prompt containing
+"wake by itself", and `a-chat-claude-wakes-says-it-is-working.spec.ts` checks it
+through the real adapter. `CLAUDE_WAKE_BASELINE=1` with an adapter built from the
+previous patch expects the old reading, Idle.
+
 The phase patch is a release build input and participates in the adapter cache
 fingerprint. Updating the app without rebuilding its adapter bundle would omit
 the provider-side signal; the changed fingerprint forces that rebuild.

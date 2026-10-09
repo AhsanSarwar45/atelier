@@ -33,6 +33,26 @@ async function seed(params) {
         yield state('idle');
         continue;
       }
+      // A shell left running in the background, which never holds the prompt
+      // (upstream's shells-never-defer rule). When it ends the CLI wakes and
+      // runs a turn of its own: `running`, the work, an autonomous result,
+      // `idle` — the shape the real CLI sent in bw-hlu1o's probe.
+      if (JSON.stringify(u.message).includes('wake by itself')) {
+        const shell = `shell-${turn}`;
+        yield frame({ type: 'system', subtype: 'task_started', task_id: shell, tool_use_id: `toolu_${shell}`, description: 'sleep 6' });
+        yield text('Started the command in the background.');
+        yield result();
+        yield state('idle');
+        while (!existsSync(resolve(params.cwd, `wake-${turn}`))) await new Promise(r => setTimeout(r, 50));
+        yield frame({ type: 'system', subtype: 'task_notification', task_id: shell, tool_use_id: `toolu_${shell}`, status: 'completed', output_file: '', summary: 'sleep 6 finished' });
+        yield state('running');
+        yield text('The command finished, so I am checking its output.');
+        while (!existsSync(resolve(params.cwd, `end-wake-${turn}`))) await new Promise(r => setTimeout(r, 50));
+        yield text('Its output is fine.');
+        yield result({ origin: { kind: 'task-notification' } });
+        yield state('idle');
+        continue;
+      }
       const task_id = `helper-${turn}`;
       yield frame({ type: 'system', subtype: 'task_started', task_id, tool_use_id: `toolu_${task_id}`, description: 'Explore the project', subagent_type: 'Explore' });
       yield text('The parent answer is complete. A background helper is still working.');

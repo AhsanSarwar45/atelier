@@ -2532,7 +2532,7 @@ impl AcpDriver {
             let elicitations = status_elicitations.clone();
             Box::pin(async move {
                 let mut activity = normalizer.lock().await;
-                if !controls.is_closed() && !activity.request_is_active(&requests) && activity.turn_is_open() {
+                if !controls.is_closed() && !activity.turn_is_owned(&requests) && activity.turn_is_open() {
                     permissions.cancel_all().await;
                     elicitations.cancel_all().await;
                     let (ended, _) = withhold_standing(activity.finish_turn(&session_id, brand, &json!({"stopReason":"end_turn"})));
