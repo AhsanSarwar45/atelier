@@ -553,6 +553,29 @@ async fn serve(open_browser: bool) {
         });
     }
 
+    // Records of chats an agent ran keep every picture the provider saw or
+    // made, as base64, for good; a picture generator's runs filled 31 GB in a
+    // week. Once a run has been left alone for an hour its pictures go
+    // (bw-zubih.1).
+    {
+        let profiles = data_dir.join("profiles");
+        std::thread::spawn(move || {
+            let mut sweeper = workbench::transcript_pictures::Sweeper::default();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(120));
+                let swept = sweeper.sweep(&profiles, std::time::Duration::from_secs(3600));
+                if swept.records > 0 {
+                    tracing::info!(
+                        records = swept.records,
+                        freed = swept.freed,
+                        "pictures stripped from agent records"
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_secs(480));
+            }
+        });
+    }
+
     // What tells a phone whose app is closed that a chat is waiting. The page
     // does the same while it is open; this is the half that survives the
     // operating system freezing it (push.rs).
