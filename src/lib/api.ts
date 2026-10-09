@@ -1620,6 +1620,28 @@ export interface MemorySettings {
   limitGb: number | null;
 }
 
+/** Whether a chat stopped by a usage limit resumes once it resets (server/src/routes/limit_settings.rs). */
+export interface LimitSettings {
+  autoResume: boolean;
+}
+
+export async function limitSettings(): Promise<LimitSettings> {
+  const answer = await request('/api/settings/limits');
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as LimitSettings;
+}
+
+/** Turn resuming on or off; answers what the server then holds. */
+export async function saveLimitSettings(settings: LimitSettings): Promise<LimitSettings> {
+  const answer = await request('/api/settings/limits', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as LimitSettings;
+}
+
 /** How much memory one chat may hold (server/src/routes/memory_settings.rs). */
 export async function memorySettings(): Promise<MemorySettings> {
   const answer = await request('/api/settings/memory');

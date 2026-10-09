@@ -586,6 +586,11 @@ async fn serve(open_browser: bool) {
     // (workbench/memory_limit.rs).
     workbench::memory_limit::watch(database.clone(), workbench_state.registry().clone());
 
+    // What sends a chat stopped by a usage limit on its way a minute after the
+    // limit resets. Does nothing at all while the setting is off
+    // (workbench/limit_resume.rs).
+    workbench::limit_resume::watch(database.clone(), workbench_state.registry().clone());
+
     // A chat whose driver died with the last run of the server still has its
     // driven stretch ahead of its cursor; hand it back once, before a follower
     // could read it again as new (workbench/handback.rs).
@@ -708,6 +713,12 @@ async fn serve(open_browser: bool) {
         .nest(
             "/api",
             routes::memory_settings::memory_settings_routes().with_state(database.clone()),
+        )
+        // Whether a chat stopped by a usage limit resumes once it resets. Same
+        // table, same guard (routes/limit_settings.rs).
+        .nest(
+            "/api",
+            routes::limit_settings::limit_settings_routes().with_state(database.clone()),
         )
         // The version a person asked not to be told about again. Same table,
         // same guard (routes/update_settings.rs).

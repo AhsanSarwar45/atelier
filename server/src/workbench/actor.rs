@@ -446,6 +446,11 @@ impl ChatDb {
         self.read(move |store, _| store.chats_told_to_sign_in()).await
     }
 
+    /// Chats started here whose usage limit still stands (`Store::standing_usage_limits`).
+    pub async fn standing_usage_limits(&self) -> Result<Vec<super::store::StandingLimit>, String> {
+        self.read(move |store, _| store.standing_usage_limits()).await
+    }
+
     /// The chat's notices whose condition still stands (`Store::current_notices`).
     pub async fn current_notices(&self, session_id: String) -> Result<Vec<serde_json::Value>, String> {
         self.read(move |store, _| store.current_notices(&session_id)).await

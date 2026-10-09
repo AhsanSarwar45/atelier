@@ -18,6 +18,7 @@ pub mod new_chat;
 pub mod push;
 pub mod remote_access;
 pub mod memory_settings;
+pub mod limit_settings;
 pub mod search_settings;
 pub mod projects;
 pub mod update_run;

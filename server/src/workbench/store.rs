@@ -418,6 +418,19 @@ pub struct Spend {
     pub tokens: i64,
 }
 
+/// A chat stopped by a usage limit that still stands (`standing_usage_limits`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StandingLimit {
+    pub session_id: String,
+    pub brand: String,
+    /// The notice's own seq, so one notice is acted on once.
+    pub seq: i64,
+    /// When the notice was written, which is what a bare "9pm" is the next
+    /// one after.
+    pub at: String,
+    pub signal: Value,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionActivity {
     pub label: String,
@@ -1181,8 +1194,45 @@ fn held_in_its_project(
     /// the same rows, so the chat's status can never say something its
     /// transcript does not.
     pub fn current_notices(&self, session_id: &str) -> rusqlite::Result<Vec<Value>> {
+        Ok(self
+            .standing_notices(session_id)?
+            .into_iter()
+            .map(|(_, _, signal)| signal)
+            .collect())
+    }
+
+    /// Every chat started here whose usage limit still stands, with the seq
+    /// and time of the notice that says so. The chats that resuming after a
+    /// limit looks at (`limit_resume.rs`).
+    ///
+    /// Candidates come off `event_by_type`, so the read touches notices
+    /// alone; each is then held to the rule `current_notices` draws by.
+    pub fn standing_usage_limits(&self) -> rusqlite::Result<Vec<StandingLimit>> {
         let mut statement = self.connection.prepare(
-            r#"SELECT json_extract(notice.json,'$.signal') FROM event AS notice
+            r#"SELECT DISTINCT notice.session_id, session.brand FROM event AS notice
+                JOIN session ON session.id=notice.session_id
+                WHERE notice.type='provider.message' AND session.origin='app'
+                  AND json_extract(notice.json,'$.signal.kind')='usage_limit'"#,
+        )?;
+        let candidates = statement
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut standing = Vec::new();
+        for (session_id, brand) in candidates {
+            let limit = self
+                .standing_notices(&session_id)?
+                .into_iter()
+                .rfind(|(_, _, signal)| signal["kind"] == "usage_limit");
+            if let Some((seq, at, signal)) = limit {
+                standing.push(StandingLimit { session_id, brand, seq, at, signal });
+            }
+        }
+        Ok(standing)
+    }
+
+    fn standing_notices(&self, session_id: &str) -> rusqlite::Result<Vec<(i64, String, Value)>> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT notice.seq, notice.at, json_extract(notice.json,'$.signal') FROM event AS notice
                 WHERE notice.session_id=?1 AND notice.seq IN (
                   SELECT MAX(seq) FROM event
                    WHERE session_id=?1 AND type='provider.message'
@@ -1198,10 +1248,12 @@ fn held_in_its_project(
                 ORDER BY notice.seq"#,
         )?;
         let rows = statement
-            .query_map([session_id], |row| row.get::<_, String>(0))?
+            .query_map([session_id], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows.iter()
-            .map(|json| serde_json::from_str(json).map_err(json_error))
+        rows.into_iter()
+            .map(|(seq, at, json)| Ok((seq, at, serde_json::from_str(&json).map_err(json_error)?)))
             .collect()
     }
 
@@ -6053,6 +6105,43 @@ mod tests {
         append(sign_in("active"));
         append(json!({"type":"message.started","messageId":"helper","role":"assistant","parentToolCallId":"t"}));
         assert_eq!(store.current_notices("chat").unwrap().len(), 1);
+    }
+
+    /// A chat counts as held by its usage limit while its newest limit notice
+    /// stands, and only a chat started here counts at all: one begun in a
+    /// terminal is that terminal's to resume.
+    #[test]
+    fn only_a_standing_limit_on_a_chat_started_here_is_reported() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        for id in ["here", "there"] {
+            let mut row = session(id, "claude", None, "2026-10-09T00:00:00Z");
+            row.origin = if id == "here" { "app" } else { "terminal" }.into();
+            store.create_session(&row).unwrap();
+        }
+        let mut seq = 0;
+        let mut append = |chat: &str, value: Value| {
+            seq += 1;
+            let mut value = value;
+            value["sessionId"] = json!(chat);
+            value["seq"] = json!(seq);
+            value["at"] = json!("2026-10-09T10:00:00Z");
+            assert!(store.append_event(&serde_json::from_value(value).unwrap()).unwrap());
+        };
+        let limit = json!({"type":"provider.message","signal":{
+            "id":"usage:session","kind":"usage_limit","phase":"active",
+            "severity":"blocking","scope":"session","resets":"resets 9pm (Asia/Karachi)"
+        }});
+        append("here", limit.clone());
+        append("there", limit.clone());
+        let standing = store.standing_usage_limits().unwrap();
+        assert_eq!(standing.len(), 1);
+        assert_eq!(standing[0].session_id, "here");
+        assert_eq!(standing[0].at, "2026-10-09T10:00:00Z");
+        assert_eq!(standing[0].signal["resets"], "resets 9pm (Asia/Karachi)");
+
+        append("here", json!({"type":"message.started","messageId":"reply","role":"assistant"}));
+        assert!(store.standing_usage_limits().unwrap().is_empty());
     }
 
     /// What only this app recorded survives the provider's record replacing
