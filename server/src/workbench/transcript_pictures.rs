@@ -133,6 +133,13 @@ fn jsonl_under(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
 /// changes while it is read — a run resumed after all — is left for the next
 /// sweep rather than losing what was written meanwhile.
 pub fn strip(path: &Path) -> std::io::Result<u64> {
+    // A provider keeps a record open for as long as the thread is loaded and
+    // appends through that handle, so a record swapped while it is held would
+    // send the next lines to the file it replaced. An idle hour does not prove
+    // the writer has gone; an open handle proves it has not.
+    if held_open(path) {
+        return Ok(0);
+    }
     let before = fs::metadata(path)?;
     let modified = before.modified()?;
     let mut reader = BufReader::new(File::open(path)?);
@@ -166,11 +173,13 @@ pub fn strip(path: &Path) -> std::io::Result<u64> {
             written += bytes.len() as u64;
         }
     }
+    // Our own reading handle is let go, or the check below would find it.
+    drop(reader);
     let Some(writer) = writer else { return Ok(0) };
     let file = writer.into_inner().map_err(|error| error.into_error())?;
     file.sync_all()?;
     let after = fs::metadata(path)?;
-    if after.len() != before.len() || after.modified()? != modified {
+    if after.len() != before.len() || after.modified()? != modified || held_open(path) {
         let _ = fs::remove_file(&temporary);
         return Ok(0);
     }
@@ -179,6 +188,32 @@ pub fn strip(path: &Path) -> std::io::Result<u64> {
     file.set_modified(modified)?;
     fs::rename(&temporary, path)?;
     Ok(before.len().saturating_sub(written))
+}
+
+/// Whether any process of ours has the record open, read from each one's
+/// descriptors. Another user's processes cannot be read and cannot hold the
+/// owner's records either.
+fn held_open(path: &Path) -> bool {
+    let Ok(path) = fs::canonicalize(path) else {
+        return false;
+    };
+    fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|process| {
+            process
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+        .flat_map(|process| {
+            fs::read_dir(process.path().join("fd"))
+                .into_iter()
+                .flatten()
+                .flatten()
+        })
+        .any(|descriptor| fs::read_link(descriptor.path()).is_ok_and(|target| target == path))
 }
 
 fn stripped_line(line: &[u8]) -> Option<Vec<u8>> {
@@ -338,6 +373,36 @@ mod tests {
         let swept = Sweeper::default().sweep(dir.path(), Duration::from_secs(3600));
         assert_eq!(swept, Swept::default());
         assert_eq!(fs::read_to_string(&agent).unwrap(), kept);
+    }
+
+    #[test]
+    fn a_record_a_writer_still_holds_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = dir
+            .path()
+            .join("codex/me/sessions/2026/10/04/rollout-a.jsonl");
+        write(&agent, &rollout("exec", &picture()));
+        let mut writer = fs::OpenOptions::new().append(true).open(&agent).unwrap();
+        assert_eq!(
+            Sweeper::default().sweep(dir.path(), Duration::ZERO),
+            Swept::default()
+        );
+        writeln!(
+            writer,
+            "{}",
+            json!({"type":"event_msg","payload":{"type":"agent_message","message":"later"}})
+        )
+        .unwrap();
+        drop(writer);
+        assert!(fs::read_to_string(&agent).unwrap().contains("later"));
+        // Once the writer lets go, the next sweep takes the pictures and keeps
+        // the line it wrote.
+        assert_eq!(
+            Sweeper::default().sweep(dir.path(), Duration::ZERO).records,
+            1
+        );
+        let text = fs::read_to_string(&agent).unwrap();
+        assert!(text.contains("later") && !text.contains(&picture()));
     }
 
     #[test]
