@@ -65,7 +65,9 @@ impl Sweeper {
                 continue;
             }
             match strip(&path) {
-                Ok(freed) => {
+                // Left for later: held open, or written to while it was read.
+                Ok(None) => {}
+                Ok(Some(freed)) => {
                     if freed > 0 {
                         swept.records += 1;
                         swept.freed += freed;
@@ -129,16 +131,17 @@ fn jsonl_under(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
 }
 
 /// Rewrite one record with its pictures swapped out, and say how many bytes
-/// that freed. A record with no pictures is left as it is. A record that
+/// that freed — `None` when the record was left for a later sweep. A record
+/// with no pictures is left as it is, and frees nothing. A record that
 /// changes while it is read — a run resumed after all — is left for the next
 /// sweep rather than losing what was written meanwhile.
-pub fn strip(path: &Path) -> std::io::Result<u64> {
+pub fn strip(path: &Path) -> std::io::Result<Option<u64>> {
     // A provider keeps a record open for as long as the thread is loaded and
     // appends through that handle, so a record swapped while it is held would
     // send the next lines to the file it replaced. An idle hour does not prove
     // the writer has gone; an open handle proves it has not.
     if held_open(path) {
-        return Ok(0);
+        return Ok(None);
     }
     let before = fs::metadata(path)?;
     let modified = before.modified()?;
@@ -175,19 +178,21 @@ pub fn strip(path: &Path) -> std::io::Result<u64> {
     }
     // Our own reading handle is let go, or the check below would find it.
     drop(reader);
-    let Some(writer) = writer else { return Ok(0) };
+    let Some(writer) = writer else {
+        return Ok(Some(0));
+    };
     let file = writer.into_inner().map_err(|error| error.into_error())?;
     file.sync_all()?;
     let after = fs::metadata(path)?;
     if after.len() != before.len() || after.modified()? != modified || held_open(path) {
         let _ = fs::remove_file(&temporary);
-        return Ok(0);
+        return Ok(None);
     }
     // The record keeps the time it was last written, so lists ordered by it
     // and the idle test above read it as they did before.
     file.set_modified(modified)?;
     fs::rename(&temporary, path)?;
-    Ok(before.len().saturating_sub(written))
+    Ok(Some(before.len().saturating_sub(written)))
 }
 
 /// Whether any process of ours has the record open, read from each one's
@@ -383,24 +388,18 @@ mod tests {
             .join("codex/me/sessions/2026/10/04/rollout-a.jsonl");
         write(&agent, &rollout("exec", &picture()));
         let mut writer = fs::OpenOptions::new().append(true).open(&agent).unwrap();
-        assert_eq!(
-            Sweeper::default().sweep(dir.path(), Duration::ZERO),
-            Swept::default()
-        );
         writeln!(
             writer,
             "{}",
             json!({"type":"event_msg","payload":{"type":"agent_message","message":"later"}})
         )
         .unwrap();
+        let mut sweeper = Sweeper::default();
+        assert_eq!(sweeper.sweep(dir.path(), Duration::ZERO), Swept::default());
         drop(writer);
-        assert!(fs::read_to_string(&agent).unwrap().contains("later"));
-        // Once the writer lets go, the next sweep takes the pictures and keeps
-        // the line it wrote.
-        assert_eq!(
-            Sweeper::default().sweep(dir.path(), Duration::ZERO).records,
-            1
-        );
+        // Once the writer lets go, the same sweeper — which has not written the
+        // record off as clean — takes the pictures and keeps the line written.
+        assert_eq!(sweeper.sweep(dir.path(), Duration::ZERO).records, 1);
         let text = fs::read_to_string(&agent).unwrap();
         assert!(text.contains("later") && !text.contains(&picture()));
     }
