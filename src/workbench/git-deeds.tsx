@@ -20,13 +20,14 @@
  */
 'use client';
 
-import { Check, CloudDownload, Download, GitBranch, GitCommitVertical, Minus, Plus, Trash2, TriangleAlert, Undo2, Upload, type LucideIcon } from 'lucide-react';
+import { Check, CloudDownload, Download, FolderGit2, GitBranch, GitCommitVertical, Minus, Plus, Trash2, TriangleAlert, Undo2, Upload, type LucideIcon } from 'lucide-react';
 
 import { toast } from '@/hooks/use-toast';
 import { Spinner } from '@/components/ui/spinner';
 
 /** One thing the panel can do to a repository. */
 export type GitDeed =
+  | 'init'
   | 'fetch'
   | 'pull'
   | 'push'
@@ -57,6 +58,7 @@ interface DeedWords {
  * label that will be written differently the second time.
  */
 const DEEDS: Record<GitDeed, DeedWords> = {
+  init: { icon: FolderGit2, doing: 'Initializing repository', done: 'Repository initialized', failed: 'Initialize failed' },
   fetch: { icon: CloudDownload, doing: 'Fetching', done: 'Fetched', failed: 'Fetch failed' },
   pull: { icon: Download, doing: 'Pulling', done: 'Pulled', failed: 'Pull failed' },
   push: { icon: Upload, doing: 'Pushing', done: 'Pushed', failed: 'Push failed' },

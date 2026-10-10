@@ -50,6 +50,9 @@ use super::validate_path_security;
 /// state rather than the middle of it.
 const DEBOUNCE_MS: u64 = 200;
 
+/// How often a folder with no repository is looked at for one, in ms.
+const WAIT_FOR_INIT_MS: u64 = 1_000;
+
 /// What this feed ever says, as it goes on the wire.
 ///
 /// Deliberately not "what changed": the panel re-reads the whole of `status`
@@ -132,13 +135,25 @@ pub(super) async fn watch_repo(repo: PathBuf, tx: mpsc::Sender<Tagged>, tag: Opt
         return;
     }
 
-    let dirs = git_dirs(&repo).await;
+    let mut dirs = git_dirs(&repo).await;
     if dirs.is_empty() {
-        // Not a repository, or git could not say. The panel shows what the
-        // read routes say about it, which is the same "not a repository";
-        // there is simply nothing here to watch.
-        info!("Nothing to watch: {:?} is not a git repository", repo);
-        return;
+        // Not a repository yet. The panel offers to make one, and somebody
+        // can run `git init` in a terminal, so this waits for a `.git` to
+        // appear rather than leaving the panel unwatched for the rest of the
+        // window's life. It still ends when the window goes away.
+        info!("Nothing to watch yet: {:?} is not a git repository", repo);
+        while dirs.is_empty() {
+            tokio::select! {
+                _ = tx.closed() => return,
+                _ = tokio::time::sleep(Duration::from_millis(WAIT_FOR_INIT_MS)) => {}
+            }
+            if repo.join(".git").exists() {
+                dirs = git_dirs(&repo).await;
+            }
+        }
+        if tx.send(changed(tag, "changed")).await.is_err() {
+            return;
+        }
     }
 
     if let Err(e) = run(dirs, tx, tag).await {

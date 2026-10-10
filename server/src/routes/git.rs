@@ -167,12 +167,31 @@ pub struct Refused {
     /// panel reads it to know that asking is worth offering; nothing else in
     /// the answer changes, and git's own words still lead.
     a_key_could_fix_it: bool,
+    /// Set only when the folder has no repository at all. The panel reads it
+    /// to offer to make one instead of drawing controls that cannot work.
+    not_a_repository: bool,
 }
 
 impl Refused {
     /// The ordinary refusal: a code and git's own words.
     fn new(code: StatusCode, said: impl Into<String>) -> Self {
-        Refused { code, said: said.into(), a_key_could_fix_it: false }
+        Refused {
+            code,
+            said: said.into(),
+            a_key_could_fix_it: false,
+            not_a_repository: false,
+        }
+    }
+
+    /// The folder has no repository. git's own words still lead; the mark is
+    /// what lets the panel tell this apart from every other refusal.
+    fn not_a_repository(said: impl Into<String>) -> Self {
+        Refused {
+            code: StatusCode::UNPROCESSABLE_ENTITY,
+            said: said.into(),
+            a_key_could_fix_it: false,
+            not_a_repository: true,
+        }
     }
 
     /// The refusal a locked SSH key could clear, told apart so the panel can
@@ -182,6 +201,7 @@ impl Refused {
             code: StatusCode::UNAUTHORIZED,
             said: said.into(),
             a_key_could_fix_it: true,
+            not_a_repository: false,
         }
     }
 }
@@ -193,6 +213,9 @@ impl IntoResponse for Refused {
             // Only ever present when true, so a reader of the answer cannot
             // mistake its absence for a considered "no".
             body["needsPassphrase"] = serde_json::Value::Bool(true);
+        }
+        if self.not_a_repository {
+            body["notARepository"] = serde_json::Value::Bool(true);
         }
         (self.code, Json(body)).into_response()
     }
@@ -586,6 +609,53 @@ async fn has_commits(repo: &Path) -> bool {
     )
 }
 
+/// Whether `at` is inside a repository at all.
+///
+/// Asked of git rather than read off its refusal: the sentence is translated
+/// with the user's locale, and the exit code alone does not say why.
+async fn is_a_repository(at: &Path) -> bool {
+    matches!(
+        run_git(at, &["rev-parse", "--git-dir"]).await,
+        Ok(o) if o.status.success()
+    )
+}
+
+// ----------------------------------------------------------------------------
+// POST /api/git/init
+// ----------------------------------------------------------------------------
+
+/// Request body for making a repository.
+#[derive(Deserialize)]
+pub struct InitRequest {
+    /// Absolute path of the folder to make a repository in.
+    pub path: String,
+}
+
+/// Make a repository in a folder that has none.
+///
+/// Refused for a folder already inside one: `git init` there would either do
+/// nothing or nest a second repository inside the first, and the panel only
+/// offers this where there is no repository.
+///
+/// # Endpoint
+///
+/// `POST /api/git/init` — `{ path }`
+pub async fn init(GitJson(body): GitJson<InitRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    if is_a_repository(&repo).await {
+        return Err(Refused::new(
+            StatusCode::CONFLICT,
+            "This folder is already in a Git repository.",
+        ));
+    }
+    spoke_or_refused(run_git(&repo, &["init"]).await?)?;
+    Ok(did_it())
+}
+
 // ----------------------------------------------------------------------------
 // GET /api/git/status
 // ----------------------------------------------------------------------------
@@ -800,19 +870,22 @@ pub fn read_porcelain_v2(raw: &[u8]) -> StatusResponse {
 /// `GET /api/git/status?path=...`
 pub async fn status(GitQuery(params): GitQuery<PathParams>) -> Answer {
     let repo = checked_repo(&params.path)?;
-    let output = spoke_or_refused(
-        run_git(
-            &repo,
-            &[
-                "status",
-                "--porcelain=v2",
-                "-z",
-                "--branch",
-                "--untracked-files=all",
-            ],
-        )
-        .await?,
-    )?;
+    let output = run_git(
+        &repo,
+        &[
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--branch",
+            "--untracked-files=all",
+        ],
+    )
+    .await?;
+    if !output.status.success() && !is_a_repository(&repo).await {
+        let said = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(Refused::not_a_repository(said));
+    }
+    let output = spoke_or_refused(output)?;
     let mut status = read_porcelain_v2(&output.stdout);
     if let Some((sent_to, ahead)) = ahead_of_where_a_push_goes(&repo).await {
         status.ahead = ahead;

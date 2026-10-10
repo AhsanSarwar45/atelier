@@ -963,6 +963,12 @@ export const git = {
     signal ? { signal } : undefined,
   ),
 
+  /** Make a repository in a folder that has none. */
+  init: (path: string) => fetchApi<GitOk>('/api/git/init', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  }),
+
   /** Pick whole files to be saved. Per file, never per hunk (bw-8dp8). */
   stage: (path: string, files: string[]) => fetchApi<GitOk>('/api/git/stage', {
     method: 'POST',

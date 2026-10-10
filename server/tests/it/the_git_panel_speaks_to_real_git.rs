@@ -2755,3 +2755,70 @@ async fn a_move_that_would_lose_unsaved_work_is_refused_in_gits_own_words() {
         "one\nand something unsaved\n"
     );
 }
+
+// ----------------------------------------------------------------------------
+// A folder with no repository
+// ----------------------------------------------------------------------------
+
+/// A folder git finds no repository for.
+///
+/// The scratch folders live under the crate's target directory, which is
+/// itself inside this project's checkout, so git is told to stop looking
+/// before it climbs out of them.
+fn a_plain_folder() -> TempDir {
+    let dir = scratch();
+    let base = dir.path().parent().expect("the scratch base").to_path_buf();
+    std::env::set_var("GIT_CEILING_DIRECTORIES", base);
+    dir
+}
+
+async fn init_at(dir: &TempDir) -> (StatusCode, Value) {
+    answered(git::init(GitJson(git::InitRequest { path: here(dir) })).await).await
+}
+
+#[tokio::test]
+async fn a_folder_with_no_repository_is_told_apart_from_every_other_refusal() {
+    let dir = a_plain_folder();
+
+    let (code, body) = status_of(&dir).await;
+
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["notARepository"], true, "{body}");
+    assert!(body["error"].as_str().is_some_and(|said| !said.is_empty()));
+}
+
+#[tokio::test]
+async fn a_repository_never_carries_the_mark() {
+    let dir = a_repo();
+
+    let (code, body) = status_of(&dir).await;
+
+    assert_eq!(code, StatusCode::OK);
+    assert!(body.get("notARepository").is_none());
+}
+
+#[tokio::test]
+async fn init_makes_a_repository_the_panel_can_read() {
+    let dir = a_plain_folder();
+    put(dir.path(), "notes.txt", "one\n");
+
+    let (code, body) = init_at(&dir).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert!(dir.path().join(".git").is_dir());
+
+    let (code, body) = status_of(&dir).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["untracked"][0]["path"], "notes.txt");
+}
+
+#[tokio::test]
+async fn init_is_refused_inside_a_repository() {
+    let dir = a_repo();
+    fs::create_dir_all(dir.path().join("inner")).expect("a folder inside");
+
+    let inner = dir.path().join("inner").display().to_string();
+    let (code, body) = answered(git::init(GitJson(git::InitRequest { path: inner })).await).await;
+
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert!(!dir.path().join("inner/.git").exists());
+}

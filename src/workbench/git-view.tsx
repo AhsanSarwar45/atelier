@@ -32,6 +32,7 @@ import {
   CloudDownload,
   Download,
   FileDiff,
+  FolderGit2,
   GitBranch as BranchIcon,
   Minus,
   Plus,
@@ -117,6 +118,14 @@ function wantsAKey(trouble: unknown): boolean {
   return (
     trouble instanceof ApiError
     && (trouble.body as { needsPassphrase?: boolean } | undefined)?.needsPassphrase === true
+  );
+}
+
+/** Whether the read failed because the folder has no repository at all. */
+function notARepository(trouble: unknown): boolean {
+  return (
+    trouble instanceof ApiError
+    && (trouble.body as { notARepository?: boolean } | undefined)?.notARepository === true
   );
 }
 
@@ -534,6 +543,11 @@ export function GitView({
   const [lastCommit, setLastCommit] = useState<GitCommit | null>(null);
   /** The lines of work this checkout could move to. */
   const [branches, setBranches] = useState<GitBranch[]>([]);
+  /**
+   * Whether the folder has no repository. The panel then draws one empty state
+   * with the way to make one, and none of the controls that need a repository.
+   */
+  const [noRepository, setNoRepository] = useState(false);
   const [reading, setReading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [fault, setFault] = useState<string | null>(null);
@@ -624,17 +638,20 @@ export function GitView({
       // change reads as the panel doing something, not as it being current.
       if (!quietly) setReading(true);
       try {
-        const [state, head] = await Promise.all([
-          // The status goes through the shared reader so that the file tree
-          // beside this rail, drawn from the same answer on the same rule,
-          // does not run git a second time a few milliseconds later
-          // (bw-o5i3.4). A read the reader asked for — a refresh, or the read
-          // after a stage or a commit — asks for a fresh one, because the
-          // point of reading again after a write is to see the write.
-          readRepositoryStatus(path, { fresh: !quietly }),
-          git.log(path, { limit: 1 }, signal),
-        ]);
+        // Asked together, read status first: when both fail, the status
+        // answer is the one that says whether there is a repository at all.
+        const log = git.log(path, { limit: 1 }, signal);
+        log.catch(() => {});
+        // The status goes through the shared reader so that the file tree
+        // beside this rail, drawn from the same answer on the same rule,
+        // does not run git a second time a few milliseconds later
+        // (bw-o5i3.4). A read the reader asked for — a refresh, or the read
+        // after a stage or a commit — asks for a fresh one, because the
+        // point of reading again after a write is to see the write.
+        const state = await readRepositoryStatus(path, { fresh: !quietly });
+        const head = await log;
         if (signal?.aborted) return;
+        setNoRepository(false);
         setStatus(state);
         setLastCommit(head.commits[0] ?? null);
         if (faultFrom.current !== 'an operation') {
@@ -643,6 +660,17 @@ export function GitView({
         }
       } catch (trouble) {
         if (signal?.aborted) return;
+        if (notARepository(trouble)) {
+          // Not a failure to read about: there is nothing to read yet.
+          setNoRepository(true);
+          setStatus(null);
+          setLastCommit(null);
+          if (faultFrom.current !== 'an operation') {
+            setFault(null);
+            faultFrom.current = null;
+          }
+          return;
+        }
         setFault(gitSaid(trouble));
         faultFrom.current = 'a read';
       } finally {
@@ -859,6 +887,39 @@ export function GitView({
       <p className="px-3 py-3 text-xs text-muted-foreground" data-testid="git-no-project">
         No project directory for this chat.
       </p>
+    );
+  }
+
+  if (noRepository) {
+    return (
+      <div
+        className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center"
+        data-testid="git-no-repository"
+      >
+        <FolderGit2 className="size-6 text-t-faint" aria-hidden="true" />
+        <div className="flex flex-col gap-1">
+          <p className="text-sm font-medium text-t-primary">Not a Git repository</p>
+          <p className="text-xs text-muted-foreground">Initialize a repository to track changes.</p>
+        </div>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={busy}
+          data-testid="git-init"
+          onClick={() => void act({ deed: 'init' }, () => git.init(path))}
+        >
+          Initialize repository
+        </Button>
+        {fault && (
+          <Panel
+            tone="danger"
+            className="w-full whitespace-pre-wrap break-words text-left font-mono text-[11px] text-danger"
+            data-testid="git-error"
+          >
+            {fault}
+          </Panel>
+        )}
+      </div>
     );
   }
 
