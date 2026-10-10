@@ -139,7 +139,7 @@ export function CommitDetails({ commit, files, onOpen, onLeave }: CommitDetailsP
         <Tooltip label={made.exact}>
           <span data-testid="commit-when">{made.near}</span>
         </Tooltip>
-        <Tooltip label={copied ? 'Copied' : 'Copy the full name'}>
+        <Tooltip label={copied ? 'Copied' : 'Copy commit hash'}>
           <Button
             size="2xs"
             variant="ghost"
@@ -149,7 +149,7 @@ export function CommitDetails({ commit, files, onOpen, onLeave }: CommitDetailsP
           >
             {commit.shortSha}
             {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-            <span className="sr-only">Copy the full commit name</span>
+            <span className="sr-only">Copy commit hash</span>
           </Button>
         </Tooltip>
         {commit.merge && (
@@ -201,7 +201,7 @@ export function CommitDetails({ commit, files, onOpen, onLeave }: CommitDetailsP
         <StatBar added={added} removed={removed} />
         {commit.parents.length > 0 && (
           <span className="ml-auto flex items-center gap-1 text-t-faint">
-            {commit.parents.length === 1 ? 'Built on' : 'Merging'}
+            {commit.parents.length === 1 ? 'Parent' : 'Parents'}
             {commit.parents.map((parent) => (
               <Button
                 key={parent}

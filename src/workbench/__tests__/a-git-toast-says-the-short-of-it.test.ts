@@ -35,7 +35,7 @@ describe('the one line of git worth putting in a toast', () => {
   });
 
   it('says something rather than nothing when git said nothing at all', () => {
-    expect(theShortOfIt('   \n \n')).toBe('git gave no reason');
+    expect(theShortOfIt('   \n \n')).toBe('Unknown error');
   });
 
   it('cuts a line too long to be a label', () => {

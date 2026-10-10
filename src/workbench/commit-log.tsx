@@ -218,7 +218,7 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
 
         {commits.length === 0 && !fault ? (
           <p className="py-2 text-xs text-muted-foreground" data-testid="git-log-empty">
-            {reading ? 'Reading…' : searching ? 'No commit matches.' : 'No commits yet.'}
+            {reading ? 'Loading…' : searching ? 'No results' : 'No commits yet'}
           </p>
         ) : (
           // A plain list of buttons, not a listbox: these are things to press,
@@ -263,8 +263,8 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
                         </span>
                       </Tooltip>
                       {made.parents.length > 1 && (
-                        <Tooltip label="A merge">
-                          <GitMerge className="size-3 shrink-0 text-t-faint" aria-label="A merge" />
+                        <Tooltip label="Merge commit">
+                          <GitMerge className="size-3 shrink-0 text-t-faint" aria-label="Merge commit" />
                         </Tooltip>
                       )}
                     </div>
@@ -305,7 +305,7 @@ export function CommitLog({ path, shown = true, openSha, onOpen, onLeave }: Comm
             data-testid="git-log-more"
             onClick={() => void more()}
           >
-            {reading ? 'Reading…' : 'Older commits'}
+            {reading ? 'Loading…' : 'Load more'}
           </Button>
         )}
       </div>

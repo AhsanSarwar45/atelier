@@ -66,7 +66,7 @@ const DEEDS: Record<GitDeed, DeedWords> = {
   amend: { icon: GitCommitVertical, doing: 'Amending', done: 'Amended', failed: 'Amend failed' },
   checkout: { icon: GitBranch, doing: 'Switching', done: 'Switched', failed: 'Switch failed' },
   discard: { icon: Undo2, doing: 'Discarding', done: 'Discarded', failed: 'Discard failed' },
-  remove: { icon: Trash2, doing: 'Removing', done: 'Removed', failed: 'Remove failed' },
+  remove: { icon: Trash2, doing: 'Deleting', done: 'Deleted', failed: 'Delete failed' },
   stage: { icon: Plus, doing: 'Staging', done: 'Staged', failed: 'Stage failed' },
   unstage: { icon: Minus, doing: 'Unstaging', done: 'Unstaged', failed: 'Unstage failed' },
 };
@@ -100,7 +100,7 @@ export function theShortOfIt(said: string): string {
   const pointed = lines.find(
     (line) => line.startsWith('!') || line.startsWith('fatal:') || line.startsWith('error:'),
   );
-  const line = (pointed ?? lines[0] ?? 'git gave no reason').replace(
+  const line = (pointed ?? lines[0] ?? 'Unknown error').replace(
     /^(!|fatal:|error:)\s*/,
     '',
   );

@@ -68,7 +68,7 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
               size="xs"
               mode="icon"
               variant="ghost"
-              aria-label="Clear the search"
+              aria-label="Clear search"
               data-testid="commit-search-clear"
               onClick={() => onLine('')}
             >
@@ -87,7 +87,7 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
               size="xs"
               mode="icon"
               variant={filters.length > 0 ? 'outline' : 'ghost'}
-              aria-label="Filter the commits"
+              aria-label="Filters"
               data-testid="commit-filter-open"
             >
               <Filter aria-hidden="true" />
@@ -100,7 +100,7 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
             <div className="flex flex-col gap-3">
               <Field
                 label="Author"
-                placeholder="Any part of a name"
+                placeholder="Name"
                 testId="commit-filter-author"
                 value={query.author ?? ''}
                 onValue={(value) => set('author', value)}
@@ -111,7 +111,7 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
                   type="single"
                   optional
                   variant="outline"
-                  aria-label="Since, as a window"
+                  aria-label="Date range"
                   className="flex-wrap gap-1"
                   value={query.since ?? ''}
                   // Pressing the window already chosen takes it away again.
@@ -130,7 +130,7 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
                 <Input
                   value={query.since ?? ''}
                   onChange={(event) => set('since', event.target.value)}
-                  placeholder="or a date, or 2 weeks ago"
+                  placeholder="e.g. 2 weeks ago"
                   aria-label="Since"
                   data-testid="commit-filter-since"
                   size="sm"
@@ -138,21 +138,21 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
               </div>
               <Field
                 label="Until"
-                placeholder="A date, or yesterday"
+                placeholder="e.g. yesterday"
                 testId="commit-filter-until"
                 value={query.until ?? ''}
                 onValue={(value) => set('until', value)}
               />
               <Field
                 label="Path"
-                placeholder="A file or a folder"
+                placeholder="File or folder"
                 testId="commit-filter-path"
                 value={query.path ?? ''}
                 onValue={(value) => set('path', value)}
               />
               <Field
                 label="Branch"
-                placeholder="The line to walk"
+                placeholder="Branch name"
                 testId="commit-filter-ref"
                 value={query.ref ?? ''}
                 onValue={(value) => set('ref', value)}
@@ -178,7 +178,7 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
                     {filter.word}: {filter.value}
                   </span>
                   <X className="shrink-0" aria-hidden="true" />
-                  <span className="sr-only">Remove this filter</span>
+                  <span className="sr-only">Remove filter</span>
                 </Button>
               </Badge>
             </Tooltip>
@@ -188,7 +188,7 @@ export function CommitSearch({ line, onLine, found, reading }: CommitSearchProps
               className={cn('ml-auto text-[10px] tabular-nums text-t-faint', reading && 'opacity-60')}
               data-testid="commit-search-count"
             >
-              {reading ? 'Searching…' : `${found} found`}
+              {reading ? 'Searching…' : `${found} ${found === 1 ? 'result' : 'results'}`}
             </span>
           )}
         </div>

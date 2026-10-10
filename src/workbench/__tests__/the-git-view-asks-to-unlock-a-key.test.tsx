@@ -133,7 +133,7 @@ describe('a push that needs a key unlocked', () => {
     await push();
     await waitFor(() => expect(screen.getByTestId('git-passphrase')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByLabelText('SSH key passphrase'), {
+    fireEvent.change(screen.getByLabelText('Passphrase'), {
       target: { value: 'open sesame' },
     });
     fireEvent.click(screen.getByTestId('git-unlock'));
@@ -152,7 +152,7 @@ describe('a push that needs a key unlocked', () => {
     await push();
     await waitFor(() => expect(screen.getByTestId('git-passphrase')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByLabelText('SSH key passphrase'), {
+    fireEvent.change(screen.getByLabelText('Passphrase'), {
       target: { value: 'open sesame' },
     });
     fireEvent.click(screen.getByTestId('git-unlock'));
@@ -168,7 +168,7 @@ describe('a push that needs a key unlocked', () => {
     await push();
     await waitFor(() => expect(screen.getByTestId('git-passphrase')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByLabelText('SSH key passphrase'), {
+    fireEvent.change(screen.getByLabelText('Passphrase'), {
       target: { value: 'the wrong one' },
     });
     fireEvent.click(screen.getByTestId('git-unlock'));
@@ -176,12 +176,12 @@ describe('a push that needs a key unlocked', () => {
 
     // Still asking, and the field is empty rather than holding what failed.
     expect(screen.getByTestId('git-passphrase')).toBeInTheDocument();
-    expect(screen.getByLabelText('SSH key passphrase')).toHaveValue('');
+    expect(screen.getByLabelText('Passphrase')).toHaveValue('');
     // The one word about it is said inside the prompt, quietly, because the
     // reader is still in the middle of the thing rather than done failing at
     // it (bw-8nwh.1).
     expect(screen.getByTestId('git-passphrase-refused')).toHaveTextContent(
-      'That passphrase did not unlock the key. Try again.',
+      'Incorrect passphrase. Try again.',
     );
     expect(screen.queryByTestId('git-error')).not.toBeInTheDocument();
   });
@@ -193,7 +193,7 @@ describe('a push that needs a key unlocked', () => {
     await push();
     await waitFor(() => expect(screen.getByTestId('git-passphrase')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByLabelText('SSH key passphrase'), {
+    fireEvent.change(screen.getByLabelText('Passphrase'), {
       target: { value: 'open sesame' },
     });
     fireEvent.click(screen.getByTestId('git-unlock'));
@@ -223,7 +223,7 @@ describe('a push that needs a key unlocked', () => {
     await push();
     const asking = await screen.findByTestId('git-passphrase');
 
-    fireEvent.change(screen.getByLabelText('SSH key passphrase'), {
+    fireEvent.change(screen.getByLabelText('Passphrase'), {
       target: { value: 'half a passphrase' },
     });
     fireEvent.keyDown(asking, { key: 'Escape', code: 'Escape' });
@@ -237,7 +237,7 @@ describe('a push that needs a key unlocked', () => {
     calls.push.mockRejectedValue(lockedKey());
     await push();
     await waitFor(() =>
-      expect(screen.getByLabelText('SSH key passphrase')).toHaveValue(''),
+      expect(screen.getByLabelText('Passphrase')).toHaveValue(''),
     );
   });
 

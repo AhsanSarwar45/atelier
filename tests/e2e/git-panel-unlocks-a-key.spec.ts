@@ -277,30 +277,30 @@ test.describe('a push that needs the key unlocked', () => {
       // Escape is the same word as Cancel, now that the asking is the app's
       // own modal (bw-ahf2.1): the dialog goes, nothing is reported, and what
       // was half-typed is not waiting in the box next time.
-      await page.getByLabel('SSH key passphrase').fill('half a passphrase');
+      await page.getByLabel('Passphrase', { exact: true }).fill('half a passphrase');
       await page.keyboard.press('Escape');
       await expect(asking, 'Escape did not put the asking away').toHaveCount(0);
       await expect(page.getByTestId('git-error')).toHaveCount(0);
       await page.getByTestId('git-push').click();
       await expect(asking).toBeVisible({ timeout: 60_000 });
       await expect(
-        page.getByLabel('SSH key passphrase'),
+        page.getByLabel('Passphrase', { exact: true }),
         'a passphrase escaped out of was kept for the next time',
       ).toHaveValue('');
 
       // A wrong one is refused, and nothing of it is kept.
-      await page.getByLabel('SSH key passphrase').fill('not the passphrase');
+      await page.getByLabel('Passphrase', { exact: true }).fill('not the passphrase');
       await page.getByTestId('git-unlock').click();
       await expect(asking, 'a wrong passphrase should leave the panel still asking').toBeVisible();
       await expect(
-        page.getByLabel('SSH key passphrase'),
+        page.getByLabel('Passphrase', { exact: true }),
         'the panel kept a passphrase that did not work',
       ).toHaveValue('', { timeout: 30_000 });
       // Said inside the prompt, in one plain sentence — still no red panel.
       await expect(
         page.getByTestId('git-passphrase-refused'),
         'nothing said about the passphrase that did not work',
-      ).toContainText('That passphrase did not unlock the key', { timeout: 30_000 });
+      ).toContainText('Incorrect passphrase', { timeout: 30_000 });
       await expect(
         page.getByTestId('git-error'),
         'a refused passphrase drew the red panel instead of saying so in the prompt',
@@ -308,7 +308,7 @@ test.describe('a push that needs the key unlocked', () => {
       expect(theSharedCopyHas(WAITING), 'a wrong passphrase pushed anyway').toBe(false);
 
       // ---- and the right one ------------------------------------------------
-      await page.getByLabel('SSH key passphrase').fill(PASSPHRASE);
+      await page.getByLabel('Passphrase', { exact: true }).fill(PASSPHRASE);
       await page.getByTestId('git-unlock').click();
 
       // A second in, with the push still running: the one moment the whole of

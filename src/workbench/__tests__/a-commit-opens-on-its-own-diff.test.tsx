@@ -136,7 +136,7 @@ describe('the diff pane, showing one commit', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('git-diff-empty')).toHaveTextContent(
-        'This commit changed nothing',
+        'No changes in this commit',
       ),
     );
   });

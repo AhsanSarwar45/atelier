@@ -453,7 +453,7 @@ export function GitDiffView({
           news. */}
       {files !== null && files.length === 0 && !fault && (
         <p data-testid="git-diff-empty" className="p-6 text-center text-[12px] text-muted-foreground">
-          {commit ? 'This commit changed nothing' : 'Nothing has changed'}
+          {commit ? 'No changes in this commit' : 'No changes'}
         </p>
       )}
       {!many && shown.map((file) => <div key={file.path}>{section(file)}</div>)}

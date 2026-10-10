@@ -222,7 +222,7 @@ test.describe('a commit opens in the diff pane', () => {
 
       // A word nothing holds says so rather than showing yesterday's list.
       await search.fill('nothing holds this word');
-      await expect(page.getByTestId('git-log-empty')).toHaveText('No commit matches.', { timeout: 30_000 });
+      await expect(page.getByTestId('git-log-empty')).toHaveText('No results', { timeout: 30_000 });
 
       // ---- a commit, opened on its own diff ---------------------------------
       await search.fill('kettle');

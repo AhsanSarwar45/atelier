@@ -153,7 +153,7 @@ describe('the commits pane', () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByTestId('git-log-empty')).toHaveTextContent('No commit matches.'),
+      expect(screen.getByTestId('git-log-empty')).toHaveTextContent('No results'),
     );
   });
 

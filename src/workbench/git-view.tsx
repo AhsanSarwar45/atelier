@@ -314,13 +314,7 @@ function FileLine({
           right-click (bw-g3o3.9). It keeps the row's own type and weight rather
           than becoming a capsule, because a rail of twelve capsules is a rail
           nobody can read down. */}
-      <Tooltip
-        label={
-          from
-            ? `${from} → ${path}`
-            : `${path} — click to ${showsDiff ? 'show its diff' : 'open in the Files tab'}`
-        }
-      >
+      <Tooltip label={from ? `${from} → ${path}` : path}>
         {/* A button, so the keyboard reaches it too: Enter is a click, and the
             rail's listener answers it the same. It is one line of a list, so on
             a phone it takes the row's band rather than growing. */}
@@ -885,7 +879,7 @@ export function GitView({
   if (!path) {
     return (
       <p className="px-3 py-3 text-xs text-muted-foreground" data-testid="git-no-project">
-        No project directory for this chat.
+        No project folder
       </p>
     );
   }
@@ -945,7 +939,7 @@ export function GitView({
           (bw-g6zy.3). */}
       <SplitColumn
         storageKey={path || 'git'}
-        label="Resize the changes and the history"
+        label="Resize panels"
         top={
           <>
       {/* The line of work, and how far it is from the shared copy. Both counts
@@ -974,7 +968,7 @@ export function GitView({
             className="min-w-0 flex-1"
             placeholder={status?.branch ?? '—'}
             searchPlaceholder="Search branches"
-            empty="No branch matches"
+            empty="No results"
             value={status?.branch ?? ''}
             disabled={busy || reading || !path || branches.length === 0}
             choices={branches
@@ -987,7 +981,7 @@ export function GitView({
           />
           {status?.detached && (
             <Badge size="xs" variant="warning" appearance="light" data-testid="git-detached">
-              detached
+              Detached
             </Badge>
           )}
           {onFlipDiff && (
@@ -1005,7 +999,7 @@ export function GitView({
             mode="icon"
             variant="ghost"
             disabled={busy || reading}
-            aria-label="Re-read this repository"
+            aria-label="Refresh"
             data-testid="git-refresh"
             onClick={() => void read()}
           >
@@ -1030,7 +1024,7 @@ export function GitView({
               (bw-xp12.2). The arrow is the push, in the direction the button
               below sends. */}
           <span className="min-w-0 flex-1 truncate" data-testid="git-upstream">
-            {status?.upstream ?? 'no upstream'}
+            {status?.upstream ?? 'No upstream'}
             {status?.pushTo && (
               <span data-testid="git-push-to"> → {status.pushTo}</span>
             )}
@@ -1166,8 +1160,8 @@ export function GitView({
               accessible name and leave "the passphrase field" ambiguous to a
               screen reader and to anything looking for it by that name. */}
           <DialogHeader>
-            <DialogTitle className="text-base text-t-primary">Unlock your SSH key</DialogTitle>
-            <DialogDescription>Used once and never saved.</DialogDescription>
+            <DialogTitle className="text-base text-t-primary">Unlock SSH key</DialogTitle>
+            <DialogDescription>The passphrase is used once and not saved.</DialogDescription>
           </DialogHeader>
           <form
             className="flex flex-col gap-3"
@@ -1191,7 +1185,7 @@ export function GitView({
           >
             <div className="flex flex-col gap-1.5">
               <label htmlFor="git-passphrase-field" className="text-xs font-medium text-t-secondary">
-                SSH key passphrase
+                Passphrase
               </label>
               <Input
                 id="git-passphrase-field"
@@ -1199,14 +1193,13 @@ export function GitView({
                 type="password"
                 autoFocus
                 autoComplete="off"
-                placeholder="Passphrase for your key"
                 value={passphrase}
                 disabled={busy}
                 onChange={(typing) => setPassphrase(typing.target.value)}
               />
               {keyRefused && (
                 <p className="text-[11px] text-danger" data-testid="git-passphrase-refused">
-                  That passphrase did not unlock the key. Try again.
+                  Incorrect passphrase. Try again.
                 </p>
               )}
             </div>
@@ -1227,7 +1220,7 @@ export function GitView({
                 disabled={busy || passphrase.length === 0}
                 data-testid="git-unlock"
               >
-                Unlock and retry
+                Unlock
               </Button>
             </DialogFooter>
           </form>
@@ -1264,7 +1257,7 @@ export function GitView({
                 disabled={busy}
                 data-testid="git-confirm-cancel"
               >
-                Keep
+                Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 className={buttonVariants({ variant: 'destructive', size: 'sm' })}
@@ -1294,7 +1287,7 @@ export function GitView({
       )}
 
       {shown && conflicted.length > 0 && (
-        <Section title="Conflicted" count={conflicted.length} testId="git-conflicted">
+        <Section title="Conflicts" count={conflicted.length} testId="git-conflicted">
           <FileRows
             files={conflicted}
             keyOf={(file) => file.path}
@@ -1321,7 +1314,7 @@ export function GitView({
 
       {shown && staged.length > 0 && (
         <Section
-          title="Staged"
+          title="Staged changes"
           count={staged.length}
           testId="git-staged"
           actions={
@@ -1370,7 +1363,7 @@ export function GitView({
 
       {shown && unstaged.length > 0 && (
         <Section
-          title="Not staged"
+          title="Changes"
           count={unstaged.length}
           testId="git-unstaged"
           actions={
@@ -1399,7 +1392,7 @@ export function GitView({
                 data-testid="git-discard-all"
                 onClick={() =>
                   askFirst(
-                    'Discard every change in this project? Files that are new will be deleted; ignored files are kept. This cannot be undone.',
+                    'Discard all changes? New files will be deleted. Ignored files are kept. This can’t be undone.',
                     'Discard all',
                     { deed: 'discard', note: howManyFiles(unstaged.length + untracked.length) },
                     () => git.discardAll(path),
@@ -1442,7 +1435,7 @@ export function GitView({
                       data-testid="git-discard"
                       onClick={() =>
                         askFirst(
-                          `Discard changes to ${file.path}? This cannot be undone.`,
+                          `Discard changes to ${file.path}? This can’t be undone.`,
                           'Discard',
                           { deed: 'discard', note: file.path },
                           () => git.discard(path, [file.path]),
@@ -1509,7 +1502,7 @@ export function GitView({
                       data-testid="git-remove"
                       onClick={() =>
                         askFirst(
-                          `Delete ${file.path}? git has no copy of it, so this cannot be undone.`,
+                          `Delete ${file.path}? This can’t be undone.`,
                           'Delete',
                           { deed: 'remove', note: file.path },
                           () => git.remove(path, [file.path]),
@@ -1528,7 +1521,7 @@ export function GitView({
 
       {clean && (
         <p className="px-3 py-3 text-xs text-muted-foreground" data-testid="git-clean">
-          Nothing changed in this project.
+          No changes
         </p>
       )}
 
@@ -1540,7 +1533,7 @@ export function GitView({
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           rows={3}
-          placeholder="What changed, and why"
+          placeholder="Message"
           aria-label="Commit message"
           data-testid="git-commit-message"
           className="min-h-16 resize-none text-xs"
