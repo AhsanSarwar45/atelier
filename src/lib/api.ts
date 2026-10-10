@@ -688,7 +688,9 @@ export interface GitStatus {
   untracked: GitPath[];
   conflicted: GitPath[];
   /** Whether the repository has a remote to fetch from and push to. */
-  hasRemote: boolean;
+  hasRemote?: boolean;
+  /** Whether anything has been committed yet. */
+  hasCommits?: boolean;
 }
 
 /** What a mutating call answers when git said nothing else. */

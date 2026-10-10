@@ -934,6 +934,8 @@ export function GitView({
   // Absent on an answer from before the server said it, and then the panel
   // draws what it always drew.
   const hasRemote = status?.hasRemote !== false;
+  // Nothing to amend before the first commit.
+  const hasCommits = status?.hasCommits !== false;
   /** Whether the branch has an upstream to pull from and push to. */
   const following = Boolean(status?.upstream);
   const staged = status?.staged ?? [];
@@ -1661,6 +1663,7 @@ export function GitView({
             rail it sits in, and this rail's is twelve — two short of the floor
             (bw-e3dw.6). Its own words are right beside it and toggle it, so the
             line they share is the target, and it is the floor tall. */}
+        {hasCommits && (
         <label className="flex min-h-11 items-center gap-1.5 text-[11px] text-muted-foreground">
           <Checkbox
             checked={amend}
@@ -1670,6 +1673,7 @@ export function GitView({
           />
           Amend last commit
         </label>
+        )}
         <Button
           size="sm"
           variant="primary"

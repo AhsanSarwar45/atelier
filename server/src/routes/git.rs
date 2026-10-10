@@ -718,6 +718,9 @@ pub struct StatusResponse {
     /// Whether the repository has anywhere to fetch from or push to.
     #[serde(rename = "hasRemote")]
     pub has_remote: bool,
+    /// Whether anything has been committed yet.
+    #[serde(rename = "hasCommits")]
+    pub has_commits: bool,
 }
 
 /// The word for one of git's status letters, or `None` when the letter means
@@ -895,6 +898,7 @@ pub async fn status(GitQuery(params): GitQuery<PathParams>) -> Answer {
         status.push_to = Some(sent_to);
     }
     status.has_remote = has_remote(&repo).await;
+    status.has_commits = has_commits(&repo).await;
     Ok(Json(status).into_response())
 }
 
