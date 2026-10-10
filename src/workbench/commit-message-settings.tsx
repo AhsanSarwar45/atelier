@@ -22,6 +22,9 @@ import {
 import { SYSTEM_PROFILE } from '@/workbench/protocol';
 import { Choose } from '@/workbench/search-settings';
 
+/** The chooser brings its own Default, so the catalogue's is left out. */
+const named = (choices: { value: string; label: string }[]) => choices.filter((c) => c.value !== 'default');
+
 const PROVIDERS = [
   { value: 'claude', label: 'Claude' },
   { value: 'codex', label: 'Codex' },
@@ -112,7 +115,7 @@ export function CommitMessageSettings() {
           <Choose
             id="commit-message-model"
             value={held.model}
-            choices={held.provider === 'codex' ? CODEX_MODELS : CLAUDE_MODELS}
+            choices={named(held.provider === 'codex' ? CODEX_MODELS : CLAUDE_MODELS)}
             onChange={(model) => void save({ model })}
           />
         </SettingRow>
