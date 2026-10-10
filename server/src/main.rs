@@ -777,6 +777,8 @@ async fn serve(open_browser: bool) {
         .route("/api/git/init", post(routes::git::init))
         .route("/api/git/remote", post(routes::git::add_remote))
         .route("/api/git/stash", post(routes::git::stash))
+        .route("/api/git/resolve", post(routes::git::resolve))
+        .route("/api/git/operation", post(routes::git::operation))
         .route("/api/git/stage", post(routes::git::stage))
         .route("/api/git/unstage", post(routes::git::unstage))
         // The two that throw work away. Both are asked about in the panel

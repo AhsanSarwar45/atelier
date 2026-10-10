@@ -693,6 +693,8 @@ export interface GitStatus {
   hasCommits?: boolean;
   /** How many stashes are put away. */
   stashes?: number;
+  /** What the repository is in the middle of, if anything. */
+  operation?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | null;
 }
 
 /** What a mutating call answers when git said nothing else. */
@@ -1027,6 +1029,20 @@ export const git = {
     method: 'POST',
     body: JSON.stringify({ path, files, staged: true }),
   }),
+
+  /** Settle conflicted files by taking one side whole. */
+  resolve: (path: string, files: string[], side: 'ours' | 'theirs') =>
+    fetchApi<GitOk>('/api/git/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ path, files, side }),
+    }),
+
+  /** Give up, or go on with, the merge or rebase under way. */
+  operation: (path: string, action: 'abort' | 'continue') =>
+    fetchApi<GitOk>('/api/git/operation', {
+      method: 'POST',
+      body: JSON.stringify({ path, action }),
+    }),
 
   stash: (path: string) => fetchApi<GitOk>('/api/git/stash', {
     method: 'POST',

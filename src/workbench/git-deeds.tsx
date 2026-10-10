@@ -41,7 +41,10 @@ export type GitDeed =
   | 'stage'
   | 'unstage'
   | 'stash'
-  | 'pop';
+  | 'pop'
+  | 'resolve'
+  | 'abort'
+  | 'continue';
 
 /** The three words an operation is known by, and the mark it carries. */
 interface DeedWords {
@@ -76,6 +79,9 @@ const DEEDS: Record<GitDeed, DeedWords> = {
   stage: { icon: Plus, doing: 'Staging', done: 'Staged', failed: 'Stage failed' },
   unstage: { icon: Minus, doing: 'Unstaging', done: 'Unstaged', failed: 'Unstage failed' },
   stash: { icon: Archive, doing: 'Stashing', done: 'Stashed', failed: 'Stash failed' },
+  resolve: { icon: Check, doing: 'Resolving', done: 'Resolved', failed: 'Resolve failed' },
+  abort: { icon: Undo2, doing: 'Aborting', done: 'Aborted', failed: 'Abort failed' },
+  continue: { icon: Check, doing: 'Continuing', done: 'Continued', failed: 'Continue failed' },
   pop: { icon: ArchiveRestore, doing: 'Popping stash', done: 'Stash popped', failed: 'Pop stash failed' },
 };
 

@@ -723,6 +723,9 @@ pub struct StatusResponse {
     pub has_commits: bool,
     /// How many stashes are put away.
     pub stashes: u32,
+    /// What the repository is in the middle of: `merge`, `rebase`,
+    /// `cherry-pick` or `revert`. `null` when it is in the middle of nothing.
+    pub operation: Option<&'static str>,
 }
 
 /// The word for one of git's status letters, or `None` when the letter means
@@ -902,6 +905,7 @@ pub async fn status(GitQuery(params): GitQuery<PathParams>) -> Answer {
     status.has_remote = has_remote(&repo).await;
     status.has_commits = has_commits(&repo).await;
     status.stashes = how_many_stashes(&repo).await;
+    status.operation = operation_under_way(&repo).await;
     Ok(Json(status).into_response())
 }
 
@@ -911,6 +915,136 @@ async fn has_remote(repo: &Path) -> bool {
         run_git(repo, &["remote"]).await,
         Ok(o) if o.status.success() && !o.stdout.iter().all(u8::is_ascii_whitespace)
     )
+}
+
+/// What the repository is in the middle of, read off the files git leaves in
+/// its own directory while it waits to be told to go on or give up.
+async fn operation_under_way(repo: &Path) -> Option<&'static str> {
+    let named = run_git(repo, &["rev-parse", "--absolute-git-dir"]).await.ok()?;
+    if !named.status.success() {
+        return None;
+    }
+    let git_dir = PathBuf::from(String::from_utf8_lossy(&named.stdout).trim());
+    if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
+        Some("rebase")
+    } else if git_dir.join("MERGE_HEAD").exists() {
+        Some("merge")
+    } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
+        Some("cherry-pick")
+    } else if git_dir.join("REVERT_HEAD").exists() {
+        Some("revert")
+    } else {
+        None
+    }
+}
+
+// ----------------------------------------------------------------------------
+// POST /api/git/resolve, POST /api/git/operation
+// ----------------------------------------------------------------------------
+
+/// Request body for settling conflicted files in favour of one side.
+#[derive(Deserialize)]
+pub struct ResolveRequest {
+    /// Absolute working directory of the repository.
+    pub path: String,
+    /// Conflicted paths relative to the repository root.
+    pub files: Vec<String>,
+    /// `ours` or `theirs`.
+    pub side: String,
+}
+
+/// Settle conflicted files by taking one side whole, and mark them resolved.
+///
+/// A side that deleted the file has nothing to check out, so taking that side
+/// means the file goes: git's index stage 2 is ours and 3 is theirs, and a
+/// missing stage is how git records "deleted on that side".
+///
+/// # Endpoint
+///
+/// `POST /api/git/resolve` — `{ path, files, side }`
+pub async fn resolve(GitJson(body): GitJson<ResolveRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+    let (switch, stage) = match body.side.as_str() {
+        "ours" => ("--ours", "2"),
+        "theirs" => ("--theirs", "3"),
+        _ => {
+            return Err(Refused::new(
+                StatusCode::BAD_REQUEST,
+                "side must be ours or theirs",
+            ))
+        }
+    };
+    if body.files.is_empty() {
+        return Err(Refused::new(
+            StatusCode::BAD_REQUEST,
+            "No files were named".to_string(),
+        ));
+    }
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    for file in &body.files {
+        let unmerged =
+            spoke_or_refused(run_git(&repo, &["ls-files", "-u", "-z", "--", file]).await?)?;
+        // `<mode> <object> <stage>\t<path>`, one record per stage present.
+        let has_side = String::from_utf8_lossy(&unmerged.stdout)
+            .split('\0')
+            .filter_map(|record| record.split('\t').next())
+            .any(|meta| meta.split(' ').nth(2) == Some(stage));
+        if has_side {
+            spoke_or_refused(run_git(&repo, &["checkout", switch, "--", file]).await?)?;
+            spoke_or_refused(run_git(&repo, &["add", "--", file]).await?)?;
+        } else {
+            spoke_or_refused(run_git(&repo, &["rm", "-f", "-q", "--", file]).await?)?;
+        }
+    }
+    Ok(did_it())
+}
+
+/// Request body for ending whatever the repository is in the middle of.
+#[derive(Deserialize)]
+pub struct OperationRequest {
+    /// Absolute working directory of the repository.
+    pub path: String,
+    /// `abort` gives it up; `continue` goes on once the conflicts are settled.
+    pub action: String,
+}
+
+/// Give up, or go on with, the merge, rebase, cherry-pick or revert under way.
+///
+/// # Endpoint
+///
+/// `POST /api/git/operation` — `{ path, action }`
+pub async fn operation(GitJson(body): GitJson<OperationRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+    let flag = match body.action.as_str() {
+        "abort" => "--abort",
+        "continue" => "--continue",
+        _ => {
+            return Err(Refused::new(
+                StatusCode::BAD_REQUEST,
+                "action must be abort or continue",
+            ))
+        }
+    };
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    let Some(under_way) = operation_under_way(&repo).await else {
+        return Err(Refused::new(
+            StatusCode::CONFLICT,
+            "No merge or rebase is in progress.",
+        ));
+    };
+    // Going on writes a commit, and git would open an editor for its message.
+    // Nobody is at a terminal to answer one, so the message it already has
+    // stands.
+    spoke_or_refused(
+        run_git(&repo, &["-c", "core.editor=true", under_way, flag]).await?,
+    )?;
+    Ok(did_it())
 }
 
 /// How many stashes the repository holds; none when it cannot be read.

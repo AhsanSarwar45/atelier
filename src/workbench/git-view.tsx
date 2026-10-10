@@ -36,11 +36,13 @@ import {
   FolderGit2,
   GitBranch as BranchIcon,
   Minus,
+  Play,
   Plus,
   RefreshCw,
   Trash2,
   Undo2,
   Upload,
+  X,
 } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
@@ -1034,6 +1036,7 @@ export function GitView({
       .map((branch) => ({ value: branch.name, label: branch.name, hint: 'Remote' })),
   ];
   const stashes = status?.stashes ?? 0;
+  const operation = status?.operation ?? null;
   const canPush = hasRemote && !status?.detached;
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
@@ -1528,8 +1531,45 @@ export function GitView({
 
       {/* What is done to the working tree as a whole, on one line above the
           groups it is done to. Drawn only when one of them applies. */}
-      {status !== null && (!clean || stashes > 0) && (
+      {status !== null && (!clean || stashes > 0 || operation) && (
         <div className="flex flex-wrap items-center gap-1 px-3 py-1.5" data-testid="git-tree-actions">
+          {/* The way out of, or on from, a merge or rebase that stopped. Going
+              on is offered only once nothing is left in conflict; a merge is
+              gone on with by committing, so it has no button of its own. */}
+          {operation && (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="text-danger"
+              disabled={busy}
+              data-testid="git-abort"
+              onClick={() =>
+                askFirst(
+                  `Abort the ${operation}? The branch goes back to where it was before the ${operation} started.`,
+                  `Abort ${operation}`,
+                  { deed: 'abort', note: operation },
+                  () => git.operation(path, 'abort'),
+                )
+              }
+            >
+              <X aria-hidden="true" />
+              {`Abort ${operation}`}
+            </Button>
+          )}
+          {operation && operation !== 'merge' && conflicted.length === 0 && (
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={busy}
+              data-testid="git-continue"
+              onClick={() =>
+                void act({ deed: 'continue', note: operation }, () => git.operation(path, 'continue'))
+              }
+            >
+              <Play aria-hidden="true" />
+              {`Continue ${operation}`}
+            </Button>
+          )}
           {/* One button for both groups it stages: it used to be drawn on
               each, doing the same thing twice. */}
           {unstaged.length + untracked.length > 0 && (
@@ -1606,6 +1646,29 @@ export function GitView({
                   void act({ deed: 'stage', quiet: true, note: file.path }, () =>
                     git.stage(path, [file.path]),
                   )
+                }
+                extra={
+                  <>
+                    {(['ours', 'theirs'] as const).map((side) => (
+                      <Tooltip key={side} label={`Accept ${side} for ${file.path}`}>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="h-5 px-1 text-[10px]"
+                          disabled={busy}
+                          aria-label={`Accept ${side} for ${file.path}`}
+                          data-testid={`git-accept-${side}`}
+                          onClick={() =>
+                            void act({ deed: 'resolve', quiet: true, note: file.path }, () =>
+                              git.resolve(path, [file.path], side),
+                            )
+                          }
+                        >
+                          {side === 'ours' ? 'Ours' : 'Theirs'}
+                        </Button>
+                      </Tooltip>
+                    ))}
+                  </>
                 }
               />
             )}
