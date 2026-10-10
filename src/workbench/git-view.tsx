@@ -584,6 +584,12 @@ export interface GitViewProps {
   shown?: boolean;
 }
 
+/**
+ * What each side of a conflict is called on screen. Git's own words for them,
+ * "ours" and "theirs", are not shown: editors call them current and incoming.
+ */
+const SIDES = { ours: 'current', theirs: 'incoming' } as const;
+
 export function GitView({
   path,
   diffOpen = false,
@@ -1548,7 +1554,7 @@ export function GitView({
               data-testid="git-abort"
               onClick={() =>
                 askFirst(
-                  `Abort the ${operation}? The branch goes back to where it was before the ${operation} started.`,
+                  `Abort the ${operation}? Changes made during the ${operation} will be lost.`,
                   `Abort ${operation}`,
                   { deed: 'abort', note: operation },
                   () => git.operation(path, 'abort'),
@@ -1617,7 +1623,7 @@ export function GitView({
               onClick={() => void act({ deed: 'pop' }, () => git.popStash(path))}
             >
               <ArchiveRestore aria-hidden="true" />
-              Pop stash
+              Restore stash
               <span className="tabular-nums text-t-faint">{stashes}</span>
             </Button>
           )}
@@ -1653,13 +1659,13 @@ export function GitView({
                 extra={
                   <>
                     {(['ours', 'theirs'] as const).map((side) => (
-                      <Tooltip key={side} label={`Accept ${side} for ${file.path}`}>
+                      <Tooltip key={side} label={`Accept ${SIDES[side]} change in ${file.path}`}>
                         <Button
                           size="xs"
                           variant="ghost"
                           className="h-5 px-1 text-[10px]"
                           disabled={busy}
-                          aria-label={`Accept ${side} for ${file.path}`}
+                          aria-label={`Accept ${SIDES[side]} change in ${file.path}`}
                           data-testid={`git-accept-${side}`}
                           onClick={() =>
                             void act({ deed: 'resolve', quiet: true, note: file.path }, () =>
@@ -1667,7 +1673,7 @@ export function GitView({
                             )
                           }
                         >
-                          {side === 'ours' ? 'Ours' : 'Theirs'}
+                          {side === 'ours' ? 'Current' : 'Incoming'}
                         </Button>
                       </Tooltip>
                     ))}
@@ -1739,7 +1745,7 @@ export function GitView({
                           // go back to, so discarding it deletes it.
                           file.status === 'added'
                             ? `Discard ${file.path}? The file will be deleted. This can’t be undone.`
-                            : `Discard changes to ${file.path}? The file goes back to the last commit. This can’t be undone.`,
+                            : `Discard changes to ${file.path}? This can’t be undone.`,
                           'Discard',
                           { deed: 'discard', note: file.path },
                           () =>
@@ -1945,9 +1951,9 @@ export function GitView({
                     // on the remote, and taking it back here leaves the two
                     // apart.
                     following && ahead === 0
-                      ? 'Undo the last commit? Its changes stay staged. This commit is already pushed, so the branch will be behind its upstream.'
+                      ? 'Undo the last commit? Its changes stay staged. This commit is already pushed, so the branch will be behind the remote.'
                       : 'Undo the last commit? Its changes stay staged.',
-                    'Undo commit',
+                    'Undo',
                     { deed: 'undo', note: lastCommit ? shortened(lastCommit.subject) : undefined },
                     async () => {
                       const undone = await git.undoCommit(path);

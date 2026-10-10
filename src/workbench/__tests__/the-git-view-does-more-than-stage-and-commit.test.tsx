@@ -321,7 +321,7 @@ describe('the working tree as a whole', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Stash' }));
     await waitFor(() => expect(calls.stash).toHaveBeenCalledWith(REPO));
 
-    expect(screen.getByTestId('git-pop-stash')).toHaveTextContent('Pop stash2');
+    expect(screen.getByTestId('git-pop-stash')).toHaveTextContent('Restore stash2');
     fireEvent.click(screen.getByTestId('git-pop-stash'));
     await waitFor(() => expect(calls.popStash).toHaveBeenCalledWith(REPO));
   });
@@ -401,10 +401,10 @@ describe('a merge that stopped on a conflict', () => {
   it('settles a file as ours or as theirs', async () => {
     await panel(STOPPED);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Accept theirs for both.txt' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept incoming change in both.txt' }));
     await waitFor(() => expect(calls.resolve).toHaveBeenCalledWith(REPO, ['both.txt'], 'theirs'));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Accept ours for both.txt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Accept current change in both.txt' }));
     await waitFor(() => expect(calls.resolve).toHaveBeenCalledWith(REPO, ['both.txt'], 'ours'));
   });
 

@@ -86,7 +86,7 @@ const DEEDS: Record<GitDeed, DeedWords> = {
   resolve: { icon: Check, doing: 'Resolving', done: 'Resolved', failed: 'Resolve failed' },
   abort: { icon: Undo2, doing: 'Aborting', done: 'Aborted', failed: 'Abort failed' },
   continue: { icon: Check, doing: 'Continuing', done: 'Continued', failed: 'Continue failed' },
-  pop: { icon: ArchiveRestore, doing: 'Popping stash', done: 'Stash popped', failed: 'Pop stash failed' },
+  pop: { icon: ArchiveRestore, doing: 'Restoring stash', done: 'Stash restored', failed: 'Restore stash failed' },
 };
 
 /** Long enough that nothing dismisses a running toast but the call finishing. */

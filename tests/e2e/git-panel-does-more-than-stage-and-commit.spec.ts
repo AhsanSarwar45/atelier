@@ -346,7 +346,7 @@ test.describe('the Git tab beyond stage and commit', () => {
       await expect(page.getByRole('button', { name: 'Abort merge' })).toBeVisible();
       await page.screenshot({ path: `${SHOTS}/conflict.png` });
 
-      await page.getByRole('button', { name: 'Accept theirs for a.txt' }).click();
+      await page.getByRole('button', { name: 'Accept incoming change in a.txt' }).click();
       await expect(page.getByTestId('git-conflicted')).toHaveCount(0, { timeout: 30_000 });
       expect(readFileSync(join(REPO, 'a.txt'), 'utf8')).toBe('side\n');
 
