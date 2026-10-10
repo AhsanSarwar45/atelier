@@ -35,6 +35,7 @@ export type GitDeed =
   | 'commit'
   | 'amend'
   | 'checkout'
+  | 'branch'
   | 'discard'
   | 'remove'
   | 'stage'
@@ -67,6 +68,7 @@ const DEEDS: Record<GitDeed, DeedWords> = {
   commit: { icon: GitCommitVertical, doing: 'Committing', done: 'Committed', failed: 'Commit failed' },
   amend: { icon: GitCommitVertical, doing: 'Amending', done: 'Amended', failed: 'Amend failed' },
   checkout: { icon: GitBranch, doing: 'Switching', done: 'Switched', failed: 'Switch failed' },
+  branch: { icon: GitBranch, doing: 'Creating branch', done: 'Branch created', failed: 'Create branch failed' },
   discard: { icon: Undo2, doing: 'Discarding', done: 'Discarded', failed: 'Discard failed' },
   remove: { icon: Trash2, doing: 'Deleting', done: 'Deleted', failed: 'Delete failed' },
   stage: { icon: Plus, doing: 'Staging', done: 'Staged', failed: 'Stage failed' },

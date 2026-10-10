@@ -1083,6 +1083,20 @@ export const git = {
       body: JSON.stringify({ path, branch, ...(create === undefined ? {} : { create }) }),
     }),
 
+  /** Make a branch here and move to it. */
+  createBranch: (path: string, branch: string) =>
+    fetchApi<GitOk>('/api/git/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ path, branch, create: true }),
+    }),
+
+  /** Make a local branch that follows a remote one, and move to it. */
+  trackBranch: (path: string, branch: string) =>
+    fetchApi<GitOk>('/api/git/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ path, branch, track: true }),
+    }),
+
   /**
    * Told whenever the repository itself moves — a commit, a push, a checkout,
    * whoever made it and wherever from (bw-8nwh.2). Returns the way to stop.

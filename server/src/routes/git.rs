@@ -1499,6 +1499,10 @@ pub struct CheckoutRequest {
     /// Start it here rather than expecting it to exist.
     #[serde(default)]
     pub create: bool,
+    /// `branch` names a remote branch: make a local branch that follows it and
+    /// move to that, rather than detaching HEAD on the remote's commit.
+    #[serde(default)]
+    pub track: bool,
 }
 
 /// Switch to another line of work.
@@ -1512,8 +1516,11 @@ pub async fn checkout(GitJson(body): GitJson<CheckoutRequest>) -> Answer {
     let turn = repo_lock(&repo);
     let _holding = turn.lock().await;
 
+    not_a_switch("branch name", body.branch.as_str())?;
     let args: Vec<&str> = if body.create {
         vec!["checkout", "-b", body.branch.as_str()]
+    } else if body.track {
+        vec!["checkout", "--track", body.branch.as_str()]
     } else {
         vec!["checkout", body.branch.as_str()]
     };

@@ -934,6 +934,23 @@ export function GitView({
   const hasRemote = status?.hasRemote !== false;
   // Nothing to amend before the first commit.
   const hasCommits = status?.hasCommits !== false;
+  // Local branches first, then the remote ones nothing here follows yet:
+  // picking one of those makes the local branch that follows it.
+  const local = branches.filter((branch) => !branch.isRemote);
+  const branchChoices = [
+    ...local.map((branch) => ({ value: branch.name, label: branch.name })),
+    ...branches
+      .filter(
+        (branch) =>
+          branch.isRemote
+          && !local.some(
+            (mine) =>
+              mine.upstream === branch.name
+              || mine.name === branch.name.slice(branch.name.indexOf('/') + 1),
+          ),
+      )
+      .map((branch) => ({ value: branch.name, label: branch.name, hint: 'Remote' })),
+  ];
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
   /** Whether the branch has an upstream to pull from and push to. */
@@ -990,13 +1007,27 @@ export function GitView({
             searchPlaceholder="Search branches"
             empty="No results"
             value={status?.branch ?? ''}
-            disabled={busy || reading || !path || branches.length === 0}
-            choices={branches
-              .filter((branch) => !branch.isRemote)
-              .map((branch) => ({ value: branch.name, label: branch.name }))}
+            disabled={busy || reading || !path}
+            choices={branchChoices}
             onChange={(branch) => {
               if (!path || branch === status?.branch) return;
-              void act({ deed: 'checkout', note: branch }, () => git.checkout(path, branch));
+              const remote = branches.some((known) => known.isRemote && known.name === branch);
+              void act({ deed: 'checkout', note: branch }, () =>
+                remote ? git.trackBranch(path, branch) : git.checkout(path, branch),
+              );
+            }}
+            action={{
+              label: 'Create branch',
+              onSelect: (typed) => {
+                setNamed(typed);
+                setNaming({
+                  title: 'Create branch',
+                  label: 'Name',
+                  verb: 'Create',
+                  told: (name) => ({ deed: 'branch', note: name }),
+                  run: (name) => git.createBranch(path, name),
+                });
+              },
             }}
           />
           {status?.detached && (

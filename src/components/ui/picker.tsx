@@ -14,7 +14,7 @@
  */
 
 import * as React from 'react';
-import { Check, ChevronDown, Search } from 'lucide-react';
+import { Check, ChevronDown, Plus, Search } from 'lucide-react';
 
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -56,6 +56,7 @@ export function Picker({
   disabled,
   appearance = 'field',
   className,
+  action,
   'data-testid': testId,
 }: {
   choices: PickerChoice[];
@@ -74,6 +75,11 @@ export function Picker({
    */
   appearance?: 'field' | 'inline';
   className?: string;
+  /**
+   * One thing to do that is not a choice, drawn under the list — making a new
+   * item, say. It is handed what was typed in the search box.
+   */
+  action?: { label: string; onSelect: (typed: string) => void };
   'data-testid'?: string;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -189,6 +195,22 @@ export function Picker({
             </button>
           ))}
         </div>
+        {action && (
+          <div className="border-t border-b-default p-1">
+            <button
+              type="button"
+              data-testid={testId ? `${testId}-action` : undefined}
+              onClick={() => {
+                action.onSelect(typed.trim());
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-surface-overlay"
+            >
+              <Plus className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">{action.label}</span>
+            </button>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );
