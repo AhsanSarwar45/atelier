@@ -687,6 +687,8 @@ export interface GitStatus {
   unstaged: GitChange[];
   untracked: GitPath[];
   conflicted: GitPath[];
+  /** Whether the repository has a remote to fetch from and push to. */
+  hasRemote: boolean;
 }
 
 /** What a mutating call answers when git said nothing else. */
@@ -970,6 +972,11 @@ export const git = {
   }),
 
   /** Pick whole files to be saved. Per file, never per hunk (bw-8dp8). */
+  addRemote: (path: string, url: string) => fetchApi<GitOk>('/api/git/remote', {
+    method: 'POST',
+    body: JSON.stringify({ path, url }),
+  }),
+
   stage: (path: string, files: string[]) => fetchApi<GitOk>('/api/git/stage', {
     method: 'POST',
     body: JSON.stringify({ path, files }),

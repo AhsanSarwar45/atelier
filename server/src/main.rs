@@ -775,6 +775,7 @@ async fn serve(open_browser: bool) {
         // mutating ones queue behind their repository's own lock (bw-8dp8).
         .route("/api/git/status", get(routes::git::status))
         .route("/api/git/init", post(routes::git::init))
+        .route("/api/git/remote", post(routes::git::add_remote))
         .route("/api/git/stage", post(routes::git::stage))
         .route("/api/git/unstage", post(routes::git::unstage))
         // The two that throw work away. Both are asked about in the panel

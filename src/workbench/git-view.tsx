@@ -572,6 +572,20 @@ export function GitView({
     run: () => Promise<unknown>;
   } | null>(null);
   /**
+   * The one thing the panel has to be told in words before it can act: where a
+   * remote lives, or what a new branch is called. One dialog for all of them,
+   * so each asks the same way.
+   */
+  const [naming, setNaming] = useState<{
+    title: string;
+    label: string;
+    placeholder?: string;
+    verb: string;
+    told: (typed: string) => Telling;
+    run: (typed: string) => Promise<unknown>;
+  } | null>(null);
+  const [named, setNamed] = useState('');
+  /**
    * The call that came back wanting an unlocked key, kept so that answering
    * the prompt runs the very thing the reader asked for rather than a guess at
    * it — a push that was setting an upstream is still setting one on the
@@ -917,6 +931,11 @@ export function GitView({
     );
   }
 
+  // Absent on an answer from before the server said it, and then the panel
+  // draws what it always drew.
+  const hasRemote = status?.hasRemote !== false;
+  /** Whether the branch has an upstream to pull from and push to. */
+  const following = Boolean(status?.upstream);
   const staged = status?.staged ?? [];
   const unstaged = status?.unstaged ?? [];
   const untracked = status?.untracked ?? [];
@@ -1044,6 +1063,30 @@ export function GitView({
             loudest thing in it. Equal thirds of the row, so the three read as
             one set rather than three stray words. */}
         <div className="flex items-center gap-1.5">
+          {!hasRemote && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              disabled={busy}
+              data-testid="git-add-remote"
+              onClick={() => {
+                setNamed('');
+                setNaming({
+                  title: 'Add remote',
+                  label: 'Remote URL',
+                  placeholder: 'https://example.com/repo.git',
+                  verb: 'Add',
+                  told: (url) => ({ deed: 'remote', note: url }),
+                  run: (url) => git.addRemote(path, url),
+                });
+              }}
+            >
+              <Plus aria-hidden="true" />
+              Add remote
+            </Button>
+          )}
+          {hasRemote && (
           <Button
             size="sm"
             variant="outline"
@@ -1070,6 +1113,8 @@ export function GitView({
             <CloudDownload aria-hidden="true" />
             Fetch
           </Button>
+          )}
+          {hasRemote && following && (
           <Button
             size="sm"
             variant="outline"
@@ -1086,6 +1131,8 @@ export function GitView({
             <Download aria-hidden="true" />
             Pull
           </Button>
+          )}
+          {hasRemote && !status?.detached && (
           <Button
             size="sm"
             variant="outline"
@@ -1105,8 +1152,9 @@ export function GitView({
             }
           >
             <Upload aria-hidden="true" />
-            Push
+            {following ? 'Push' : 'Publish branch'}
           </Button>
+          )}
         </div>
       </div>
 
@@ -1225,6 +1273,72 @@ export function GitView({
             </DialogFooter>
           </form>
         </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={naming !== null}
+        onOpenChange={(wanted) => {
+          if (!wanted) setNaming(null);
+        }}
+      >
+        {naming && (
+          <DialogContent
+            className="w-[90vw] gap-3 border-b-default bg-surface-raised sm:max-w-md"
+            data-testid="git-name-dialog"
+          >
+            <DialogHeader>
+              <DialogTitle className="text-base text-t-primary">{naming.title}</DialogTitle>
+              {/* The title says it all; the description is for screen readers. */}
+              <DialogDescription className="sr-only">{naming.label}</DialogDescription>
+            </DialogHeader>
+            <form
+              className="flex flex-col gap-3"
+              onSubmit={(sending) => {
+                sending.preventDefault();
+                const typed = named.trim();
+                if (!typed) return;
+                const { told, run } = naming;
+                setNaming(null);
+                void act(told(typed), () => run(typed));
+              }}
+            >
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="git-name-field" className="text-xs font-medium text-t-secondary">
+                  {naming.label}
+                </label>
+                <Input
+                  id="git-name-field"
+                  data-testid="git-name-field"
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={naming.placeholder}
+                  value={named}
+                  onChange={(typing) => setNamed(typing.target.value)}
+                />
+              </div>
+              <DialogFooter className="gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  data-testid="git-name-cancel"
+                  onClick={() => setNaming(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={busy || named.trim() === ''}
+                  data-testid="git-name-confirm"
+                >
+                  {naming.verb}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        )}
       </Dialog>
 
       {/* The one thing that stands between a press and work that cannot be got

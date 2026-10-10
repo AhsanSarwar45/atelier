@@ -715,6 +715,9 @@ pub struct StatusResponse {
     pub untracked: Vec<NamedPath>,
     /// Files a merge left unresolved.
     pub conflicted: Vec<NamedPath>,
+    /// Whether the repository has anywhere to fetch from or push to.
+    #[serde(rename = "hasRemote")]
+    pub has_remote: bool,
 }
 
 /// The word for one of git's status letters, or `None` when the letter means
@@ -891,7 +894,54 @@ pub async fn status(GitQuery(params): GitQuery<PathParams>) -> Answer {
         status.ahead = ahead;
         status.push_to = Some(sent_to);
     }
+    status.has_remote = has_remote(&repo).await;
     Ok(Json(status).into_response())
+}
+
+/// Whether any remote is set up.
+async fn has_remote(repo: &Path) -> bool {
+    matches!(
+        run_git(repo, &["remote"]).await,
+        Ok(o) if o.status.success() && !o.stdout.iter().all(u8::is_ascii_whitespace)
+    )
+}
+
+// ----------------------------------------------------------------------------
+// POST /api/git/remote
+// ----------------------------------------------------------------------------
+
+/// Request body for giving a repository a remote.
+#[derive(Deserialize)]
+pub struct RemoteRequest {
+    /// Absolute working directory of the repository.
+    pub path: String,
+    /// Where the remote lives.
+    pub url: String,
+    /// What to call it. `origin` when left out.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// Give the repository a remote to fetch from and push to.
+///
+/// # Endpoint
+///
+/// `POST /api/git/remote` — `{ path, url, name? }`
+pub async fn add_remote(GitJson(body): GitJson<RemoteRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+    let url = body.url.trim();
+    let name = body.name.as_deref().map(str::trim).unwrap_or("origin");
+    if url.is_empty() {
+        return Err(Refused::new(StatusCode::BAD_REQUEST, "Enter a remote URL."));
+    }
+    not_a_switch("remote URL", url)?;
+    not_a_switch("remote name", name)?;
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    spoke_or_refused(run_git(&repo, &["remote", "add", name, url]).await?)?;
+    Ok(did_it())
 }
 
 // ----------------------------------------------------------------------------
