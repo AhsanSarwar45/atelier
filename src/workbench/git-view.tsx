@@ -27,8 +27,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { formatDistanceToNow } from 'date-fns';
 import {
-  ArrowDown,
-  ArrowUp,
   CloudDownload,
   Download,
   FileDiff,
@@ -936,6 +934,8 @@ export function GitView({
   const hasRemote = status?.hasRemote !== false;
   // Nothing to amend before the first commit.
   const hasCommits = status?.hasCommits !== false;
+  const ahead = status?.ahead ?? 0;
+  const behind = status?.behind ?? 0;
   /** Whether the branch has an upstream to pull from and push to. */
   const following = Boolean(status?.upstream);
   const staged = status?.staged ?? [];
@@ -963,10 +963,9 @@ export function GitView({
         label="Resize panels"
         top={
           <>
-      {/* The line of work, and how far it is from the shared copy. Both counts
-          are drawn whether or not there is anything in them: "0 ahead, 0
-          behind" is an answer, and a row that appears only when it is not zero
-          is a row the reader cannot find when he goes looking for it. */}
+      {/* The line of work. How far it is from its upstream is written on the
+          buttons that close the gap: what Pull would bring, what Push would
+          send. */}
       <div className="flex flex-col gap-1.5 px-3 py-2" data-testid="git-branch">
         {/* Tight against the icon on purpose: the picker beside it carries its
             own room inside, so the eye reads one gap between the two and not
@@ -1026,30 +1025,6 @@ export function GitView({
           >
             <RefreshCw className={cn(reading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
           </Button>
-        </div>
-        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="inline-flex items-center gap-0.5 tabular-nums" data-testid="git-ahead" data-count={status?.ahead ?? 0}>
-            <ArrowUp className="size-3" aria-hidden="true" />
-            {status?.ahead ?? 0}
-            <span className="sr-only">commits ahead</span>
-          </span>
-          <span className="inline-flex items-center gap-0.5 tabular-nums" data-testid="git-behind" data-count={status?.behind ?? 0}>
-            <ArrowDown className="size-3" aria-hidden="true" />
-            {status?.behind ?? 0}
-            <span className="sr-only">commits behind</span>
-          </span>
-          {/* One ref ordinarily, two when the repository pushes somewhere other
-              than it follows — `remote.origin.push` can send this branch to a
-              name its upstream never hears about, and then a single name here
-              is a name one of the two counts was not taken against
-              (bw-xp12.2). The arrow is the push, in the direction the button
-              below sends. */}
-          <span className="min-w-0 flex-1 truncate" data-testid="git-upstream">
-            {status?.upstream ?? 'No upstream'}
-            {status?.pushTo && (
-              <span data-testid="git-push-to"> → {status.pushTo}</span>
-            )}
-          </span>
         </div>
         {/* Talking to the shared copy uses the keys and credential helper the
             user's own setup already carries — the app stores nothing.
@@ -1117,6 +1092,7 @@ export function GitView({
           </Button>
           )}
           {hasRemote && following && (
+          <Tooltip label={status?.upstream ? `Pull from ${status.upstream}` : undefined} wrapperClassName="flex flex-1">
           <Button
             size="sm"
             variant="outline"
@@ -1132,9 +1108,24 @@ export function GitView({
           >
             <Download aria-hidden="true" />
             Pull
+            {/* What a pull would bring. Nothing is drawn at zero, but the
+                count is still on the element for anything reading it. */}
+            <span
+              className={cn('tabular-nums', behind === 0 && 'hidden')}
+              data-testid="git-behind"
+              data-count={behind}
+            >
+              {behind}
+            </span>
+            <span className="sr-only">
+              {' commits from '}
+              <span data-testid="git-upstream">{status?.upstream}</span>
+            </span>
           </Button>
+          </Tooltip>
           )}
           {hasRemote && !status?.detached && (
+          <Tooltip label={following ? `Push to ${status?.pushTo ?? status?.upstream}` : undefined} wrapperClassName="flex flex-1">
           <Button
             size="sm"
             variant="outline"
@@ -1155,7 +1146,23 @@ export function GitView({
           >
             <Upload aria-hidden="true" />
             {following ? 'Push' : 'Publish branch'}
+            <span
+              className={cn('tabular-nums', (ahead === 0 || !following) && 'hidden')}
+              data-testid="git-ahead"
+              data-count={ahead}
+            >
+              {ahead}
+            </span>
+            {/* Where git will really write, which is not always what the
+                branch follows (bw-xp12.2). */}
+            {status?.pushTo && (
+              <span className="sr-only">
+                {' commits to '}
+                <span data-testid="git-push-to">{status.pushTo}</span>
+              </span>
+            )}
           </Button>
+          </Tooltip>
           )}
         </div>
       </div>
