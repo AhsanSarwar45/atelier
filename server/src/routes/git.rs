@@ -721,6 +721,8 @@ pub struct StatusResponse {
     /// Whether anything has been committed yet.
     #[serde(rename = "hasCommits")]
     pub has_commits: bool,
+    /// How many stashes are put away.
+    pub stashes: u32,
 }
 
 /// The word for one of git's status letters, or `None` when the letter means
@@ -899,6 +901,7 @@ pub async fn status(GitQuery(params): GitQuery<PathParams>) -> Answer {
     }
     status.has_remote = has_remote(&repo).await;
     status.has_commits = has_commits(&repo).await;
+    status.stashes = how_many_stashes(&repo).await;
     Ok(Json(status).into_response())
 }
 
@@ -908,6 +911,52 @@ async fn has_remote(repo: &Path) -> bool {
         run_git(repo, &["remote"]).await,
         Ok(o) if o.status.success() && !o.stdout.iter().all(u8::is_ascii_whitespace)
     )
+}
+
+/// How many stashes the repository holds; none when it cannot be read.
+async fn how_many_stashes(repo: &Path) -> u32 {
+    match run_git(repo, &["stash", "list", "--format=%H"]).await {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter(|line| !line.is_empty())
+            .count() as u32,
+        _ => 0,
+    }
+}
+
+// ----------------------------------------------------------------------------
+// POST /api/git/stash
+// ----------------------------------------------------------------------------
+
+/// Request body for putting changes away and bringing them back.
+#[derive(Deserialize)]
+pub struct StashRequest {
+    /// Absolute working directory of the repository.
+    pub path: String,
+    /// Bring the newest stash back rather than making one.
+    #[serde(default)]
+    pub pop: bool,
+}
+
+/// Put every change away, untracked files included, or bring the newest
+/// stash back.
+///
+/// # Endpoint
+///
+/// `POST /api/git/stash` — `{ path, pop? }`
+pub async fn stash(GitJson(body): GitJson<StashRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    let args: &[&str] = if body.pop {
+        &["stash", "pop"]
+    } else {
+        &["stash", "push", "--include-untracked"]
+    };
+    spoke_or_refused(run_git(&repo, args).await?)?;
+    Ok(did_it())
 }
 
 // ----------------------------------------------------------------------------
@@ -971,6 +1020,10 @@ pub struct FilesRequest {
     /// from stale paths stages the wrong set and says nothing about it.
     #[serde(default)]
     pub all: bool,
+    /// Discard only: the files are picked up, and both the index and the
+    /// working tree go back to the last commit.
+    #[serde(default)]
+    pub staged: bool,
 }
 
 /// Pick files to be saved.
@@ -1106,6 +1159,10 @@ pub async fn discard(GitJson(body): GitJson<FilesRequest>) -> Answer {
         return Ok(did_it());
     }
 
+    if body.staged {
+        return discard_staged(&repo, &body.files).await;
+    }
+
     let tracked = the_tracked_ones(&repo, &body.files).await?;
     let untracked: Vec<&str> = body
         .files
@@ -1123,6 +1180,42 @@ pub async fn discard(GitJson(body): GitJson<FilesRequest>) -> Answer {
         spoke_or_refused(clean_away(&repo, &untracked).await?)?;
     }
 
+    Ok(did_it())
+}
+
+/// Put picked-up files back to the last commit, index and working tree both.
+///
+/// A file the last commit has is restored from it. One it does not have was
+/// added since, so there is nothing to restore: it leaves the index and the
+/// disk, which is what discarding a new file means everywhere else here. A
+/// staged rename names both paths, and each goes the way its own state needs.
+async fn discard_staged(repo: &Path, files: &[String]) -> Answer {
+    let mut saved: Vec<&str> = Vec::new();
+    let mut added: Vec<&str> = Vec::new();
+    for file in files {
+        let in_head = has_commits(repo).await
+            && matches!(
+                run_git(repo, &["cat-file", "-e", &format!("HEAD:{file}")]).await,
+                Ok(o) if o.status.success()
+            );
+        if in_head {
+            saved.push(file);
+        } else {
+            added.push(file);
+        }
+    }
+
+    if !saved.is_empty() {
+        let mut args: Vec<&str> =
+            vec!["restore", "--staged", "--worktree", "--source=HEAD", "--"];
+        args.extend(saved.iter().copied());
+        spoke_or_refused(run_git(repo, &args).await?)?;
+    }
+    if !added.is_empty() {
+        let mut args: Vec<&str> = vec!["rm", "-f", "-q", "--"];
+        args.extend(added.iter().copied());
+        spoke_or_refused(run_git(repo, &args).await?)?;
+    }
     Ok(did_it())
 }
 

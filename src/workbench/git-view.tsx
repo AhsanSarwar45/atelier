@@ -27,6 +27,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { formatDistanceToNow } from 'date-fns';
 import {
+  Archive,
+  ArchiveRestore,
   CloudDownload,
   Download,
   FileDiff,
@@ -965,6 +967,7 @@ export function GitView({
       )
       .map((branch) => ({ value: branch.name, label: branch.name, hint: 'Remote' })),
   ];
+  const stashes = status?.stashes ?? 0;
   const canPush = hasRemote && !status?.detached;
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
@@ -1453,6 +1456,47 @@ export function GitView({
           <Panel tone="danger" className="whitespace-pre-wrap break-words font-mono text-[11px] text-danger" data-testid="git-error">
             {fault}
           </Panel>
+        </div>
+      )}
+
+      {/* What is done to the working tree as a whole, on one line above the
+          groups it is done to. Drawn only when one of them applies. */}
+      {status !== null && (!clean || stashes > 0) && (
+        <div className="flex flex-wrap items-center gap-1 px-3 py-1.5" data-testid="git-tree-actions">
+          {!clean && (
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={busy}
+              data-testid="git-stash"
+              onClick={() =>
+                void act(
+                  {
+                    deed: 'stash',
+                    note: howManyFiles(staged.length + unstaged.length + untracked.length),
+                  },
+                  () => git.stash(path),
+                )
+              }
+            >
+              <Archive aria-hidden="true" />
+              Stash
+            </Button>
+          )}
+          {stashes > 0 && (
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={busy}
+              data-testid="git-pop-stash"
+              data-count={stashes}
+              onClick={() => void act({ deed: 'pop' }, () => git.popStash(path))}
+            >
+              <ArchiveRestore aria-hidden="true" />
+              Pop stash
+              <span className="tabular-nums text-t-faint">{stashes}</span>
+            </Button>
+          )}
         </div>
       )}
 

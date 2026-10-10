@@ -20,7 +20,7 @@
  */
 'use client';
 
-import { Check, CloudDownload, Download, FolderGit2, Link, GitBranch, GitCommitVertical, Minus, Plus, Trash2, TriangleAlert, Undo2, Upload, type LucideIcon } from 'lucide-react';
+import { Archive, ArchiveRestore, Check, CloudDownload, Download, FolderGit2, Link, GitBranch, GitCommitVertical, Minus, Plus, Trash2, TriangleAlert, Undo2, Upload, type LucideIcon } from 'lucide-react';
 
 import { toast } from '@/hooks/use-toast';
 import { Spinner } from '@/components/ui/spinner';
@@ -39,7 +39,9 @@ export type GitDeed =
   | 'discard'
   | 'remove'
   | 'stage'
-  | 'unstage';
+  | 'unstage'
+  | 'stash'
+  | 'pop';
 
 /** The three words an operation is known by, and the mark it carries. */
 interface DeedWords {
@@ -73,6 +75,8 @@ const DEEDS: Record<GitDeed, DeedWords> = {
   remove: { icon: Trash2, doing: 'Deleting', done: 'Deleted', failed: 'Delete failed' },
   stage: { icon: Plus, doing: 'Staging', done: 'Staged', failed: 'Stage failed' },
   unstage: { icon: Minus, doing: 'Unstaging', done: 'Unstaged', failed: 'Unstage failed' },
+  stash: { icon: Archive, doing: 'Stashing', done: 'Stashed', failed: 'Stash failed' },
+  pop: { icon: ArchiveRestore, doing: 'Popping stash', done: 'Stash popped', failed: 'Pop stash failed' },
 };
 
 /** Long enough that nothing dismisses a running toast but the call finishing. */

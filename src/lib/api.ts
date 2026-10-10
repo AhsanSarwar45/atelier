@@ -691,6 +691,8 @@ export interface GitStatus {
   hasRemote?: boolean;
   /** Whether anything has been committed yet. */
   hasCommits?: boolean;
+  /** How many stashes are put away. */
+  stashes?: number;
 }
 
 /** What a mutating call answers when git said nothing else. */
@@ -1020,6 +1022,22 @@ export const git = {
    * Everything tracked back to HEAD and every untracked file gone. What the
    * project ignores is kept — this never reaches a `.env` or a build.
    */
+  /** Put staged files back to the last commit, index and working tree both. */
+  discardStaged: (path: string, files: string[]) => fetchApi<GitOk>('/api/git/discard', {
+    method: 'POST',
+    body: JSON.stringify({ path, files, staged: true }),
+  }),
+
+  stash: (path: string) => fetchApi<GitOk>('/api/git/stash', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  }),
+
+  popStash: (path: string) => fetchApi<GitOk>('/api/git/stash', {
+    method: 'POST',
+    body: JSON.stringify({ path, pop: true }),
+  }),
+
   discardAll: (path: string) => fetchApi<GitOk>('/api/git/discard', {
     method: 'POST',
     body: JSON.stringify({ path, all: true }),
