@@ -177,6 +177,7 @@ async fn stage(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
             path: here(dir),
             files: files.iter().map(|f| (*f).to_string()).collect(),
             all: false,
+            staged: false,
         }))
         .await,
     )
@@ -189,6 +190,7 @@ async fn unstage(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
             path: here(dir),
             files: files.iter().map(|f| (*f).to_string()).collect(),
             all: false,
+            staged: false,
         }))
         .await,
     )
@@ -202,6 +204,7 @@ async fn stage_all(dir: &TempDir) -> (StatusCode, Value) {
             path: here(dir),
             files: vec![],
             all: true,
+            staged: false,
         }))
         .await,
     )
@@ -214,6 +217,7 @@ async fn unstage_all(dir: &TempDir) -> (StatusCode, Value) {
             path: here(dir),
             files: vec![],
             all: true,
+            staged: false,
         }))
         .await,
     )
@@ -226,6 +230,7 @@ async fn discard(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
             path: here(dir),
             files: files.iter().map(|f| (*f).to_string()).collect(),
             all: false,
+            staged: false,
         }))
         .await,
     )
@@ -238,6 +243,7 @@ async fn discard_all(dir: &TempDir) -> (StatusCode, Value) {
             path: here(dir),
             files: vec![],
             all: true,
+            staged: false,
         }))
         .await,
     )
@@ -250,6 +256,7 @@ async fn remove(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
             path: here(dir),
             files: files.iter().map(|f| (*f).to_string()).collect(),
             all: false,
+            staged: false,
         }))
         .await,
     )
@@ -459,6 +466,7 @@ async fn many_mutating_calls_at_one_project_wait_for_each_other_instead_of_colli
             path: here(&repo),
             files: vec![name.clone()],
             all: false,
+            staged: false,
         }))
     });
     let answers = futures::future::join_all(calls).await;
@@ -992,6 +1000,7 @@ async fn the_lines_of_work_are_listed_switched_and_their_saved_changes_read() {
             path: here(&repo),
             branch: "feature-one".to_string(),
             create: false,
+            track: false,
         }))
         .await,
     )
@@ -1007,6 +1016,7 @@ async fn the_lines_of_work_are_listed_switched_and_their_saved_changes_read() {
             path: here(&repo),
             branch: "feature-three".to_string(),
             create: true,
+            track: false,
         }))
         .await,
     )
@@ -1023,6 +1033,7 @@ async fn the_lines_of_work_are_listed_switched_and_their_saved_changes_read() {
             path: here(&repo),
             branch: "no-such-line".to_string(),
             create: false,
+            track: false,
         }))
         .await,
     )
@@ -2739,6 +2750,7 @@ async fn a_move_that_would_lose_unsaved_work_is_refused_in_gits_own_words() {
             path: here(&repo),
             branch: "other-line".to_string(),
             create: false,
+            track: false,
         }))
         .await,
     )
@@ -2821,4 +2833,340 @@ async fn init_is_refused_inside_a_repository() {
 
     assert_eq!(code, StatusCode::CONFLICT, "{body}");
     assert!(!dir.path().join("inner/.git").exists());
+}
+
+// ----------------------------------------------------------------------------
+// What the panel does beyond stage and commit (bw-7s0up)
+// ----------------------------------------------------------------------------
+
+fn only(path: &TempDir) -> git::PathRequest {
+    git::PathRequest {
+        path: here(path),
+        passphrase: None,
+    }
+}
+
+async fn stash_at(dir: &TempDir, pop: bool) -> (StatusCode, Value) {
+    answered(git::stash(GitJson(git::StashRequest { path: here(dir), pop })).await).await
+}
+
+async fn discard_staged(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
+    answered(
+        git::discard(GitJson(git::FilesRequest {
+            path: here(dir),
+            files: files.iter().map(|f| (*f).to_string()).collect(),
+            all: false,
+            staged: true,
+        }))
+        .await,
+    )
+    .await
+}
+
+async fn resolve(dir: &TempDir, file: &str, side: &str) -> (StatusCode, Value) {
+    answered(
+        git::resolve(GitJson(git::ResolveRequest {
+            path: here(dir),
+            files: vec![file.to_string()],
+            side: side.to_string(),
+        }))
+        .await,
+    )
+    .await
+}
+
+async fn operate(dir: &TempDir, action: &str) -> (StatusCode, Value) {
+    answered(
+        git::operation(GitJson(git::OperationRequest {
+            path: here(dir),
+            action: action.to_string(),
+        }))
+        .await,
+    )
+    .await
+}
+
+/// A repository stopped in the middle of a merge: `both.txt` changed on both
+/// sides, and `gone.txt` changed here and deleted there.
+fn a_merge_in_conflict() -> TempDir {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "both.txt", "base\n");
+    put(at, "gone.txt", "base\n");
+    save_all(at, "base");
+    run(at, &["checkout", "-q", "-b", "theirs"]);
+    put(at, "both.txt", "theirs\n");
+    fs::remove_file(at.join("gone.txt")).expect("the file is deleted");
+    save_all(at, "their side");
+    run(at, &["checkout", "-q", "main"]);
+    put(at, "both.txt", "ours\n");
+    put(at, "gone.txt", "ours\n");
+    save_all(at, "our side");
+    run_anyway(at, &["merge", "theirs"]);
+    repo
+}
+
+#[tokio::test]
+async fn the_status_says_whether_there_is_a_remote_and_a_commit() {
+    let repo = a_repo();
+    let (_, body) = status_of(&repo).await;
+    assert_eq!(body["hasRemote"], false, "{body}");
+    assert_eq!(body["hasCommits"], false, "{body}");
+    assert_eq!(body["stashes"], 0);
+    assert_eq!(body["operation"], Value::Null);
+
+    put(repo.path(), "a.txt", "one\n");
+    save_all(repo.path(), "first");
+    let shared = a_shared_copy();
+    let (code, said) = answered(
+        git::add_remote(GitJson(git::RemoteRequest {
+            path: here(&repo),
+            url: here(&shared),
+            name: None,
+        }))
+        .await,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{said}");
+    assert_eq!(run(repo.path(), &["remote", "get-url", "origin"]), here(&shared));
+
+    let (_, body) = status_of(&repo).await;
+    assert_eq!(body["hasRemote"], true, "{body}");
+    assert_eq!(body["hasCommits"], true, "{body}");
+}
+
+#[tokio::test]
+async fn a_remote_needs_a_url_and_not_a_switch() {
+    let repo = a_repo();
+    for url in ["  ", "--upload-pack=touch /tmp/x"] {
+        let (code, _) = answered(
+            git::add_remote(GitJson(git::RemoteRequest {
+                path: here(&repo),
+                url: url.to_string(),
+                name: None,
+            }))
+            .await,
+        )
+        .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{url:?}");
+    }
+    assert_eq!(run(repo.path(), &["remote"]), "");
+}
+
+#[tokio::test]
+async fn picking_a_remote_branch_makes_a_local_one_that_follows_it() {
+    let shared = a_shared_copy();
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "a.txt", "one\n");
+    save_all(at, "first");
+    run(at, &["remote", "add", "origin", &here(&shared)]);
+    run(at, &["push", "-q", "-u", "origin", "main"]);
+    run(at, &["push", "-q", "origin", "main:feature"]);
+    run(at, &["fetch", "-q"]);
+
+    let (code, said) = answered(
+        git::checkout(GitJson(git::CheckoutRequest {
+            path: here(&repo),
+            branch: "origin/feature".to_string(),
+            create: false,
+            track: true,
+        }))
+        .await,
+    )
+    .await;
+
+    assert_eq!(code, StatusCode::OK, "{said}");
+    let (_, body) = status_of(&repo).await;
+    assert_eq!(body["branch"], "feature");
+    assert_eq!(body["upstream"], "origin/feature");
+    assert_eq!(body["detached"], false);
+}
+
+#[tokio::test]
+async fn a_stash_takes_every_change_and_a_pop_brings_them_back() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "a.txt", "one\n");
+    save_all(at, "first");
+    put(at, "a.txt", "two\n");
+    put(at, "new.txt", "new\n");
+
+    let (code, said) = stash_at(&repo, false).await;
+    assert_eq!(code, StatusCode::OK, "{said}");
+    let (_, body) = status_of(&repo).await;
+    assert_eq!(body["stashes"], 1, "{body}");
+    assert!(named(&body, "unstaged").is_empty() && named(&body, "untracked").is_empty(), "{body}");
+    assert!(!at.join("new.txt").exists(), "an untracked file is stashed too");
+
+    let (code, said) = stash_at(&repo, true).await;
+    assert_eq!(code, StatusCode::OK, "{said}");
+    let (_, body) = status_of(&repo).await;
+    assert_eq!(body["stashes"], 0, "{body}");
+    assert_eq!(reads(at, "a.txt"), "two\n");
+    assert_eq!(reads(at, "new.txt"), "new\n");
+}
+
+#[tokio::test]
+async fn discarding_a_staged_file_puts_it_back_to_the_last_commit() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "kept.txt", "one\n");
+    put(at, "moved.txt", "a file long enough to be seen as the same file when it moves\n");
+    save_all(at, "first");
+
+    // Staged, then changed again: both halves go.
+    put(at, "kept.txt", "two\n");
+    run(at, &["add", "kept.txt"]);
+    put(at, "kept.txt", "three\n");
+    // Added since the last commit: nothing to go back to.
+    put(at, "added.txt", "new\n");
+    run(at, &["add", "added.txt"]);
+    // A staged rename is two paths.
+    run(at, &["mv", "moved.txt", "renamed.txt"]);
+
+    let (code, said) =
+        discard_staged(&repo, &["kept.txt", "added.txt", "renamed.txt", "moved.txt"]).await;
+
+    assert_eq!(code, StatusCode::OK, "{said}");
+    assert_eq!(reads(at, "kept.txt"), "one\n");
+    assert!(!at.join("added.txt").exists());
+    assert!(!at.join("renamed.txt").exists());
+    assert!(at.join("moved.txt").exists());
+    assert_eq!(run(at, &["status", "--porcelain"]), "");
+}
+
+#[tokio::test]
+async fn a_staged_file_is_discarded_before_the_first_commit_too() {
+    let repo = a_repo();
+    put(repo.path(), "first.txt", "one\n");
+    run(repo.path(), &["add", "first.txt"]);
+
+    let (code, said) = discard_staged(&repo, &["first.txt"]).await;
+
+    assert_eq!(code, StatusCode::OK, "{said}");
+    assert!(!repo.path().join("first.txt").exists());
+}
+
+#[tokio::test]
+async fn a_conflict_is_settled_as_ours_or_as_theirs() {
+    let repo = a_merge_in_conflict();
+    let at = repo.path();
+    let (_, body) = status_of(&repo).await;
+    assert_eq!(body["operation"], "merge", "{body}");
+    assert_eq!(named(&body, "conflicted").len(), 2, "{body}");
+
+    let (code, said) = resolve(&repo, "both.txt", "theirs").await;
+    assert_eq!(code, StatusCode::OK, "{said}");
+    assert_eq!(reads(at, "both.txt"), "theirs\n");
+
+    // Their side deleted this one, so taking theirs deletes it.
+    let (code, said) = resolve(&repo, "gone.txt", "theirs").await;
+    assert_eq!(code, StatusCode::OK, "{said}");
+    assert!(!at.join("gone.txt").exists());
+
+    let (_, body) = status_of(&repo).await;
+    assert!(named(&body, "conflicted").is_empty(), "{body}");
+    assert_eq!(body["operation"], "merge", "the merge still waits to be committed");
+}
+
+#[tokio::test]
+async fn taking_ours_keeps_what_was_here() {
+    let repo = a_merge_in_conflict();
+    let at = repo.path();
+
+    for file in ["both.txt", "gone.txt"] {
+        let (code, said) = resolve(&repo, file, "ours").await;
+        assert_eq!(code, StatusCode::OK, "{said}");
+        assert_eq!(reads(at, file), "ours\n");
+    }
+    let (code, _) = resolve(&repo, "both.txt", "mine").await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn aborting_a_merge_puts_the_branch_back() {
+    let repo = a_merge_in_conflict();
+    let at = repo.path();
+
+    let (code, said) = operate(&repo, "abort").await;
+
+    assert_eq!(code, StatusCode::OK, "{said}");
+    let (_, body) = status_of(&repo).await;
+    assert_eq!(body["operation"], Value::Null, "{body}");
+    assert!(named(&body, "conflicted").is_empty());
+    assert_eq!(reads(at, "both.txt"), "ours\n");
+
+    // Nothing under way is nothing to abort.
+    let (code, _) = operate(&repo, "abort").await;
+    assert_eq!(code, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn a_rebase_goes_on_once_its_conflict_is_settled() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "both.txt", "base\n");
+    save_all(at, "base");
+    run(at, &["checkout", "-q", "-b", "topic"]);
+    put(at, "both.txt", "topic\n");
+    save_all(at, "topic change");
+    run(at, &["checkout", "-q", "main"]);
+    put(at, "both.txt", "main\n");
+    save_all(at, "main change");
+    run(at, &["checkout", "-q", "topic"]);
+    run_anyway(at, &["rebase", "main"]);
+
+    let (_, body) = status_of(&repo).await;
+    assert_eq!(body["operation"], "rebase", "{body}");
+    // In a rebase "theirs" is the commit being replayed.
+    let (code, said) = resolve(&repo, "both.txt", "theirs").await;
+    assert_eq!(code, StatusCode::OK, "{said}");
+    let (code, said) = operate(&repo, "continue").await;
+    assert_eq!(code, StatusCode::OK, "{said}");
+
+    let (_, body) = status_of(&repo).await;
+    assert_eq!(body["operation"], Value::Null, "{body}");
+    assert_eq!(body["branch"], "topic");
+    assert_eq!(reads(at, "both.txt"), "topic\n");
+    assert_eq!(run(at, &["log", "--format=%s"]), "topic change\nmain change\nbase");
+}
+
+#[tokio::test]
+async fn undoing_a_commit_keeps_what_it_saved_staged() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "a.txt", "one\n");
+    let first = save_all(at, "first");
+    put(at, "a.txt", "two\n");
+    save_all(at, "second\n\nWith a body.");
+
+    let (code, body) = answered(git::undo_commit(GitJson(only(&repo))).await).await;
+
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["message"], "second\n\nWith a body.");
+    assert_eq!(run(at, &["rev-parse", "HEAD"]), first);
+    assert_eq!(reads(at, "a.txt"), "two\n");
+    let (_, status) = status_of(&repo).await;
+    assert_eq!(named(&status, "staged"), vec!["a.txt"]);
+}
+
+#[tokio::test]
+async fn undoing_the_first_commit_leaves_a_repository_with_none() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "a.txt", "one\n");
+    save_all(at, "first");
+
+    let (code, body) = answered(git::undo_commit(GitJson(only(&repo))).await).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["message"], "first");
+    let (_, status) = status_of(&repo).await;
+    assert_eq!(status["hasCommits"], false, "{status}");
+    assert_eq!(status["branch"], "main");
+    assert_eq!(named(&status, "staged"), vec!["a.txt"]);
+
+    // And then there is nothing left to undo.
+    let (code, _) = answered(git::undo_commit(GitJson(only(&repo))).await).await;
+    assert_eq!(code, StatusCode::CONFLICT);
 }

@@ -33,7 +33,7 @@ const LIMITS = [
   { value: 600, label: '10 minutes' },
 ];
 
-function Choose({
+export function Choose({
   id,
   value,
   choices,

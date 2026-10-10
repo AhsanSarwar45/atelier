@@ -1079,6 +1079,14 @@ export const git = {
   // for that one call and keeps nothing.
 
   /** Ask the shared copy where it is, without touching the working tree. */
+  /** A commit message written from what is staged. A model runs, so it is slow. */
+  generateMessage: (path: string) =>
+    fetchApi<{ message: string }>('/api/git/commit-message', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+      deadlineMs: REMOTE_DEADLINE_MS,
+    }),
+
   /** Take the last commit back, keeping what it saved staged. */
   undoCommit: (path: string) =>
     fetchApi<{ ok: boolean; message: string }>('/api/git/undo-commit', {
@@ -1672,6 +1680,32 @@ export async function searchSettings(): Promise<SearchSettings> {
   const answer = await request('/api/settings/search');
   if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
   return (await answer.json()) as SearchSettings;
+}
+
+/** Which agent writes commit messages; every field null leaves it to the app. */
+export interface CommitMessageSettings {
+  provider: 'claude' | 'codex' | null;
+  profile: string | null;
+  model: string | null;
+  effort: string | null;
+}
+
+export async function commitMessageSettings(): Promise<CommitMessageSettings> {
+  const answer = await request('/api/settings/commit-message');
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as CommitMessageSettings;
+}
+
+export async function saveCommitMessageSettings(
+  settings: CommitMessageSettings,
+): Promise<CommitMessageSettings> {
+  const answer = await request('/api/settings/commit-message', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as CommitMessageSettings;
 }
 
 /** Save every field as it now stands; answers what the server then holds. */

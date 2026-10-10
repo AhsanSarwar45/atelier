@@ -174,7 +174,7 @@ pub struct Refused {
 
 impl Refused {
     /// The ordinary refusal: a code and git's own words.
-    fn new(code: StatusCode, said: impl Into<String>) -> Self {
+    pub(crate) fn new(code: StatusCode, said: impl Into<String>) -> Self {
         Refused {
             code,
             said: said.into(),
@@ -311,7 +311,7 @@ pub fn repo_lock(repo: &Path) -> RepoLock {
 // ----------------------------------------------------------------------------
 
 /// Check the working directory a route was handed before anything touches it.
-fn checked_repo(path: &str) -> Result<PathBuf, Refused> {
+pub(crate) fn checked_repo(path: &str) -> Result<PathBuf, Refused> {
     let repo = Path::new(path);
 
     if let Err(e) = validate_path_security(repo) {
@@ -336,7 +336,7 @@ fn checked_repo(path: &str) -> Result<PathBuf, Refused> {
 }
 
 /// Run git in `repo` and hand back everything it produced.
-async fn run_git(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
+pub(crate) async fn run_git(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
     super::git_output(repo, args).await.map_err(could_not_run)
 }
 
@@ -574,7 +574,7 @@ fn a_key_could_fix_it(said: &str) -> bool {
 }
 
 /// Pass the output on, or turn a nonzero exit into git's own refusal.
-fn spoke_or_refused(output: Output) -> Result<Output, Refused> {
+pub(crate) fn spoke_or_refused(output: Output) -> Result<Output, Refused> {
     if output.status.success() {
         Ok(output)
     } else {

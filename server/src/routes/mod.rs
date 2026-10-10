@@ -5,6 +5,7 @@
 
 pub mod beads;
 pub mod cli;
+pub mod commit_message;
 pub mod dolt;
 pub mod environment;
 pub mod fs;

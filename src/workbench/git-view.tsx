@@ -39,6 +39,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
   Undo2,
   Upload,
@@ -191,9 +192,11 @@ function Section({
       <div className="flex items-center gap-1">
         <h3 className="min-w-0 flex-1 truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           {onToggle ? (
-            <button
+            <Button
               type="button"
-              className="flex w-full min-w-0 items-center gap-1 rounded-sm text-left uppercase tracking-wide hover:text-t-secondary focus-visible:outline-2 focus-visible:outline-ring"
+              size="xs"
+              variant="ghost"
+              className="-ml-1 h-5 w-full min-w-0 justify-start gap-1 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
               aria-expanded={!collapsed}
               data-testid="git-section-toggle"
               onClick={onToggle}
@@ -204,7 +207,7 @@ function Section({
               />
               <span className="truncate">{title}</span>
               {count === undefined ? null : <span className="tabular-nums text-t-faint">{count}</span>}
-            </button>
+            </Button>
           ) : (
             <>
               {title}
@@ -1905,7 +1908,29 @@ export function GitView({
       <Section
         title="Commit"
         actions={
-          hasCommits && !operation ? (
+          <>
+            {/* Written from what is staged, by the agent chosen in Settings.
+                It only fills the box: nothing is committed until Commit is
+                pressed, and what is written there can be changed first. */}
+            <Tooltip label={staged.length === 0 ? 'Stage changes to generate a message' : 'Generate message'}>
+              <Button
+                size="xs"
+                mode="icon"
+                variant="ghost"
+                disabled={busy || staged.length === 0}
+                aria-label="Generate message"
+                data-testid="git-generate-message"
+                onClick={() =>
+                  void act({ deed: 'generate', note: howManyFiles(staged.length) }, async () => {
+                    const written = await git.generateMessage(path);
+                    setMessage(written.message);
+                  })
+                }
+              >
+                <Sparkles aria-hidden="true" />
+              </Button>
+            </Tooltip>
+            {hasCommits && !operation && (
             <Tooltip label="Undo last commit">
               <Button
                 size="xs"
@@ -1936,7 +1961,8 @@ export function GitView({
                 <Undo2 aria-hidden="true" />
               </Button>
             </Tooltip>
-          ) : undefined
+            )}
+          </>
         }
       >
         <Textarea
@@ -2015,10 +2041,12 @@ export function GitView({
         }
         bottom={
           <>
-            <div className="shrink-0 px-3 pt-2">
-              <button
+            <div className={cn('shrink-0 px-3 pt-2', folded('history') && 'pb-2')}>
+              <Button
                 type="button"
-                className="flex w-full items-center gap-1 rounded-sm pb-1 text-left text-[11px] font-medium uppercase tracking-wide text-muted-foreground hover:text-t-secondary focus-visible:outline-2 focus-visible:outline-ring"
+                size="xs"
+                variant="ghost"
+                className="-ml-1 h-5 w-full justify-start gap-1 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
                 aria-expanded={!folded('history')}
                 data-testid="git-history-toggle"
                 onClick={() => flip('history')}
@@ -2031,7 +2059,7 @@ export function GitView({
                   aria-hidden="true"
                 />
                 History
-              </button>
+              </Button>
             </div>
             {/* Folded, the history is not read at all. */}
             {!folded('history') && (

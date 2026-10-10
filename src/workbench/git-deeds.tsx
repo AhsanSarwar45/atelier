@@ -20,7 +20,7 @@
  */
 'use client';
 
-import { Archive, ArchiveRestore, Check, CloudDownload, Download, FolderGit2, Link, GitBranch, GitCommitVertical, Minus, Plus, Trash2, TriangleAlert, Undo2, Upload, type LucideIcon } from 'lucide-react';
+import { Archive, Sparkles, ArchiveRestore, Check, CloudDownload, Download, FolderGit2, Link, GitBranch, GitCommitVertical, Minus, Plus, Trash2, TriangleAlert, Undo2, Upload, type LucideIcon } from 'lucide-react';
 
 import { toast } from '@/hooks/use-toast';
 import { Spinner } from '@/components/ui/spinner';
@@ -34,6 +34,7 @@ export type GitDeed =
   | 'push'
   | 'commit'
   | 'amend'
+  | 'generate'
   | 'undo'
   | 'checkout'
   | 'branch'
@@ -73,6 +74,7 @@ const DEEDS: Record<GitDeed, DeedWords> = {
   push: { icon: Upload, doing: 'Pushing', done: 'Pushed', failed: 'Push failed' },
   commit: { icon: GitCommitVertical, doing: 'Committing', done: 'Committed', failed: 'Commit failed' },
   amend: { icon: GitCommitVertical, doing: 'Amending', done: 'Amended', failed: 'Amend failed' },
+  generate: { icon: Sparkles, doing: 'Generating message', done: 'Message generated', failed: 'Generate message failed' },
   undo: { icon: Undo2, doing: 'Undoing commit', done: 'Commit undone', failed: 'Undo commit failed' },
   checkout: { icon: GitBranch, doing: 'Switching', done: 'Switched', failed: 'Switch failed' },
   branch: { icon: GitBranch, doing: 'Creating branch', done: 'Branch created', failed: 'Create branch failed' },

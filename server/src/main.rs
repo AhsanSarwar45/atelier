@@ -708,6 +708,13 @@ async fn serve(open_browser: bool) {
             "/api",
             routes::search_settings::search_settings_routes().with_state(database.clone()),
         )
+        // Which agent writes commit messages. Same table, same guard
+        // (routes/commit_message.rs).
+        .nest(
+            "/api",
+            routes::commit_message::commit_message_settings_routes()
+                .with_state(database.clone()),
+        )
         // How much memory one chat may hold. Same table, same guard
         // (routes/memory_settings.rs).
         .nest(
@@ -787,6 +794,10 @@ async fn serve(open_browser: bool) {
         .route("/api/git/remove", post(routes::git::remove))
         .route("/api/git/commit", post(routes::git::commit))
         .route("/api/git/undo-commit", post(routes::git::undo_commit))
+        .route(
+            "/api/git/commit-message",
+            post(routes::commit_message::generate),
+        )
         .route("/api/git/fetch", post(routes::git::fetch))
         .route("/api/git/pull", post(routes::git::pull))
         .route("/api/git/push", post(routes::git::push))

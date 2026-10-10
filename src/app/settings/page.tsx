@@ -12,7 +12,7 @@ import { Suspense, useCallback, useMemo } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { Bell, FileCode2, Gauge, Globe, Info, MemoryStick, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
+import { Bell, FileCode2, Gauge, GitBranch, Globe, Info, MemoryStick, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
 
 import { AboutSettings } from '@/components/settings/about-settings';
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
@@ -30,6 +30,7 @@ import { stepsOut } from '@/lib/address';
 import { SignedOutMark, useStanding } from '@/workbench/account-standing';
 import { AccountsSettings } from '@/workbench/accounts-settings';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
+import { CommitMessageSettings } from '@/workbench/commit-message-settings';
 import { DependenciesSettings } from '@/workbench/dependencies-settings';
 import { SYSTEM_PROFILE } from '@/workbench/protocol';
 import { LimitSettings } from '@/workbench/limit-settings';
@@ -46,6 +47,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'codex', label: 'Codex', hint: 'Per account', icon: <BrandIcon brand="codex" /> },
   { id: 'files', label: 'Agent files', hint: 'Per account', icon: <FileCode2 /> },
   { id: 'search', label: 'Search', hint: 'AI search', icon: <Search /> },
+  { id: 'git', label: 'Git', hint: 'Commit messages', icon: <GitBranch /> },
   { id: 'limits', label: 'Usage limits', hint: 'Resume', icon: <Gauge /> },
   { id: 'memory', label: 'Memory', hint: 'Chat limit', icon: <MemoryStick /> },
   { id: 'terminal', label: 'Terminal', hint: 'Shell', icon: <SquareTerminal /> },
@@ -159,6 +161,7 @@ function Settings() {
         </div>
       )}
       {known === 'search' && <SearchSettings />}
+      {known === 'git' && <CommitMessageSettings />}
       {known === 'limits' && <LimitSettings />}
       {known === 'memory' && <MemorySettings />}
       {known === 'terminal' && (
