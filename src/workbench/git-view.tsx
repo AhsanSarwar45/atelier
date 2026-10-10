@@ -1463,6 +1463,20 @@ export function GitView({
           groups it is done to. Drawn only when one of them applies. */}
       {status !== null && (!clean || stashes > 0) && (
         <div className="flex flex-wrap items-center gap-1 px-3 py-1.5" data-testid="git-tree-actions">
+          {/* One button for both groups it stages: it used to be drawn on
+              each, doing the same thing twice. */}
+          {unstaged.length + untracked.length > 0 && (
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={busy}
+              data-testid="git-stage-all"
+              onClick={() => void act({ deed: 'stage', quiet: true }, () => git.stageAll(path))}
+            >
+              <Plus aria-hidden="true" />
+              Stage all
+            </Button>
+          )}
           {!clean && (
             <Button
               size="xs"
@@ -1614,19 +1628,6 @@ export function GitView({
           testId="git-unstaged"
           actions={
             <>
-              <Button
-                size="xs"
-                variant="ghost"
-                className="h-5 px-1 text-[10px]"
-                disabled={busy}
-                data-testid="git-stage-all"
-                onClick={() =>
-                void act({ deed: 'stage', quiet: true }, () => git.stageAll(path))
-              }
-              >
-                <Plus aria-hidden="true" />
-                Stage all
-              </Button>
               {/* Everything back to the last saved change, and every new file
                   gone with it. What the project ignores is kept — this is not
                   the button that eats somebody's .env. */}
@@ -1699,26 +1700,7 @@ export function GitView({
       )}
 
       {shown && untracked.length > 0 && (
-        <Section
-          title="Untracked"
-          count={untracked.length}
-          testId="git-untracked"
-          actions={
-            <Button
-              size="xs"
-              variant="ghost"
-              className="h-5 px-1 text-[10px]"
-              disabled={busy}
-              data-testid="git-stage-all"
-              onClick={() =>
-                void act({ deed: 'stage', quiet: true }, () => git.stageAll(path))
-              }
-            >
-              <Plus aria-hidden="true" />
-              Stage all
-            </Button>
-          }
-        >
+        <Section title="Untracked" count={untracked.length} testId="git-untracked">
           <FileRows
             files={untracked}
             keyOf={(file) => file.path}

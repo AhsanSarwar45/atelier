@@ -195,7 +195,7 @@ test.describe('the Git panel’s bulk and destructive actions', () => {
       await page.screenshot({ path: `${SHOTS}/git-panel-bulk-before.png` });
 
       // ---- stage all --------------------------------------------------------
-      await page.getByTestId('git-unstaged').getByTestId('git-stage-all').click();
+      await page.getByTestId('git-stage-all').click();
 
       // Everything changed and everything new is picked, in one press, and the
       // two groups they came out of are gone.

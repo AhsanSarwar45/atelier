@@ -245,10 +245,9 @@ describe('the bulk actions, which take nothing back and so ask nothing', () => {
   it('picks everything up on the spot', async () => {
     await panel();
 
-    // Two groups carry a Stage all; either is the same `git add -A`.
-    fireEvent.click(
-      screen.getByTestId('git-unstaged').querySelector('[data-testid="git-stage-all"]') as Element,
-    );
+    // One Stage all for both groups it stages, not one drawn on each.
+    expect(screen.getAllByTestId('git-stage-all')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('git-stage-all'));
 
     await waitFor(() => expect(calls.stageAll).toHaveBeenCalledWith(REPO));
     expect(screen.queryByTestId('git-confirm-dialog')).toBeNull();
