@@ -1434,6 +1434,53 @@ pub async fn commit(GitJson(body): GitJson<CommitRequest>) -> Answer {
 }
 
 // ----------------------------------------------------------------------------
+// POST /api/git/undo-commit
+// ----------------------------------------------------------------------------
+
+/// Take the last commit back, keeping everything it saved staged.
+///
+/// `git reset --soft HEAD~1`: the branch moves back one commit and neither the
+/// index nor the working tree is touched, so nothing is lost and the same
+/// commit can be made again. The very first commit has no parent to move back
+/// to, so its ref is removed instead, which leaves the same thing behind: a
+/// branch with nothing saved and everything staged.
+///
+/// The message is handed back so the panel can put it in the box again.
+///
+/// # Endpoint
+///
+/// `POST /api/git/undo-commit` — `{ path }` → `{ ok, message }`
+pub async fn undo_commit(GitJson(body): GitJson<PathRequest>) -> Answer {
+    let repo = checked_repo(&body.path)?;
+
+    let turn = repo_lock(&repo);
+    let _holding = turn.lock().await;
+
+    if !has_commits(&repo).await {
+        return Err(Refused::new(StatusCode::CONFLICT, "No commits yet."));
+    }
+    if let Some(under_way) = operation_under_way(&repo).await {
+        return Err(Refused::new(
+            StatusCode::CONFLICT,
+            format!("Finish or abort the {under_way} first."),
+        ));
+    }
+    let said = spoke_or_refused(run_git(&repo, &["log", "-1", "--format=%B"]).await?)?;
+    let message = String::from_utf8_lossy(&said.stdout).trim_end().to_string();
+
+    let has_parent = matches!(
+        run_git(&repo, &["rev-parse", "--verify", "--quiet", "HEAD~1"]).await,
+        Ok(o) if o.status.success()
+    );
+    if has_parent {
+        spoke_or_refused(run_git(&repo, &["reset", "--soft", "HEAD~1"]).await?)?;
+    } else {
+        spoke_or_refused(run_git(&repo, &["update-ref", "-d", "HEAD"]).await?)?;
+    }
+    Ok(Json(serde_json::json!({ "ok": true, "message": message })).into_response())
+}
+
+// ----------------------------------------------------------------------------
 // POST /api/git/fetch, /api/git/pull, /api/git/push
 // ----------------------------------------------------------------------------
 

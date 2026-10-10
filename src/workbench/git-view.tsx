@@ -1902,7 +1902,43 @@ export function GitView({
       </div>
 
       <div className="shrink-0 border-t border-border/60" data-testid="git-compose">
-      <Section title="Commit">
+      <Section
+        title="Commit"
+        actions={
+          hasCommits && !operation ? (
+            <Tooltip label="Undo last commit">
+              <Button
+                size="xs"
+                mode="icon"
+                variant="ghost"
+                disabled={busy}
+                aria-label="Undo last commit"
+                data-testid="git-undo-commit"
+                onClick={() =>
+                  askFirst(
+                    // Nothing ahead of an upstream means the commit is already
+                    // on the remote, and taking it back here leaves the two
+                    // apart.
+                    following && ahead === 0
+                      ? 'Undo the last commit? Its changes stay staged. This commit is already pushed, so the branch will be behind its upstream.'
+                      : 'Undo the last commit? Its changes stay staged.',
+                    'Undo commit',
+                    { deed: 'undo', note: lastCommit ? shortened(lastCommit.subject) : undefined },
+                    async () => {
+                      const undone = await git.undoCommit(path);
+                      // Its wording goes back in the box, unless something
+                      // has been written there since.
+                      setMessage((was) => (was.trim() === '' ? undone.message : was));
+                    },
+                  )
+                }
+              >
+                <Undo2 aria-hidden="true" />
+              </Button>
+            </Tooltip>
+          ) : undefined
+        }
+      >
         <Textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}

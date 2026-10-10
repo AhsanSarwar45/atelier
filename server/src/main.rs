@@ -786,6 +786,7 @@ async fn serve(open_browser: bool) {
         .route("/api/git/discard", post(routes::git::discard))
         .route("/api/git/remove", post(routes::git::remove))
         .route("/api/git/commit", post(routes::git::commit))
+        .route("/api/git/undo-commit", post(routes::git::undo_commit))
         .route("/api/git/fetch", post(routes::git::fetch))
         .route("/api/git/pull", post(routes::git::pull))
         .route("/api/git/push", post(routes::git::push))

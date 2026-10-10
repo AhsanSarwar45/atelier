@@ -1079,6 +1079,13 @@ export const git = {
   // for that one call and keeps nothing.
 
   /** Ask the shared copy where it is, without touching the working tree. */
+  /** Take the last commit back, keeping what it saved staged. */
+  undoCommit: (path: string) =>
+    fetchApi<{ ok: boolean; message: string }>('/api/git/undo-commit', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+
   fetch: (path: string, passphrase?: string) => fetchApi<GitFetchResponse>('/api/git/fetch', {
     method: 'POST',
     body: JSON.stringify({ path, ...(passphrase === undefined ? {} : { passphrase }) }),
