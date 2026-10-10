@@ -806,7 +806,7 @@ export function GitView({
     setKeyRefused(false);
   }, []);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (thenPush = false) => {
     if (!path) return;
     const words = message.trim();
     if (!words) return;
@@ -826,16 +826,30 @@ export function GitView({
       setMessage('');
       setAmend(false);
       telling.worked();
-      await read();
     } catch (trouble) {
       const said = gitSaid(trouble);
       telling.failed(said);
       setFault(said);
       faultFrom.current = 'an operation';
-    } finally {
       setBusy(false);
+      return;
     }
-  }, [path, message, amend, read]);
+    if (!thenPush) {
+      await read();
+      setBusy(false);
+      return;
+    }
+    // The push is its own operation with its own toast, so a commit that
+    // worked is never reported as failed because the push after it was.
+    const publish = status?.upstream == null;
+    await act(
+      {
+        deed: 'push',
+        note: `${status?.branch ?? 'HEAD'} → ${status?.pushTo ?? status?.upstream ?? 'origin'}`,
+      },
+      (key) => git.push(path, publish, key),
+    );
+  }, [path, message, amend, read, act, status]);
 
   /**
    * Ask before throwing work away, and only then do it.
@@ -951,6 +965,7 @@ export function GitView({
       )
       .map((branch) => ({ value: branch.name, label: branch.name, hint: 'Remote' })),
   ];
+  const canPush = hasRemote && !status?.detached;
   const ahead = status?.ahead ?? 0;
   const behind = status?.behind ?? 0;
   /** Whether the branch has an upstream to pull from and push to. */
@@ -959,6 +974,7 @@ export function GitView({
   const unstaged = status?.unstaged ?? [];
   const untracked = status?.untracked ?? [];
   const conflicted = status?.conflicted ?? [];
+  const canCommit = !busy && message.trim() !== '' && (amend || staged.length > 0);
   const clean =
     status !== null &&
     staged.length === 0 &&
@@ -1155,7 +1171,7 @@ export function GitView({
           </Button>
           </Tooltip>
           )}
-          {hasRemote && !status?.detached && (
+          {canPush && (
           <Tooltip label={following ? `Push to ${status?.pushTo ?? status?.upstream}` : undefined} wrapperClassName="flex flex-1">
           <Button
             size="sm"
@@ -1691,6 +1707,12 @@ export function GitView({
           aria-label="Commit message"
           data-testid="git-commit-message"
           className="min-h-16 resize-none text-xs"
+          onKeyDown={(pressed) => {
+            // Ctrl+Enter, or Cmd+Enter on a Mac, commits from the keyboard.
+            if (pressed.key !== 'Enter' || !(pressed.ctrlKey || pressed.metaKey)) return;
+            pressed.preventDefault();
+            if (canCommit) void save();
+          }}
         />
         {/* Rewriting the last saved change rather than adding one. A tick
             and not a second button, because it changes what Commit does
@@ -1712,24 +1734,41 @@ export function GitView({
           Amend last commit
         </label>
         )}
-        <Button
-          size="sm"
-          variant="primary"
-          // Nothing picked is not a commit git will make, and a button that
-          // exists to hand back git's refusal is a button that should not have
-          // been pressed. The count says why it is out. An amend is the one
-          // exception: rewording the last saved change picks nothing up, and
-          // git makes that commit perfectly happily.
-          disabled={busy || message.trim() === '' || (!amend && staged.length === 0)}
-          data-testid="git-commit"
-          onClick={() => void save()}
-        >
-          {amend
-            ? 'Amend last commit'
-            : staged.length > 0
-              ? `Commit ${staged.length} file${staged.length === 1 ? '' : 's'}`
-              : 'Commit'}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="primary"
+            className="min-w-0 flex-1"
+            // Nothing picked is not a commit git will make, and a button that
+            // exists to hand back git's refusal is a button that should not have
+            // been pressed. The count says why it is out. An amend is the one
+            // exception: rewording the last saved change picks nothing up, and
+            // git makes that commit perfectly happily.
+            disabled={!canCommit}
+            data-testid="git-commit"
+            onClick={() => void save()}
+          >
+            {amend
+              ? 'Amend last commit'
+              : staged.length > 0
+                ? `Commit ${staged.length} file${staged.length === 1 ? '' : 's'}`
+                : 'Commit'}
+          </Button>
+          {/* Committing and sending it in one press. Not offered for an amend:
+              a rewritten commit that was already pushed needs a force, and
+              that is not something to do in passing. */}
+          {canPush && !amend && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!canCommit}
+              data-testid="git-commit-push"
+              onClick={() => void save(true)}
+            >
+              Commit and push
+            </Button>
+          )}
+        </div>
       </Section>
       </div>
           </>
