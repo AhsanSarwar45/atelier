@@ -29,6 +29,7 @@ import { formatDistanceToNow } from 'date-fns';
 import {
   Archive,
   ArchiveRestore,
+  ChevronRight,
   CloudDownload,
   Download,
   FileDiff,
@@ -160,28 +161,58 @@ function Section({
   count,
   testId,
   actions,
+  collapsed,
+  onToggle,
   children,
 }: {
   title: string;
   count?: number;
   testId?: string;
+  /** Whether the group is folded to its heading. */
+  collapsed?: boolean;
+  /** Folding and unfolding it. Without this the heading is only a heading. */
+  onToggle?: () => void;
   /** What can be done to the whole group, drawn on the heading's own line. */
   actions?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-1.5 px-3 py-2" data-testid={testId} data-count={count}>
+    <div
+      className="flex flex-col gap-1.5 px-3 py-2"
+      data-testid={testId}
+      data-count={count}
+      data-collapsed={collapsed || undefined}
+    >
       {/* The heading and the group's own buttons share one line: a rail this
           narrow has no room for a second, and a bulk action belongs against
           the group it acts on rather than in a menu somewhere above it. */}
       <div className="flex items-center gap-1">
         <h3 className="min-w-0 flex-1 truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {title}
-          {count === undefined ? null : <span className="ml-1 tabular-nums text-t-faint">{count}</span>}
+          {onToggle ? (
+            <button
+              type="button"
+              className="flex w-full min-w-0 items-center gap-1 rounded-sm text-left uppercase tracking-wide hover:text-t-secondary focus-visible:outline-2 focus-visible:outline-ring"
+              aria-expanded={!collapsed}
+              data-testid="git-section-toggle"
+              onClick={onToggle}
+            >
+              <ChevronRight
+                className={cn('size-3 shrink-0 transition-transform motion-reduce:transition-none', !collapsed && 'rotate-90')}
+                aria-hidden="true"
+              />
+              <span className="truncate">{title}</span>
+              {count === undefined ? null : <span className="tabular-nums text-t-faint">{count}</span>}
+            </button>
+          ) : (
+            <>
+              {title}
+              {count === undefined ? null : <span className="ml-1 tabular-nums text-t-faint">{count}</span>}
+            </>
+          )}
         </h3>
-        {actions}
+        {!collapsed && actions}
       </div>
-      {children}
+      {!collapsed && children}
     </div>
   );
 }
@@ -221,6 +252,40 @@ function Section({
  * chip for a pointer — a reader who cannot tell green from amber loses
  * nothing.
  */
+/** The groups that can be folded to their headings. */
+type Fold = 'conflicted' | 'staged' | 'unstaged' | 'untracked' | 'history';
+
+const FOLDS_KEY = 'workbench.git-folds';
+
+function rememberedFolds(): Fold[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const kept: unknown = JSON.parse(window.localStorage.getItem(FOLDS_KEY) ?? '[]');
+    return Array.isArray(kept) ? (kept as Fold[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Which groups are folded, remembered across reloads and projects. */
+function useFolds(): { folded: (fold: Fold) => boolean; flip: (fold: Fold) => void } {
+  const [folds, setFolds] = useState<Fold[]>([]);
+  // Read after mount, so the first paint matches what the server drew.
+  useEffect(() => setFolds(rememberedFolds()), []);
+  const flip = useCallback((fold: Fold) => {
+    setFolds((was) => {
+      const next = was.includes(fold) ? was.filter((one) => one !== fold) : [...was, fold];
+      try {
+        window.localStorage.setItem(FOLDS_KEY, JSON.stringify(next));
+      } catch {
+        // Nothing to do: the group still folded.
+      }
+      return next;
+    });
+  }, []);
+  return { folded: (fold) => folds.includes(fold), flip };
+}
+
 export type FileState = GitChange['status'] | 'untracked' | 'conflicted';
 
 export const STATUS_LOOK: Record<
@@ -527,6 +592,7 @@ export function GitView({
   // The rail's file names are file chips, answered by the one set of handlers
   // every other file chip in the app is answered by (bw-g3o3.9).
   const paths = usePathActions();
+  const { folded, flip } = useFolds();
   const [status, setStatus] = useState<GitStatus | null>(null);
   /**
    * The last saved change, and nothing before it. The history itself belongs
@@ -997,6 +1063,7 @@ export function GitView({
       <SplitColumn
         storageKey={path || 'git'}
         label="Resize panels"
+        bottomCollapsed={folded('history')}
         top={
           <>
       {/* The line of work. How far it is from its upstream is written on the
@@ -1515,7 +1582,13 @@ export function GitView({
       )}
 
       {shown && conflicted.length > 0 && (
-        <Section title="Conflicts" count={conflicted.length} testId="git-conflicted">
+        <Section
+          title="Conflicts"
+          count={conflicted.length}
+          testId="git-conflicted"
+          collapsed={folded('conflicted')}
+          onToggle={() => flip('conflicted')}
+        >
           <FileRows
             files={conflicted}
             keyOf={(file) => file.path}
@@ -1545,6 +1618,8 @@ export function GitView({
           title="Staged changes"
           count={staged.length}
           testId="git-staged"
+          collapsed={folded('staged')}
+          onToggle={() => flip('staged')}
           actions={
             <Button
               size="xs"
@@ -1626,6 +1701,8 @@ export function GitView({
           title="Changes"
           count={unstaged.length}
           testId="git-unstaged"
+          collapsed={folded('unstaged')}
+          onToggle={() => flip('unstaged')}
           actions={
             <>
               {/* Everything back to the last saved change, and every new file
@@ -1700,7 +1777,13 @@ export function GitView({
       )}
 
       {shown && untracked.length > 0 && (
-        <Section title="Untracked" count={untracked.length} testId="git-untracked">
+        <Section
+          title="Untracked"
+          count={untracked.length}
+          testId="git-untracked"
+          collapsed={folded('untracked')}
+          onToggle={() => flip('untracked')}
+        >
           <FileRows
             files={untracked}
             keyOf={(file) => file.path}
@@ -1832,13 +1915,36 @@ export function GitView({
           </>
         }
         bottom={
-          <CommitLog
-            path={path}
-            shown={shown}
-            openSha={openCommit ?? null}
-            onOpen={(made) => onShowCommit?.(made.sha)}
-            onLeave={onShowWorkingTree}
-          />
+          <>
+            <div className="shrink-0 px-3 pt-2">
+              <button
+                type="button"
+                className="flex w-full items-center gap-1 rounded-sm pb-1 text-left text-[11px] font-medium uppercase tracking-wide text-muted-foreground hover:text-t-secondary focus-visible:outline-2 focus-visible:outline-ring"
+                aria-expanded={!folded('history')}
+                data-testid="git-history-toggle"
+                onClick={() => flip('history')}
+              >
+                <ChevronRight
+                  className={cn(
+                    'size-3 shrink-0 transition-transform motion-reduce:transition-none',
+                    !folded('history') && 'rotate-90',
+                  )}
+                  aria-hidden="true"
+                />
+                History
+              </button>
+            </div>
+            {/* Folded, the history is not read at all. */}
+            {!folded('history') && (
+              <CommitLog
+                path={path}
+                shown={shown}
+                openSha={openCommit ?? null}
+                onOpen={(made) => onShowCommit?.(made.sha)}
+                onLeave={onShowWorkingTree}
+              />
+            )}
+          </>
         }
       />
     </div>

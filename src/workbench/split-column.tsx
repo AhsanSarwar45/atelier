@@ -62,6 +62,11 @@ export interface SplitColumnProps {
   /** What the divider is called, for a person moving it by keyboard. */
   label?: string;
   className?: string;
+  /**
+   * The lower pane folded down to its own height — a heading, say — with the
+   * upper pane taking the rest and no divider to drag between them.
+   */
+  bottomCollapsed?: boolean;
 }
 
 export function SplitColumn({
@@ -70,6 +75,7 @@ export function SplitColumn({
   storageKey,
   label = 'Resize',
   className,
+  bottomCollapsed = false,
 }: SplitColumnProps) {
   const holder = React.useRef<HTMLDivElement>(null);
   const [share, setShare] = React.useState(TWO_THIRDS);
@@ -147,13 +153,14 @@ export function SplitColumn({
     <div ref={holder} className={cn('flex min-h-0 flex-1 flex-col', className)} data-testid="split-column">
       <div
         className="flex min-h-0 flex-col"
-        style={{ flexGrow: share, flexBasis: 0, minHeight: LEAST }}
+        style={{ flexGrow: bottomCollapsed ? 1 : share, flexBasis: 0, minHeight: LEAST }}
         data-testid="split-top"
       >
         {top}
       </div>
       {/* The bar itself is two pixels of line inside a taller reach: a divider
           you have to hit exactly is a divider nobody moves. */}
+      {!bottomCollapsed && (
       <div
         role="separator"
         aria-orientation="horizontal"
@@ -184,10 +191,12 @@ export function SplitColumn({
           aria-hidden="true"
         />
       </div>
+      )}
       <div
-        className="flex min-h-0 flex-col"
-        style={{ flexGrow: 1 - share, flexBasis: 0, minHeight: LEAST }}
+        className={cn('flex min-h-0 flex-col', bottomCollapsed && 'shrink-0 border-t border-border')}
+        style={bottomCollapsed ? undefined : { flexGrow: 1 - share, flexBasis: 0, minHeight: LEAST }}
         data-testid="split-bottom"
+        data-collapsed={bottomCollapsed || undefined}
       >
         {bottom}
       </div>
