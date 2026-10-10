@@ -1569,6 +1569,38 @@ export function GitView({
                     git.unstage(path, [file.path]),
                   )
                 }
+                extra={
+                  <Tooltip label={`Discard changes to ${file.path}`}>
+                    <Button
+                      size="xs"
+                      mode="icon"
+                      variant="ghost"
+                      disabled={busy}
+                      aria-label={`Discard changes to ${file.path}`}
+                      data-testid="git-discard-staged"
+                      onClick={() =>
+                        askFirst(
+                          // A file added since the last commit has nothing to
+                          // go back to, so discarding it deletes it.
+                          file.status === 'added'
+                            ? `Discard ${file.path}? The file will be deleted. This can’t be undone.`
+                            : `Discard changes to ${file.path}? The file goes back to the last commit. This can’t be undone.`,
+                          'Discard',
+                          { deed: 'discard', note: file.path },
+                          () =>
+                            git.discardStaged(
+                              path,
+                              // A rename is two paths: the new one goes, the
+                              // old one comes back.
+                              file.origPath ? [file.path, file.origPath] : [file.path],
+                            ),
+                        )
+                      }
+                    >
+                      <Undo2 aria-hidden="true" />
+                    </Button>
+                  </Tooltip>
+                }
               />
             )}
           />
