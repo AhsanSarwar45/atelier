@@ -31,6 +31,7 @@ import {
   clearsReads,
   clockReads,
   expiryReads,
+  moneyReads,
   percentReads,
   sessionChipReads,
   type Driving,
@@ -529,7 +530,7 @@ export function UsageView({ brand = 'claude', profile, onClose }: { brand?: Bran
               {usage.credits.enabled
                 ? `${usage.credits.percent === null ? 'Available' : `${percentReads(usage.credits.percent)} used`}${
                     usage.credits.limit !== null
-                      ? ` · ${usage.credits.currency ?? ''}${usage.credits.used ?? 0} of ${usage.credits.currency ?? ''}${usage.credits.limit}`
+                      ? ` · ${moneyReads(usage.credits.used ?? 0, usage.credits.currency)} of ${moneyReads(usage.credits.limit, usage.credits.currency)}`
                       : ''
                   }`
                 : 'Off'}

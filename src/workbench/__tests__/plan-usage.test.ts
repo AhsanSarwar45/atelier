@@ -15,6 +15,7 @@ import {
   chipReads,
   clockReads,
   CRITICAL_AT,
+  moneyReads,
   percentReads,
   type RawPlanUsage,
   readUsage,
@@ -66,6 +67,31 @@ describe('the answer the kit actually gives', () => {
 
   it('says credits are off rather than saying nothing about them', () => {
     expect(usage.credits).toEqual({ enabled: false, percent: null, used: null, limit: null, currency: null });
+  });
+
+  it('reads overage amounts as money, not as cents', () => {
+    // The kit sends cents: 2433 of 10000 is $24.33 of $100.00.
+    const on = readUsage(
+      {
+        ...REAL,
+        rate_limits: {
+          ...REAL.rate_limits,
+          extra_usage: {
+            is_enabled: true,
+            monthly_limit: 10000,
+            used_credits: 2433,
+            utilization: 24.33,
+            currency: 'USD',
+            decimal_places: 2,
+          },
+        },
+      } as RawPlanUsage,
+      AT,
+    );
+    expect(on.credits).toMatchObject({ used: 24.33, limit: 100 });
+    expect(moneyReads(24.33, 'USD')).toBe('$24.33');
+    expect(moneyReads(100, 'USD')).toBe('$100.00');
+    expect(moneyReads(5, null)).toBe('5.00');
   });
 
   it('carries what the machine says is driving the spend, in our words', () => {

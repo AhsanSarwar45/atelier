@@ -93,6 +93,7 @@ export interface RawPlanUsage {
           monthly_limit?: number | null;
           used_credits?: number | null;
           currency?: string | null;
+          decimal_places?: number | null;
         } | null;
       })
     | null;
@@ -123,7 +124,7 @@ export interface PlanWindow {
 export interface PlanCredits {
   enabled: boolean;
   percent: number | null;
-  /** Both in whole currency units, as the kit gives them. */
+  /** Both in whole currency units. The kit sends minor units (cents). */
   used: number | null;
   limit: number | null;
   currency: string | null;
@@ -323,6 +324,12 @@ export function readUsage(raw: RawPlanUsage | null | undefined, at: string): Pla
         .filter((w): w is PlanWindow => w !== null);
 
   const extra = raw.rate_limits.extra_usage;
+  // Amounts come in minor units; `decimal_places` says how many (2 if missing).
+  const scale = 10 ** Math.min(6, Math.max(0, num(extra?.decimal_places) ?? 2));
+  const money = (n: unknown) => {
+    const v = num(n);
+    return v === null ? null : v / scale;
+  };
 
   return {
     available: true,
@@ -334,8 +341,8 @@ export function readUsage(raw: RawPlanUsage | null | undefined, at: string): Pla
       ? {
           enabled: extra.is_enabled === true,
           percent: num(extra.utilization),
-          used: num(extra.used_credits),
-          limit: num(extra.monthly_limit),
+          used: money(extra.used_credits),
+          limit: money(extra.monthly_limit),
           currency: text(extra.currency),
         }
       : null,
@@ -354,6 +361,18 @@ export function readUsage(raw: RawPlanUsage | null | undefined, at: string): Pla
 /** `67%`, or a dash when the server declined to say. */
 export function percentReads(percent: number | null): string {
   return percent === null ? '—' : `${Math.round(percent)}%`;
+}
+
+/** A whole-unit amount as money: `$24.33`, or `24.33` with no known currency. */
+export function moneyReads(amount: number, currency: string | null): string {
+  if (currency) {
+    try {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
+    } catch {
+      // An unknown currency code falls through to the plain number.
+    }
+  }
+  return amount.toFixed(2);
 }
 
 /**

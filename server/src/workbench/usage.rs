@@ -288,12 +288,17 @@ pub fn claude_usage(raw: Option<&Value>, at: impl Into<String>) -> PlanUsage {
     let credits = rate
         .get("extra_usage")
         .filter(|v| v.is_object())
-        .map(|extra| PlanCredits {
-            enabled: extra["is_enabled"] == true,
-            percent: number(&extra["utilization"]),
-            used: number(&extra["used_credits"]),
-            limit: number(&extra["monthly_limit"]),
-            currency: text(&extra["currency"]),
+        .map(|extra| {
+            // Amounts come in minor units (cents); `decimal_places` says how
+            // many, and is 2 when it is missing.
+            let scale = 10f64.powi(extra["decimal_places"].as_i64().unwrap_or(2).clamp(0, 6) as i32);
+            PlanCredits {
+                enabled: extra["is_enabled"] == true,
+                percent: number(&extra["utilization"]),
+                used: number(&extra["used_credits"]).map(|n| n / scale),
+                limit: number(&extra["monthly_limit"]).map(|n| n / scale),
+                currency: text(&extra["currency"]),
+            }
         });
     PlanUsage {
         available: true,
@@ -1297,7 +1302,8 @@ mod tests {
         assert_eq!(usage.session.as_ref().unwrap().percent, Some(38.0));
         assert_eq!(usage.week.as_ref().unwrap().percent, Some(74.0));
         assert_eq!(usage.per_model[0].label, "This week · Fable");
-        assert_eq!(usage.credits.as_ref().unwrap().limit, Some(10000.0));
+        assert_eq!(usage.credits.as_ref().unwrap().limit, Some(100.0));
+        assert_eq!(usage.credits.as_ref().unwrap().used, Some(29.66));
         let resets = usage.resets.unwrap();
         assert_eq!(resets.available, 1);
         assert!(resets.items[0].usable);
