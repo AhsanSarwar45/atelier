@@ -41,6 +41,16 @@ afterEach(() => vi.unstubAllGlobals());
 const line = (key: string) =>
   screen.getAllByTestId('close-chat-line').find((l) => l.getAttribute('data-key') === key)!;
 const tick = (key: string) => within(line(key)).getByTestId('close-chat-tick');
+const lineKeys = () => screen.getAllByTestId('close-chat-line').map((l) => l.getAttribute('data-key'));
+
+/** Opens every folded branch, top down. */
+async function unfold() {
+  for (;;) {
+    const shut = screen.queryAllByRole('button', { name: /^Expand / });
+    if (!shut.length) return;
+    await act(async () => void fireEvent.click(shut[0]));
+  }
+}
 
 async function open() {
   const closed = vi.fn();
@@ -50,8 +60,22 @@ async function open() {
 }
 
 describe('closing a chat with things running', () => {
+  it('opens with each process folded, so only the top of every run shows', async () => {
+    await open();
+
+    expect(lineKeys()).toEqual(['group:processes', 'p:20', 'p:30', 'group:containers', 'c:abc123']);
+    expect(line('p:30').getAttribute('aria-expanded')).toBe('false');
+    expect(line('p:30').getAttribute('data-state')).toBe('on');
+    expect(screen.getByTestId('close-chat-confirm')).toHaveTextContent('Close and stop 4');
+
+    await act(async () => void fireEvent.click(within(line('p:30')).getByRole('button', { name: /^Expand / })));
+    expect(lineKeys()).toContain('p:31');
+    expect(lineKeys()).not.toContain('p:32');
+  });
+
   it('draws the processes as a tree beside the containers, everything ticked', async () => {
     await open();
+    await unfold();
 
     expect(line('p:32').style.paddingLeft).not.toBe(line('p:30').style.paddingLeft);
     expect(line('group:processes').getAttribute('data-state')).toBe('on');
@@ -61,6 +85,7 @@ describe('closing a chat with things running', () => {
 
   it('shows the agent and its group as stopping with the chat, not to be cleared', async () => {
     await open();
+    await unfold();
 
     expect(tick('p:22')).toBeDisabled();
     expect(within(line('p:22')).getByTestId('close-chat-locked')).toBeInTheDocument();
@@ -68,6 +93,7 @@ describe('closing a chat with things running', () => {
 
   it('clearing a line clears what is under it, and only what is still ticked is stopped', async () => {
     const closed = await open();
+    await unfold();
 
     await act(async () => void fireEvent.click(tick('p:31')));
     expect(line('p:32').getAttribute('data-state')).toBe('off');

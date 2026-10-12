@@ -13,6 +13,9 @@
  * What sits in the agent's own group stops with the chat whatever is ticked,
  * so its box is ticked and cannot be cleared: a box that could be cleared
  * would promise something the close does not keep.
+ *
+ * The tree opens folded below the top line of each process, so a chat with a
+ * deep run shows a short list; a branch opens on its arrow (bw-5etd7).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -121,6 +124,17 @@ export function runningTree(running: ChatRunning): RunningNode[] {
   return tree;
 }
 
+/** Every process line with lines under it, which is what starts folded. */
+export function foldedAtFirst(tree: RunningNode[]): Set<string> {
+  const keys: string[] = [];
+  const walk = (node: RunningNode) => {
+    if (node.children.length && !node.key.startsWith('group:')) keys.push(node.key);
+    node.children.forEach(walk);
+  };
+  tree.forEach(walk);
+  return new Set(keys);
+}
+
 /** Every key at or under `node` that a tick can change. */
 function tickable(node: RunningNode): string[] {
   const own = node.locked || node.key.startsWith('group:') ? [] : [node.key];
@@ -190,7 +204,9 @@ export function CloseChatDialog({ chat, onCancel, onBusy, onClosed }: Props) {
         };
         if (!live) return;
         setRunning(found);
-        setTicked(allTickable(runningTree(found)));
+        const tree = runningTree(found);
+        setTicked(allTickable(tree));
+        setFolded(foldedAtFirst(tree));
       } catch (e) {
         if (live) setLoadError(e instanceof Error ? e.message : String(e));
       }
@@ -369,23 +385,30 @@ function Line({
           onCheckedChange={() => onFlip(node)}
         />
         <div
-          className={cn('flex min-w-0 flex-1 items-baseline gap-2', !fixed && !disabled && 'cursor-pointer')}
+          className={cn(
+            'flex min-w-0 flex-1 flex-col sm:flex-row sm:items-baseline sm:gap-2',
+            !fixed && !disabled && 'cursor-pointer',
+          )}
           onClick={() => {
             if (!fixed && !disabled) onFlip(node);
           }}
         >
-          <span className={cn('shrink-0', group && 'font-medium', state === 'off' && 'text-t-tertiary')}>
+          <span className={cn('truncate sm:shrink-0', group && 'font-medium', state === 'off' && 'text-t-tertiary')}>
             {node.label}
           </span>
-          {node.detail && (
-            <Tooltip label={node.detail}>
-              <span className="min-w-0 truncate font-mono text-xs text-t-tertiary">{node.detail}</span>
-            </Tooltip>
+          {(node.detail || node.bytes || (node.locked && !group)) && (
+            <div className="flex min-w-0 flex-1 items-baseline gap-2">
+              {node.detail && (
+                <Tooltip label={node.detail}>
+                  <span className="min-w-0 truncate font-mono text-xs text-t-tertiary">{node.detail}</span>
+                </Tooltip>
+              )}
+              <span className="ml-auto flex shrink-0 items-baseline gap-2 pl-2 text-xs text-t-tertiary">
+                {node.locked && !group && <span data-testid="close-chat-locked">Stops with chat</span>}
+                {node.bytes ? <span className="tabular-nums">{memoryWords(node.bytes)}</span> : null}
+              </span>
+            </div>
           )}
-          <span className="ml-auto flex shrink-0 items-baseline gap-2 pl-2 text-xs text-t-tertiary">
-            {node.locked && !group && <span data-testid="close-chat-locked">Stops with chat</span>}
-            {node.bytes ? <span className="tabular-nums">{memoryWords(node.bytes)}</span> : null}
-          </span>
         </div>
       </div>
       {branch &&
