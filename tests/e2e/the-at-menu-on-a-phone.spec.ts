@@ -1,5 +1,5 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
@@ -13,6 +13,8 @@ import type { WbpEvent } from '../../src/workbench/protocol';
  *    chose the first line touched and shut the menu, so it could not scroll.
  *  * An `@word` that names no file is words: no badge, no tile above the box.
  *    `@skill` left behind by Backspace was drawn as a file called `skill`.
+ *  * Backspace after a badge, through the editor's Android input path, takes
+ *    the whole reference and leaves the box focused.
  *  * Copying a sent message gives back its references as they were written,
  *    not the badges' labels each on a line of its own.
  *
@@ -71,7 +73,7 @@ async function openTheBox(page: Page, request: APIRequestContext, fixture: strin
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({
     json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'At menu', cwd: fixture, beads: [] },
   }));
-  const made = await request.post('/api/projects', { data: { name: 'at-menu-on-a-phone', path: fixture, isTest: true } });
+  const made = await request.post('/api/projects', { data: { name: `${basename(fixture)}-${Date.now()}`, path: fixture, isTest: true } });
   expect(made.status(), await made.text()).toBe(201);
   const project = (await made.json()) as { id: string };
   await page.goto(`/project?id=${project.id}&tab=chat&chat=${CHAT}`);
@@ -81,7 +83,7 @@ async function openTheBox(page: Page, request: APIRequestContext, fixture: strin
 
 test('a finger scrolls the @ menu, and a tap picks', async ({ page, request }) => {
   test.setTimeout(180_000);
-  const fixture = join(__dirname, '..', '.workbench-run-at-menu-phone');
+  const fixture = join(__dirname, '..', `.workbench-run-at-menu-phone-${test.info().repeatEachIndex}`);
   seed(fixture);
   mkdirSync(SHOTS, { recursive: true });
   const project = await openTheBox(page, request, fixture);
@@ -89,6 +91,16 @@ test('a finger scrolls the @ menu, and a tap picks', async ({ page, request }) =
     await page.getByTestId('composer-frame').locator('.cm-content').tap();
     await page.keyboard.type('@src/file');
     const list = page.locator('.cm-tooltip-autocomplete > ul');
+    // The menu asks where the chat is working, which can arrive after the
+    // typing did; the last letter is typed again until it has.
+    const files = page.locator('[data-testid="mention-tab"][data-scope="file"]');
+    await expect(async () => {
+      await page.keyboard.press('Backspace');
+      await page.keyboard.type('e');
+      await expect(files).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: WAIT });
+    // All shows a few files beside the other kinds; Files shows enough to scroll.
+    await files.tap();
     await expect(list.locator('li[id]').nth(10)).toBeAttached({ timeout: WAIT });
 
     // A real touch drag up the list, from a line in it, once the menu has
@@ -123,7 +135,7 @@ test('a finger scrolls the @ menu, and a tap picks', async ({ page, request }) =
 
 test('an @ word that names no file is words, with no badge and no tile', async ({ page, request }) => {
   test.setTimeout(180_000);
-  const fixture = join(__dirname, '..', '.workbench-run-at-menu-phone-words');
+  const fixture = join(__dirname, '..', `.workbench-run-at-menu-phone-words-${test.info().repeatEachIndex}`);
   seed(fixture);
   mkdirSync(SHOTS, { recursive: true });
   const project = await openTheBox(page, request, fixture);
@@ -142,13 +154,45 @@ test('an @ word that names no file is words, with no badge and no tile', async (
   }
 });
 
+test.describe('on Android', () => {
+  // CodeMirror reads the browser's name to take its Android input path.
+  test.use({ userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36' });
+
+  test('Backspace after a badge takes the whole reference', async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const fixture = join(__dirname, '..', `.workbench-run-at-menu-backspace-${test.info().repeatEachIndex}`);
+    seed(fixture);
+    const project = await openTheBox(page, request, fixture);
+    try {
+      const writing = page.getByTestId('composer-frame').locator('.cm-content');
+      // The Android path: the keyboard writes through an EditContext.
+      expect(await writing.evaluate((box) => Boolean((box as HTMLElement & { editContext?: unknown }).editContext))).toBe(true);
+      for (const reference of ['@README.md', '@skill:standup']) {
+        await page.getByTestId('composer').fill(`see ${reference} now`);
+        await expect(page.getByTestId('composer-reference')).toHaveCount(1, { timeout: WAIT });
+        await writing.tap();
+        // The caret just after the badge.
+        await page.keyboard.press('End');
+        for (let n = 0; n < ' now'.length; n++) await page.keyboard.press('ArrowLeft');
+        await page.keyboard.press('Backspace');
+        await expect(page.getByTestId('composer'), `Backspace after ${reference}`).toHaveValue('see  now');
+        await expect(page.getByTestId('composer-reference')).toHaveCount(0);
+        expect(await writing.evaluate((box) => box.contains(document.activeElement) || box === document.activeElement)).toBe(true);
+      }
+    } finally {
+      await request.delete(`/api/projects/${project.id}`);
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+});
+
 test.describe('with a mouse', () => {
   test.use({ viewport: { width: 1100, height: 800 }, deviceScaleFactor: 1, hasTouch: false, isMobile: false });
 
   test('copying a message gives back the references it was written with', async ({ page, request, context }) => {
     test.setTimeout(180_000);
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    const fixture = join(__dirname, '..', '.workbench-run-at-menu-copy');
+    const fixture = join(__dirname, '..', `.workbench-run-at-menu-copy-${test.info().repeatEachIndex}`);
     seed(fixture);
     mkdirSync(SHOTS, { recursive: true });
     const said = 'alpha @README.md beta @skill:standup gamma';
