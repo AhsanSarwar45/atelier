@@ -5,7 +5,7 @@
  * a fenced block or an address looks the same wherever it was written. There is
  * no second renderer; a place that needs different spacing passes `tight`.
  */
-import { memo, useMemo, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
+import { memo, useMemo, useState, type ClipboardEvent, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -74,6 +74,59 @@ export interface Mentions {
    * `@skill:…` — drawn as the one reference badge (bw-mi3s.1).
    */
   reference?: (kind: AtelierKind, id: string) => ReactNode;
+}
+
+/**
+ * Copying a stretch of a message gives back what was written. A chip draws a
+ * label — `a.ts` for `@src/a.ts:3-9`, `standup` for `@skill:standup` — and the
+ * browser copied the label, on a line of its own, so a pasted message lost
+ * every reference in it. Each chip carries what it stands for in `data-copy`
+ * (`mentions.ts`), and this puts that back in its place.
+ */
+export function copyWritten(event: ClipboardEvent<HTMLElement>): void {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return;
+  const copied = document.createElement("div");
+  for (let at = 0; at < selection.rangeCount; at++) copied.append(selection.getRangeAt(at).cloneContents());
+  const chips = copied.querySelectorAll("[data-copy]");
+  if (chips.length === 0) return;
+  chips.forEach((chip) => chip.replaceWith(chip.getAttribute("data-copy") ?? ""));
+  // Laid out, out of sight, so `innerText` keeps the paragraphs' line breaks.
+  copied.style.cssText = "position:fixed;left:0;top:0;opacity:0;pointer-events:none;white-space:pre-wrap";
+  document.body.append(copied);
+  const text = copied.innerText;
+  copied.remove();
+  event.clipboardData.setData("text/plain", text);
+  event.preventDefault();
+}
+
+/** The chip a span the rewriting step marked stands for, or null for an ordinary span. */
+function chipFor(marks: Record<string, string | undefined>, children: ReactNode, mentions: Mentions | undefined): ReactNode | null {
+  const card = marks['data-card-mention'];
+  if (card && mentions) return mentions.card(card);
+  const referenced = marks['data-reference-mention'];
+  const referencedId = marks['data-reference-id'];
+  if (referenced && referencedId) {
+    if (mentions?.reference) return mentions.reference(referenced as AtelierKind, referencedId);
+    if (referenced === 'bead' && mentions) return mentions.card(referencedId);
+  }
+  const attached = marks['data-attachment-mention'];
+  if (attached !== undefined && mentions?.attachment) {
+    return mentions.attachment(Number(attached));
+  }
+  const path = marks['data-path-mention'];
+  if (path && mentions?.path) {
+    const line = marks['data-path-line'];
+    const written = textOf(children);
+    return mentions.path(
+      path,
+      written || path,
+      line ? Number(line) : null,
+      lastLineOf(marks['data-path-range']),
+      marks['data-path-in-code'] !== undefined,
+    );
+  }
+  return null;
 }
 
 const PROSE_CLASSES =
@@ -612,35 +665,9 @@ export function MarkdownBody({
     // stays a span, so nothing about ordinary text changes.
     span: ({ node, ...props }) => {
       const marks = props as Record<string, string | undefined>;
-      const card = marks['data-card-mention'];
-      if (card && mentions) return <>{mentions.card(card)}</>;
-      const referenced = marks['data-reference-mention'];
-      const referencedId = marks['data-reference-id'];
-      if (referenced && referencedId) {
-        if (mentions?.reference) return <>{mentions.reference(referenced as AtelierKind, referencedId)}</>;
-        if (referenced === 'bead' && mentions) return <>{mentions.card(referencedId)}</>;
-      }
-      const attached = marks['data-attachment-mention'];
-      if (attached !== undefined && mentions?.attachment) {
-        return <>{mentions.attachment(Number(attached))}</>;
-      }
-      const path = marks['data-path-mention'];
-      if (path && mentions?.path) {
-        const line = marks['data-path-line'];
-        const written = textOf(props.children);
-        return (
-          <>
-            {mentions.path(
-              path,
-              written || path,
-              line ? Number(line) : null,
-              lastLineOf(marks['data-path-range']),
-              marks['data-path-in-code'] !== undefined,
-            )}
-          </>
-        );
-      }
-      return <span {...props} />;
+      const chip = chipFor(marks, props.children, mentions);
+      // What it stands for rides on a box that draws nothing (`copyWritten`).
+      return chip === null ? <span {...props} /> : <span data-copy={marks['data-copy']} className="contents">{chip}</span>;
     },
   }), [base, mentions]);
   const rehypePlugins = useMemo<PluggableList>(
@@ -650,7 +677,7 @@ export function MarkdownBody({
   const blocks = useMemo(() => markdownBlocks(children), [children]);
   return (
     <>
-    <div className={cn(PROSE_CLASSES, className)} {...paths.chips}>
+    <div className={cn(PROSE_CLASSES, className)} {...paths.chips} onCopy={copyWritten}>
       {blocks.map((block, index) => (
         <MarkdownBlock key={index} text={block} components={components} rehypePlugins={rehypePlugins} />
       ))}

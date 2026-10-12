@@ -65,6 +65,8 @@ import { mention, type FsFoundPath, type MentionOffer, type MentionPlace } from 
 import { cn } from '@/lib/utils';
 import type { BeadStatus } from '@/types';
 import type { Brand, CommandInfo } from '@/workbench/protocol';
+import { resolvePath } from '@/workbench/paths';
+import { knownReal } from '@/workbench/paths-on-disk';
 import { learnChat, learnSkill, setReferenceAsker } from '@/workbench/reference-names';
 import { canBeginReference, formatAtelierReference, formatReference, type AtelierKind } from '@/workbench/references';
 
@@ -312,8 +314,8 @@ const scopeTabs = ViewPlugin.fromClass(
   },
 );
 
-/** One found path as a line of the menu. */
-function offer(found: FsFoundPath, rank = 0): Completion {
+/** One found path, in the folder `cwd`, as a line of the menu. */
+function offer(found: FsFoundPath, rank = 0, cwd = ''): Completion {
   const { name, folder } = split(found.path);
   const folderish = found.kind === 'dir';
   return {
@@ -336,6 +338,10 @@ function offer(found: FsFoundPath, rank = 0): Completion {
           endLine: null,
           kind: folderish ? 'folder' : 'file',
         }) + (folderish ? '' : ' ');
+      // The menu just found it, so it is drawn as a file now, not after disk
+      // has been asked (`composer-editor.tsx` draws only real files).
+      const absolute = resolvePath(found.path, { cwd, home: '' });
+      if (absolute) knownReal(absolute);
       view.dispatch({
         changes: { from, to, insert },
         selection: { anchor: from + insert.length },
@@ -413,14 +419,14 @@ function nothingFound(scope: Scope): Completion {
 }
 
 /** Everything the server offered, as lines of the menu in its order. */
-function lines(found: readonly MentionOffer[]): Completion[] {
+function lines(found: readonly MentionOffer[], cwd: string): Completion[] {
   const ranks = new Map<string, number>();
   return found.map((one) => {
     if (!ranks.has(one.kind)) ranks.set(one.kind, ranks.size);
     const rank = ranks.get(one.kind)!;
     learn(one);
     return one.kind === 'file'
-      ? offer({ path: one.id, kind: one.folder ? 'dir' : 'file' }, rank)
+      ? offer({ path: one.id, kind: one.folder ? 'dir' : 'file' }, rank, cwd)
       : atelierOffer(one, rank);
   });
 }
@@ -461,7 +467,7 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
     }
     if (context.aborted) return null;
 
-    const options = lines(found.items);
+    const options = lines(found.items, place.cwd);
     found.items.forEach((one, at) => {
       if (one.kind !== 'file') drawnBadges.set(options[at]!, referenceOf(one));
     });
@@ -718,16 +724,33 @@ function slashOpens(feed: CommandFeed) {
  * decides to emulate them — which it declines to on a list it reads the tap as
  * the start of a scroll on, so on a phone picking did nothing at all
  * (bw-ad3r.9). Pointer events arrive for every kind of pointer, so a touch
- * or a pen picks on its own `pointerdown`.
+ * or a pen picks on its own.
+ *
+ * On the finger's lift, not its landing: a finger lands the same way to scroll
+ * the list, and picking on landing chose the first line touched and shut the
+ * menu, so it could not be scrolled at all. A scroll ends in `pointercancel`
+ * and no `pointerup`, and a lift on another line than the landing is a drag;
+ * neither picks.
  */
 const tapPicks = ViewPlugin.fromClass(
   class {
-    private readonly picked = (event: PointerEvent) => {
+    private landed: Element | null = null;
+
+    private readonly line = (event: PointerEvent) =>
       // A mouse is served by CodeMirror's own `mousedown`, which also needs no
       // pause after the menu opens.
-      if (event.pointerType === 'mouse') return;
-      const line = (event.target as Element | null)?.closest?.('.cm-tooltip-autocomplete li[id]');
-      const at = line ? /-(\d+)$/.exec(line.id) : null;
+      event.pointerType === 'mouse' ? null : (event.target as Element | null)?.closest?.('.cm-tooltip-autocomplete li[id]') ?? null;
+
+    private readonly lands = (event: PointerEvent) => {
+      this.landed = this.line(event);
+      // Held, so the emulated `mousedown` after the lift does not pick too.
+      if (this.landed) event.preventDefault();
+    };
+
+    private readonly lifts = (event: PointerEvent) => {
+      const line = this.line(event);
+      const at = line && line === this.landed ? /-(\d+)$/.exec(line.id) : null;
+      this.landed = null;
       if (!at) return;
       event.preventDefault();
       this.view.dispatch({ effects: setSelectedCompletion(Number(at[1])) });
@@ -735,11 +758,13 @@ const tapPicks = ViewPlugin.fromClass(
     };
 
     constructor(private readonly view: EditorView) {
-      view.dom.addEventListener('pointerdown', this.picked);
+      view.dom.addEventListener('pointerdown', this.lands);
+      view.dom.addEventListener('pointerup', this.lifts);
     }
 
     destroy() {
-      this.view.dom.removeEventListener('pointerdown', this.picked);
+      this.view.dom.removeEventListener('pointerdown', this.lands);
+      this.view.dom.removeEventListener('pointerup', this.lifts);
     }
   },
 );

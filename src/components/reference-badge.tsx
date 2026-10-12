@@ -258,7 +258,7 @@ export function ReferenceBadge({
 export function referenceBadgeElement(reference: Reference): HTMLElement {
   const holder = document.createElement('span');
   holder.innerHTML = renderToStaticMarkup(
-    <ReferenceBadgeLook reference={reference} className="mx-0.5 cursor-default select-none" testId="composer-reference" />,
+    <ReferenceBadgeLook reference={reference} className="mx-0.5 cursor-default" testId="composer-reference" />,
   );
   return (holder.firstElementChild as HTMLElement | null) ?? holder;
 }

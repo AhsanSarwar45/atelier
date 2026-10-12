@@ -158,6 +158,15 @@ export function usePathsOnDisk(): Disk {
   return useMemo(() => ({ real, home: homeNow, ask, answered }), [real, homeNow, ask, answered]);
 }
 
+/**
+ * Note an address as there without asking. The `@` menu only offers files it
+ * has just found, so the one picked is drawn as a file at once instead of
+ * after a round trip.
+ */
+export function knownReal(absolute: string): void {
+  answers.set(absolute, true);
+}
+
 /** Forget everything asked. For tests, which must not inherit an old disk. */
 export function forgetDisk(): void {
   answers.clear();

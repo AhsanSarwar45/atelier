@@ -68,7 +68,7 @@ import { opens as opensIt } from '@/workbench/attachment-look';
 import { drawnMarks } from '@/workbench/drawn-marks';
 import { referenceBadgeElement, type Reference } from '@/components/reference-badge';
 import type { DescribeReference } from '@/workbench/reference-names';
-import { findAtelierReferences, findReferences, referenceForPaste, referenceLabel } from '@/workbench/references';
+import { findAtelierReferences, findReferences, referenceForPaste, referenceLabel, type Reference as FileReference } from '@/workbench/references';
 
 /** What the chat holds this box by: the one thing it ever asks of it. */
 export interface ComposerHandle {
@@ -108,6 +108,9 @@ function leavesTheBox(to: EventTarget | null, view: EditorView): boolean {
 }
 
 const RefreshPictures = StateEffect.define<void>();
+
+/** Whether a file reference names something on disk. */
+type IsReal = (reference: FileReference) => boolean;
 
 /** Where an icon of a given kind is fetched from, already drawn. */
 type IconSource = (kind: FileKind) => Node | null;
@@ -162,7 +165,9 @@ class FileBadge extends WidgetType {
       size: 'sm',
       shape: 'circle',
       wrap: true,
-      className: cn(badgeClass(this.kind), opens ? 'cursor-pointer select-none' : 'cursor-default select-none'),
+      // Selectable, like the words around it: a drag across the line takes
+      // the badge with it, and its characters are what is copied.
+      className: cn(badgeClass(this.kind), opens ? 'cursor-pointer' : 'cursor-default'),
     });
     if (this.picture) {
       badge.setAttribute('data-testid', 'composer-image-badge');
@@ -183,18 +188,18 @@ class FileBadge extends WidgetType {
 
   /**
    * A picture's badge is a control and takes its own press; a path's is a
-   * drawing of text the reader is still editing, so the click goes through it
-   * to place a caret.
+   * drawing of text the reader is still editing, so the editor takes every
+   * event on it: a press places the caret, a copy copies its characters.
    */
   ignoreEvent(): boolean {
-    return !(this.picture && this.onOpen);
+    return Boolean(this.picture && this.onOpen);
   }
 }
 
 /**
  * A card, a chat or a skill named in the line, as the badge a sent message
  * draws for it (`reference-badge.tsx`, bw-mi3s.1). A drawing of text still
- * being edited, like a path's: the click goes through it to place a caret.
+ * being edited, like a path's: the editor takes every event on it.
  */
 class AtelierBadge extends WidgetType {
   private readonly key: string;
@@ -213,7 +218,7 @@ class AtelierBadge extends WidgetType {
   }
 
   ignoreEvent(): boolean {
-    return true;
+    return false;
   }
 }
 
@@ -241,12 +246,13 @@ function atelierBadges(state: EditorState, describe: DescribeReference | undefin
  * Every reference in the document, as a badge over exactly its characters. A
  * file's is held back while the `@` menu is open on it, since then it is still
  * being typed: `@z` on its way to a name was drawn as a badge for a file called
- * `z`. One pasted whole opens no menu and is drawn at once.
+ * `z`. One pasted whole opens no menu and is drawn at once. And one that names
+ * nothing on disk is never a badge: `@skill` left behind by Backspace is words.
  */
-function badges(state: EditorState, icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void, describe: () => DescribeReference | undefined): DecorationSet {
+function badges(state: EditorState, icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void, describe: () => DescribeReference | undefined, isReal: IsReal): DecorationSet {
   const text = state.doc.toString();
   const menuOpen = completionStatus(state) !== null;
-  const references = findReferences(text).filter((ref) => !(menuOpen && stillTyped(state, ref))).map((ref) =>
+  const references = findReferences(text).filter((ref) => isReal(ref) && !(menuOpen && stillTyped(state, ref))).map((ref) =>
       Decoration.replace({ widget: new FileBadge(referenceLabel(ref), fileKind(ref.path), icon) }).range(
         ref.start,
         ref.end,
@@ -274,18 +280,18 @@ function badges(state: EditorState, icon: IconSource, picture: (id: string) => D
  * the end of one takes all of it. Without that, deleting a badge would eat one
  * character of a path that is no longer on screen to be read.
  */
-function referenceBadges(icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void, describe: () => DescribeReference | undefined): Extension {
+function referenceBadges(icon: IconSource, picture: (id: string) => DraftPicture | undefined, onOpen: (picture: DraftPicture) => void, describe: () => DescribeReference | undefined, isReal: IsReal): Extension {
   const drawn = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
 
       constructor(view: EditorView) {
-        this.decorations = badges(view.state, icon, picture, onOpen, describe);
+        this.decorations = badges(view.state, icon, picture, onOpen, describe, isReal);
       }
 
       update(update: ViewUpdate) {
         if (update.docChanged || update.selectionSet || completionStatus(update.startState) !== completionStatus(update.state) || update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(RefreshPictures)))) {
-          this.decorations = badges(update.state, icon, picture, onOpen, describe);
+          this.decorations = badges(update.state, icon, picture, onOpen, describe, isReal);
         }
       }
     },
@@ -347,11 +353,16 @@ export interface ComposerEditorProps {
    * redraws the badges — a card's status moved, a chat's name arrived.
    */
   describe?: DescribeReference;
+  /**
+   * Whether a file reference names something on disk. Only those are badges;
+   * a new answer redraws them. Without it every reference counts.
+   */
+  isReal?: IsReal;
   className?: string;
 }
 
 export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function ComposerEditor(
-  { value, onChange, onKey, onFiles, pictures = [], onOpenPicture = () => {}, placeholder, extra, describe, className },
+  { value, onChange, onKey, onFiles, pictures = [], onOpenPicture = () => {}, placeholder, extra, describe, isReal, className },
   ref,
 ) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -373,6 +384,8 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
   openPicture.current = onOpenPicture;
   const described = useRef(describe);
   described.current = describe;
+  const real = useRef(isReal);
+  real.current = isReal;
 
   // Built once; the props at that moment are the starting state.
   const opening = useRef({ value, placeholder, extra });
@@ -410,6 +423,7 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
           (id) => pictured.current.find((picture) => picture.id === id),
           (picture) => openPicture.current(picture),
           () => described.current,
+          (reference) => real.current?.(reference) ?? true,
         ),
         // Ahead of the chat's own answer to a key, because bw-gr8y.7's `@` menu
         // lives in here: while that menu is open, Enter picks a file and Escape
@@ -481,7 +495,7 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
     });
   }, [value]);
 
-  useEffect(() => { view.current?.dispatch({ effects: RefreshPictures.of() }); }, [pictures, describe]);
+  useEffect(() => { view.current?.dispatch({ effects: RefreshPictures.of() }); }, [pictures, describe, isReal]);
 
   useImperativeHandle(ref, () => ({
     focus: () => view.current?.focus(),

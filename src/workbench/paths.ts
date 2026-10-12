@@ -39,6 +39,8 @@ export type PathPiece =
       line: number | null;
       /** The last line of a range, when it named one (`@a.ts:3-9`). */
       endLine: number | null;
+      /** What copying it gives back, when that is not `raw`: a reference's `@` form. */
+      copy?: string;
     };
 
 /**

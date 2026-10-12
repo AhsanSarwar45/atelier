@@ -44,12 +44,11 @@ export function baseName(path: string): string {
 /**
  * Every file this draft names, in writing order.
  *
- * A path that cannot be resolved — a relative name written before the chat has
- * said where it is working — is left out rather than given a tile that points
- * nowhere. Its badge stays, because the badge is a drawing of the characters
- * and those are still there.
+ * A path that is not a file on disk — `@skill` left behind by Backspace, a
+ * relative name written before the chat has said where it is working — is
+ * left out. It is words, not a file, so it has neither a tile nor a badge.
  */
-export function draftFiles(draft: string, pictures: DraftPicture[], where: Rooted): DraftFile[] {
+export function draftFiles(draft: string, pictures: DraftPicture[], where: Rooted, real: (absolute: string) => boolean): DraftFile[] {
   const byId = new Map(pictures.map((picture) => [picture.id, picture]));
   const found: DraftFile[] = [];
 
@@ -62,7 +61,7 @@ export function draftFiles(draft: string, pictures: DraftPicture[], where: Roote
   for (const reference of findReferences(draft)) {
     if (reference.kind === 'folder') continue;
     const path = resolvePath(reference.path, where);
-    if (!path) continue;
+    if (!path || !real(path)) continue;
     found.push({
       key: `${reference.start}:${reference.raw}`,
       // A path says nothing about what is at the end of it, so the type is left

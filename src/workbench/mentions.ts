@@ -31,7 +31,7 @@
  */
 import { OLD_CARD } from '@/lib/address';
 import { askableIn, pathsIn, type OnDisk, type PathPiece, type Rooted } from '@/workbench/paths';
-import { findAtelierReferences, findReferences, referenceLabel, resolveReference, type AtelierKind } from '@/workbench/references';
+import { findAtelierReferences, findReferences, formatAtelierReference, formatReference, referenceLabel, resolveReference, type AtelierKind } from '@/workbench/references';
 
 /** One stretch of a message: plain words, or something that opens. */
 export type Piece =
@@ -161,6 +161,7 @@ function filesAndCards(text: string, existing: Existing, where: Rooted, disk: On
       absolute,
       line: found.line,
       endLine: found.endLine,
+      copy: formatReference(found),
     });
     from = found.end;
   }
@@ -348,7 +349,11 @@ function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: bo
   if (changed) node.children = out;
 }
 
-/** One piece, as the span the page then draws as a chip. */
+/**
+ * One piece, as the span the page then draws as a chip. Each carries the text
+ * it stands for in `data-copy`, so copying a message gives back what was
+ * written, `@src/a.ts:3-9` and not the chip's label (`copyWritten`).
+ */
 function marker(piece: Exclude<Piece, { kind: 'text' }>, inCode: boolean): HastNode {
   if (piece.kind === 'attachment') {
     return {
@@ -369,6 +374,7 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>, inCode: boolean): HastN
           ? {}
           : { 'data-path-range': `${piece.line}-${piece.endLine}` }),
         ...(inCode ? { 'data-path-in-code': '' } : {}),
+        'data-copy': piece.copy ?? piece.raw,
       },
       children: [{ type: 'text', value: piece.raw }],
     };
@@ -377,7 +383,7 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>, inCode: boolean): HastN
     return {
       type: 'element',
       tagName: 'span',
-      properties: { 'data-reference-mention': piece.ref, 'data-reference-id': piece.id },
+      properties: { 'data-reference-mention': piece.ref, 'data-reference-id': piece.id, 'data-copy': formatAtelierReference(piece.ref, piece.id) },
       children: [{ type: 'text', value: piece.id }],
     };
   }
@@ -385,7 +391,7 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>, inCode: boolean): HastN
   return {
     type: 'element',
     tagName: 'span',
-    properties: { 'data-card-mention': name },
+    properties: { 'data-card-mention': name, 'data-copy': name },
     children: [{ type: 'text', value: name }],
   };
 }

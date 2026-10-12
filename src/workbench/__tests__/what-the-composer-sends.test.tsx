@@ -54,8 +54,10 @@ vi.mock('@/workbench/chat-right-rail', () => ({
   useGitPanel: (): [boolean, () => void] => [false, () => {}],
   useGitDiff: () => ({ diffOpen: false, flipDiff: () => {} }),
 }));
+// Every file the line names is on disk, so each is drawn as a badge.
 vi.mock('@/workbench/paths-on-disk', () => ({
-  usePathsOnDisk: () => ({ real: () => false, home: '/home/me', ask: () => {} }),
+  usePathsOnDisk: () => ({ real: () => true, home: '/home/me', ask: () => {} }),
+  knownReal: () => {},
 }));
 vi.mock('@/workbench/known-cards', () => ({
   useKnownCards: () => new Set<string>(),

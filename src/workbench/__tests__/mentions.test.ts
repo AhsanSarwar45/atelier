@@ -60,7 +60,7 @@ describe('the rewriting step', () => {
     rehypeMentions(split)(tree);
     const para = tree.children[0] as { children: { type: string; properties?: Record<string, unknown> }[] };
     expect(para.children).toHaveLength(2);
-    expect(para.children[1]!.properties).toEqual({ 'data-card-mention': 'bw-1u1' });
+    expect(para.children[1]!.properties).toEqual({ 'data-card-mention': 'bw-1u1', 'data-copy': 'bw-1u1' });
   });
 
   it('leaves a command alone, so it is still something to copy', () => {

@@ -74,8 +74,8 @@ import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
 import { pathsIn, type Rooted } from '@/workbench/paths';
 import { useDescribeReference, type DescribeReference } from '@/workbench/reference-names';
-import { parseDiffId, type AtelierKind } from '@/workbench/references';
-import { usePathsOnDisk } from '@/workbench/paths-on-disk';
+import { findReferences, parseDiffId, resolveReference, type AtelierKind, type Reference as FileReference } from '@/workbench/references';
+import { usePathsOnDisk, type Disk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
@@ -666,6 +666,7 @@ export function enterPushesThrough(event: ComposerKey): boolean {
 const ComposerBody = memo(function ComposerBody({
   sessionId,
   where,
+  disk,
   attached,
   setAttached,
   onLook,
@@ -680,6 +681,7 @@ const ComposerBody = memo(function ComposerBody({
 }: {
   sessionId: string;
   where: Rooted;
+  disk: Disk;
   attached: DraftPicture[];
   setAttached: Dispatch<SetStateAction<DraftPicture[]>>;
   onLook: OnLook;
@@ -703,7 +705,17 @@ const ComposerBody = memo(function ComposerBody({
    * Derived rather than held: the draft is the record of what the message
    * names, and a second list kept alongside it is a second thing to go stale.
    */
-  const tray = useMemo(() => draftFiles(draft, attached, where), [draft, attached, where]);
+  const tray = useMemo(() => draftFiles(draft, attached, where, disk.real), [draft, attached, where, disk]);
+  // A typed `@name` is a file only when disk says it is one, so disk is asked
+  // about every name in the line, the way it is asked about the transcript's.
+  useEffect(() => {
+    const asking = findReferences(draft).flatMap((reference) => resolveReference(reference, where) ?? []);
+    if (asking.length > 0) disk.ask(asking);
+  }, [draft, where, disk]);
+  const isReal = useCallback((reference: FileReference) => {
+    const path = resolveReference(reference, where);
+    return path !== null && disk.real(path);
+  }, [where, disk]);
   const trayFiles = useMemo(() => tray.map((named) => named.file).filter(opens), [tray]);
 
   return (
@@ -782,6 +794,7 @@ const ComposerBody = memo(function ComposerBody({
         onKey={onKey}
         extra={completeFiles}
         describe={describe}
+        isReal={isReal}
         // No held case here: a held chat draws no box at all, so a disabled
         // one with a sentence in it is unreachable — and the sentence it
         // still carried claimed the holder was working, which is the whole
@@ -3266,6 +3279,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           <ComposerBody
             sessionId={chatId}
             where={where}
+            disk={disk}
             attached={attached}
             setAttached={setAttached}
             onLook={setLooking}

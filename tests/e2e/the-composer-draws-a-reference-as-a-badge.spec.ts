@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { foldAll } from '../../src/workbench/fold';
@@ -26,6 +27,11 @@ test('a reference typed into the composer is drawn as a badge over its own chara
   await page.setViewportSize({ width: 1100, height: 700 });
   const run = join(process.cwd(), 'tests', '.workbench-run-composer-badge');
   const projectPath = makeFixtureProject(join(run, 'project'), join(run, 'reporting'));
+  // Only a file that is there is drawn as a badge (bw-7ihk5.1).
+  mkdirSync(join(projectPath, 'src', 'workbench'), { recursive: true });
+  mkdirSync(join(projectPath, 'docs', 'designs'), { recursive: true });
+  writeFileSync(join(projectPath, 'src', 'workbench', 'paths.ts'), 'export {};\n');
+  writeFileSync(join(projectPath, 'src', 'a.ts'), 'export {};\n');
 
   const base = { sessionId: CHAT, at: new Date(0).toISOString() };
   const events: WbpEvent[] = [
