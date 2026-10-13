@@ -244,6 +244,8 @@ test('what one keystroke, one word and one new row cause React to run', async ({
   await page.waitForTimeout(800);
   const word = await measure('one streamed word', () => say({ type: 'text.delta', messageId: 'live', text: 'another word ' }));
   const keyWhileStreaming = await measure('one keystroke while streaming', () => page.keyboard.type('y'));
+  const thinking = await measure('a thinking count tick', () => say({ type: 'thinking.progress', tokens: 4_200 }));
+  await expect(page.getByTestId('working-line')).toContainText('4.2k thought');
   const toolCall = await measure('a new tool call', () => say({ type: 'tool.started', toolCallId: 'new-tool', name: 'Bash', input: { command: 'ls' }, title: 'ls', parentToolCallId: null }));
   const toolDone = await measure('that tool finishing', () => say({ type: 'tool.completed', toolCallId: 'new-tool', ok: true, output: 'a\nb' }));
   const message = await measure('a new message', async () => {
@@ -264,6 +266,8 @@ test('what one keystroke, one word and one new row cause React to run', async ({
   expect(ran(keyWhileStreaming), 'a keystroke while the agent talks redrew more than the box').toBeLessThanOrEqual(80);
   expect(ran(word), 'one streamed word redrew far more than the message it lands in').toBeLessThan(60);
   expect(Object.keys(word.mounted), 'one streamed word rebuilt parts of the screen').toEqual([]);
+  // The count is drawn by the working line alone; the chat around it stays put.
+  expect(ran(thinking), 'a thinking count tick redrew more than the working line').toBeLessThan(15);
   expect(ran(toolCall), 'a new tool call redrew far more than its own row').toBeLessThan(150);
   expect(ran(toolDone), 'a tool finishing redrew far more than its own row').toBeLessThan(150);
   expect(ran(message), 'a new message redrew far more than its own row').toBeLessThan(3 * 150);
