@@ -449,18 +449,23 @@ function Body({
  */
 function Numbered({ text, language }: { text: string; language: string | null }) {
   const split = useContext(SplitPaths);
-  const lines = text.split('\n');
-  const numbered = lines.filter((l) => /^\s*\d+\t/.test(l)).length;
+  // Coloured once per text: a running call's row is drawn again on every
+  // progress tick, and its output has not changed.
+  const { lines, code, html, painted } = useMemo(() => {
+    const lines = text.split('\n');
+    if (!language) return { lines, code: lines, html: null, painted: null };
+    const numbered = lines.filter((l) => /^\s*\d+\t/.test(l)).length;
+    if (numbered < lines.length / 2) return { lines, code: null, html: withChips(paint(text, language), split), painted: null };
+    // The numbers off, the file put back together, coloured as one thing and
+    // then cut again — otherwise every line is read as if it were the first
+    // (bw-4wcd.16).
+    const code = lines.map((line) => (line.includes('\t') ? line.slice(line.indexOf('\t') + 1) : line));
+    return { lines, code, html: null, painted: paintLines(code.join('\n'), language) };
+  }, [text, language, split]);
   if (!language) return <Chipped text={text} />;
-  if (numbered < lines.length / 2) {
-    const html = withChips(paint(text, language), split);
+  if (code === null) {
     return html === null ? <Chipped text={text} /> : <span dangerouslySetInnerHTML={{ __html: html }} />;
   }
-  // The numbers off, the file put back together, coloured as one thing and
-  // then cut again — otherwise every line is read as if it were the first
-  // (bw-4wcd.16).
-  const code = lines.map((line) => (line.includes('\t') ? line.slice(line.indexOf('\t') + 1) : line));
-  const painted = paintLines(code.join('\n'), language);
   return (
     <>
       {lines.map((line, i) => {

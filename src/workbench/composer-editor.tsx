@@ -40,7 +40,7 @@
  * see the comment beside it below.
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, memo, useEffect, useImperativeHandle, useRef } from 'react';
 
 import { acceptCompletion, closeCompletion, completionStatus, moveCompletionSelection } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
@@ -361,6 +361,18 @@ export interface ComposerEditorProps {
   className?: string;
 }
 
+/** Every file kind's icon, drawn once rather than again on every keystroke. */
+const FileKindIcons = memo(function FileKindIcons() {
+  return (
+    <>
+      {(Object.keys(FILE_KINDS) as FileKind[]).map((kind) => {
+        const Icon = FILE_KINDS[kind].icon;
+        return <Icon key={kind} data-icon-kind={kind} className="mr-0.5 h-3 w-3 shrink-0" />;
+      })}
+    </>
+  );
+});
+
 export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function ComposerEditor(
   { value, onChange, onKey, onFiles, pictures = [], onOpenPicture = () => {}, placeholder, extra, describe, isReal, className },
   ref,
@@ -508,10 +520,7 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
       {/* One drawing of each file kind, off the page, so a badge can clone the
           icon its kind wears without this file knowing how to draw one. */}
       <div ref={icons} aria-hidden="true" className="hidden">
-        {(Object.keys(FILE_KINDS) as FileKind[]).map((kind) => {
-          const Icon = FILE_KINDS[kind].icon;
-          return <Icon key={kind} data-icon-kind={kind} className="mr-0.5 h-3 w-3 shrink-0" />;
-        })}
+        <FileKindIcons />
       </div>
       {/* The document as a form control: what has a `value`, and what a machine
           types into. Out of sight rather than `display: none`, because a

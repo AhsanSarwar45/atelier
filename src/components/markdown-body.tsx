@@ -562,21 +562,30 @@ export function markdownBlocks(text: string): string[] {
   let blankBefore = false;
   let at = 0;
   lines.forEach((line, index) => {
-    const opens = FENCE.exec(line)?.[1];
     if (fence === null && blankBefore && index > 0 && line.trim() !== "" && !CARRIES_ON.test(line)) {
       blocks.push(text.slice(from, at));
       from = at;
     }
-    if (fence === null) {
-      if (opens) fence = opens;
-    } else if (opens && opens[0] === fence[0] && opens.length >= fence.length && line.trim() === opens) {
-      fence = null;
-    }
+    fence = fenceAfter(line, fence);
     blankBefore = line.trim() === "";
     at += line.length + 1;
   });
   blocks.push(text.slice(from));
   return blocks;
+}
+
+/** The fence open after this line, given the one open before it. */
+function fenceAfter(line: string, fence: string | null): string | null {
+  const opens = FENCE.exec(line)?.[1];
+  if (fence === null) return opens ?? null;
+  return opens && opens[0] === fence[0] && opens.length >= fence.length && line.trim() === opens ? null : fence;
+}
+
+/** Whether the words end inside a code fence that has not been closed yet. */
+function endsInOpenFence(text: string): boolean {
+  let fence: string | null = null;
+  for (const line of text.split("\n")) fence = fenceAfter(line, fence);
+  return fence !== null;
 }
 
 /** One block of the words, parsed again only when its own text changes. */
@@ -674,12 +683,21 @@ export function MarkdownBody({
     () => (mentions ? [rehypeHighlightOnce, [rehypeMentions, mentions.split]] : [rehypeHighlightOnce]),
     [mentions],
   );
+  // A code block still being written is coloured once it closes, not again on
+  // every frame it grows.
+  const plainPlugins = useMemo<PluggableList>(() => (mentions ? [[rehypeMentions, mentions.split]] : []), [mentions]);
   const blocks = useMemo(() => markdownBlocks(children), [children]);
+  const lastIsOpen = endsInOpenFence(blocks[blocks.length - 1] ?? "");
   return (
     <>
     <div className={cn(PROSE_CLASSES, className)} {...paths.chips} onCopy={copyWritten}>
       {blocks.map((block, index) => (
-        <MarkdownBlock key={index} text={block} components={components} rehypePlugins={rehypePlugins} />
+        <MarkdownBlock
+          key={index}
+          text={block}
+          components={components}
+          rehypePlugins={lastIsOpen && index === blocks.length - 1 ? plainPlugins : rehypePlugins}
+        />
       ))}
     </div>
     {/* Outside the prose, which styles its own first and last child. */}

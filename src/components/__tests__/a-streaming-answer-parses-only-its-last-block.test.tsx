@@ -61,4 +61,13 @@ describe('A streaming answer', () => {
     expect(container.querySelector('p')).toBe(written);
     expect(container.querySelectorAll('p')[1]).toHaveTextContent('The second is still being written.');
   });
+
+  it('colours a code block once it closes, not on every frame while it is written', () => {
+    const open = 'Here:\n\n```ts\nconst a = 1;';
+    const { container, rerender } = render(<MarkdownBody>{open}</MarkdownBody>);
+    expect(container.querySelector('code')).toHaveTextContent('const a = 1;');
+    expect(container.querySelector('.hljs')).toBeNull();
+    rerender(<MarkdownBody>{`${open}\n\`\`\`\n`}</MarkdownBody>);
+    expect(container.querySelector('code.hljs')).not.toBeNull();
+  });
 });

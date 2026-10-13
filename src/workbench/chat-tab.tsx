@@ -719,10 +719,11 @@ const ComposerBody = memo(function ComposerBody({
   const tray = useMemo(() => draftFiles(draft, attached, where, disk.real), [draft, attached, where, disk]);
   // A typed `@name` is a file only when disk says it is one, so disk is asked
   // about every name in the line, the way it is asked about the transcript's.
+  const askDisk = disk.ask;
   useEffect(() => {
     const asking = findReferences(draft).flatMap((reference) => resolveReference(reference, where) ?? []);
-    if (asking.length > 0) disk.ask(asking);
-  }, [draft, where, disk]);
+    if (asking.length > 0) askDisk(asking);
+  }, [draft, where, askDisk]);
   const isReal = useCallback((reference: FileReference) => {
     const path = resolveReference(reference, where);
     return path !== null && disk.real(path);
