@@ -49,7 +49,8 @@ impl NativeProviderFactory {
                         let _ = import_claude_history(&database, &claude_config, &session).await;
                     } else {
                         let asked = std::time::Instant::now();
-                        let loaded = ask_provider_to_load(&database, &session).await;
+                        let times = claude_call_times(&claude_config, &session);
+                        let loaded = ask_provider_to_load(&database, &session, &times).await;
                         let acp_ms = asked.elapsed().as_millis();
                         if let Err(error) = loaded {
                             let fell_back = std::time::Instant::now();
@@ -95,13 +96,32 @@ impl NativeProviderFactory {
 /// discovery that fills the chat list runs a moment before the click that opens
 /// one, and paying twice for the same "Authentication required" was most of an
 /// 800ms click-to-transcript against a 500ms budget (bw-t26l.20).
-async fn ask_provider_to_load(database: &ChatDb, session: &Session) -> Result<(), String> {
+async fn ask_provider_to_load(
+    database: &ChatDb,
+    session: &Session,
+    times: &super::acp::client::CallTimes,
+) -> Result<(), String> {
     if super::acp::client::adapter_refused_recently(&session.brand).await {
         return Err(format!("{} refused this app a moment ago", session.brand));
     }
-    let loaded = super::acp::client::load_history(database, session).await;
+    let loaded = super::acp::client::load_history(database, session, times).await;
     super::acp::client::note_adapter_answer(&session.brand, loaded.is_err()).await;
     loaded
+}
+
+/// When each call in a saved Claude chat began and ended, read off its record;
+/// empty for any other brand or when the record cannot be found.
+fn claude_call_times(config: &Path, session: &Session) -> super::acp::client::CallTimes {
+    if session.brand != "claude" {
+        return Default::default();
+    }
+    let config = super::profiles::chat_dir("claude", session.profile.as_deref(), config);
+    session
+        .external_id
+        .as_deref()
+        .and_then(|external_id| super::claude::history::find_record(&config, external_id))
+        .map(|record| super::claude::history::call_times(&record))
+        .unwrap_or_default()
 }
 
 /// A saved Claude chat that sent work off to a helper, which ACP `session/load`

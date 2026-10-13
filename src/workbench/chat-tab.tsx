@@ -1865,6 +1865,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             ? inFlight.input.command
             : whileItRuns(whatItRan(inFlight.name, inFlight.input)?.said ?? inFlight.title),
           seconds: inFlight.seconds,
+          startedAt: inFlight.startedAt,
         }
       : null;
   /** The turn under the last message, in the words of whoever owes it. */

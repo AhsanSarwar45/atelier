@@ -138,6 +138,16 @@ fn item(kind: &str, id: String) -> Map<String, Value> {
     row
 }
 
+/// When an event happened, ms since the epoch, or 0 when it does not say.
+fn millis(event: &Event) -> i64 {
+    event
+        .fields
+        .get("at")
+        .and_then(Value::as_str)
+        .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+        .map_or(0, |at| at.timestamp_millis())
+}
+
 fn find(items: &[Value], kind: &str, id: &str) -> Option<usize> {
     items
         .iter()
@@ -358,6 +368,8 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 row.insert("diff".into(), Value::Null);
                 row.insert("input".into(), arguments(event, "input"));
                 row.insert("output".into(), Value::Null);
+                row.insert("startedAt".into(), json!(millis(event)));
+                row.insert("endedAt".into(), json!(0));
                 let mut row = Value::Object(row);
                 // A re-announcement REFRESHES the row; it does not empty it.
                 // What the call answered with arrives on its own events -- a
@@ -374,6 +386,15 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                         if let Some(images) = items[at].get("images") {
                             row["images"] = images.clone();
                         }
+                        // The call began when it was first announced. A later
+                        // word about it is not a new start, or a command that
+                        // has run a minute counts from the last time it was
+                        // described (bw-iavgo.1).
+                        let began = items[at]["startedAt"].as_i64().unwrap_or_default();
+                        if began > 0 {
+                            row["startedAt"] = json!(began);
+                        }
+                        row["endedAt"] = items[at]["endedAt"].clone();
                         items[at] = row;
                     }
                     None => items.push(row),
@@ -392,6 +413,9 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                         json!("failed")
                     };
                     items[at]["output"] = value(event, "output");
+                    // When it ended, so the row can say how long it took
+                    // after the clock that counted it has gone (bw-iavgo.1).
+                    items[at]["endedAt"] = json!(millis(event));
                     carry_terminal(&mut items[at], event);
                     if event
                         .fields
@@ -449,13 +473,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                         row.insert(target.into(), value(event, field));
                     }
                     row.insert("state".into(), json!("running"));
-                    let started = event
-                        .fields
-                        .get("at")
-                        .and_then(Value::as_str)
-                        .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
-                        .map_or(0, |at| at.timestamp_millis());
-                    row.insert("startedAt".into(), json!(started));
+                    row.insert("startedAt".into(), json!(millis(event)));
                     row.insert("seconds".into(), json!(0));
                     row.insert("tokens".into(), json!(0));
                     row.insert("calls".into(), json!(0));
@@ -858,6 +876,41 @@ mod tests {
             1,
             "the picture does not become a row of its own: {rows:?}"
         );
+    }
+
+    /// A call's row keeps when it began and when it ended.
+    ///
+    /// The manager's report: the count beside a running command "resets
+    /// whenever we load the page", and a finished command said nothing about
+    /// how long it took. The start is the first announcement's: a later word
+    /// about the same call is not a new start (bw-iavgo.1).
+    #[test]
+    fn a_call_keeps_when_it_began_and_ended() {
+        let event = |seq: i64, at: &str, value: Value| -> Event {
+            let mut value = value;
+            let object = value.as_object_mut().unwrap();
+            object.insert("sessionId".into(), json!("chat"));
+            object.insert("seq".into(), json!(seq));
+            object.insert("at".into(), json!(at));
+            serde_json::from_value(value).unwrap()
+        };
+        let started = json!({"type":"tool.started","toolCallId":"call","name":"Bash","title":"sleep 45"});
+        let told = vec![
+            event(1, "2026-10-13T12:00:00Z", started.clone()),
+            event(2, "2026-10-13T12:00:20Z", started),
+        ];
+        let mut view = fold_all(&told).view.as_object().cloned().unwrap();
+        let call = view["items"][0].clone();
+        assert_eq!(call["startedAt"], json!(1_791_892_800_000_i64), "{call:?}");
+        assert_eq!(call["endedAt"], json!(0), "still running");
+
+        let ended = fold_from(
+            &mut view,
+            &[event(3, "2026-10-13T12:00:45.5Z", json!({"type":"tool.completed","toolCallId":"call","ok":true}))],
+        );
+        let call = ended.items()[0].clone();
+        assert_eq!(call["startedAt"], json!(1_791_892_800_000_i64));
+        assert_eq!(call["endedAt"], json!(1_791_892_845_500_i64), "{call:?}");
     }
 
     fn contract_events() -> Vec<Event> {

@@ -4,7 +4,7 @@ use super::adapter;
 use super::client_io::ClientIo;
 use super::normalize::AcpNormalizer;
 use crate::workbench::actor::ChatDb;
-use crate::workbench::protocol::{Command, CommandKind, Event};
+use crate::workbench::protocol::{Command, CommandKind, Event, EventKind};
 use crate::workbench::registry::{DriverFuture, ProviderDriver};
 use crate::workbench::session_policy;
 use crate::workbench::metadata::{added_by_atelier, GUIDANCE, HANDOFF};
@@ -435,7 +435,15 @@ fn replay_delivery(event: Event) -> Event {
 
 /// Load a saved provider session through ACP and materialize the replay through
 /// the same normalizer used for live `session/update` notifications.
-pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), String> {
+/// When each call began and ended, by call id, as the provider's own record
+/// dates them. See `claude::history::call_times`.
+pub type CallTimes = std::collections::HashMap<String, (Option<String>, Option<String>)>;
+
+pub async fn load_history(
+    database: &ChatDb,
+    session: &Session,
+    times: &CallTimes,
+) -> Result<(), String> {
     match super::super::provider_reconciliation::complete_history_choice(database, &session.id)
         .await?
     {
@@ -583,6 +591,17 @@ pub async fn load_history(database: &ChatDb, session: &Session) -> Result<(), St
         event
             .fields
             .insert("at".into(), json!(session.last_active_at));
+        // Except a call the record dates: dated by the batch, every call it
+        // held began and ended in the same instant (bw-iavgo.1).
+        let call = event.fields.get("toolCallId").and_then(Value::as_str);
+        let dated = match (&event.kind, call) {
+            (EventKind::ToolStarted, Some(id)) => times.get(id).and_then(|time| time.0.clone()),
+            (EventKind::ToolCompleted, Some(id)) => times.get(id).and_then(|time| time.1.clone()),
+            _ => None,
+        };
+        if let Some(at) = dated {
+            event.fields.insert("at".into(), json!(at));
+        }
     }
     database.append_replay(replay).await?;
     database

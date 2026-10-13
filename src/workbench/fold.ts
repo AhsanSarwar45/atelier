@@ -102,6 +102,15 @@ export interface TranscriptTool {
   /** How long it has been running, as the brand counts it. */
   seconds: number;
   /**
+   * When the call began and ended, ms since the epoch, as the record dates
+   * them; 0 when it does not say, and `endedAt` 0 while it runs. The live
+   * count reads the first, so a reload does not start it again from nothing,
+   * and a finished card reads both to say how long it took (bw-iavgo.1).
+   * Optional because a row an older build stored carries neither.
+   */
+  startedAt?: number;
+  endedAt?: number;
+  /**
    * What the agent this call sent away is doing NOW, in its own words. Null on
    * every other kind of call, and on a sent-off one until the first summary
    * arrives (bw-7ks.22.2).
@@ -701,6 +710,8 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
         title: e.title,
         status: 'running',
         seconds: 0,
+        startedAt: Date.parse(e.at) || 0,
+        endedAt: 0,
         summary: null,
         parentId: e.parentToolCallId,
         ...(e.execution ? { execution: e.execution } : {}),
@@ -724,7 +735,15 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.items = twice
         ? items.map((it) =>
             it.kind === 'tool' && it.id === e.toolCallId
-              ? { ...row, diff: it.diff ?? row.diff, ...(it.images ? { images: it.images } : {}) }
+              ? {
+                  ...row,
+                  diff: it.diff ?? row.diff,
+                  ...(it.images ? { images: it.images } : {}),
+                  // A later word about the call is not a new start
+                  // (projection.rs agrees).
+                  startedAt: it.startedAt || row.startedAt,
+                  endedAt: it.endedAt ?? 0,
+                }
               : it,
           )
         : [...items, row];
@@ -740,6 +759,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
               ...it,
               status: e.ok ? 'ok' : 'failed',
               output: e.output,
+              endedAt: Date.parse(e.at) || 0,
               title: e.title ?? it.title,
               // The last reading wins, and a ping that carried none leaves the
               // one already on the row: a terminal that has closed is still
@@ -1248,6 +1268,8 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           title: e.title,
           status: 'running',
           seconds: 0,
+          startedAt: Date.parse(e.at) || 0,
+          endedAt: 0,
           summary: null,
           parentId: e.parentToolCallId,
           ...(e.execution ? { execution: e.execution } : {}),
@@ -1264,7 +1286,13 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           items.push(row);
         } else {
           const was = items[at] as TranscriptTool;
-          items[at] = { ...row, diff: was.diff ?? row.diff, ...(was.images ? { images: was.images } : {}) };
+          items[at] = {
+            ...row,
+            diff: was.diff ?? row.diff,
+            ...(was.images ? { images: was.images } : {}),
+            startedAt: was.startedAt || row.startedAt,
+            endedAt: was.endedAt ?? 0,
+          };
         }
         break;
       }
@@ -1275,6 +1303,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           const it = items[at] as TranscriptTool;
           it.status = e.ok ? 'ok' : 'failed';
           it.output = e.output;
+          it.endedAt = Date.parse(e.at) || 0;
           if (e.title) it.title = e.title;
           if (e.terminal) it.terminal = e.terminal;
         }

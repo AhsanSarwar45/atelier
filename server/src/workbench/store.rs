@@ -20,7 +20,7 @@ use std::time::Duration;
 /// replaying its record can add or correct canonical events; changing Claude
 /// must not force every Codex transcript through an unrelated rebuild.
 pub const IMPORT_RECIPE: i64 = 11;
-pub const CLAUDE_IMPORT_RECIPE: i64 = 12;
+pub const CLAUDE_IMPORT_RECIPE: i64 = 13;
 
 pub fn import_recipe(brand: &str) -> i64 {
     if brand == "claude" {
@@ -39,7 +39,8 @@ pub fn import_recipe(brand: &str) -> i64 {
 /// rebuilds its own rows the next time it is opened, and pays for it once.
 ///
 /// 1: a picture a call answered with is kept on the call's row (bw-343e.1).
-const TRANSCRIPT_FOLD_VERSION: i64 = 1;
+/// 2: a call's row keeps when it began and ended (bw-iavgo.1).
+const TRANSCRIPT_FOLD_VERSION: i64 = 2;
 
 /// Events a message's id gathers into its transcript row.
 const MESSAGE_REF_TYPES: &[&str] = &[

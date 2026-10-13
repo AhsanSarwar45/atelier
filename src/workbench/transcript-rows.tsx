@@ -684,11 +684,17 @@ export const ToolRow = memo(function ToolRow({
             </ChipsInAControl.Provider>
           </span>
           {/* How long it has been running, while it is running: a call that takes a
-              minute must not look the same as one that took none. */}
-          {item.status === 'running' && item.seconds > 0 && (
-            <span data-testid="tool-elapsed" className="shrink-0 tabular-nums">
-              {forHowLong(item.seconds)}
-            </span>
+              minute must not look the same as one that took none. Once it is
+              over, how long it took, off the times the record keeps, so the
+              answer is still there after a reload (bw-iavgo.1). */}
+          {item.status === 'running' ? (
+            <RunningFor seconds={item.seconds} since={item.startedAt ?? 0} />
+          ) : (
+            tookMs(item) !== null && (
+              <span data-testid="tool-took" className="shrink-0 tabular-nums">
+                {tookFor(tookMs(item)!)}
+              </span>
+            )
           )}
           <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
         </Row>
@@ -893,6 +899,42 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
     </div>
   );
 });
+/**
+ * How long a finished call took, in ms, or null when the record cannot say.
+ * A start and end in the same instant is a replay that dated everything by one
+ * clock, not a call that took no time, so it says nothing either.
+ */
+function tookMs(item: TranscriptTool): number | null {
+  const { startedAt = 0, endedAt = 0 } = item;
+  return startedAt > 0 && endedAt > startedAt ? endedAt - startedAt : null;
+}
+
+/** A finished call's length; under a second is said as such, not as `0s`. */
+function tookFor(ms: number): string {
+  return ms < 1000 ? '<1s' : forHowLong(ms / 1000);
+}
+
+/**
+ * A running call's count. Its own beat, so only this span redraws each second
+ * and not the conversation around it (see WorkingLine). The brand's own count
+ * wins when it gives one; otherwise it counts from when the call began.
+ */
+function RunningFor({ seconds, since }: { seconds: number; since: number }) {
+  const [, beat] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (seconds > 0 || since <= 0) return;
+    const timer = setInterval(beat, 1000);
+    return () => clearInterval(timer);
+  }, [seconds, since]);
+  const shown = seconds > 0 ? seconds : since > 0 ? Math.floor((Date.now() - since) / 1000) : 0;
+  if (shown <= 0) return null;
+  return (
+    <span data-testid="tool-elapsed" className="shrink-0 tabular-nums">
+      {forHowLong(shown)}
+    </span>
+  );
+}
+
 /**
  * The line at the foot of the transcript, present exactly while the agent owes
  * an answer: a moving mark, what it is doing in its own words, and how long it

@@ -274,6 +274,31 @@ pub(crate) fn searchable_events(record: &Path) -> Vec<Value> {
     transcript_events(&ordered_conversation(&jsonl(record), false), None)
 }
 
+/// When each call in a record was asked and answered, by its id, as the lines
+/// that carried them are dated. A replay that cannot date its own events (ACP
+/// `session/load` carries no times) reads the calls' times from here, or every
+/// call it replays lasted no time at all (bw-iavgo.1).
+pub fn call_times(record: &Path) -> HashMap<String, (Option<String>, Option<String>)> {
+    let mut times: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+    for row in jsonl(record) {
+        let Some(at) = row["timestamp"].as_str() else {
+            continue;
+        };
+        for block in row["message"]["content"].as_array().into_iter().flatten() {
+            let (id, asked) = match block["type"].as_str() {
+                Some("tool_use") => (block["id"].as_str(), true),
+                Some("tool_result") => (block["tool_use_id"].as_str(), false),
+                _ => continue,
+            };
+            let Some(id) = id else { continue };
+            let entry = times.entry(id.to_string()).or_default();
+            let slot = if asked { &mut entry.0 } else { &mut entry.1 };
+            slot.get_or_insert_with(|| at.to_string());
+        }
+    }
+    times
+}
+
 pub fn find_record(config: &Path, session_id: &str) -> Option<PathBuf> {
     if !valid_session_id(session_id) {
         return None;
@@ -1462,6 +1487,18 @@ pub fn handed_off(answer: &Value, tool_call_id: &str, title: &str) -> Option<Val
     }))
 }
 
+/// A call's answer, dated by the line that carried it when that line says.
+fn completed(call_id: &str, ok: bool, output: String, ended: Option<String>) -> Value {
+    let mut event = json!({
+        "type":"tool.completed", "toolCallId":call_id, "ok":ok,
+        "output":cut(output, KEPT)
+    });
+    if let Some(at) = ended {
+        event["at"] = json!(at);
+    }
+    event
+}
+
 fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
     let mut results = HashMap::new();
     // The tool's answer in full, beside the words of it: what the words say
@@ -1477,6 +1514,11 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
                             result_text(&block["content"]),
                             block["is_error"] != true,
                             result_images(&block["content"]),
+                            // When the answer was written, which is when the
+                            // call ended: the call's own line only says when
+                            // it began, so a completion dated by it lasted no
+                            // time at all (bw-iavgo.1).
+                            row["timestamp"].as_str().map(str::to_string),
                         ),
                     );
                     if row["toolUseResult"].is_object() {
@@ -1566,11 +1608,8 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
             // the command is still running, not that it failed with empty
             // output. The follower will append the completion when the
             // matching `tool_result` lands.
-            if let Some((output, ok, pictures)) = results.remove(call_id) {
-                events.push(json!({
-                    "type":"tool.completed", "toolCallId":call_id, "ok":ok,
-                    "output":cut(output, KEPT)
-                }));
+            if let Some((output, ok, pictures, ended)) = results.remove(call_id) {
+                events.push(completed(call_id, ok, output, ended));
                 events.extend(result_image_events(call_id, pictures, parent));
             }
             // Work the call handed off rather than did. Only the chat's own
@@ -1606,11 +1645,8 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
     // row already on screen.
     let mut unmatched = results.into_iter().collect::<Vec<_>>();
     unmatched.sort_by(|a, b| a.0.cmp(&b.0));
-    for (call_id, (output, ok, pictures)) in unmatched {
-        events.push(json!({
-            "type":"tool.completed", "toolCallId":call_id, "ok":ok,
-            "output":cut(output, KEPT)
-        }));
+    for (call_id, (output, ok, pictures, ended)) in unmatched {
+        events.push(completed(&call_id, ok, output, ended));
         events.extend(result_image_events(&call_id, pictures, parent));
     }
     events
@@ -2232,6 +2268,34 @@ pub fn replay_lines(lines: &[String]) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    /// A call read out of a record ends when its answer was written, not when
+    /// it was asked: dated by the asking line, every imported command lasted
+    /// no time at all (bw-iavgo.1).
+    #[test]
+    fn an_imported_call_ends_when_its_answer_was_written() {
+        let rows = vec![
+            json!({"type":"assistant","timestamp":"2026-10-13T12:00:00Z","message":{"role":"assistant",
+                "content":[{"type":"tool_use","id":"t","name":"Bash","input":{"command":"sleep 45"}}]}}),
+            json!({"type":"user","timestamp":"2026-10-13T12:00:45Z","message":{"role":"user",
+                "content":[{"type":"tool_result","tool_use_id":"t","content":"done"}]}}),
+        ];
+        let events = super::transcript_events(&rows, None);
+        let at = |kind: &str| {
+            events
+                .iter()
+                .find(|event| event["type"] == kind)
+                .map(|event| event["at"].clone())
+                .unwrap()
+        };
+        assert_eq!(at("tool.started"), json!("2026-10-13T12:00:00Z"));
+        assert_eq!(at("tool.completed"), json!("2026-10-13T12:00:45Z"));
+
+        // The answer alone, its call read in an earlier window.
+        let events = super::transcript_events(&rows[1..], None);
+        assert_eq!(events[0]["type"], "tool.completed");
+        assert_eq!(events[0]["at"], json!("2026-10-13T12:00:45Z"));
+    }
+
     /// A record that only grew is searched back for the person's last words
     /// only as far as the last search reached; one rewritten is searched whole
     /// (bw-xeeqg.9).

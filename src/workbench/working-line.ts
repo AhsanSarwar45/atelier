@@ -63,6 +63,13 @@ export interface WorkingLineNow {
 export interface CallInFlight {
   title: string;
   seconds: number;
+  /**
+   * When the call began, as the record dates it, ms since the epoch; 0 when it
+   * does not say. The count beside the label runs from here, so it survives a
+   * reload instead of starting again from the moment the page opened
+   * (bw-iavgo.1).
+   */
+  startedAt?: number;
 }
 
 export function workingLine(now: {
@@ -83,6 +90,7 @@ export function workingLine(now: {
   typicalMs?: number | null;
 }): WorkingLineNow | null {
   const reported = now.running?.seconds ?? 0;
+  const began = now.running?.startedAt || null;
   if (now.busy) {
     return {
       // The one reading's word, which IS the driver's own when the driver named
@@ -95,7 +103,7 @@ export function workingLine(now: {
       detail: now.state.detail,
       typicalMs: now.typicalMs ?? null,
       doing: now.state.doing,
-      since: now.since,
+      since: began ?? now.since,
       // Off the one reading, so the line and the chip an inch above it cannot
       // disagree about whether the turn is worth a second number at all.
       turn: now.state.turnSince,
@@ -115,7 +123,7 @@ export function workingLine(now: {
       detail: now.state.detail,
       typicalMs: now.typicalMs ?? null,
       doing: now.state.doing,
-      since: now.state.since,
+      since: began ?? now.state.since,
       turn: now.state.turnSince,
       reported,
       waiting: false,
