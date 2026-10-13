@@ -97,18 +97,23 @@ function read(projectPath: string, store: CardStore, force = false): Promise<voi
     .then(({ cards, source }) => {
       // The first answer is the whole board; every later one is only what
       // moved since, folded into what was already known.
-      const statuses = updatedAfter ? new Map(store.snapshot.statuses) : new Map<string, BeadStatus>();
+      const held = store.snapshot.statuses;
+      const statuses = updatedAfter ? new Map(held) : new Map<string, BeadStatus>();
       let newest = store.lastUpdated ?? '';
       for (const card of cards) {
         statuses.set(card.id, card.status);
         const stamp = card.updated_at || '';
         if (stamp > newest) newest = stamp;
       }
-      store.snapshot = { ids: new Set(statuses.keys()), statuses };
       store.loadedAt = Date.now();
       store.lastUpdated = newest || null;
       store.source = source ?? null;
-      store.listeners.forEach((notify) => notify());
+      // Every chip and every drawn message reads this index, so an answer that
+      // moved nothing keeps the old one and tells no one.
+      if (!sameStatuses(held, statuses)) {
+        store.snapshot = { ids: new Set(statuses.keys()), statuses };
+        store.listeners.forEach((notify) => notify());
+      }
       keepAsking(projectPath, store);
     })
     // An unreadable board leaves the last good answer on screen. On first
@@ -122,6 +127,12 @@ function read(projectPath: string, store: CardStore, force = false): Promise<voi
       }
     });
   return store.loading;
+}
+
+function sameStatuses(a: ReadonlyMap<string, BeadStatus>, b: ReadonlyMap<string, BeadStatus>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [id, status] of b) if (a.get(id) !== status) return false;
+  return true;
 }
 
 /** Starts the backstop once the board has said where it comes from, while anyone is listening. */

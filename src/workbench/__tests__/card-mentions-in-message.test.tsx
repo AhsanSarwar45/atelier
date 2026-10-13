@@ -120,6 +120,30 @@ describe('card names in a rendered message', () => {
     expect(loadCardStatuses).toHaveBeenLastCalledWith('/project', { updatedAfter: '2026-09-07T00:00:00Z' });
   });
 
+  it('keeps the same index when a board refresh moved nothing, so drawn messages are not redrawn', async () => {
+    loadCardStatuses.mockClear();
+    loadCardStatuses
+      .mockResolvedValueOnce({ cards: [{ id: 'bw-1u1', status: 'open', updated_at: '2026-09-07T00:00:00Z' }], source: 'cli' })
+      .mockResolvedValueOnce({ cards: [], source: 'cli' })
+      .mockResolvedValueOnce({ cards: [{ id: 'bw-1u1', status: 'open', updated_at: '2026-09-07T00:00:02Z' }], source: 'cli' });
+    const seen: ReadonlyMap<string, unknown>[] = [];
+    function Watch() {
+      const statuses = useKnownCardStatuses('/quiet');
+      if (seen.at(-1) !== statuses) seen.push(statuses);
+      return null;
+    }
+
+    render(<Watch />);
+    await waitFor(() => expect(seen.at(-1)?.get('bw-1u1')).toBe('open'));
+    const held = seen.at(-1);
+
+    await act(async () => { boardChanged?.(); });
+    await act(async () => { boardChanged?.(); });
+    await waitFor(() => expect(loadCardStatuses).toHaveBeenCalledTimes(3));
+    await act(async () => { await Promise.resolve(); });
+    expect(seen.at(-1)).toBe(held);
+  });
+
   it('asks a Dolt board again every backstop period, whether or not a change frame came', async () => {
     vi.useFakeTimers();
     loadCardStatuses.mockClear();
