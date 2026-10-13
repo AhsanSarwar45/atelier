@@ -443,6 +443,7 @@ pub async fn load_history(
     database: &ChatDb,
     session: &Session,
     times: &CallTimes,
+    held: bool,
 ) -> Result<(), String> {
     match super::super::provider_reconciliation::complete_history_choice(database, &session.id)
         .await?
@@ -557,6 +558,21 @@ pub async fn load_history(
         .map_err(|error| error.to_string())?;
 
     let mut events = std::mem::take(&mut *collected.lock().await);
+    // A replay closes every call it left open, because a replay is over. A
+    // call the record has not answered, in a chat a live process is holding,
+    // is not over: it is the command that process is running now, and the
+    // follower will settle it when its answer is written (bw-iavgo.2).
+    if held {
+        events.retain(|event| {
+            event.kind != EventKind::ToolCompleted
+                || event
+                    .fields
+                    .get("toolCallId")
+                    .and_then(Value::as_str)
+                    .and_then(|id| times.get(id))
+                    .is_none_or(|time| time.0.is_none() || time.1.is_some())
+        });
+    }
     let menu = menu_fields(
         &session.brand,
         session.model.as_deref(),

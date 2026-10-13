@@ -150,12 +150,10 @@ async function scenario(
     console.log(`[iavgo ${what}] after reload:`, JSON.stringify(after));
 
     for (const [when, seen] of [['open', before], ['reload', after]] as const) {
-      // A record read in whole closes a call still unanswered in it, which is
-      // a fault of its own (bw-iavgo.2); only the finished call is asked of it.
-      if (what === 'followed') {
-        expect.soft(seen.workingElapsed, `working-elapsed after ${when}`).toMatch(/^[23]m/);
-        expect.soft(seen.toolElapsed, `running tool-elapsed after ${when}`).toMatch(/^[23]m/);
-      }
+      // Read in whole, the record's unanswered call stays running while a
+      // process holds the chat; it was closed as failed (bw-iavgo.2).
+      expect.soft(seen.workingElapsed, `working-elapsed after ${when}`).toMatch(/^[23]m/);
+      expect.soft(seen.toolElapsed, `running tool-elapsed after ${when}`).toMatch(/^[23]m/);
       expect.soft(seen.toolTook, `finished tool-took after ${when}`).toBe('45s');
     }
   } finally {

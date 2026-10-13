@@ -50,7 +50,9 @@ impl NativeProviderFactory {
                     } else {
                         let asked = std::time::Instant::now();
                         let times = claude_call_times(&claude_config, &session);
-                        let loaded = ask_provider_to_load(&database, &session, &times).await;
+                        let held = held_elsewhere(&claude_config, &session);
+                        let loaded =
+                            ask_provider_to_load(&database, &session, &times, held).await;
                         let acp_ms = asked.elapsed().as_millis();
                         if let Err(error) = loaded {
                             let fell_back = std::time::Instant::now();
@@ -100,11 +102,12 @@ async fn ask_provider_to_load(
     database: &ChatDb,
     session: &Session,
     times: &super::acp::client::CallTimes,
+    held: bool,
 ) -> Result<(), String> {
     if super::acp::client::adapter_refused_recently(&session.brand).await {
         return Err(format!("{} refused this app a moment ago", session.brand));
     }
-    let loaded = super::acp::client::load_history(database, session, times).await;
+    let loaded = super::acp::client::load_history(database, session, times, held).await;
     super::acp::client::note_adapter_answer(&session.brand, loaded.is_err()).await;
     loaded
 }
@@ -122,6 +125,21 @@ fn claude_call_times(config: &Path, session: &Session) -> super::acp::client::Ca
         .and_then(|external_id| super::claude::history::find_record(&config, external_id))
         .map(|record| super::claude::history::call_times(&record))
         .unwrap_or_default()
+}
+
+/// Whether a live Claude process outside this app is holding the chat now, so
+/// a call its record has not answered yet is still running rather than over.
+fn held_elsewhere(config: &Path, session: &Session) -> bool {
+    let Some(external_id) = session.external_id.as_deref() else {
+        return false;
+    };
+    if session.brand != "claude" {
+        return false;
+    }
+    let config = super::profiles::chat_dir("claude", session.profile.as_deref(), config);
+    super::external::claude_holds(&config, Path::new("/proc"), Utc::now().timestamp_millis())
+        .iter()
+        .any(|hold| hold.id.eq_ignore_ascii_case(external_id))
 }
 
 /// A saved Claude chat that sent work off to a helper, which ACP `session/load`
