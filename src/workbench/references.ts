@@ -257,10 +257,14 @@ function codeSpans(text: string): Array<[number, number]> {
     if (m.index === undefined) continue;
     spans.push([m.index, m.index + m[0].length]);
   }
+  // Both runs come in the order written, so one walk over the fences skips
+  // every backtick inside one.
   const fenced = spans.length;
+  let fence = 0;
   for (const m of text.matchAll(CODE_SPAN)) {
     if (m.index === undefined) continue;
-    if (spans.slice(0, fenced).some(([from, to]) => m.index! >= from && m.index! < to)) continue;
+    while (fence < fenced && spans[fence]![1] <= m.index) fence += 1;
+    if (fence < fenced && m.index >= spans[fence]![0]) continue;
     spans.push([m.index, m.index + m[0].length]);
   }
   return spans;

@@ -46,6 +46,11 @@ describe('a chat keeps its shape while an answer streams in', () => {
     expect(onlyWordsGrew(view([answer('You')]), view([answer("You've hit your limit")]))).toBe(false);
   });
 
+  it('holds when only the withheld-thinking count moved, which the working line reads itself', () => {
+    const items = [thought('Let me')];
+    expect(onlyWordsGrew(view(items, { thinkingTokens: 10 }), view(items, { thinkingTokens: 20 }))).toBe(true);
+  });
+
   it('moves when anything beside the transcript changed', () => {
     const items = [answer('Hello')];
     expect(onlyWordsGrew(view(items), view(items, { model: 'other' } as Partial<SessionView>))).toBe(false);

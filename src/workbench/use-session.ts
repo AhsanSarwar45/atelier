@@ -263,6 +263,14 @@ function publishCached(id: string, view: SessionView, ready?: boolean, immediate
 }
 
 /**
+ * What a working chat changes with nearly every event and the screen reads in
+ * one place only: the rows (each reads its own words), the sequence, and the
+ * withheld-thinking count the working line reads for itself
+ * (`useThinkingTokens`). None of them is a change of shape.
+ */
+const QUIET_KEYS = new Set<keyof SessionView>(['items', 'lastSeq', 'thinkingTokens']);
+
+/**
  * Whether `next` differs from `held` only in the words of answers and thoughts
  * already on the page.
  *
@@ -279,7 +287,7 @@ export function onlyWordsGrew(held: SessionView, next: SessionView): boolean {
   const keys = Object.keys(next) as (keyof SessionView)[];
   if (keys.length !== Object.keys(held).length) return false;
   for (const key of keys) {
-    if (key !== 'items' && key !== 'lastSeq' && held[key] !== next[key]) return false;
+    if (!QUIET_KEYS.has(key) && held[key] !== next[key]) return false;
   }
   const was = held.items;
   const now = next.items;
@@ -338,6 +346,18 @@ export function useLatestItem<T extends TranscriptItem>(sessionId: string, item:
     return latest && latest.kind === item.kind ? (latest as T) : item;
   }, [grows, sessionId, item]);
   return useSyncExternalStore(subscribe, snapshot, () => item);
+}
+
+/** How much thinking this chat has done but withheld, read live rather than off the shape. */
+export function useThinkingTokens(sessionId: string | null): number {
+  const subscribe = useCallback((listener: () => void) => {
+    if (!sessionId) return () => {};
+    const entry = cached(sessionId);
+    entry.listeners.add(listener);
+    return () => entry.listeners.delete(listener);
+  }, [sessionId]);
+  const snapshot = useCallback(() => (sessionId ? cachedSessions.get(sessionId)?.view.thinkingTokens ?? 0 : 0), [sessionId]);
+  return useSyncExternalStore(subscribe, snapshot, () => 0);
 }
 
 /** The app-wide feed keeps chats already opened current while another tab is

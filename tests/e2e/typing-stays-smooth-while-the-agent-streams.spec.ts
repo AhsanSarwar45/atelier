@@ -286,6 +286,15 @@ test('a keystroke costs the same whether or not the agent is talking', async ({ 
                     // with code in it, arriving a clause at a time.
                     text: words,
                   });
+                  // And the counters a working agent sends beside its words:
+                  // how far its thinking has gone and how full the window is.
+                  // Neither is a word, so each one used to redraw the screen.
+                  if (sent % 3 === 0) {
+                    say({ sessionId: chat, seq: (seq += 1), at: at(), type: 'thinking.progress', tokens: sent * 7 });
+                  }
+                  if (sent % 10 === 0) {
+                    say({ sessionId: chat, seq: (seq += 1), at: at(), type: 'context', used: 1_000 + sent, window: 200_000 });
+                  }
                 }, everyMs);
               },
               stop() {

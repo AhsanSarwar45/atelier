@@ -8,7 +8,7 @@
 'use client';
 import { ActiveGuidance } from './active-guidance';
 
-import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from 'react';
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type Dispatch, type KeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -102,7 +102,7 @@ import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modelWords, modeWords } from '@/workbench/what-it-runs';
-import { isBusy, isMidTurn, readAndKeep, sendCommand, useSession, useSessionFactsRead, useSessionView, type TranscriptItem } from '@/workbench/use-session';
+import { isBusy, isMidTurn, readAndKeep, sendCommand, useSession, useSessionFactsRead, useSessionView, useThinkingTokens, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProfileBadge, brandName } from '@/workbench/brand-icon';
 import { ChatAccount, useSignIn } from '@/workbench/sign-in-dialog';
@@ -133,6 +133,17 @@ const EVERY_CHAT = 'workbench.every-chat';
 /** A brand whose accounts have not been read yet, the same empty list every time. */
 const NO_ACCOUNTS: ProfileChoice[] = [];
 const NO_ITEMS: TranscriptItem[] = [];
+
+/**
+ * The working line, counting our own driver's withheld thinking for itself.
+ * The count moves with nearly every event of a thinking turn, so the screen
+ * around the line does not follow it.
+ */
+function OurWorkingLine({ counting, ...line }: ComponentProps<typeof WorkingLine> & { counting: string | null }) {
+  const thought = useThinkingTokens(counting);
+  return <WorkingLine {...line} thought={counting ? thought : line.thought} />;
+}
+
 const LEFT_PANEL_WIDTH = 'workbench.left-panel-width';
 const RIGHT_PANEL_WIDTH = 'workbench.right-panel-width';
 /** How wide the diff beside a chat was last dragged (bw-v79ny.4). */
@@ -1149,14 +1160,21 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   );
 
   // Everything the conversation says, gone through once for the addresses in
-  // it, so the answers are already back by the time the reader looks.
+  // it, so the answers are already back by the time the reader looks. Once:
+  // each row is read when it is new or changed, not every row on every event.
+  const askDisk = disk.ask;
+  const scanned = useRef({ where, items: new WeakSet<TranscriptItem>() });
   useEffect(() => {
+    if (scanned.current.where !== where) scanned.current = { where, items: new WeakSet() };
+    const seen = scanned.current.items;
     const asking = new Set<string>();
     for (const item of view.items) {
+      if (seen.has(item)) continue;
+      seen.add(item);
       for (const text of textOfItem(item)) for (const p of openableAsks(text, where)) asking.add(p);
     }
-    if (asking.size > 0) disk.ask(Array.from(asking));
-  }, [view.items, where, disk]);
+    if (asking.size > 0) askDisk(Array.from(asking));
+  }, [view.items, where, askDisk]);
 
   // A card, a chat or a skill named as a reference is the one reference badge,
   // here and in the box it was written in (bw-mi3s.1).
@@ -1874,7 +1892,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     label: view.stateLabel,
     since: busySince,
     waiting: view.state === 'waiting_permission',
-    thought: view.thinkingTokens,
+    // Read live by the line itself (`OurWorkingLine`), not off the shape.
+    thought: 0,
     state,
     running,
     // Measured in this project, by the sidecar watching runs begin and end. Only
@@ -3232,7 +3251,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             still loading: the page has not heard from it yet, and a chat it
             has not heard from reads as the blank one, whose word is
             "Starting" — a second spinner under the loading line (bw-721t.1). */}
-        {atWork && !view.loading && <WorkingLine {...atWork} />}
+        {atWork && !view.loading && <OurWorkingLine {...atWork} counting={busy ? reading : null} />}
         </div>
       </div>
       {/* The way back floats over the conversation's own bottom corner, the way
