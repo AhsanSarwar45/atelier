@@ -98,6 +98,7 @@ import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
 import { DrawnTranscript } from '@/workbench/drawn-transcript';
 import { linesInFlight, worthDrawing, type PendingSend } from '@/workbench/pending-sends';
+import { withPresented } from '@/workbench/presented';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
@@ -1533,7 +1534,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** The rows this conversation draws, once the reader's switches and current conditions are obeyed. */
   const rows = useMemo(() => stillShowing(
     [
-      ...view.items.filter(worthDrawing),
+      // Each presenter call's widgets as a reply of their own (bw-yh4nu).
+      ...withPresented(view.items.filter(worthDrawing)),
       // At the end, which is where a line just sent belongs and where the
       // server's copy of it will land.
       ...lines.sent,

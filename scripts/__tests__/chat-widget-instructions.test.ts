@@ -17,7 +17,9 @@ describe('agent chat widget instructions', () => {
 
   it.each(instructions)('requires the validated presenter instead of hand-authored syntax', (text) => {
     expect(text).toContain('Atelier presenter');
-    expect(text).toMatch(/copy .*stdout/i);
+    // The chat draws what the presenter printed; a paste was the step agents
+    // skipped (bw-yh4nu).
+    expect(text).toMatch(/do not copy its stdout/i);
     expect(text).toMatch(/never hand-author/i);
   });
 

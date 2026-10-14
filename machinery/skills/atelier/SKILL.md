@@ -93,8 +93,9 @@ Save little, and keep it short.
 ## Presenter commands
 
 Never hand-author an `atelier-widget` or `atelier-image-compare` fence. Run the
-Atelier presenter and copy its stdout into your reply byte-for-byte. It
-validates the input and prints the canonical block.
+Atelier presenter. It validates the input, and the chat shows the result right
+where the command ran. Do not copy its stdout into your reply; a pasted copy is
+drawn once, not twice. Refer to it in words ("the screenshot above") instead.
 
 | Output | Command |
 |---|---|

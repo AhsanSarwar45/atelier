@@ -129,6 +129,31 @@ pub fn bound_event(event: &mut Event) {
             }
         }
         EventKind::ToolCompleted => {
+            // What the presenter printed is read before the output is cut, so
+            // a large table is not lost to its missing closing fence. The chat
+            // draws these at the call itself: an agent that forgot to paste
+            // the block into its reply — a quarter of every block presented
+            // (bw-yh4nu) — no longer leaves the reader without the widget. As
+            // with a diff's hunks, the second bounding finds the field set.
+            //
+            // Codex hands its output back as JSON (`formatted_output`), which
+            // escapes the fence; the terminal's own copy is the plain text.
+            if !event.fields.contains_key("presented") {
+                let printed = [
+                    event.fields.get("output"),
+                    event.fields.get("terminal").and_then(|run| run.get("output")),
+                ];
+                let presented = printed
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .filter(|text| text.contains("```atelier-widget"))
+                    .map(super::media::widget_specs)
+                    .find(|found| !found.is_empty());
+                if let Some(presented) = presented {
+                    event.fields.insert("presented".into(), Value::Array(presented));
+                }
+            }
             if let Some(output) = event.fields.get_mut("output") {
                 trim(output, 0, "")
             }
@@ -225,6 +250,40 @@ mod tests {
             bound_event(&mut value);
             assert!(value.fields[field].as_str().unwrap().len() < 5_000);
         }
+    }
+
+    /// A widget the presenter printed survives the cut that would take its
+    /// closing fence, and a second bounding leaves what was read alone.
+    #[test]
+    fn a_presented_widget_is_read_before_the_output_is_cut() {
+        let rows: Vec<Value> = (0..30).map(|row| json!([format!("row {row} {}", "w".repeat(150)), "ok"])).collect();
+        let table = json!({"type":"table","columns":["Name","State"],"rows":rows});
+        let output = format!("```atelier-widget\n{table}\n```\n");
+        assert!(output.len() > 5_000);
+        let mut completed = event(
+            json!({"type":"tool.completed","sessionId":"s","seq":0,"at":"now","toolCallId":"t","ok":true,"output":output}),
+        );
+        bound_event(&mut completed);
+        assert!(completed.fields["output"].as_str().unwrap().len() < 5_000);
+        assert_eq!(completed.fields["presented"], json!([table]));
+        bound_event(&mut completed);
+        assert_eq!(completed.fields["presented"], json!([table]));
+
+        let mut plain = event(
+            json!({"type":"tool.completed","sessionId":"s","seq":0,"at":"now","toolCallId":"t","ok":true,"output":"```atelier-widget\nnot json\n```\n"}),
+        );
+        bound_event(&mut plain);
+        assert!(!plain.fields.contains_key("presented"));
+
+        // Codex's output is JSON around the text; its terminal holds the text.
+        let block = "```atelier-widget\n{\"columns\":[\"A\"],\"rows\":[[\"1\"]],\"type\":\"table\"}\n```\n";
+        let mut codex = event(json!({
+            "type":"tool.completed","sessionId":"s","seq":0,"at":"now","toolCallId":"t","ok":true,
+            "output": json!({"formatted_output": block, "exit_code": 0}).to_string(),
+            "terminal": {"type":"terminal","output": block}
+        }));
+        bound_event(&mut codex);
+        assert_eq!(codex.fields["presented"], json!([{"columns":["A"],"rows":[["1"]],"type":"table"}]));
     }
 
     #[test]

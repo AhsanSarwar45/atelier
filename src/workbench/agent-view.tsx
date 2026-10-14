@@ -39,6 +39,7 @@ import type { AgentControl } from '@/workbench/protocol';
 // A finished shell's output is drawn with xterm, fetched when one is shown (bw-fbzd.4).
 const RanTerminal = dynamic(() => import('@/workbench/ran-terminal').then((m) => m.RanTerminal), { ssr: false });
 import { AgentSteering, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, useNow } from '@/workbench/sent-away';
+import { withPresented } from '@/workbench/presented';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -169,7 +170,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
       const key = `${item.kind}:${item.id}`;
       if (!known.has(key) && (!historyReady || !openingKeys.current.has(key))) merged.push(item);
     }
-    return merged;
+    return withPresented(merged);
   }, [history, historyReady, live]);
 
   useEffect(() => {

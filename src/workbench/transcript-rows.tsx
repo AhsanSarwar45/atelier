@@ -1108,6 +1108,9 @@ const MessageRow = memo(function MessageRow({
       // Which call this came from, when it came from a helper rather than from
       // the agent you are talking to (bw-7ks.22.2).
       data-sent-by={sentBy ?? undefined}
+      // The presenter call these widgets came from, when no reply carried
+      // them (bw-yh4nu).
+      data-presented-by={item.presentedBy}
       data-actor-id={item.execution?.actorId}
       data-actor-name={item.execution?.actorName ?? undefined}
       data-conversation-id={item.execution?.conversationId}

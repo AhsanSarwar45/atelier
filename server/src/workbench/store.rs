@@ -40,7 +40,8 @@ pub fn import_recipe(brand: &str) -> i64 {
 ///
 /// 1: a picture a call answered with is kept on the call's row (bw-343e.1).
 /// 2: a call's row keeps when it began and ended (bw-iavgo.1).
-const TRANSCRIPT_FOLD_VERSION: i64 = 2;
+/// 3: a call's row keeps the widgets the presenter printed (bw-yh4nu).
+const TRANSCRIPT_FOLD_VERSION: i64 = 3;
 
 /// Events a message's id gathers into its transcript row.
 const MESSAGE_REF_TYPES: &[&str] = &[

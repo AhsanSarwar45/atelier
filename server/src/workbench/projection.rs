@@ -413,6 +413,11 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                         json!("failed")
                     };
                     items[at]["output"] = value(event, "output");
+                    // What the presenter printed, read before the output was
+                    // cut; the chat draws it beside the call (bw-yh4nu).
+                    if let Some(presented) = event.fields.get("presented") {
+                        items[at]["presented"] = presented.clone();
+                    }
                     // When it ended, so the row can say how long it took
                     // after the clock that counted it has gone (bw-iavgo.1).
                     items[at]["endedAt"] = json!(millis(event));

@@ -572,6 +572,8 @@ export type WbpEvent = EventBase &
         title?: string;
         /** The terminal this call ran, when it ran one. See {@link TerminalRun}. */
         terminal?: TerminalRun | null;
+        /** The widgets the presenter printed, read before the output was cut (bw-yh4nu). */
+        presented?: ChatWidget[];
       }
     /**
      * How long this call has been running, as the brand counts it, and — when the call sent an agent

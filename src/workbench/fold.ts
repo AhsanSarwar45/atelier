@@ -79,6 +79,8 @@ export interface TranscriptMessage {
    * drawn as his (bw-oamr.1).
    */
   composedHere?: boolean;
+  /** Set on the row that draws a presenter call's widgets: that call's id (bw-yh4nu). */
+  presentedBy?: string;
   execution?: ExecutionContext;
 }
 
@@ -135,6 +137,10 @@ export interface TranscriptTool {
    * with words. A screenshot tool's whole answer used to be dropped: the row
    * said it succeeded and showed nothing (bw-t26l.20). */
   images?: ImagePayload[];
+  /** The widgets the presenter printed, when this call ran it. Read by the
+   * server before the output was cut; drawn as a row of their own after the
+   * call, so the agent need not paste them (bw-yh4nu). */
+  presented?: ChatWidget[];
   /** What ACP itself said this call is, when no rule here recognises its name. */
   acpKind?: string | null;
   /** The files this call says it touched, and where in them. */
@@ -761,6 +767,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
               output: e.output,
               endedAt: Date.parse(e.at) || 0,
               title: e.title ?? it.title,
+              ...(e.presented?.length ? { presented: e.presented } : {}),
               // The last reading wins, and a ping that carried none leaves the
               // one already on the row: a terminal that has closed is still
               // the terminal that ran, and blanking it would take the output
@@ -1306,6 +1313,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           it.endedAt = Date.parse(e.at) || 0;
           if (e.title) it.title = e.title;
           if (e.terminal) it.terminal = e.terminal;
+          if (e.presented?.length) it.presented = e.presented;
         }
         break;
       }

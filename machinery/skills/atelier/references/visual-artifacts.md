@@ -1,8 +1,9 @@
 # Visual artifact contract
 
 Create exactly one JSON object with `version: 1`, a `kind`, and a concise
-`title`. Optional `description` may explain what to look for. Save it, run
-`atelier tool present artifact --file FILE`, and copy stdout unchanged.
+`title`. Optional `description` may explain what to look for. Save it and run
+`atelier tool present artifact --file FILE`. The chat shows it where the
+command ran; do not paste the output.
 
 ## Mermaid
 

@@ -136,6 +136,9 @@ fn reads_stdin(rest: &[String]) -> bool {
     rest.first().map(String::as_str) == Some("widget") && !rest.iter().any(|word| word == "--input")
 }
 
+/// What the presenter adds under its block, for the agent that ran it.
+pub const PRESENTED: &str = "Shown in the chat. Do not paste this block into your reply.\n";
+
 pub async fn present(rest: &[String]) -> Result<i32, String> {
     use std::io::Read;
     let mut stdin = String::new();
@@ -161,8 +164,11 @@ pub async fn present(rest: &[String]) -> Result<i32, String> {
             .unwrap_or("Atelier refused the presentation")
             .to_string());
     }
+    // The chat draws the block from this output, at this call. Said here,
+    // where the agent reads it, because a paste it was told to make was the
+    // step a quarter of presented widgets never got (bw-yh4nu).
     print!(
-        "{}",
+        "{}{PRESENTED}",
         value["output"]
             .as_str()
             .ok_or_else(|| "Atelier returned no presentation output".to_string())?
