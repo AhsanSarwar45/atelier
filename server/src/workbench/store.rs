@@ -2947,127 +2947,66 @@ fn held_in_its_project(
         let wanted = limit.saturating_add(8);
         let mut candidate_count = wanted;
         let (items, anchors) = loop {
-            let cutoff = self
-            .connection
-            .query_row(
-                // The chat's own messages and calls are found by their ids in
-                // `event_ref`, the ones a helper's call owns by their `p:` id,
-                // so no event's JSON is read to tell them apart; only the rare
-                // kinds below are read, through the type index. Reading every
-                // started call's JSON instead was about a gigabyte from a cold
-                // disk on a 2.2 GB chat, because the calls' big results sit
-                // between them (bw-xeeqg.2).
-                r#"WITH parented(seq) AS (
-                     SELECT seq FROM event_ref
-                     WHERE session_id=?1 AND ref>='p:' AND ref<'p;' AND seq<?2 AND seq>?3
-                   ),
-                   anchors AS (
-                     SELECT CASE type
-                       WHEN 'message.started' THEN 'message:'
-                       WHEN 'thinking.delta' THEN 'thinking:'
-                       ELSE 'tool:' END || substr(ref,3) AS item_key,
-                       MIN(seq) AS started
-                     FROM event_ref
-                     WHERE session_id=?1 AND seq<?2 AND seq>?3
-                       AND ((ref>='m:' AND ref<'m;' AND type IN ('message.started','thinking.delta'))
-                         OR (ref>='t:' AND ref<'t;' AND type='tool.started'))
-                       AND seq NOT IN (SELECT seq FROM parented)
-                     GROUP BY item_key
-                     UNION ALL
-                     SELECT CASE type
-                       WHEN 'note' THEN 'note:' || json_extract(json,'$.noteId')
-                       WHEN 'ask.permission' THEN 'ask:' || json_extract(json,'$.askId')
-                       WHEN 'question.requested' THEN 'question:' || json_extract(json,'$.requestId')
-                       WHEN 'plan.proposed' THEN 'plan:' || json_extract(json,'$.proposalId')
-                       WHEN 'provider.message' THEN 'provider_message:' || seq
-                       WHEN 'notice' THEN 'notice:' || seq END AS item_key,
-                       MIN(seq) AS started
-                     FROM event
-                     WHERE session_id=?1 AND seq<?2 AND seq>?3
-                       AND type IN ('note','ask.permission','question.requested','plan.proposed',
-                                    'provider.message','notice')
-                       AND NOT(type='note' AND json_extract(json,'$.rank')='detail')
-                     GROUP BY item_key
-                   )
-                   SELECT started FROM anchors ORDER BY started DESC LIMIT 1 OFFSET ?4"#,
-                params![
-                    session_id,
-                    ceiling,
-                    reset_seq,
-                    candidate_count.saturating_sub(1) as i64
-                ],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?
-            .unwrap_or_else(|| reset_seq.saturating_add(1));
+            // Walk the chat's ids newest first and stop once enough of its
+            // own messages and calls have started. Seeking `event_ref` by id
+            // prefix instead read every id row the chat ever stored, which
+            // took seconds on a long chat from a cold disk (bw-yg67a.1).
+            let walk = self.walk_newest_refs(session_id, ceiling, reset_seq, candidate_count, limit)?;
+            let mut starts = walk.roots.values().copied().collect::<Vec<_>>();
+            // A rare row older than the walk cannot outrank the starts it found.
+            starts.extend(self.newest_rare_anchors(
+                session_id,
+                ceiling,
+                walk.floor.saturating_sub(1).max(reset_seq),
+                candidate_count,
+            )?);
+            starts.sort_unstable_by(|left, right| right.cmp(left));
+            let cutoff = starts
+                .get(candidate_count.saturating_sub(1))
+                .copied()
+                .unwrap_or_else(|| reset_seq.saturating_add(1));
+            let mut refs = Vec::new();
+            let mut tools = Vec::new();
+            for (key, seq) in &walk.roots {
+                if *seq < cutoff {
+                    continue;
+                }
+                let (kind, id) = key.split_once(':').unwrap_or(("", key));
+                if kind == "tool" {
+                    refs.push(format!("t:{id}"));
+                    tools.push(id.to_string());
+                } else {
+                    refs.push(format!("m:{id}"));
+                }
+            }
+            refs.extend(walk.child_messages.iter().map(|id| format!("m:{id}")));
+            refs.extend(walk.child_tools.iter().map(|id| format!("t:{id}")));
+            tools.extend(walk.child_tools.iter().cloned());
+            refs.sort_unstable();
+            refs.dedup();
 
-            // Select only the events that can affect the chosen parent rows and a
-            // separately bounded helper tail. SQLite performs the identity joins;
-            // Rust never parses or repeatedly folds a huge intervening child run.
+            // Read only the chosen messages, calls and helpers by id, plus the
+            // rare kinds newer than the cutoff. A helper starts after its call,
+            // so it lies inside the walked window.
             let mut statement = self.connection.prepare(
-            r#"WITH
-               -- Which messages and calls are the chat's own and which a
-               -- helper's call owns is read from their ids, never from their
-               -- JSON (bw-xeeqg.2).
-               parented(seq) AS (
-                 SELECT seq FROM event_ref
-                 WHERE session_id=?1 AND ref>='p:' AND ref<'p;' AND seq>?5 AND seq<?3
-               ),
-               root_messages(id) AS (
-                 SELECT DISTINCT substr(ref,3) FROM event_ref
-                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND ref>='m:' AND ref<'m;'
-                   AND type IN ('message.started','thinking.delta')
-                   AND seq NOT IN (SELECT seq FROM parented)
-               ),
-               child_messages(id) AS (
-                 SELECT substr(ref,3) FROM event_ref
-                 WHERE session_id=?1 AND seq>?5 AND seq<?3 AND ref>='m:' AND ref<'m;'
-                   AND type IN ('message.started','thinking.delta')
-                   AND seq IN (SELECT seq FROM parented)
-                 GROUP BY ref
-                 ORDER BY MIN(seq) DESC LIMIT ?4
-               ),
-               selected_messages(id) AS (
-                 SELECT id FROM root_messages UNION SELECT id FROM child_messages
-               ),
-               root_tools(id) AS (
-                 SELECT DISTINCT substr(ref,3) FROM event_ref
-                 WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND ref>='t:' AND ref<'t;'
-                   AND type='tool.started'
-                   AND seq NOT IN (SELECT seq FROM parented)
-               ),
-               child_tools(id) AS (
-                 SELECT substr(ref,3) FROM event_ref
-                 WHERE session_id=?1 AND seq>?5 AND seq<?3 AND ref>='t:' AND ref<'t;'
-                   AND type='tool.started'
-                   AND seq IN (SELECT seq FROM parented)
-                 GROUP BY ref
-                 ORDER BY MIN(seq) DESC LIMIT ?4
-               ),
-               selected_tools(id) AS (
-                 SELECT id FROM root_tools UNION SELECT id FROM child_tools
-               ),
+                r#"WITH
                selected_agents(id) AS (
-                 SELECT DISTINCT json_extract(json,'$.agentId') FROM event
-                 WHERE session_id=?1 AND seq>?5 AND seq<?3 AND type='agent.started'
-                   AND json_extract(json,'$.toolCallId') IN (SELECT id FROM selected_tools)
+                 SELECT DISTINCT json_extract(json,'$.agentId') FROM event INDEXED BY event_by_type
+                 WHERE type='agent.started' AND session_id=?1 AND seq>=?6 AND seq<?3
+                   AND json_extract(json,'$.toolCallId') IN (SELECT value FROM json_each(?5))
                ),
-               -- Each chosen message, call and helper's events are found by
-               -- id in `event_ref`, never by reading the JSON of every event
-               -- the chat stored (bw-0xeav.1). A picture a CALL answered with
-               -- names the call and leaves messageId null, so it is filed
-               -- under the call; one naming a message is filed under that
-               -- (bw-343e.1).
+               -- A picture a CALL answered with names the call and leaves
+               -- messageId null, so it is filed under the call; one naming a
+               -- message is filed under that (bw-343e.1).
                wanted(ref) AS (
-                 SELECT 'm:' || id FROM selected_messages
-                 UNION SELECT 't:' || id FROM selected_tools
+                 SELECT value FROM json_each(?4)
                  UNION SELECT 'a:' || id FROM selected_agents
                ),
                picked(seq) AS (
                  SELECT seq FROM event_ref
-                 WHERE session_id=?1 AND ref IN (SELECT ref FROM wanted) AND seq>?5 AND seq<?3
+                 WHERE session_id=?1 AND ref IN (SELECT ref FROM wanted) AND seq>?7 AND seq<?3
                  UNION
-                 SELECT seq FROM event
+                 SELECT seq FROM event INDEXED BY event_by_type
                  WHERE session_id=?1 AND seq>=?2 AND seq<?3 AND type IN
                    ('ask.permission','ask.resolved','question.requested','question.resolved',
                     'plan.proposed','plan.resolved','provider.message','notice','note')
@@ -3078,10 +3017,18 @@ fn held_in_its_project(
                CROSS JOIN event ON event.session_id=?1 AND event.seq=picked.seq
                WHERE NOT(event.type='note' AND json_extract(event.json,'$.rank')='detail')
                ORDER BY event.seq"#,
-        )?;
+            )?;
             let rows = statement
                 .query_map(
-                    params![session_id, cutoff, ceiling, limit as i64, reset_seq],
+                    params![
+                        session_id,
+                        cutoff,
+                        ceiling,
+                        serde_json::to_string(&refs).map_err(json_error)?,
+                        serde_json::to_string(&tools).map_err(json_error)?,
+                        walk.floor,
+                        reset_seq
+                    ],
                     |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -3106,8 +3053,8 @@ fn held_in_its_project(
                 break (items, anchors);
             }
             // Retractions and identity refinements can make creation anchors
-            // disappear during folding. Expanding the indexed anchor window
-            // is cheap and guarantees a full page without scanning child runs.
+            // disappear during folding. Walking a little further back is cheap
+            // and guarantees a full page.
             candidate_count = candidate_count.saturating_add(wanted);
         };
         let oldest_anchor = items
@@ -3117,18 +3064,19 @@ fn held_in_its_project(
             .filter_map(|key| anchors.get(&key).copied())
             .min();
         let has_older = match oldest_anchor {
-            Some(cursor) if cursor > reset_seq => self.connection.query_row(
-                r#"SELECT EXISTS(SELECT 1 FROM event
-                    WHERE session_id=?1 AND seq>?2 AND seq<?3 AND (
-                      type IN ('note','ask.permission','question.requested','plan.proposed',
-                               'provider.message','notice')
-                      OR (type IN ('message.started','thinking.delta','tool.started')
-                          AND json_extract(json,'$.parentToolCallId') IS NULL)
-                    )
-                    AND NOT(type='note' AND json_extract(json,'$.rank')='detail'))"#,
-                params![session_id, reset_seq, cursor],
-                |row| row.get::<_, bool>(0),
-            )?,
+            // Both checks stop at the first match, read through an index.
+            Some(cursor) if cursor > reset_seq => {
+                self.connection.query_row(
+                    r#"SELECT EXISTS(SELECT 1 FROM event_ref AS start INDEXED BY event_ref_by_seq
+                        WHERE start.session_id=?1 AND start.seq>?2 AND start.seq<?3
+                          AND start.type IN ('message.started','thinking.delta','tool.started')
+                          AND NOT EXISTS(SELECT 1 FROM event_ref AS parent INDEXED BY event_ref_by_seq
+                            WHERE parent.session_id=?1 AND parent.seq=start.seq
+                              AND parent.ref>='p:' AND parent.ref<'p;'))"#,
+                    params![session_id, reset_seq, cursor],
+                    |row| row.get::<_, bool>(0),
+                )? || !self.newest_rare_anchors(session_id, cursor, reset_seq, 1)?.is_empty()
+            }
             _ => false,
         };
         Ok(TranscriptItemPage {
@@ -3137,6 +3085,121 @@ fn held_in_its_project(
             has_older,
             newest_seq,
         })
+    }
+
+    /// Walk a chat's ids from `ceiling` back towards `reset_seq`, newest first,
+    /// and stop once `roots` of its own messages and calls have started. Each
+    /// row read is one small index entry, never an event's JSON, and the walk
+    /// never reads further back than the page needs (bw-yg67a.1).
+    fn walk_newest_refs(
+        &self,
+        session_id: &str,
+        ceiling: i64,
+        reset_seq: i64,
+        roots: usize,
+        tail: usize,
+    ) -> rusqlite::Result<RefWalk> {
+        let mut walk = RefWalk {
+            roots: HashMap::new(),
+            child_messages: Vec::new(),
+            child_tools: Vec::new(),
+            floor: reset_seq.saturating_add(1),
+        };
+        let mut statement = self.connection.prepare_cached(
+            "SELECT seq, ref, type FROM event_ref INDEXED BY event_ref_by_seq
+             WHERE session_id=?1 AND seq<?2 AND seq>?3 ORDER BY seq DESC",
+        )?;
+        let mut rows = statement.query(params![session_id, ceiling, reset_seq])?;
+        let mut group: Vec<(String, String)> = Vec::new();
+        let mut group_seq = None;
+        let finish = |walk: &mut RefWalk, seq: i64, group: &mut Vec<(String, String)>| {
+            let parented = group.iter().any(|(id, _)| id.starts_with("p:"));
+            for (id, kind) in group.drain(..) {
+                let key = match (id.split_once(':'), kind.as_str()) {
+                    (Some(("m", id)), "message.started") => ("message", id.to_string()),
+                    (Some(("m", id)), "thinking.delta") => ("thinking", id.to_string()),
+                    (Some(("t", id)), "tool.started") => ("tool", id.to_string()),
+                    _ => continue,
+                };
+                if parented {
+                    let ids = if key.0 == "tool" {
+                        &mut walk.child_tools
+                    } else {
+                        &mut walk.child_messages
+                    };
+                    if ids.len() < tail && !ids.contains(&key.1) {
+                        ids.push(key.1);
+                    }
+                } else {
+                    walk.roots.insert(format!("{}:{}", key.0, key.1), seq);
+                }
+            }
+            walk.floor = seq;
+        };
+        while let Some(row) = rows.next()? {
+            let seq = row.get::<_, i64>(0)?;
+            if group_seq.is_some_and(|current| current != seq) {
+                finish(&mut walk, group_seq.unwrap_or(seq), &mut group);
+                if walk.roots.len() >= roots {
+                    return Ok(walk);
+                }
+            }
+            group_seq = Some(seq);
+            group.push((row.get(1)?, row.get(2)?));
+        }
+        if let Some(seq) = group_seq {
+            finish(&mut walk, seq, &mut group);
+        }
+        // The walk reached the reset, so nothing older can belong to the page.
+        walk.floor = reset_seq.saturating_add(1);
+        Ok(walk)
+    }
+
+    /// When the newest `count` rare rows (notes, asks, questions, plans,
+    /// provider messages, notices) before `ceiling` began, read newest first
+    /// through the type index.
+    fn newest_rare_anchors(
+        &self,
+        session_id: &str,
+        ceiling: i64,
+        reset_seq: i64,
+        count: usize,
+    ) -> rusqlite::Result<Vec<i64>> {
+        let mut statement = self.connection.prepare_cached(
+            r#"SELECT seq, CASE type
+                 WHEN 'note' THEN 'note:' || json_extract(json,'$.noteId')
+                 WHEN 'ask.permission' THEN 'ask:' || json_extract(json,'$.askId')
+                 WHEN 'question.requested' THEN 'question:' || json_extract(json,'$.requestId')
+                 WHEN 'plan.proposed' THEN 'plan:' || json_extract(json,'$.proposalId')
+                 ELSE type || ':' || seq END
+               FROM event INDEXED BY event_by_type
+               WHERE type=?4 AND session_id=?1 AND seq<?2 AND seq>?3
+                 AND NOT(type='note' AND json_extract(json,'$.rank')='detail')
+               ORDER BY seq DESC LIMIT ?5"#,
+        )?;
+        let mut started = HashMap::<String, i64>::new();
+        for kind in [
+            "note",
+            "ask.permission",
+            "question.requested",
+            "plan.proposed",
+            "provider.message",
+            "notice",
+        ] {
+            let rows = statement.query_map(
+                params![session_id, ceiling, reset_seq, kind, count as i64],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            )?;
+            for row in rows {
+                let (seq, key) = row?;
+                let key = key.unwrap_or_else(|| format!("{kind}:{seq}"));
+                started
+                    .entry(key)
+                    .and_modify(|first| *first = (*first).min(seq))
+                    .or_insert(seq);
+            }
+        }
+        Ok(started.into_values().collect())
     }
 
     /// Page one helper's private transcript by the canonical call that owns
@@ -3324,6 +3387,16 @@ fn item_key(item: &Value) -> Option<String> {
         item["kind"].as_str()?,
         item["id"].as_str()?
     ))
+}
+
+/// What a backward walk over a chat's ids found: when each of its own
+/// messages and calls started, the newest ids a helper's calls own, and the
+/// oldest seq it read.
+struct RefWalk {
+    roots: HashMap<String, i64>,
+    child_messages: Vec<String>,
+    child_tools: Vec<String>,
+    floor: i64,
 }
 
 fn event_item_anchor(event: &Event) -> Option<String> {
@@ -3800,6 +3873,9 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
            PRIMARY KEY (session_id, ref, seq)
          ) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS event_ref_filled (session_id TEXT PRIMARY KEY);
+         -- Lets a chat's first page walk its newest ids back and stop
+         -- (bw-yg67a.1).
+         CREATE INDEX IF NOT EXISTS event_ref_by_seq ON event_ref(session_id, seq, type);
          DROP TABLE IF EXISTS event_ref_ready;",
     )?;
     transaction.execute_batch(
@@ -5857,6 +5933,72 @@ mod tests {
         assert_eq!(
             fold, TRANSCRIPT_FOLD_VERSION,
             "the rebuild is paid for once, not on every open"
+        );
+    }
+
+    /// Opening a chat walks its newest ids back and stops once the page is
+    /// full. Seeking the ids by prefix read every id row the chat ever had,
+    /// seconds on a long chat from a cold disk, so a chat ten times longer
+    /// must cost exactly the same to open (bw-yg67a.1).
+    #[test]
+    fn opening_a_chat_reads_the_same_rows_however_long_it_grows() {
+        fn open_cost(turns: usize) -> (u64, usize, bool) {
+            let directory = tempfile::tempdir().unwrap();
+            let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+            let mut seq = 0;
+            let mut append = |body: Value| {
+                seq += 1;
+                let mut object = body.as_object().unwrap().clone();
+                object.insert("sessionId".into(), json!("long"));
+                object.insert("seq".into(), json!(seq));
+                object.insert("at".into(), json!("now"));
+                assert!(store
+                    .append_event(&serde_json::from_value(Value::Object(object)).unwrap())
+                    .unwrap());
+            };
+            for turn in 0..turns {
+                for (role, id) in [("user", format!("ask-{turn}")), ("assistant", format!("say-{turn}"))] {
+                    append(json!({"type":"message.started","messageId":id,"role":role}));
+                    append(json!({"type":"text.delta","messageId":id,"text":format!("turn {turn}")}));
+                    append(json!({"type":"message.completed","messageId":id}));
+                }
+                let call = format!("call-{turn}");
+                append(json!({"type":"tool.started","toolCallId":call,"name":"Agent","input":{}}));
+                append(json!({"type":"agent.started","agentId":format!("helper-{turn}"),"toolCallId":call}));
+                let child = format!("child-{turn}");
+                append(json!({"type":"message.started","messageId":child,"role":"assistant","parentToolCallId":call}));
+                append(json!({"type":"text.delta","messageId":child,"text":"helping"}));
+                append(json!({"type":"message.completed","messageId":child}));
+                append(json!({"type":"tool.completed","toolCallId":call,"output":"done"}));
+                append(json!({"type":"notice","text":format!("notice {turn}")}));
+            }
+            // The first open may file an old chat's ids; measure the next.
+            store.transcript_items("long", None, 40).unwrap();
+            let steps = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let counter = steps.clone();
+            store.connection().progress_handler(
+                1,
+                Some(move || {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    false
+                }),
+            );
+            let page = store.transcript_items("long", None, 40).unwrap();
+            store.connection().progress_handler(1, None::<fn() -> bool>);
+            (
+                steps.load(std::sync::atomic::Ordering::Relaxed),
+                page.items.len(),
+                page.has_older,
+            )
+        }
+
+        let short = open_cost(200);
+        let long = open_cost(2_000);
+        assert_eq!(short.1, long.1);
+        assert!(short.2 && long.2);
+        assert_eq!(
+            short.0, long.0,
+            "a chat ten times longer cost more to open: {short:?} against {long:?}"
         );
     }
 

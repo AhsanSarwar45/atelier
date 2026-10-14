@@ -130,6 +130,9 @@ tower = { version = "0.4", features = ["util"] }
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# Counts the work SQLite does, so a test can prove opening a chat reads the
+# same rows however long the chat grows (bw-yg67a.1).
+rusqlite = { version = "0.31", features = ["bundled", "hooks"] }
 
 # The installed program is the one a person downloads and keeps running, so it
 # is built for size and speed together: one codegen unit and whole-program LTO
