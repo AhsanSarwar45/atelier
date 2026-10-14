@@ -72,6 +72,12 @@ const LAST = {
   parents: [],
 };
 
+/** Open the panel's More actions menu, the way a keyboard does. */
+async function openMore() {
+  fireEvent.keyDown(await screen.findByTestId('git-more'), { key: 'Enter' });
+  await screen.findByRole('menu');
+}
+
 async function panel(status: Partial<GitStatus> = {}) {
   calls.status.mockResolvedValue({ ...CLEAN, ...status });
   render(
@@ -194,6 +200,8 @@ describe('before the first commit', () => {
     await waitFor(() => expect(screen.getByTestId('git-commit')).toBeTruthy());
     expect(screen.queryByTestId('git-amend')).toBeNull();
     expect(screen.queryByTestId('git-undo-commit')).toBeNull();
+    // A clean tree with no commit and nothing stashed has nothing for the menu.
+    expect(screen.queryByTestId('git-more')).toBeNull();
   });
 });
 
@@ -292,7 +300,8 @@ describe('committing', () => {
   it('undoes the last commit after asking, and puts its message back', async () => {
     await panel();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Undo last commit' }));
+    await openMore();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Undo last commit' }));
     const dialog = await screen.findByTestId('git-confirm-dialog');
     // Nothing ahead of the upstream: the commit is already on the remote.
     expect(dialog).toHaveTextContent('already pushed');
@@ -308,7 +317,8 @@ describe('committing', () => {
   it('does not warn about a push for a commit that was never pushed', async () => {
     await panel({ ahead: 1 });
 
-    fireEvent.click(await screen.findByTestId('git-undo-commit'));
+    await openMore();
+    fireEvent.click(screen.getByTestId('git-undo-commit'));
 
     expect(await screen.findByTestId('git-confirm-dialog')).not.toHaveTextContent('pushed');
   });
@@ -318,9 +328,13 @@ describe('the working tree as a whole', () => {
   it('stashes changes and pops the newest stash', async () => {
     await panel({ unstaged: [{ path: 'a.txt', status: 'modified', origPath: null }], stashes: 2 });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Stash' }));
+    // Kept in the menu, not on a row of their own.
+    expect(screen.queryByRole('button', { name: 'Stash' })).toBeNull();
+    await openMore();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Stash' }));
     await waitFor(() => expect(calls.stash).toHaveBeenCalledWith(REPO));
 
+    await openMore();
     expect(screen.getByTestId('git-pop-stash')).toHaveTextContent('Restore stash2');
     fireEvent.click(screen.getByTestId('git-pop-stash'));
     await waitFor(() => expect(calls.popStash).toHaveBeenCalledWith(REPO));

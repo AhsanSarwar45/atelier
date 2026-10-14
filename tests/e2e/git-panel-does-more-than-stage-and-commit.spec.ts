@@ -76,6 +76,14 @@ async function openTheGitTab(page: Page, projectId: string, chatId: string): Pro
   await expect(page.getByTestId('git-branch')).toBeVisible({ timeout: 30_000 });
 }
 
+/** The panel's three-dot menu, opened. */
+async function openMore(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  // Done opening, so a picture of it is not of a menu half faded in.
+  await expect(page.getByRole('menu')).toHaveCSS('opacity', '1');
+}
+
 function fileRow(page: Page, group: string, path: string) {
   return page.getByTestId(group).locator(`[data-testid="git-file"][data-path="${path}"]`);
 }
@@ -245,7 +253,8 @@ test.describe('the Git tab beyond stage and commit', () => {
       expect(git(REPO, 'log', '-1', '--format=%s')).toBe(subject);
 
       // ---- undone: the changes stay staged and the message comes back --------
-      await page.getByRole('button', { name: 'Undo last commit' }).click();
+      await openMore(page);
+      await page.getByRole('menuitem', { name: 'Undo last commit' }).click();
       const asking = page.getByTestId('git-confirm-dialog');
       await expect(asking).toContainText('Its changes stay staged');
       await expect(asking).not.toContainText('pushed');
@@ -261,7 +270,8 @@ test.describe('the Git tab beyond stage and commit', () => {
       expect(git(REMOTE, 'log', '-1', '--format=%s', 'main')).toBe(subject);
 
       // A pushed commit is said to be pushed before it is undone.
-      await page.getByRole('button', { name: 'Undo last commit' }).click();
+      await openMore(page);
+      await page.getByRole('menuitem', { name: 'Undo last commit' }).click();
       await expect(asking).toContainText('already pushed');
       await page.getByTestId('git-confirm-cancel').click();
 
@@ -269,11 +279,16 @@ test.describe('the Git tab beyond stage and commit', () => {
       writeFileSync(join(REPO, 'a.txt'), 'one\ntwo\nthree\n');
       writeFileSync(join(REPO, 'loose.txt'), 'loose\n');
       await expect(fileRow(page, 'git-untracked', 'loose.txt')).toBeVisible({ timeout: 30_000 });
-      await page.getByRole('button', { name: 'Stash', exact: true }).click();
+      // Stash is not given a row of its own; it is in the menu.
+      await expect(page.getByRole('button', { name: 'Stash', exact: true })).toHaveCount(0);
+      await openMore(page);
+      await page.screenshot({ path: `${SHOTS}/more-actions.png` });
+      await page.getByRole('menuitem', { name: 'Stash', exact: true }).click();
       await expect(page.getByTestId('git-clean')).toBeVisible({ timeout: 30_000 });
       const pop = page.getByTestId('git-pop-stash');
-      await expect(pop).toHaveAttribute('data-count', '1');
       expect(existsSync(join(REPO, 'loose.txt')), 'the untracked file was not stashed').toBe(false);
+      await openMore(page);
+      await expect(pop).toHaveAttribute('data-count', '1');
       await page.screenshot({ path: `${SHOTS}/stashed.png` });
       await pop.click();
       await expect(fileRow(page, 'git-untracked', 'loose.txt')).toBeVisible({ timeout: 30_000 });
@@ -378,14 +393,18 @@ test.describe('the Git tab beyond stage and commit', () => {
       await expect(fileRow(page, 'git-untracked', 'first.txt')).toBeVisible({ timeout: 30_000 });
       await expect(page.getByTestId('git-commit')).toBeVisible();
       await expect(page.getByTestId('git-amend')).toHaveCount(0);
+      await openMore(page);
+      await expect(page.getByTestId('git-stash')).toBeVisible();
       await expect(page.getByTestId('git-undo-commit')).toHaveCount(0);
       await page.screenshot({ path: `${SHOTS}/no-commits.png` });
+      await page.keyboard.press('Escape');
 
       // The first commit brings both.
       await page.getByRole('button', { name: 'Stage all' }).click();
       await page.getByTestId('git-commit-message').fill('The first commit');
       await page.getByTestId('git-commit').click();
       await expect(page.getByTestId('git-amend')).toBeVisible({ timeout: 30_000 });
+      await openMore(page);
       await expect(page.getByTestId('git-undo-commit')).toBeVisible();
     } finally {
       chat.forget();

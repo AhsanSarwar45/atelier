@@ -36,6 +36,7 @@ import {
   FolderGit2,
   GitBranch as BranchIcon,
   Minus,
+  MoreHorizontal,
   Play,
   Plus,
   RefreshCw,
@@ -68,6 +69,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { Picker } from '@/components/ui/picker';
@@ -1154,6 +1161,82 @@ export function GitView({
           >
             <RefreshCw className={cn(reading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
           </Button>
+          {/* What is used now and then, kept out of the way: the rail is
+              narrow, and a row of buttons for these took a line of it. */}
+          {status !== null && (!clean || stashes > 0 || (hasCommits && !operation)) && (
+            <DropdownMenu>
+              <Tooltip label="More actions">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="xs"
+                    mode="icon"
+                    variant="ghost"
+                    disabled={busy}
+                    aria-label="More actions"
+                    data-testid="git-more"
+                  >
+                    <MoreHorizontal aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </Tooltip>
+              <DropdownMenuContent align="end">
+                {!clean && (
+                  <DropdownMenuItem
+                    data-testid="git-stash"
+                    onSelect={() =>
+                      void act(
+                        {
+                          deed: 'stash',
+                          note: howManyFiles(staged.length + unstaged.length + untracked.length),
+                        },
+                        () => git.stash(path),
+                      )
+                    }
+                  >
+                    <Archive aria-hidden="true" />
+                    Stash
+                  </DropdownMenuItem>
+                )}
+                {stashes > 0 && (
+                  <DropdownMenuItem
+                    data-testid="git-pop-stash"
+                    data-count={stashes}
+                    onSelect={() => void act({ deed: 'pop' }, () => git.popStash(path))}
+                  >
+                    <ArchiveRestore aria-hidden="true" />
+                    Restore stash
+                    <span className="ml-auto tabular-nums text-t-faint">{stashes}</span>
+                  </DropdownMenuItem>
+                )}
+                {hasCommits && !operation && (
+                  <DropdownMenuItem
+                    data-testid="git-undo-commit"
+                    onSelect={() =>
+                      askFirst(
+                        // Nothing ahead of an upstream means the commit is
+                        // already on the remote, and taking it back here
+                        // leaves the two apart.
+                        following && ahead === 0
+                          ? 'Undo the last commit? Its changes stay staged. This commit is already pushed, so the branch will be behind the remote.'
+                          : 'Undo the last commit? Its changes stay staged.',
+                        'Undo',
+                        { deed: 'undo', note: lastCommit ? shortened(lastCommit.subject) : undefined },
+                        async () => {
+                          const undone = await git.undoCommit(path);
+                          // Its wording goes back in the box, unless
+                          // something has been written there since.
+                          setMessage((was) => (was.trim() === '' ? undone.message : was));
+                        },
+                      )
+                    }
+                  >
+                    <Undo2 aria-hidden="true" />
+                    Undo last commit
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
         {/* Talking to the shared copy uses the keys and credential helper the
             user's own setup already carries — the app stores nothing.
@@ -1538,9 +1621,9 @@ export function GitView({
         </div>
       )}
 
-      {/* What is done to the working tree as a whole, on one line above the
-          groups it is done to. Drawn only when one of them applies. */}
-      {status !== null && (!clean || stashes > 0 || operation) && (
+      {/* The way out of a merge or rebase that stopped, on its own line above
+          the groups, and only while one is under way. */}
+      {status !== null && operation && (
         <div className="flex flex-wrap items-center gap-1 px-3 py-1.5" data-testid="git-tree-actions">
           {/* The way out of, or on from, a merge or rebase that stopped. Going
               on is offered only once nothing is left in conflict; a merge is
@@ -1577,54 +1660,6 @@ export function GitView({
             >
               <Play aria-hidden="true" />
               {`Continue ${operation}`}
-            </Button>
-          )}
-          {/* One button for both groups it stages: it used to be drawn on
-              each, doing the same thing twice. */}
-          {unstaged.length + untracked.length > 0 && (
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={busy}
-              data-testid="git-stage-all"
-              onClick={() => void act({ deed: 'stage', quiet: true }, () => git.stageAll(path))}
-            >
-              <Plus aria-hidden="true" />
-              Stage all
-            </Button>
-          )}
-          {!clean && (
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={busy}
-              data-testid="git-stash"
-              onClick={() =>
-                void act(
-                  {
-                    deed: 'stash',
-                    note: howManyFiles(staged.length + unstaged.length + untracked.length),
-                  },
-                  () => git.stash(path),
-                )
-              }
-            >
-              <Archive aria-hidden="true" />
-              Stash
-            </Button>
-          )}
-          {stashes > 0 && (
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={busy}
-              data-testid="git-pop-stash"
-              data-count={stashes}
-              onClick={() => void act({ deed: 'pop' }, () => git.popStash(path))}
-            >
-              <ArchiveRestore aria-hidden="true" />
-              Restore stash
-              <span className="tabular-nums text-t-faint">{stashes}</span>
             </Button>
           )}
         </div>
@@ -1777,6 +1812,19 @@ export function GitView({
           onToggle={() => flip('unstaged')}
           actions={
             <>
+              {/* One button for both groups it stages: it used to be drawn on
+                  each, doing the same thing twice. */}
+              <Button
+                size="xs"
+                variant="ghost"
+                className="h-5 px-1 text-[10px]"
+                disabled={busy}
+                data-testid="git-stage-all"
+                onClick={() => void act({ deed: 'stage', quiet: true }, () => git.stageAll(path))}
+              >
+                <Plus aria-hidden="true" />
+                Stage all
+              </Button>
               {/* Everything back to the last saved change, and every new file
                   gone with it. What the project ignores is kept — this is not
                   the button that eats somebody's .env. */}
@@ -1855,6 +1903,22 @@ export function GitView({
           testId="git-untracked"
           collapsed={folded('untracked')}
           onToggle={() => flip('untracked')}
+          // Stage all sits on Changes; with no changes it sits here instead.
+          actions={unstaged.length === 0 ? <>
+              {/* One button for both groups it stages: it used to be drawn on
+                  each, doing the same thing twice. */}
+              <Button
+                size="xs"
+                variant="ghost"
+                className="h-5 px-1 text-[10px]"
+                disabled={busy}
+                data-testid="git-stage-all"
+                onClick={() => void act({ deed: 'stage', quiet: true }, () => git.stageAll(path))}
+              >
+                <Plus aria-hidden="true" />
+                Stage all
+              </Button>
+            </> : undefined}
         >
           <FileRows
             files={untracked}
@@ -1936,38 +2000,6 @@ export function GitView({
                 <Sparkles aria-hidden="true" />
               </Button>
             </Tooltip>
-            {hasCommits && !operation && (
-            <Tooltip label="Undo last commit">
-              <Button
-                size="xs"
-                mode="icon"
-                variant="ghost"
-                disabled={busy}
-                aria-label="Undo last commit"
-                data-testid="git-undo-commit"
-                onClick={() =>
-                  askFirst(
-                    // Nothing ahead of an upstream means the commit is already
-                    // on the remote, and taking it back here leaves the two
-                    // apart.
-                    following && ahead === 0
-                      ? 'Undo the last commit? Its changes stay staged. This commit is already pushed, so the branch will be behind the remote.'
-                      : 'Undo the last commit? Its changes stay staged.',
-                    'Undo',
-                    { deed: 'undo', note: lastCommit ? shortened(lastCommit.subject) : undefined },
-                    async () => {
-                      const undone = await git.undoCommit(path);
-                      // Its wording goes back in the box, unless something
-                      // has been written there since.
-                      setMessage((was) => (was.trim() === '' ? undone.message : was));
-                    },
-                  )
-                }
-              >
-                <Undo2 aria-hidden="true" />
-              </Button>
-            </Tooltip>
-            )}
           </>
         }
       >
