@@ -30,8 +30,8 @@
  * still the reader's own words, so the command still copies as it was written.
  */
 import { OLD_CARD } from '@/lib/address';
-import { askableIn, pathsIn, type OnDisk, type PathPiece, type Rooted } from '@/workbench/paths';
-import { findAtelierReferences, findReferences, formatAtelierReference, formatReference, referenceLabel, resolveReference, type AtelierKind } from '@/workbench/references';
+import { askableIn, pathsIn, resolveEach, resolveReal, type OnDisk, type PathPiece, type Rooted } from '@/workbench/paths';
+import { findAtelierReferences, findReferences, formatAtelierReference, formatReference, referenceLabel, type AtelierKind } from '@/workbench/references';
 
 /** One stretch of a message: plain words, or something that opens. */
 export type Piece =
@@ -150,8 +150,8 @@ function filesAndCards(text: string, existing: Existing, where: Rooted, disk: On
   // say about those characters, and the badge it becomes carries a range no
   // bare path can (`references.ts`).
   for (const found of findReferences(text)) {
-    const absolute = resolveReference(found, where);
-    if (!absolute || !disk.real(absolute)) continue;
+    const absolute = resolveReal(found.path, where, disk);
+    if (!absolute) continue;
     if (found.start > from) pushAll(out, text.slice(from, found.start), existing, where, disk);
     out.push({
       kind: 'path',
@@ -192,8 +192,7 @@ function pushAll(out: Piece[], text: string, existing: Existing, where: Rooted, 
 export function openableAsks(text: string, where: Rooted): string[] {
   const out = new Set<string>(askableIn(text, where));
   for (const found of findReferences(text)) {
-    const absolute = resolveReference(found, where);
-    if (absolute) out.add(absolute);
+    for (const absolute of resolveEach(found.path, where)) out.add(absolute);
   }
   return Array.from(out);
 }
@@ -304,10 +303,10 @@ const ONLY_FILES = new Set(['pre', 'code']);
  *
  * A file is a file wherever a message writes one — including inside a fenced
  * block and inside inline code, which is where an agent writes MOST of them, so
- * it opens from there too (bw-1e2e.1). But inside code it is marked as being
- * there, and drawn as the plain underlined link rather than a badge: a capsule
- * through the middle of a command is a command nobody can read or copy
- * (bw-lolf.1). That is the same link the collapsed line of an activity row and
+ * it opens from there too (bw-1e2e.1). Inline code that is nothing but a file is
+ * the badge (`soleFile`). Anywhere else inside code it is marked as being there,
+ * and drawn as the plain underlined link rather than a badge: a capsule through
+ * the middle of a command is a command nobody can read or copy (bw-lolf.1). That is the same link the collapsed line of an activity row and
  * the file line of an edit card already draw (`paths-in-html.ts`).
  */
 export function rehypeMentions(split: (text: string) => Piece[]) {
@@ -323,6 +322,12 @@ function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: bo
   for (const kid of kids) {
     if (kid.type === 'element') {
       const tag = kid.tagName ?? '';
+      const sole = filesOnly ? null : soleFile(kid, split);
+      if (sole) {
+        out.push(marker(sole, false));
+        changed = true;
+        continue;
+      }
       if (!NOT_PROSE.has(tag)) rewrite(kid, split, filesOnly || ONLY_FILES.has(tag));
       out.push(kid);
       continue;
@@ -347,6 +352,24 @@ function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: bo
   }
 
   if (changed) node.children = out;
+}
+
+/**
+ * The file an inline `code` in the words is, when that is all it is.
+ *
+ * Quoting a file name in backticks is how an agent writes most of them in a
+ * sentence, and there it is a name, not a command: nothing around it to read
+ * across or copy. So it is drawn as the badge a file in the words is, in place
+ * of the code. A file inside a longer quote or a fenced block stays the link
+ * (bw-lolf.1).
+ */
+function soleFile(node: HastNode, split: (text: string) => Piece[]): Extract<Piece, { kind: 'path' }> | null {
+  if (node.tagName !== 'code') return null;
+  const kids = node.children ?? [];
+  if (kids.length !== 1 || kids[0]!.type !== 'text' || typeof kids[0]!.value !== 'string') return null;
+  const pieces = filesFrom(split(kids[0]!.value));
+  const only = pieces.length === 1 ? pieces[0]! : null;
+  return only && only.kind === 'path' ? only : null;
 }
 
 /**

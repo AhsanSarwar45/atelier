@@ -8,15 +8,20 @@ import type { WbpEvent } from '../../src/workbench/protocol';
 import { discardFixture, makeFixtureProject } from './fixture-board';
 
 /**
- * A file named in a message's words is a badge; one inside code, or on a row,
- * is a link (bw-un8y.1, bw-1e2e.1, bw-lolf.1).
+ * A file named in a message's words is a badge, and so is one quoted in
+ * backticks on its own; one inside a command, a fenced block or on a row is a
+ * link (bw-un8y.1, bw-1e2e.1, bw-lolf.1, bw-e2cg2.1).
  *
  * One chat carries both sides, because the whole rule is where the line is
  * drawn. The message names files every way an agent writes them — in a
  * sentence, quoted in backticks, inside a command it quoted, and in a fenced
- * block — and all of them are files. Only the sentence draws a badge: nothing
- * inside code is turned into one. The activity rows above it name files too,
- * and those stay the plain link as well.
+ * block — and all of them are files. The sentence and the lone quoted name draw
+ * a badge; a name inside a command or a block stays the link. The activity rows
+ * above it name files too, and those stay the plain link as well.
+ *
+ * The chat has moved into a subfolder by the time it answers, as an agent that
+ * `cd`s does, and still names one file from the top of the project: that one
+ * is found from the project's folder.
  *
  * Disk is answered here rather than by the machine running this, so the message
  * can name files without any of them having to exist on the runner — the same
@@ -47,12 +52,19 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
   const outside = join(run, 'elsewhere', 'outside-notes.txt');
   mkdirSync(join(run, 'elsewhere'), { recursive: true });
   writeFileSync(outside, 'kept outside the project\nsecond line\n');
+  // Where the chat stood last, and a file named from the project's top.
+  const subfolder = join(projectPath, 'services', 'api');
+  mkdirSync(join(subfolder, 'scripts'), { recursive: true });
+  const script = join(subfolder, 'scripts', 'restore.js');
+  writeFileSync(script, '// restore\n');
   const text = [
     `Written outside the repo, so it stays out of git: ${body} is where it went.`,
     '',
     `Notes kept elsewhere: \`cat ${outside}\``,
     '',
     `Quoted on its own: \`${renderer}\` is the renderer.`,
+    '',
+    'Written from the top of the project: `services/api/scripts/restore.js`.',
     '',
     `Use it with \`gh pr create -F ${body}\` when you are ready.`,
     '',
@@ -65,7 +77,7 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
 
   const base = { sessionId: CHAT, at: new Date(0).toISOString() };
   const events: WbpEvent[] = [
-    { ...base, seq: 1, type: 'session.started', brand: 'claude', externalId: 'fixture', model: 'opus', cwd: projectPath, permissionMode: 'on-request' },
+    { ...base, seq: 1, type: 'session.started', brand: 'claude', externalId: 'fixture', model: 'opus', cwd: subfolder, permissionMode: 'on-request' },
     { ...base, seq: 2, type: 'tool.started', toolCallId: 'ran', name: 'Bash', input: { command: `sed -n 132p ${renderer}` }, title: `Read a file in ${projectPath}`, parentToolCallId: null },
     { ...base, seq: 3, type: 'tool.completed', toolCallId: 'ran', ok: true, output: 'line 132' },
     { ...base, seq: 4, type: 'tool.started', toolCallId: 'edit', name: 'Edit', input: { file_path: edited }, title: `Changed ${edited}`, parentToolCallId: null },
@@ -107,7 +119,7 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
     await route.continue({ url: url.toString() });
   });
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'claude', title: 'Files in a message', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Files in a message', cwd: projectPath, beads: [] } }));
+  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Files in a message', cwd: subfolder, beads: [] } }));
 
   let project: { id: string } | null = null;
   try {
@@ -131,12 +143,14 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
       .toBeGreaterThan(0);
 
     if (!process.env.PATH_BADGE_BEFORE) {
-      // Files named every way an agent writes them, and all are files. Only the
-      // one in the sentence is a badge; the four inside code are the
-      // dotted-underline link.
-      await expect.poll(async () => message.locator('[data-path-look="badge"]').count(), { timeout: 30_000 }).toBe(1);
+      // Files named every way an agent writes them, and all are files. The one
+      // in the sentence and the two quoted on their own are badges; the three
+      // inside a command or a block are the dotted-underline link.
+      await expect.poll(async () => message.locator('[data-path-look="badge"]').count(), { timeout: 30_000 }).toBe(3);
       await expect(message.locator('[data-path-look="badge"][data-file-kind="text"]')).toHaveCount(1);
-      await expect(message.locator('code [data-path-look="link"]')).toHaveCount(4);
+      await expect(message.locator(`[data-path-look="badge"][data-path-mention="${renderer}"]`)).toHaveCount(1);
+      await expect(message.locator(`[data-path-look="badge"][data-path-mention="${script}"]`)).toHaveCount(1);
+      await expect(message.locator('code [data-path-look="link"]')).toHaveCount(3);
       expect(await message.locator('code [data-path-look="badge"], pre [data-path-look="badge"]').count(), 'code drew a badge').toBe(0);
       // The quoted command is still a command: only the name became a link.
       const command = message.locator('code', { hasText: 'gh pr create' }).first();

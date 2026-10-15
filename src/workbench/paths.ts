@@ -81,6 +81,13 @@ export interface Rooted {
   cwd: string;
   /** The reader's home, for an address written with `~`. Empty when unknown. */
   home: string;
+  /**
+   * More folders a relative address may be written from, tried in order when it
+   * is not there from `cwd`. An agent that `cd`s into `services/api` still
+   * names files from the top of the project, and the folder its chat reports is
+   * the last one it stood in.
+   */
+  fallbacks?: string[];
 }
 
 /**
@@ -95,6 +102,27 @@ export function resolvePath(raw: string, where: Rooted): string | null {
   }
   if (!where.cwd) return null;
   return normalise(`${where.cwd}/${raw}`);
+}
+
+/**
+ * Every address a written one could point at, in the order to try them: from
+ * `cwd` first, then from each fallback. One at most for a rooted address.
+ */
+export function resolveEach(raw: string, where: Rooted): string[] {
+  const first = resolvePath(raw, where);
+  const out = first ? [first] : [];
+  if (raw.startsWith('/') || raw === '~' || raw.startsWith('~/')) return out;
+  for (const base of where.fallbacks ?? []) {
+    if (!base) continue;
+    const path = normalise(`${base}/${raw}`);
+    if (!out.includes(path)) out.push(path);
+  }
+  return out;
+}
+
+/** The first of those addresses disk says is real, or `null`. */
+export function resolveReal(raw: string, where: Rooted, disk: OnDisk): string | null {
+  return resolveEach(raw, where).find((path) => disk.real(path)) ?? null;
 }
 
 /** `a/./b`, `a/b/../c` and doubled slashes, put back into one plain address. */
@@ -187,8 +215,8 @@ export function pathsIn(text: string, where: Rooted, disk: OnDisk): PathPiece[] 
 
   for (const c of candidatesIn(text)) {
     if (c.at < from) continue;
-    const absolute = resolvePath(c.raw, where);
-    if (!absolute || !disk.real(absolute)) continue;
+    const absolute = resolveReal(c.raw, where, disk);
+    if (!absolute) continue;
     if (c.at > from) pieces.push({ kind: 'text', text: text.slice(from, c.at) });
     pieces.push({
       kind: 'path',
@@ -213,8 +241,7 @@ export function pathsIn(text: string, where: Rooted, disk: OnDisk): PathPiece[] 
 export function askableIn(text: string, where: Rooted): string[] {
   const out = new Set<string>();
   for (const c of candidatesIn(text)) {
-    const absolute = resolvePath(c.raw, where);
-    if (absolute) out.add(absolute);
+    for (const absolute of resolveEach(c.raw, where)) out.add(absolute);
   }
   return Array.from(out);
 }

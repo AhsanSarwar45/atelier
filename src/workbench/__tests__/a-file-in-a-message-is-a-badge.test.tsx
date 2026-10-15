@@ -1,9 +1,9 @@
 /**
  * A file named anywhere in an agent's own message is a file, and opens.
  *
- * In the sentence it is a badge. Inside code — backticks or a fenced block — it
- * is the dotted-underline link instead, because nothing inside code is turned
- * into a badge (bw-un8y.1, bw-1e2e.1, bw-lolf.1).
+ * In the sentence it is a badge, and so is a file quoted in backticks on its
+ * own. Inside a longer quote or a fenced block it is the dotted-underline link
+ * instead, so a command stays readable (bw-un8y.1, bw-1e2e.1, bw-lolf.1).
  *
  * Exercised through the renderer a chat actually uses, so the marking step and
  * the drawing step are proved as the one decision they are.
@@ -49,11 +49,30 @@ describe('a file named in a message', () => {
     expect(chip).toHaveAttribute('data-path-line', '42');
   });
 
-  it('is a link, still inside its code, when the sentence quoted it and nothing else', () => {
+  it('is a badge in place of its code when the sentence quoted it and nothing else', () => {
     say('It went to `/home/someone/project/notes.md` in the end.');
     const chip = screen.getByTestId('path-chip');
-    expect(chip).toHaveAttribute('data-path-look', 'link');
-    expect(chip.closest('code')).not.toBeNull();
+    expect(chip).toHaveAttribute('data-path-look', 'badge');
+    expect(chip).toHaveTextContent('/home/someone/project/notes.md');
+    expect(document.querySelector('code')).toBeNull();
+  });
+
+  it('is found from the project when the chat has moved into a subfolder', () => {
+    const moved: Rooted = { cwd: '/home/someone/project/services/api', home: '/home/someone', fallbacks: ['/home/someone/project'] };
+    const there: OnDisk = { real: (path) => path === '/home/someone/project/services/api/scripts/fix.js' || path === '/home/someone/project/services/api/src/const.js' };
+    render(
+      <MarkdownBody
+        mentions={{ ...mentions(there), split: (text) => openableIn(text, { card: () => false }, moved, there) }}
+      >
+        {'Wrote `services/api/scripts/fix.js`, using `src/const.js`.'}
+      </MarkdownBody>,
+    );
+    const chips = screen.getAllByTestId('path-chip');
+    expect(chips.map((c) => c.getAttribute('data-path-mention'))).toEqual([
+      '/home/someone/project/services/api/scripts/fix.js',
+      '/home/someone/project/services/api/src/const.js',
+    ]);
+    expect(chips.every((c) => c.getAttribute('data-path-look') === 'badge')).toBe(true);
   });
 
   it('is a link inside a command the message quoted', () => {

@@ -1131,10 +1131,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // A file the agent named opens from where it is written, the same way. Only
   // ones that are really there: `and/or` and `24/7` are shaped like addresses
   // too, so disk is what decides (bw-khe.13, src/workbench/paths.ts). What a
-  // relative name means is decided by the folder THIS chat ran in.
+  // relative name means is decided by the folder THIS chat ran in, and then by
+  // the project's own folder: an agent that `cd`s into a subfolder still names
+  // files from the top of the project.
   const disk = usePathsOnDisk();
   const where = useMemo<Rooted>(
-    () => ({ cwd: facts?.cwd ?? projectPath ?? '', home: disk.home }),
+    () => ({ cwd: facts?.cwd ?? projectPath ?? '', home: disk.home, fallbacks: projectPath ? [projectPath] : [] }),
     [facts?.cwd, projectPath, disk.home],
   );
   const splitPaths = useCallback((text: string) => pathsIn(text, where, disk), [where, disk]);
