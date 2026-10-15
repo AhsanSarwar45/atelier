@@ -40,6 +40,16 @@ describe('question card', () => {
     expect(screen.queryByRole('radio', { name: 'Postgres' })).toBeNull();
   });
 
+  it('an answered question keeps the note that was sent with it', () => {
+    render(<QuestionCard item={request({ answers: [
+      { questionId: 'database', optionIds: ['pg'], note: 'Use the managed instance' },
+      { questionId: 'checks', optionIds: ['unit'] },
+    ] })} sessionId="session-1" />);
+    expect(screen.getByText('Answered')).toBeInTheDocument();
+    expect(screen.getAllByTestId('question-note')).toHaveLength(1);
+    expect(screen.getByTestId('question-note')).toHaveTextContent('Note: Use the managed instance');
+  });
+
   it('groups vertical described choices and sends one deliberate multi-answer response with a note', async () => {
     render(<QuestionCard item={request()} sessionId="session-1" />);
     expect(screen.getByText('Durable relational storage.')).toBeInTheDocument();

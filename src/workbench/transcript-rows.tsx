@@ -1347,6 +1347,12 @@ export const PlanProposalCard = memo(function PlanProposalCard({
         </div>
         <MarkdownBody className="text-sm">{item.markdown}</MarkdownBody>
         <div className="text-xs text-muted-foreground">{resolved?.label ?? item.actionId}</div>
+        {item.feedback && (
+          <Panel tone="nested" inset="md" data-testid="plan-feedback" className="space-y-1">
+            <div className="text-xs font-medium text-muted-foreground">Requested changes</div>
+            <p className="whitespace-pre-wrap text-sm text-foreground">{item.feedback}</p>
+          </Panel>
+        )}
       </Panel>
     );
   }
@@ -1455,6 +1461,11 @@ export const QuestionCard = memo(function QuestionCard({
             <div key={question.id} className="text-sm">
               <span className="font-medium text-foreground">{question.header}</span>
               <span className="text-muted-foreground"> · {labels.join(', ')}</span>
+              {answer?.note && (
+                <p data-testid="question-note" className="mt-1 whitespace-pre-wrap text-muted-foreground">
+                  Note: {answer.note}
+                </p>
+              )}
             </div>
           );
         })}

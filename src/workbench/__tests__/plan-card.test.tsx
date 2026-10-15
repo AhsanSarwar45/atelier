@@ -46,4 +46,18 @@ describe('proposed plan card', () => {
       response: { actionId: 'request_changes', feedback: 'Add rollback steps' },
     })));
   });
+
+  it('a plan sent back keeps the changes that were requested', () => {
+    render(<PlanProposalCard item={plan({
+      status: 'changes_requested', actionId: 'request_changes', feedback: 'Add rollback steps\nand a canary',
+    })} sessionId="session-1" />);
+    expect(screen.getByText('Changes requested')).toBeInTheDocument();
+    expect(screen.getByTestId('plan-feedback')).toHaveTextContent('Add rollback steps');
+    expect(screen.getByTestId('plan-feedback')).toHaveTextContent('and a canary');
+  });
+
+  it('an approved plan shows no requested changes', () => {
+    render(<PlanProposalCard item={plan({ status: 'approved', actionId: 'approve' })} sessionId="session-1" />);
+    expect(screen.queryByTestId('plan-feedback')).toBeNull();
+  });
 });

@@ -815,8 +815,9 @@ struct PendingPermission {
 /// refusing that tool — and an agent that remembers refusals carried a "no"
 /// the owner never said into every turn after it (bw-t26l.20).
 enum PermissionAnswer {
-    /// The owner pressed one of the options the agent offered.
-    Chose(String),
+    /// The owner pressed one of the options the agent offered, with the
+    /// changes he asked for when it was a plan sent back.
+    Chose(String, Option<String>),
     /// The turn was stopped before he pressed anything.
     Cancelled,
 }
@@ -852,17 +853,28 @@ impl PermissionBroker {
     }
 
     async fn answer(&self, id: &str, option: &str) -> Result<(), String> {
+        self.settle(id, PermissionAnswer::Chose(option.to_string(), None)).await
+    }
+
+    async fn settle(&self, id: &str, answer: PermissionAnswer) -> Result<(), String> {
         self.pending
             .lock()
             .await
             .remove(id)
             .ok_or_else(|| format!("permission request {id} is no longer pending"))?
             .answer
-            .send(PermissionAnswer::Chose(option.to_string()))
+            .send(answer)
             .map_err(|_| format!("permission request {id} closed"))
     }
 
-    async fn answer_plan(&self, id: &str, action: &str) -> Result<(), String> {
+    /// The feedback rides with the answer so the card that closes says what
+    /// was sent back, not only that changes were asked for.
+    async fn answer_plan(
+        &self,
+        id: &str,
+        action: &str,
+        feedback: Option<String>,
+    ) -> Result<(), String> {
         let options = self
             .plan_options
             .lock()
@@ -874,7 +886,7 @@ impl PermissionBroker {
         } else {
             options.1
         };
-        self.answer(id, &option).await
+        self.settle(id, PermissionAnswer::Chose(option, feedback)).await
     }
 
     async fn cancel_all(&self) {
@@ -1244,8 +1256,8 @@ async fn permission(
     }
     let is_plan = plan.is_some();
     Ok(Box::pin(async move {
-        let selected = match receive.await.map_err(acp_error)? {
-            PermissionAnswer::Chose(option) => option,
+        let (selected, feedback) = match receive.await.map_err(acp_error)? {
+            PermissionAnswer::Chose(option, feedback) => (option, feedback),
             // Stopped before he answered. The card is closed saying so rather than
             // left open forever, and the agent is told the turn was cancelled
             // rather than handed a refusal the owner never made. No "Working"
@@ -1284,7 +1296,8 @@ async fn permission(
                 .is_some_and(|kind| kind.starts_with("allow"));
             json!({"type":"plan.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
                 "proposalId":ask_id, "status":if approved{"approved"}else{"changes_requested"},
-                "actionId":if approved{"approve"}else{"request_changes"}})
+                "actionId":if approved{"approve"}else{"request_changes"},
+                "feedback":if approved{None}else{feedback}})
         } else {
             json!({"type":"ask.resolved", "sessionId":local_session_id, "seq":0, "at":now(),
                 "askId":ask_id, "chosen":selected})
@@ -3557,7 +3570,9 @@ impl AcpDriver {
                 // Release the adapter's blocked permission request before sending
                 // any steering notification. Waiting for steering first deadlocks
                 // adapters that serialize requests behind the plan response.
-                self.permissions.answer_plan(id, action).await?;
+                self.permissions
+                    .answer_plan(id, action, feedback.clone())
+                    .await?;
                 if action == "request_changes" {
                     if let Some(feedback) = feedback {
                         let _ = self
@@ -4897,6 +4912,34 @@ mod tests {
             ]
         }))
         .unwrap()
+    }
+
+    /// A plan sent back carries the changes asked for to the place that writes
+    /// `plan.resolved`, so the closed card can say what was sent.
+    #[tokio::test]
+    async fn a_plan_sent_back_carries_its_feedback_to_the_resolution() {
+        let permissions = PermissionBroker::default();
+        let (answer, result) = oneshot::channel();
+        permissions
+            .pending
+            .lock()
+            .await
+            .insert("plan-1".into(), PendingPermission { answer });
+        permissions.plan_options.lock().await.insert(
+            "plan-1".into(),
+            ("provider-allow".into(), "provider-deny".into()),
+        );
+        permissions
+            .answer_plan("plan-1", "request_changes", Some("Add rollback steps".into()))
+            .await
+            .unwrap();
+        match result.await.unwrap() {
+            PermissionAnswer::Chose(option, feedback) => {
+                assert_eq!(option, "provider-deny");
+                assert_eq!(feedback.as_deref(), Some("Add rollback steps"));
+            }
+            PermissionAnswer::Cancelled => panic!("a plan sent back is not a cancel"),
+        }
     }
 
     /// Stopping a turn cancels the cards it left open. It does not refuse them.
