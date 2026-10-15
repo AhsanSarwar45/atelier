@@ -54,10 +54,13 @@ describe('proposed plan card', () => {
     expect(screen.getByText('Changes requested')).toBeInTheDocument();
     expect(screen.getByTestId('plan-feedback')).toHaveTextContent('Add rollback steps');
     expect(screen.getByTestId('plan-feedback')).toHaveTextContent('and a canary');
+    expect(screen.queryByText('Request changes')).toBeNull();
+    expect(screen.queryByText('Requested changes')).toBeNull();
   });
 
   it('an approved plan shows no requested changes', () => {
     render(<PlanProposalCard item={plan({ status: 'approved', actionId: 'approve' })} sessionId="session-1" />);
     expect(screen.queryByTestId('plan-feedback')).toBeNull();
+    expect(screen.getByText('Approve plan')).toBeInTheDocument();
   });
 });

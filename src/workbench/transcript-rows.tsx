@@ -1346,12 +1346,13 @@ export const PlanProposalCard = memo(function PlanProposalCard({
           <Badge variant="secondary">{item.status === 'changes_requested' ? 'Changes requested' : item.status}</Badge>
         </div>
         <MarkdownBody className="text-sm">{item.markdown}</MarkdownBody>
-        <div className="text-xs text-muted-foreground">{resolved?.label ?? item.actionId}</div>
-        {item.feedback && (
-          <Panel tone="nested" inset="md" data-testid="plan-feedback" className="space-y-1">
-            <div className="text-xs font-medium text-muted-foreground">Requested changes</div>
+        {/* The badge already says changes were asked for; the text is what is left to show. */}
+        {item.feedback ? (
+          <Panel tone="nested" inset="md" data-testid="plan-feedback" role="group" aria-label="Requested changes">
             <p className="whitespace-pre-wrap text-sm text-foreground">{item.feedback}</p>
           </Panel>
+        ) : (
+          <div className="text-xs text-muted-foreground">{resolved?.label ?? item.actionId}</div>
         )}
       </Panel>
     );
