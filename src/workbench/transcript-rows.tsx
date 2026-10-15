@@ -1105,7 +1105,7 @@ const MessageRow = memo(function MessageRow({
   const sentBy = item.parentId;
   // Right-click, or a long press on a phone, for what can be done with it
   // (bw-yszdw).
-  const actions = useMessageActions(item.text);
+  const actions = useMessageActions(item);
   return (
     <>
     <div

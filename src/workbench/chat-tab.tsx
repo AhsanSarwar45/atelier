@@ -61,6 +61,7 @@ import { FileDropTarget } from '@/workbench/file-drop';
 import { HeldMessages } from '@/workbench/held-messages';
 import { imageIds, imageMarker, pictureId, promptFromDraft, promptParts, whyNot } from '@/workbench/composer-attachments';
 import type { DraftPicture } from '@/workbench/composer-attachments';
+import { MessageRepliesContext, quoted, type MessageReplies } from '@/workbench/message-menu';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
@@ -920,6 +921,12 @@ function ChatKindFilter({ sessionId, off, onChange }: {
 }) {
   const { items } = useSessionView(sessionId, true);
   return <KindFilter items={items} off={off} onChange={onChange} />;
+}
+
+/** A message as the writing box holds one: its words and its pictures. */
+interface Written {
+  draft: string;
+  pictures: DraftPicture[];
 }
 
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
@@ -1938,12 +1945,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     return false;
   }
 
-  async function submit() {
+  /**
+   * Send what is in the box — or, for a message sent again from its menu,
+   * what that message held (bw-drvtr.2). A message sent again goes the same
+   * way as one typed, but leaves whatever is in the box alone.
+   */
+  async function submit(given?: Written) {
     // The words and the pictures come out of the draft together: each picture
     // carries where its badge sat, so the sent message can draw it there.
-    const draft = draftNow();
-    const { text, images } = promptFromDraft(draft, attached);
-    if ((!text && attached.length === 0) || !sessionId) return;
+    const draft = given ? given.draft : draftNow();
+    const files = given ? given.pictures : attached;
+    const { text, images } = promptFromDraft(draft, files);
+    if ((!text && files.length === 0) || !sessionId) return;
     if (cannotSend) {
       setSendError('Choose a local model before sending.');
       return;
@@ -1954,8 +1967,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     recallableNow.current = pending;
     setRecallable(pending);
     setPendingSends((prev) => [...prev, { id: messageId, text, images }]);
-    setDraft('');
-    setAttached([]);
+    if (!given) {
+      setDraft('');
+      setAttached([]);
+    }
     setSendError(null);
     try {
       const sent = sendCommand<{ messageId?: string; held?: HeldMessage }>({
@@ -1964,7 +1979,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         messageId,
         text,
         images,
-        ...(attached.length ? { parts: promptParts(draft, attached) } : {}),
+        ...(files.length ? { parts: promptParts(draft, files) } : {}),
         takeover: ownership.kind === 'elsewhere',
       });
       sending.current = sent;
@@ -1982,8 +1997,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       // between the box unlocking and the send, or the screen's own copy of who
       // is working was stale (bw-dmxj.12). Either way what he wrote is his, and
       // it goes back in the box he wrote it in rather than into the void.
-      setDraft(draft);
-      setAttached(images);
+      if (!given) {
+        setDraft(draft);
+        setAttached(images);
+      }
       // And the line drawn for it goes with the text: a refused send leaves
       // nothing standing in the transcript that the server never accepted.
       setPendingSends((prev) => prev.filter((sent) => sent.id !== messageId));
@@ -2002,14 +2019,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * other window the same chat is open in. What comes back is the
    * `prompt.held` event, which is what draws it (bw-r54j.1).
    */
-  async function hold() {
-    const draft = draftNow();
-    const { text, images } = promptFromDraft(draft, attached);
-    if ((!text && attached.length === 0) || !sessionId) return;
+  async function hold(given?: Written) {
+    const draft = given ? given.draft : draftNow();
+    const carried = given ? given.pictures : attached;
+    const { text, images } = promptFromDraft(draft, carried);
+    if ((!text && carried.length === 0) || !sessionId) return;
     const written = draft;
-    const carried = attached;
-    setDraft('');
-    setAttached([]);
+    if (!given) {
+      setDraft('');
+      setAttached([]);
+    }
     setSendError(null);
     try {
       await sendCommand({
@@ -2023,11 +2042,43 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     } catch (e) {
       // Refused the same way a send is refused, and answered the same way:
       // what he wrote goes back in the box he wrote it in.
-      setDraft(written);
-      setAttached(carried);
+      if (!given) {
+        setDraft(written);
+        setAttached(carried);
+      }
       setSendError(e instanceof Error ? e.message : String(e));
     }
   }
+
+  // What a message's own menu can do to this chat (bw-drvtr.2). Read through
+  // a ref so the value handed to every row never changes: the rows are
+  // remembered, and a new value each render would draw all of them again.
+  const replying = useRef({ submit, hold, midTurn, setDraft, setAttached, typing, projectId, sessionId });
+  replying.current = { submit, hold, midTurn, setDraft, setAttached, typing, projectId, sessionId };
+  const replies = useMemo<MessageReplies>(() => {
+    /** After what is already written, never over it. */
+    const add = (text: string) => {
+      const { setDraft: write, typing: box } = replying.current;
+      write((written) => (written.trim() ? `${written.replace(/\s+$/, '')}\n\n${text}` : text));
+      box.current?.focus();
+    };
+    return {
+      // Sent the way Enter sends: held when a reply is still being written.
+      resend: (draft, pictures) => {
+        const now = replying.current;
+        void (now.midTurn ? now.hold({ draft, pictures }) : now.submit({ draft, pictures }));
+      },
+      edit: (draft, pictures) => {
+        add(draft);
+        replying.current.setAttached((carried) => [...carried, ...pictures]);
+      },
+      quote: (text) => add(quoted(text)),
+      linkTo: (messageId) => {
+        const { projectId: project, sessionId: chat } = replying.current;
+        return `/project?id=${encodeURIComponent(project ?? '')}&tab=chat&chat=${encodeURIComponent(chat ?? '')}&message=${encodeURIComponent(messageId)}`;
+      },
+    };
+  }, []);
 
   /** Send a waiting message now, into whatever the chat is in the middle of. */
   async function pushHeld(message: HeldMessage) {
@@ -3224,6 +3275,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
         {!view.loading && (
           <ChatAccount.Provider value={chatAccount}>
+          <MessageRepliesContext.Provider value={replies}>
           <DrawnTranscript
             /* One per chat, and never the last chat's. The measurements a
                virtualiser makes belong to the rows it made them for, and this
@@ -3246,6 +3298,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             toTheEnd={toTheEnd}
             stand={stand}
           />
+          </MessageRepliesContext.Provider>
           </ChatAccount.Provider>
         )}
         {signing.dialog}
