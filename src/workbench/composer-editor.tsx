@@ -301,6 +301,21 @@ function referenceBadges(icon: IconSource, picture: (id: string) => DraftPicture
 }
 
 /**
+ * The view, writing through a plain `contenteditable` on every phone.
+ *
+ * On Android Chrome, CodeMirror writes through the browser's EditContext
+ * instead, and there the phone's own text menu does not know where the box
+ * ends: a long press, then Select all, selected every word on the page rather
+ * than what he had typed (bw-drvtr.1). A `contenteditable` is an editing host
+ * the browser keeps a select-all inside, which is what every other phone
+ * already gets. Set on this view's class alone, so the file editor is untouched.
+ */
+class ComposerView extends EditorView {
+  // Read by CodeMirror off `view.constructor`; not in its published types.
+  static EDIT_CONTEXT = false;
+}
+
+/**
  * The box's own look. Everything it wears is the frame's — no border, no
  * background and no shadow of its own — and it grows with what is written until
  * it would start taking the conversation's room.
@@ -408,7 +423,7 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
     if (!parent) return;
 
     const start = opening.current;
-    const editor = new EditorView({
+    const editor = new ComposerView({
       doc: start.value,
       // At the end of what is already there: a draft he left in this chat is
       // one he is going on with, not one he is about to type in front of.
