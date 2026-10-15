@@ -46,6 +46,7 @@ import { lookOf, markOf } from '@/workbench/machine-look';
 import { ChatSignIn } from '@/workbench/sign-in-dialog';
 import { attachmentMarker, attachmentsIn } from '@/workbench/mentions';
 import { AttachmentGrid, shownFrom } from '@/workbench/attachment-grid';
+import { useMessageActions } from '@/workbench/message-menu';
 import { withoutProposedPlans } from '@/workbench/proposed-plan';
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { comparisonSpecs } from '@/workbench/chat-media';
@@ -1102,8 +1103,13 @@ const MessageRow = memo(function MessageRow({
   onLook: OnLook;
 }) {
   const sentBy = item.parentId;
+  // Right-click, or a long press on a phone, for what can be done with it
+  // (bw-yszdw).
+  const actions = useMessageActions(item.text);
   return (
+    <>
     <div
+      {...actions.box}
       data-testid={item.role === 'assistant' ? 'assistant-message' : 'user-message'}
       // Which call this came from, when it came from a helper rather than from
       // the agent you are talking to (bw-7ks.22.2).
@@ -1145,6 +1151,11 @@ const MessageRow = memo(function MessageRow({
       <AttachmentGrid files={shownFrom(item.role === 'user' ? 'user' : 'assistant', item.images)} onLook={onLook} />
       <RichMessageContent item={item} mentions={mentions} onLook={onLook} />
     </div>
+    {/* Beside the box, not in it: the menu is portalled out of the page but
+        not out of React, and a press on it would bubble into the message's
+        own handlers and ask for the menu again. */}
+    {actions.menu}
+    </>
   );
 });
 
