@@ -285,6 +285,8 @@ export function TerminalShells({ children }: { children: ReactNode }) {
   const asked = useRef(false);
   /** Is the window's first fill under way, so it is not started twice? */
   const filling = useRef(false);
+  /** How many shells are being started right now; their tabs are not on the list yet. */
+  const starting = useRef(0);
 
   const keep = useCallback((next: Shell[]) => {
     held.current = next;
@@ -311,6 +313,7 @@ export function TerminalShells({ children }: { children: ReactNode }) {
   const start = useCallback(
     async (at: string | null) => {
       setOpening(true);
+      starting.current += 1;
       try {
         // Read now rather than when the answer comes back: this is the folder the
         // person was looking at when they asked for a shell.
@@ -322,6 +325,7 @@ export function TerminalShells({ children }: { children: ReactNode }) {
       } catch (why) {
         complain('The shell would not start', why);
       } finally {
+        starting.current -= 1;
         setOpening(false);
       }
     },
@@ -369,10 +373,21 @@ export function TerminalShells({ children }: { children: ReactNode }) {
     if (next === folder.current) return;
     folder.current = next;
     setWhere(next);
-    // A project with no shells of its own gets no window, rather than an empty
-    // one that starts a shell the moment it is drawn.
-    if (!held.current.some((tab) => tab.project === next)) setShowing(false);
   }, []);
+
+  /**
+   * A project with no shells of its own gets no window, rather than an empty
+   * one that starts a shell the moment it is drawn.
+   *
+   * Decided once the move has settled rather than in `showFolder`: moving
+   * between two projects clears the folder on the way out before the next
+   * screen names its own, and a window judged on that passing null would close
+   * on every move between two projects that both have shells.
+   */
+  useEffect(() => {
+    if (starting.current) return;
+    if (!held.current.some((tab) => tab.project === where)) setShowing(false);
+  }, [where]);
 
   /**
    * A window shown with nothing in it fills itself: from the server the first

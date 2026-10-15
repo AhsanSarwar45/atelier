@@ -80,8 +80,9 @@ test('each project shows only the terminals opened in it', async ({ page, reques
     await expect.poll(() => tabNames(page), { message: 'only birch’s shell' }).toEqual(['birch']);
     await page.screenshot({ path: `${SHOTS}/bw-u791v1-birch.png`, animations: 'disabled' });
 
+    // Both projects have shells now, so the window stays open across the move.
     await switchTo(page, 'aspen');
-    await openTerminal(page);
+    await expect(page.getByTestId('terminal-window')).toBeVisible();
     await expect.poll(() => tabNames(page), { message: 'aspen’s shells came back' }).toEqual(['aspen', 'aspen']);
 
     await switchTo(page, 'cedar');

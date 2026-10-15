@@ -455,4 +455,24 @@ describe('the terminal window’s tabs', () => {
     fireEvent.click(screen.getByRole('button', { name: 'open the terminal' }));
     await waitFor(() => expect(tabNames()).toEqual(['aspen']));
   });
+
+  it('keeps the window open when moving to a project that has shells of its own', async () => {
+    running = [
+      shell('aspen-1', '/w/aspen', false, '/w/aspen'),
+      shell('birch-1', '/w/birch', false, '/w/birch'),
+    ];
+    const drawn = await open('/w/aspen');
+    expect(tabNames()).toEqual(['aspen']);
+
+    drawn.rerender(
+      <Terminals>
+        <Bar folder="/w/birch" />
+      </Terminals>,
+    );
+
+    await waitFor(() => expect(tabNames()).toEqual(['birch']));
+    expect(screen.getByTestId('terminal-window').className, 'nothing was clicked, and the window stayed').not.toContain(
+      'hidden',
+    );
+  });
 });
