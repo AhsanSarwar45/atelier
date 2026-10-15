@@ -151,6 +151,9 @@ test.describe.serial('the message menu', () => {
     await expect(mine).toHaveCount(2, { timeout: 30_000 });
     await expect(replies).toHaveCount(2, { timeout: 60_000 });
     await expect(composer).toHaveValue(before);
+    // Escape in the box never trades what is in it for the resent words.
+    await page.locator('.cm-content').first().press('Escape');
+    await expect(composer).toHaveValue(before);
     await page.screenshot({ path: `${SHOTS}/resent.png` });
 
     // Copy link to message: opening it lands on that message, marked.

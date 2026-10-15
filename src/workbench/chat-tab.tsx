@@ -1964,8 +1964,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // Drawn before it is sent, under the id the server will record it by.
     const messageId = newId();
     const pending = { messageId, text: draft, images, itemsBeforeSend: new Set(view.items.map((item) => item.id)) };
-    recallableNow.current = pending;
-    setRecallable(pending);
+    // A message sent again from its menu is not offered back: recalling puts
+    // its words over whatever is in the box, and the box was never its own.
+    // Nor is the one before it, which is no longer the last one sent.
+    recallableNow.current = given ? null : pending;
+    setRecallable(given ? null : pending);
     setPendingSends((prev) => [...prev, { id: messageId, text, images }]);
     if (!given) {
       setDraft('');
