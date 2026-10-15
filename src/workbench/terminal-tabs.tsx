@@ -148,7 +148,7 @@ function TabStrip({ searching, onSearch }: { searching: boolean; onSearch: () =>
 
 /** The window itself, once there is anything to put in it. */
 function TabbedTerminal() {
-  const { showing, tabs, active, hide, typeInto } = useTerminalShells();
+  const { showing, kept, active, hide, typeInto } = useTerminalShells();
   /**
    * Whether the history panel is over the grid.
    *
@@ -171,14 +171,15 @@ function TabbedTerminal() {
   const close = useCallback(() => setSearching(false), []);
   // Nothing at all until a shell has been opened; after that it stays, because
   // what is in it is attached to something that is still running.
-  if (!showing && !tabs.length) return null;
+  if (!showing && !kept.length) return null;
 
   return (
     <TerminalWindow title="Terminal" onClose={hide} className={cn(!showing && 'hidden')}>
       <div className="flex h-full flex-col">
         <TabStrip searching={searching} onSearch={() => setSearching((was) => !was)} />
         <div className="relative min-h-0 flex-1">
-          {tabs.map((tab) => (
+          {/* Every shell held, not only this project's: see the note at the top. */}
+          {kept.map((tab) => (
             <div
               key={tab.id}
               data-testid="terminal-tab-body"

@@ -82,7 +82,7 @@ const reallyDispose = Terminal.prototype.dispose;
 
 /** What the app asked the server for, and what the server had. */
 let calls: Call[] = [];
-let running: { id: string; cwd: string; started: string; exited: boolean }[] = [];
+let running: { id: string; cwd: string; project?: string; started: string; exited: boolean }[] = [];
 let opened = 0;
 
 /** The shape of an answer, with only the parts anything here reads. */
@@ -95,9 +95,10 @@ const answers = (body: unknown, ok = true) =>
   }) as unknown as Response;
 
 /** One shell as the server lists it. */
-const shell = (id: string, cwd: string, exited = false) => ({
+const shell = (id: string, cwd: string, exited = false, project?: string) => ({
   id,
   cwd,
+  ...(project ? { project } : {}),
   started: '2026-08-29T10:00:00Z',
   exited,
 });
@@ -300,8 +301,9 @@ describe('the terminal window’s tabs', () => {
 
     const [posted] = asked('POST');
     expect(posted.url, 'a shell is opened over HTTP, not by connecting to one').toContain('/api/terminal');
-    expect(posted.body, 'the browser sends the folder it is showing, and the shape to start at').toEqual({
+    expect(posted.body, 'the browser sends the folder it is showing, its project, and the shape to start at').toEqual({
       cwd: '/home/ahsan/dev/corsetta',
+      project: '/home/ahsan/dev/corsetta',
       cols: 80,
       rows: 24,
     });
@@ -380,7 +382,7 @@ describe('the terminal window’s tabs', () => {
   });
 
   it('closes the window when the last tab is closed, and starts fresh when it is opened again', async () => {
-    running = [shell('live-1', '/home/ahsan/dev/corsetta')];
+    running = [shell('live-1', '/home/ahsan/dev/corsetta', false, '/home/ahsan/dev/corsetta')];
     await open('/home/ahsan/dev/corsetta');
 
     fireEvent.click(
@@ -393,5 +395,64 @@ describe('the terminal window’s tabs', () => {
     await waitFor(() => expect(asked('POST')).toHaveLength(1));
     expect(tabNames(), 'a window opened with nothing in it opens a shell').toEqual(['corsetta']);
     expect(asked('GET'), 'and the server is not asked twice what it has').toHaveLength(1);
+  });
+
+  it('shows only the shells of the project on screen', async () => {
+    running = [
+      shell('aspen-1', '/w/aspen/src', false, '/w/aspen'),
+      shell('home-1', '/home/ahsan'),
+      shell('birch-1', '/w/birch', false, '/w/birch'),
+    ];
+    const drawn = await open('/w/aspen');
+
+    expect(tabNames(), 'only the shell opened in aspen, even from a folder inside it').toEqual(['src']);
+    expect(asked('POST'), 'aspen had a shell, so none was started').toHaveLength(0);
+
+    drawn.rerender(
+      <Terminals>
+        <Bar folder="/w/birch" />
+      </Terminals>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'open the terminal' }));
+    await waitFor(() => expect(tabNames()).toEqual(['birch']));
+    expect(bodyOf('aspen-1'), 'aspen’s shell is out of sight, not closed').toBeInTheDocument();
+    expect(bodyOf('aspen-1')?.hidden).toBe(true);
+    expect(paneFor('aspen-1').socket.readyState, 'and still attached').not.toBe(Socket.CLOSED);
+
+    drawn.rerender(
+      <Terminals>
+        <Bar folder={null} />
+      </Terminals>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'open the terminal' }));
+    await waitFor(() => expect(tabNames()).toEqual(['ahsan']));
+    expect(asked('DELETE'), 'moving between projects closes nothing').toEqual([]);
+  });
+
+  it('closes the window on a project with no shells instead of starting one', async () => {
+    running = [shell('aspen-1', '/w/aspen', false, '/w/aspen')];
+    const drawn = await open('/w/aspen');
+
+    drawn.rerender(
+      <Terminals>
+        <Bar folder="/w/birch" />
+      </Terminals>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-window').className).toContain('hidden'));
+    expect(asked('POST'), 'nobody asked for a shell in birch').toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'open the terminal' }));
+    await waitFor(() => expect(asked('POST')).toHaveLength(1));
+    expect(asked('POST')[0].body?.project, 'opening it there starts one that belongs to birch').toBe('/w/birch');
+    await waitFor(() => expect(tabNames()).toEqual(['birch']));
+
+    drawn.rerender(
+      <Terminals>
+        <Bar folder="/w/aspen" />
+      </Terminals>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'open the terminal' }));
+    await waitFor(() => expect(tabNames()).toEqual(['aspen']));
   });
 });

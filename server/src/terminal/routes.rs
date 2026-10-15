@@ -24,6 +24,12 @@
 //! the shell starts in the person's home directory, which is where a shell
 //! opened from anywhere else on this machine would start.
 //!
+//! It also sends the folder of the project on screen, kept as given and handed
+//! back in the list. That is which project the shell belongs to: the app draws
+//! a shell's tab only on that project's screens, and the folder a shell started
+//! in cannot say so on its own, since "Open in terminal" starts one in any
+//! folder of the project and a shell opened at home names no project at all.
+//!
 //! A path that is not there, or is there and is not a folder, is refused before
 //! a shell is started. The alternative is a spawn that fails somewhere inside
 //! the pty crate and reaches the person as a sentence about an error number.
@@ -88,6 +94,9 @@ pub fn router(shells: Shells) -> Router {
 struct Opening {
     /// The folder the app is showing, when it is showing one.
     cwd: Option<String>,
+    /// The folder of the project on screen, when one is.
+    #[serde(default)]
+    project: Option<String>,
     cols: u16,
     rows: u16,
 }
@@ -104,6 +113,9 @@ struct Listed {
     /// Where it was started, which is what a tab has to label itself with
     /// before anyone has typed anything into it.
     cwd: String,
+    /// The project whose screens show this tab, or `None` for the screens
+    /// showing no project.
+    project: Option<String>,
     /// Which tab goes where, without the browser having to remember an order it
     /// may have been reloaded out of.
     started: DateTime<Utc>,
@@ -147,7 +159,13 @@ async fn open(
     })?;
 
     let session = shells
-        .open(cwd, asked.cols, asked.rows, chosen)
+        .open(
+            cwd,
+            asked.project.filter(|named| !named.is_empty()),
+            asked.cols,
+            asked.rows,
+            chosen,
+        )
         .map_err(|why| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -168,6 +186,7 @@ async fn list(Extension(shells): Extension<Shells>) -> Json<Vec<Listed>> {
             .map(|session| Listed {
                 id: session.id.to_string(),
                 cwd: session.cwd.display().to_string(),
+                project: session.project.clone(),
                 started: session.started,
                 exited: session.ended().is_some(),
             })
@@ -397,6 +416,35 @@ pub(crate) mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         false
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_shell_is_listed_with_the_project_that_opened_it() {
+        let project = tempfile::tempdir().expect("a project folder");
+        let inside = project.path().join("src");
+        std::fs::create_dir(&inside).expect("a folder inside the project");
+        let (_shells, app) = a_register();
+
+        let asking = json!({
+            "cwd": inside.display().to_string(),
+            "project": project.path().display().to_string(),
+            "cols": 80,
+            "rows": 24,
+        });
+        let (status, said) = ask(&app, Method::POST, MOUNTED_AT, OURS, Some(asking)).await;
+        assert_eq!(status, StatusCode::OK, "opening should have worked: {said}");
+        open_one(&app, None).await;
+
+        let all = listed(&app).await;
+        assert_eq!(
+            all[0]["project"],
+            project.path().display().to_string().as_str(),
+            "a shell opened in a project's subfolder still belongs to the project, and the list is {all:?}"
+        );
+        assert!(
+            all[1]["project"].is_null(),
+            "a shell opened with no project on screen belongs to none, and the list is {all:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

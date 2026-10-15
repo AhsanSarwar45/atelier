@@ -45,9 +45,21 @@
  * in the person's home, which is what a shell opened anywhere else on this
  * machine would do.
  *
- * It is kept in a ref rather than in state because nothing draws it: it is read
- * once, at the moment a shell is opened, and a project appearing on screen has
- * no business re-rendering every terminal in the app.
+ * ## Each project sees its own shells
+ *
+ * A shell belongs to the project whose screen opened it, and its tab is drawn
+ * only on that project's screens; a shell opened where no project is showing
+ * belongs to those screens instead. The server keeps the project beside the
+ * shell and hands it back in the list (`server/src/terminal/routes.rs`), so a
+ * reload puts every tab back where it was opened. It is not worked out from the
+ * folder a shell started in: "Open in terminal" starts one in any folder of a
+ * project, and a project's folder can sit inside another project's.
+ *
+ * A shell on another project's screen is only out of sight. Its pane stays
+ * mounted with the rest (`terminal-tabs.tsx`), so whatever runs in it keeps
+ * running and keeps its screen. Each project remembers its own front tab, and
+ * moving to a project with no shells closes the window rather than starting one
+ * nobody asked for.
  *
  * ## Why the list is kept in a ref as well as in state
  *
@@ -63,6 +75,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -82,10 +95,12 @@ export type Shell = {
    * restored after a reload it is the folder the server says it started in.
    */
   folder: string | null;
+  /** The folder of the project whose screens show it, or null for the screens showing none. */
+  project: string | null;
 };
 
 /** One shell as `GET /api/terminal` says it. */
-type Listed = { id: string; cwd: string; started: string; exited: boolean };
+type Listed = { id: string; cwd: string; project?: string | null; started: string; exited: boolean };
 
 /**
  * The grid a shell is opened at, before anything has been laid out.
@@ -101,7 +116,13 @@ const OPENING_SHAPE = { cols: 80, rows: 24 };
 interface Terminals {
   /** Is the window showing? Shells stay open whatever the answer. */
   showing: boolean;
+  /** The shells of the project on screen, which are the tabs on the strip. */
   tabs: Shell[];
+  /**
+   * Every shell held, on every project's screens. The window keeps a pane
+   * mounted for each, so a shell out of sight is still attached.
+   */
+  kept: Shell[];
   /** Which tab is in front, or null when there are none. */
   active: string | null;
   /** Is a shell being started right now? */
@@ -152,6 +173,7 @@ interface Terminals {
 const nothingOpen: Terminals = {
   showing: false,
   tabs: [],
+  kept: [],
   active: null,
   opening: false,
   show: () => {},
@@ -201,14 +223,18 @@ async function listShells(): Promise<Listed[]> {
   return (await answer.json()) as Listed[];
 }
 
-async function openShell(folder: string | null): Promise<string> {
+async function openShell(folder: string | null, project: string | null): Promise<string> {
   const answer = await request('/api/terminal', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // The key is left out rather than sent empty when no project is on screen:
     // an absent folder is what tells the server to choose home, and a folder it
     // has to interpret is one it can be wrong about.
-    body: JSON.stringify(folder ? { cwd: folder, ...OPENING_SHAPE } : { ...OPENING_SHAPE }),
+    body: JSON.stringify({
+      ...(folder ? { cwd: folder } : {}),
+      ...(project ? { project } : {}),
+      ...OPENING_SHAPE,
+    }),
   });
   if (!answer.ok) throw new Error(await answer.text());
   return ((await answer.json()) as { id: string }).id;
@@ -231,14 +257,29 @@ function complain(what: string, why: unknown): void {
   toast({ title: what, description: said || undefined, variant: 'destructive' });
 }
 
+/** Where a project's front tab is remembered; the screens showing no project share one. */
+const pickKey = (project: string | null) => project ?? '';
+
+/**
+ * Which of a project's shells is in front: the one last chosen there, or the
+ * newest when that one is gone or none was chosen.
+ */
+function frontOf(all: Shell[], project: string | null, picks: Record<string, string>): string | null {
+  const theirs = all.filter((tab) => tab.project === project);
+  const picked = picks[pickKey(project)];
+  if (theirs.some((tab) => tab.id === picked)) return picked;
+  return theirs[theirs.length - 1]?.id ?? null;
+}
+
 export function TerminalShells({ children }: { children: ReactNode }) {
   const [showing, setShowing] = useState(false);
-  const [tabs, setTabs] = useState<Shell[]>([]);
-  const [active, setActive] = useState<string | null>(null);
+  const [kept, setKept] = useState<Shell[]>([]);
+  const [where, setWhere] = useState<string | null>(null);
+  const [picks, setPicks] = useState<Record<string, string>>({});
   const [opening, setOpening] = useState(false);
 
   const held = useRef<Shell[]>([]);
-  const chosen = useRef<string | null>(null);
+  const picked = useRef<Record<string, string>>({});
   const folder = useRef<string | null>(null);
   /** Has the server been asked what it has, in this page's life? Once is enough. */
   const asked = useRef(false);
@@ -247,13 +288,19 @@ export function TerminalShells({ children }: { children: ReactNode }) {
 
   const keep = useCallback((next: Shell[]) => {
     held.current = next;
-    setTabs(next);
+    setKept(next);
   }, []);
 
-  const choose = useCallback((id: string | null) => {
-    chosen.current = id;
-    setActive(id);
+  const choose = useCallback((project: string | null, id: string | null) => {
+    const next = { ...picked.current };
+    if (id) next[pickKey(project)] = id;
+    else delete next[pickKey(project)];
+    picked.current = next;
+    setPicks(next);
   }, []);
+
+  const tabs = useMemo(() => kept.filter((tab) => tab.project === where), [kept, where]);
+  const active = frontOf(kept, where, picks);
 
   /**
    * Start one shell and put a tab in front for it.
@@ -267,10 +314,11 @@ export function TerminalShells({ children }: { children: ReactNode }) {
       try {
         // Read now rather than when the answer comes back: this is the folder the
         // person was looking at when they asked for a shell.
-        const startingIn = at ?? folder.current;
-        const id = await openShell(startingIn);
-        keep([...held.current, { id, folder: startingIn }]);
-        choose(id);
+        const project = folder.current;
+        const startingIn = at ?? project;
+        const id = await openShell(startingIn, project);
+        keep([...held.current, { id, folder: startingIn, project }]);
+        choose(project, id);
       } catch (why) {
         complain('The shell would not start', why);
       } finally {
@@ -284,18 +332,22 @@ export function TerminalShells({ children }: { children: ReactNode }) {
 
   const closeTab = useCallback(
     async (id: string) => {
-      const was = held.current;
+      const closing = held.current.find((tab) => tab.id === id);
+      if (!closing) return;
+      const { project } = closing;
+      const was = held.current.filter((tab) => tab.project === project);
       const left = was.filter((tab) => tab.id !== id);
-      keep(left);
-      if (chosen.current === id) {
+      const wasInFront = frontOf(held.current, project, picked.current) === id;
+      keep(held.current.filter((tab) => tab.id !== id));
+      if (wasInFront) {
         // The one on its left, which is where the eye already is; the first one
         // when the tab that went was itself the first.
         const gone = was.findIndex((tab) => tab.id === id);
-        choose(left[Math.max(0, gone - 1)]?.id ?? null);
+        choose(project, left[Math.max(0, gone - 1)]?.id ?? null);
       }
       // Nothing left to show. The window is not a thing to sit and look at
       // empty, and re-opening it starts a shell the way the first one did.
-      if (!left.length) setShowing(false);
+      if (!left.length && project === folder.current) setShowing(false);
       // The tab goes first and the shell after it, so the pane has let go of
       // its socket before the shell it was watching is taken away.
       try {
@@ -312,8 +364,14 @@ export function TerminalShells({ children }: { children: ReactNode }) {
   // not a shell, and there is no DELETE anywhere near it.
   const hide = useCallback(() => setShowing(false), []);
 
-  const showFolder = useCallback((where: string | null) => {
-    folder.current = where || null;
+  const showFolder = useCallback((shown: string | null) => {
+    const next = shown || null;
+    if (next === folder.current) return;
+    folder.current = next;
+    setWhere(next);
+    // A project with no shells of its own gets no window, rather than an empty
+    // one that starts a shell the moment it is drawn.
+    if (!held.current.some((tab) => tab.project === next)) setShowing(false);
   }, []);
 
   /**
@@ -342,17 +400,17 @@ export function TerminalShells({ children }: { children: ReactNode }) {
       const said = await listShells();
       const live = said
         .filter((one) => !one.exited)
-        .map((one) => ({ id: one.id, folder: one.cwd || null }));
+        .map((one) => ({ id: one.id, folder: one.cwd || null, project: one.project || null }));
       if (!live.length) return false;
+      // Each project's front tab is its newest, which is the one they were
+      // most likely in, so nothing needs choosing here.
       keep(live);
-      // The last one started is the one they were most likely in.
-      choose(live[live.length - 1].id);
-      return true;
+      return live.some((one) => one.project === folder.current);
     } catch (why) {
       complain('The shells already running could not be listed', why);
       return false;
     }
-  }, [keep, choose]);
+  }, [keep]);
 
   /**
    * A shell at a folder a menu named, with the window brought up around it.
@@ -378,7 +436,7 @@ export function TerminalShells({ children }: { children: ReactNode }) {
       filling.current = false;
       return;
     }
-    if (filling.current || held.current.length) return;
+    if (filling.current || held.current.some((tab) => tab.project === folder.current)) return;
     filling.current = true;
     void (async () => {
       if (!(await adopt())) await start(null);
@@ -412,11 +470,12 @@ export function TerminalShells({ children }: { children: ReactNode }) {
       value={{
         showing,
         tabs,
+        kept,
         active,
         opening,
         show,
         hide,
-        select: choose,
+        select: (id: string) => choose(where, id),
         openTab,
         openAt,
         closeTab: (id: string) => void closeTab(id),

@@ -68,6 +68,11 @@ pub struct Session {
     /// Where it was started, so a restored tab can say which folder it is
     /// looking at without interrupting the shell to ask.
     pub cwd: PathBuf,
+    /// The folder of the project whose screen opened it, or `None` when it was
+    /// opened from a screen showing no project. The browser shows a shell's tab
+    /// only on its own project's screens, and a reloaded page has to know which
+    /// project that is without guessing from where the shell started.
+    pub project: Option<String>,
     /// When it was started, which is the order tabs should come back in.
     pub started: DateTime<Utc>,
     /// Locked because a pty master is not `Sync`, for the reason above.
@@ -158,6 +163,7 @@ impl Register {
     pub fn open(
         &self,
         cwd: PathBuf,
+        project: Option<String>,
         cols: u16,
         rows: u16,
         chosen: Option<PathBuf>,
@@ -167,6 +173,7 @@ impl Register {
         let session = Arc::new(Session {
             id: Uuid::new_v4(),
             cwd,
+            project,
             started: Utc::now(),
             shell: Mutex::new(shell),
             pump,
