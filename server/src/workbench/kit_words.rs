@@ -165,6 +165,27 @@ pub fn condition(brand: &str, text: &str) -> Option<Value> {
     }))
 }
 
+/// A whole answer that is nothing but the kit saying a usage limit is hit.
+///
+/// While a chat is held by its limit the kit still runs the turns it starts
+/// on its own — a background command finishing wakes it — and each one ends,
+/// cleanly, on that one sentence: `You've hit your session limit · resets
+/// 2:10am (Asia/Karachi)`. Read as an answer, it cleared the limit, the chat
+/// said Ready, and the resume planned for the reset was dropped (bw-uic5z).
+///
+/// Narrow on purpose (bw-7pfr): the answer has to open with the kit's own
+/// words and be short, so an answer that only talks about a limit is still an
+/// answer.
+pub fn limit_refusal(brand: &str, said: &str) -> Option<Value> {
+    let said = said.trim().replace('\u{2019}', "'");
+    let opens = said
+        .get(..15)
+        .is_some_and(|opening| opening.eq_ignore_ascii_case("you've hit your"));
+    if !opens || said.len() > 400 {
+        return None;
+    }
+    condition(brand, &said).filter(|signal| signal["kind"] == "usage_limit")
+}
 
 /// A Claude allowance packet, read as the condition it reports.
 ///
@@ -196,6 +217,17 @@ pub fn allowance(message: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_kits_own_limit_sentence_is_a_refusal() {
+        let refused =
+            limit_refusal("claude", "You've hit your session limit · resets 2:10am (Asia/Karachi)").unwrap();
+        assert_eq!(refused["kind"], "usage_limit");
+        assert_eq!(refused["resets"], "resets 2:10am (Asia/Karachi)");
+        assert!(limit_refusal("claude", "You\u{2019}ve hit your weekly limit · resets 1pm (Asia/Karachi)").is_some());
+        assert!(limit_refusal("claude", "Done. Note that you've hit your session limit earlier today.").is_none());
+        assert!(limit_refusal("claude", "You've hit your stride on this refactor.").is_none());
+    }
 
     #[test]
     fn native_workbench_services_provider_prose_becomes_a_semantic_condition() {

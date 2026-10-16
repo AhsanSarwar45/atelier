@@ -111,6 +111,9 @@ pub struct AcpNormalizer {
     stream_id: String,
     active_messages: HashMap<String, (String, String)>,
     message_text: HashMap<String, String>,
+    /// What the agent said at the top level in this turn, message by message,
+    /// so a turn that said nothing but its limit can be read as refused.
+    turn_said: Vec<String>,
     root_assistant_messages: HashSet<String>,
     /// How many of a message's finished visuals have already been sent on.
     ///
@@ -190,6 +193,7 @@ impl Default for AcpNormalizer {
             stream_id: uuid::Uuid::new_v4().to_string(),
             active_messages: HashMap::new(),
             message_text: HashMap::new(),
+            turn_said: Vec::new(),
             root_assistant_messages: HashSet::new(),
             visuals_said: HashMap::new(),
             active_thinking: HashMap::new(),
@@ -542,6 +546,7 @@ impl AcpNormalizer {
         if !self.root_assistant_messages.remove(&id) || text.is_empty() {
             return events;
         }
+        self.turn_said.push(text.clone());
         // No reading of the words for a condition here. An answer is an
         // answer: this ran over the text of every completed message the agent
         // spoke, so an answer that merely MENTIONED signing in, or a model
@@ -2817,6 +2822,13 @@ impl AcpNormalizer {
         }
         self.started_messages.clear();
         events.extend(self.prompt_usage(session_id, provider, raw));
+        // A turn that said nothing but that its limit is hit was refused, not
+        // answered: the limit still stands (`kit_words::limit_refusal`).
+        let said = std::mem::take(&mut self.turn_said).join("\n");
+        let failure = match failure {
+            None if !errored => crate::workbench::kit_words::limit_refusal(provider, &said),
+            failure => failure,
+        };
         let failed = errored
             || failure.as_ref().is_some_and(|signal| {
                 matches!(signal["severity"].as_str(), Some("error" | "blocking"))
@@ -3022,6 +3034,39 @@ mod tests {
         assert!(!n.unprompted);
         assert!(n.update("local", "claude", &cycle("idle")).is_empty());
         assert!(n.runtime_facts(true, false, &requests).turn_open);
+    }
+
+    /// A chat held by its limit is still woken by its own background work, and
+    /// the kit answers each wake with the limit sentence alone. That is the
+    /// limit standing, not the turn going through (bw-uic5z).
+    #[test]
+    fn a_turn_that_says_only_its_limit_keeps_the_limit_standing() {
+        let cycle = |state: &str| json!({"sessionId":"remote","update":{
+            "sessionUpdate":"session_info_update","_meta":{"atelier":{"cycle":state}}
+        }});
+        let said = |text: &str| json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":text}
+        }});
+        let signals = |events: &[Event]| {
+            events
+                .iter()
+                .filter(|e| e.kind == EventKind::ProviderMessage)
+                .map(|e| (e.fields["signal"]["kind"].clone(), e.fields["signal"]["phase"].clone()))
+                .collect::<Vec<_>>()
+        };
+        let mut n = AcpNormalizer::default();
+        n.update("local", "claude", &cycle("running"));
+        n.update("local", "claude", &said("You've hit your session limit · resets 2:10am (Asia/Karachi)"));
+        let ended = n.update("local", "claude", &cycle("idle"));
+        assert_eq!(signals(&ended), vec![(json!("usage_limit"), json!("active"))]);
+        let state = ended.iter().rfind(|e| e.kind == EventKind::SessionState).unwrap();
+        assert_eq!(state.fields["label"], "Limit reached");
+
+        // A real answer after the reset is the limit going away.
+        n.update("local", "claude", &cycle("running"));
+        n.update("local", "claude", &said("Picked up where I left off."));
+        let ended = n.update("local", "claude", &cycle("idle"));
+        assert_eq!(signals(&ended), vec![(json!("usage_limit"), json!("resolved"))]);
     }
 
     #[test]

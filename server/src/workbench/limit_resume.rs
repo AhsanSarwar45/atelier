@@ -121,12 +121,14 @@ enum Step {
     Resume { session_id: String },
 }
 
-/// Which limit notices have been announced and which acted on, each by its
-/// chat and seq, so a notice is announced once and resumed from once. A chat
-/// that runs into the limit again writes a new notice and is planned afresh.
+/// Which resumes have been announced, by chat and time, and which notices
+/// acted on, by chat and seq. A notice is resumed from once. A time is
+/// announced once, however many notices name it: a chat held by its limit is
+/// refused again each time its own background work wakes it, and each refusal
+/// is a new notice naming the same reset (bw-uic5z).
 #[derive(Default)]
 struct Plan {
-    announced: HashSet<(String, i64)>,
+    announced: HashSet<(String, DateTime<Utc>)>,
     resumed: HashSet<(String, i64)>,
 }
 
@@ -136,7 +138,8 @@ impl Plan {
     fn next(&mut self, standing: &[StandingLimit], since: DateTime<Utc>, now: DateTime<Utc>) -> Vec<Step> {
         let present: HashSet<(String, i64)> =
             standing.iter().map(|limit| (limit.session_id.clone(), limit.seq)).collect();
-        self.announced.retain(|key| present.contains(key));
+        self.announced
+            .retain(|(chat, _)| standing.iter().any(|limit| limit.session_id == *chat));
         self.resumed.retain(|key| present.contains(key));
         let mut steps = Vec::new();
         for limit in standing {
@@ -154,7 +157,7 @@ impl Plan {
             if now >= due {
                 self.resumed.insert(key);
                 steps.push(Step::Resume { session_id: limit.session_id.clone() });
-            } else if self.announced.insert(key) {
+            } else if self.announced.insert((limit.session_id.clone(), due)) {
                 steps.push(Step::Announce { session_id: limit.session_id.clone(), at: due });
             }
         }
@@ -339,6 +342,16 @@ mod tests {
         let mut plan = Plan::default();
         let old = [standing("a", 7, "2026-10-01T16:00:00Z")];
         assert_eq!(plan.next(&old, utc("2026-10-09T09:00:00Z"), utc("2026-10-09T12:00:00Z")), []);
+    }
+
+    #[test]
+    fn refusals_naming_the_same_reset_are_announced_once() {
+        let mut plan = Plan::default();
+        let first = [standing("a", 7, "2026-10-09T16:00:00Z")];
+        assert_eq!(plan.next(&first, ON, utc("2026-10-09T12:00:00Z")).len(), 1);
+        let again = [standing("a", 19, "2026-10-09T16:00:00Z")];
+        assert_eq!(plan.next(&again, ON, utc("2026-10-09T12:05:00Z")), []);
+        assert_eq!(plan.next(&again, ON, utc("2026-10-09T16:01:00Z")), [Step::Resume { session_id: "a".into() }]);
     }
 
     #[test]

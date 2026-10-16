@@ -136,6 +136,10 @@ if [ -z "$ADAPTERS" ]; then
   installed="$(command -v atelier || true)"
   if [ -n "$installed" ]; then
     ADAPTERS="$(dirname "$(readlink -f "$installed")")/atelier-adapters"
+    # A Homebrew install keeps it in the keg's libexec, beside bin.
+    if [ ! -d "$ADAPTERS" ]; then
+      ADAPTERS="$(dirname "$(dirname "$(readlink -f "$installed")")")/libexec/atelier-adapters"
+    fi
   fi
 fi
 # Removed first, so a run that has no bundle to offer cannot be answered by the
