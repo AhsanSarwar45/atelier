@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { foldAll } from '../../src/workbench/fold';
@@ -57,6 +58,10 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
   mkdirSync(join(subfolder, 'scripts'), { recursive: true });
   const script = join(subfolder, 'scripts', 'restore.js');
   writeFileSync(script, '// restore\n');
+  // A scratch file in the temp folder, outside home: it opens read-only too.
+  const scratch = mkdtempSync(join(tmpdir(), 'bw-vxhal-'));
+  const temp = join(scratch, 'export.csv');
+  writeFileSync(temp, 'kept in the temp folder\n');
   const text = [
     `Written outside the repo, so it stays out of git: ${body} is where it went.`,
     '',
@@ -65,6 +70,8 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
     `Quoted on its own: \`${renderer}\` is the renderer.`,
     '',
     'Written from the top of the project: `services/api/scripts/restore.js`.',
+    '',
+    `The export is in \`${temp}\`.`,
     '',
     `Use it with \`gh pr create -F ${body}\` when you are ready.`,
     '',
@@ -146,7 +153,8 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
       // Files named every way an agent writes them, and all are files. The one
       // in the sentence and the two quoted on their own are badges; the three
       // inside a command or a block are the dotted-underline link.
-      await expect.poll(async () => message.locator('[data-path-look="badge"]').count(), { timeout: 30_000 }).toBe(3);
+      await expect.poll(async () => message.locator('[data-path-look="badge"]').count(), { timeout: 30_000 }).toBe(4);
+      await expect(message.locator(`[data-path-look="badge"][data-path-mention="${temp}"]`)).toHaveCount(1);
       await expect(message.locator('[data-path-look="badge"][data-file-kind="text"]')).toHaveCount(1);
       await expect(message.locator(`[data-path-look="badge"][data-path-mention="${renderer}"]`)).toHaveCount(1);
       await expect(message.locator(`[data-path-look="badge"][data-path-mention="${script}"]`)).toHaveCount(1);
@@ -187,8 +195,18 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
       await expect(page.getByText('kept outside the project')).toBeVisible();
       await page.screenshot({ path: process.env.PATH_FILES_TAB_SCREENSHOT || 'tests/results/bw-lolf-outside-in-files.png' });
 
-      // A project file named inside code opens straight in the Files tab.
+      // A file in the temp folder opens in the quick view as well.
       await page.goBack();
+      await expect(page.getByText('Written outside the repo')).toBeVisible();
+      await message.locator(`[data-path-mention="${temp}"]`).click();
+      await expect(quick).toHaveAttribute('data-path', temp);
+      await expect(quick.getByText('kept in the temp folder')).toBeVisible();
+      await quick.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+      await page.screenshot({ path: process.env.PATH_TEMP_SCREENSHOT || 'tests/results/bw-vxhal-temp-quick-view.png' });
+      await page.keyboard.press('Escape');
+      await expect(quick).toBeHidden();
+
+      // A project file named inside code opens straight in the Files tab.
       await expect(page.getByText('Written outside the repo')).toBeVisible();
       await message.locator(`code [data-path-mention="${renderer}"]`).first().click();
       await expect(page.getByTestId('files-viewer')).toHaveAttribute('data-file', renderer);
@@ -197,5 +215,6 @@ test('a file in a message is a badge, and one on a row stays a link', async ({ p
   } finally {
     if (project) await request.delete(`/api/projects/${project.id}`);
     discardFixture(run);
+    rmSync(scratch, { recursive: true, force: true });
   }
 });

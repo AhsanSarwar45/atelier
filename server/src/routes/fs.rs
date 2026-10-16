@@ -86,7 +86,7 @@ fn presentation_asset_in_stores(primary: &std::path::Path, durable: Option<&std:
         .and_then(|directory| presentation_asset_path(directory, asset)))
 }
 
-use super::validate_path_security;
+use super::{validate_path_security, validate_readable_path};
 
 /// Query parameters for the list directory endpoint.
 #[derive(Debug, Deserialize)]
@@ -136,7 +136,7 @@ pub async fn media(
         return (StatusCode::FORBIDDEN, "Cross-origin media reads are not allowed").into_response();
     }
     let path = PathBuf::from(&params.path);
-    if let Err(e) = validate_path_security(&path) {
+    if let Err(e) = validate_readable_path(&path) {
         return (StatusCode::FORBIDDEN, e).into_response();
     }
     if !path.is_file() {
@@ -245,7 +245,7 @@ fn one_level(dir: &std::path::Path, ignores: bool) -> Vec<PathBuf> {
 pub async fn tree(Query(params): Query<FsTreeParams>) -> impl IntoResponse {
     let dir = PathBuf::from(&params.dir);
 
-    if let Err(e) = validate_path_security(&dir) {
+    if let Err(e) = validate_readable_path(&dir) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e })));
     }
     if !dir.exists() {
@@ -356,7 +356,7 @@ pub fn looks_binary(bytes: &[u8]) -> bool {
 pub async fn read_file(Query(params): Query<FsExistsParams>) -> impl IntoResponse {
     let path = PathBuf::from(&params.path);
 
-    if let Err(e) = validate_path_security(&path) {
+    if let Err(e) = validate_readable_path(&path) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e })));
     }
     let metadata = match std::fs::metadata(&path) {
@@ -1053,7 +1053,7 @@ pub async fn list_directory(Query(params): Query<FsListParams>) -> impl IntoResp
     let dir_path = PathBuf::from(&params.path);
 
     // Security: Validate path is within allowed directories
-    if let Err(e) = validate_path_security(&dir_path) {
+    if let Err(e) = validate_readable_path(&dir_path) {
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({ "error": e })),
@@ -1133,7 +1133,7 @@ pub async fn path_exists(Query(params): Query<FsExistsParams>) -> impl IntoRespo
     let path = PathBuf::from(&params.path);
 
     // Security: Validate path is within allowed directories
-    if let Err(e) = validate_path_security(&path) {
+    if let Err(e) = validate_readable_path(&path) {
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({ "error": e })),
@@ -1164,7 +1164,7 @@ pub async fn paths_exist(Json(body): Json<FsExistsManyBody>) -> impl IntoRespons
             .into_iter()
             .map(|asked| {
                 let path = PathBuf::from(&asked);
-                let exists = validate_path_security(&path).is_ok() && path.exists();
+                let exists = validate_readable_path(&path).is_ok() && path.exists();
                 (asked, serde_json::Value::Bool(exists))
             })
             .collect::<serde_json::Map<_, _>>()
@@ -1327,13 +1327,13 @@ fn reveal_commands(path: &std::path::Path) -> Vec<std::process::Command> {
 /// Opens a path in an external application (VS Code, Cursor, or Finder/Explorer).
 ///
 /// # Security constraints:
-/// - Path must be within user's home directory
+/// - Path must be within the home directory or the temp folder
 /// - Target must be one of: "vscode", "cursor", "finder"
 pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl IntoResponse {
     let path = PathBuf::from(&request.path);
 
     // Security: Validate path is within allowed directories
-    if let Err(e) = validate_path_security(&path) {
+    if let Err(e) = validate_readable_path(&path) {
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({ "error": e })),

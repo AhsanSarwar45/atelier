@@ -544,10 +544,58 @@ pub fn validate_path_security(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Validates that a path may be READ: everything [`validate_path_security`]
+/// allows, and also the system temp folder.
+///
+/// Agents put scratch files, exports and logs under `/tmp` and name them in
+/// their replies, and a file there is the user's to look at the same as one in
+/// home. Only routes that check, show or open a file use this. Writing,
+/// renaming, deleting, watching and project routes stay inside home.
+pub fn validate_readable_path(path: &Path) -> Result<(), String> {
+    let home = validate_path_security(path);
+    if home.is_ok() || cfg!(windows) {
+        return home;
+    }
+    let canonical = path
+        .canonicalize()
+        .ok()
+        .or_else(|| {
+            let parent = path.parent()?.canonicalize().ok()?;
+            Some(parent.join(path.file_name()?))
+        })
+        .ok_or_else(|| "Invalid path".to_string())?;
+    let mut temps = vec![std::env::temp_dir(), PathBuf::from("/tmp")];
+    temps.dedup();
+    let inside_temp = temps
+        .iter()
+        .filter_map(|t| t.canonicalize().ok())
+        .any(|t| t != Path::new("/") && canonical.starts_with(&t));
+    if inside_temp {
+        Ok(())
+    } else {
+        home
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn a_temp_file_is_readable_but_not_writable() {
+        let dir = std::env::temp_dir().join(format!("bw-vxhal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("notes.txt");
+        std::fs::write(&file, "x").unwrap();
+        assert!(validate_readable_path(&file).is_ok());
+        assert!(validate_readable_path(&dir.join("missing.txt")).is_ok());
+        if !cfg!(windows) {
+            assert!(validate_path_security(&file).is_err() || file.starts_with(UserDirs::new().unwrap().home_dir()));
+            assert!(validate_readable_path(Path::new("/etc/passwd")).is_err());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn test_validate_home_path() {

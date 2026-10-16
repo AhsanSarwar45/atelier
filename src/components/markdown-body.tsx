@@ -493,9 +493,10 @@ function localTarget(href: string, base?: string): LocalTarget | null {
   // A leading slash is also an in-app URL. Limit Unix paths to the locations
   // people can actually link to under the backend's filesystem policy — which
   // is the same rule that stops `../../../../etc/passwd` becoming something
-  // this app offers to open, since resolving it lands outside home.
+  // this app offers to open, since resolving it lands outside home. The temp
+  // folder is the one place outside home it may read.
   if (path === null) return null;
-  if (!/^\/(home|Users)\//.test(path) && !/^[A-Za-z]:[\\/]/.test(path)) return null;
+  if (!/^\/(home|Users|tmp)\//.test(path) && !/^[A-Za-z]:[\\/]/.test(path)) return null;
   return { path, line };
 }
 
