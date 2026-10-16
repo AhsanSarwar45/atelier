@@ -110,9 +110,14 @@ describe('Markdown file links', () => {
     expect(openExternal).not.toHaveBeenCalled();
   });
 
-  it('leaves a temporary path in the browser because the backend forbids it', () => {
+  it('opens a file in the temp folder, which the backend may read', () => {
     render(<MarkdownBody>{'[proof](</tmp/proof.webm>)'}</MarkdownBody>);
-    expect(screen.getByTestId('markdown-link')).toHaveAttribute('href', '/tmp/proof.webm');
+    expect(screen.getByTestId('markdown-file-link')).toHaveAttribute('data-path-mention', '/tmp/proof.webm');
+  });
+
+  it('leaves a path outside home and the temp folder in the browser', () => {
+    render(<MarkdownBody>{'[config](</etc/hosts>)'}</MarkdownBody>);
+    expect(screen.getByTestId('markdown-link')).toHaveAttribute('href', '/etc/hosts');
     expect(openExternal).not.toHaveBeenCalled();
   });
 
@@ -217,10 +222,16 @@ describe('Markdown images', () => {
     expect(screen.getByAltText('Shot')).toHaveAttribute('src', './shot.png');
   });
 
-  it('does not route a forbidden temporary path through local media', () => {
-    render(<MarkdownBody>{'![Private file](</tmp/private.png>)'}</MarkdownBody>);
+  it('routes a picture in the temp folder through local media', () => {
+    render(<MarkdownBody>{'![Scratch](</tmp/private.png>)'}</MarkdownBody>);
 
-    expect(screen.getByAltText('Private file')).toHaveAttribute('src', '/tmp/private.png');
+    expect(screen.getByAltText('Scratch')).toHaveAttribute('src', `/api/fs/media?path=${encodeURIComponent('/tmp/private.png')}`);
+  });
+
+  it('does not route a forbidden path through local media', () => {
+    render(<MarkdownBody>{'![Private file](</etc/private.png>)'}</MarkdownBody>);
+
+    expect(screen.getByAltText('Private file')).toHaveAttribute('src', '/etc/private.png');
   });
 });
 
