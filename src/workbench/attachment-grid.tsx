@@ -29,6 +29,7 @@ import { inlineMediaBounds } from '@/workbench/media-bounds';
 import type { ImagePayload, OnLook } from '@/workbench/protocol';
 import { attachmentSrc } from '@/workbench/attachment-store';
 import { fileKind } from '@/components/file-kinds';
+import { StoredImage } from '@/workbench/stored-image';
 
 /**
  * How many files stand side by side, given how many the message holds.
@@ -122,8 +123,7 @@ export function AttachmentGrid({ files, onLook }: AttachmentGridProps): JSX.Elem
                 onClick={press}
                 className={cn('block cursor-zoom-in p-0', alone ? 'justify-self-start' : 'w-full')}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <StoredImage
                   data-testid="message-image"
                   src={attachmentSrc(file)}
                   alt={file.alt}

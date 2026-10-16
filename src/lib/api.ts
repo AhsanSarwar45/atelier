@@ -1764,6 +1764,70 @@ export async function saveMemorySettings(settings: MemorySettings): Promise<Memo
   return (await answer.json()) as MemorySettings;
 }
 
+/** One cleanup rule (server/src/workbench/cleanup.rs). */
+export interface StorageRule {
+  id: string;
+  enabled: boolean;
+  amount: number;
+  unit: 'days' | 'weeks' | 'months';
+  delete: 'chats' | 'images' | 'files';
+  projectId?: string | null;
+}
+
+export interface StorageRunReport {
+  at: string;
+  chats: number;
+  images: number;
+  files: number;
+  bytes: number;
+  failed: number;
+  error?: string | null;
+  remaining: number;
+}
+
+export interface StorageRules {
+  rules: StorageRule[];
+  lastRun: StorageRunReport | null;
+}
+
+export interface StorageEffect {
+  id: string;
+  chats: number;
+  items: number;
+  bytes: number;
+}
+
+export type StoragePartId = 'chats' | 'media' | 'claude' | 'codex' | 'search' | 'skills' | 'browser' | 'backups' | 'other';
+export type StorageAgeId = 'week' | 'month' | 'quarter' | 'half' | 'year' | 'older';
+
+/** What the app takes on disk (server/src/workbench/disk_usage.rs). */
+export interface StorageUsage {
+  total: number;
+  parts: { id: StoragePartId; bytes: number }[];
+  disk: { free: number; total: number } | null;
+  unusedChatBytes: number | null;
+  chats: number;
+  ages: { id: StorageAgeId; chats: number; bytes: number; media: number }[];
+  index: { chats: number; measured: number; ready: boolean };
+}
+
+async function storageAnswer<T>(answer: Response): Promise<T> {
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as T;
+}
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+export const storage = {
+  usage: async (fresh = false) => storageAnswer<StorageUsage>(await request(`/api/storage${fresh ? '?fresh=true' : ''}`)),
+  rules: async () => storageAnswer<StorageRules>(await request('/api/storage/rules')),
+  saveRules: async (rules: StorageRule[]) =>
+    storageAnswer<StorageRules>(await request('/api/storage/rules', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ rules }) })),
+  preview: async (rules: StorageRule[]) =>
+    (await storageAnswer<{ effects: StorageEffect[] }>(await request('/api/storage/preview', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ rules }) }))).effects,
+  run: async () => storageAnswer<StorageRunReport>(await request('/api/storage/run', { method: 'POST', deadlineMs: 15 * 60_000 })),
+};
+
 /**
  * File Watcher.
  *

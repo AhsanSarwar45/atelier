@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils';
 import { attachmentSrc } from '@/workbench/attachment-store';
 import { lookOf, opens } from '@/workbench/attachment-look';
 import type { ImagePayload } from '@/workbench/protocol';
+import { StoredImage } from '@/workbench/stored-image';
 
 export interface AttachmentTileProps {
   file: ImagePayload & { id?: string };
@@ -81,8 +82,7 @@ export function AttachmentFace({ file, fit = 'cover' }: { file: ImagePayload; fi
   const how = fit === 'contain' ? 'object-contain' : 'object-cover';
 
   if (look === 'picture') {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={src} alt={file.alt} className={cn('size-full', how)} />;
+    return <StoredImage src={src} alt={file.alt} className={cn('size-full', how)} />;
   }
   if (look === 'video') {
     return (

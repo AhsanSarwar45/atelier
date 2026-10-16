@@ -17,6 +17,7 @@ import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import type { LookableImage } from '@/workbench/protocol';
+import { StoredImage } from '@/workbench/stored-image';
 // Diagrams bring mermaid, ELK, React Flow and motion — megabytes a chat with
 // no diagram in it never needs, fetched when one is drawn (bw-fbzd.4).
 const VisualArtifactView = dynamic(() => import('@/workbench/visual-artifact-view').then((m) => m.VisualArtifactView), { ssr: false });
@@ -227,6 +228,8 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
 
 export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   const [looking, setLooking] = useState<LookableImage | null>(null);
+  // A picture a cleanup rule removed has nothing to open full size.
+  const [gone, setGone] = useState(false);
   if (widget.type === 'artifact') return (
     <WidgetFrame kind="artifact" artifactKind={widget.kind} title={widget.title} wide className="overflow-hidden">
       <VisualArtifactView asset={widget.asset} />
@@ -236,14 +239,17 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   if (widget.type === 'image') return (
     <WidgetFrame kind="image" title={widget.title}>
       <figure>
+        {gone ? (
+          <StoredImage src={presentationAssetUrl(widget.asset)} alt={widget.alt} className="w-full" />
+        ) : (
         <Tooltip label="Open full size">
         <Button type="button" variant="foreground" aria-label={`Open ${widget.alt} to zoom`}
           size="none" className="group relative block w-full whitespace-normal" onClick={() => setLooking({ mime: 'image/*', dataUrl: presentationAssetUrl(widget.asset), alt: widget.alt })}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={presentationAssetUrl(widget.asset)} alt={widget.alt} className="max-h-[38rem] w-full cursor-zoom-in rounded-md object-contain transition-opacity group-hover:opacity-90" />
+          <StoredImage src={presentationAssetUrl(widget.asset)} alt={widget.alt} onError={() => setGone(true)} className="max-h-[38rem] w-full cursor-zoom-in rounded-md object-contain transition-opacity group-hover:opacity-90" />
           <span aria-hidden className="absolute right-2 top-2 rounded-full bg-background/90 p-2 shadow"><ZoomIn className="size-4" /></span>
         </Button>
         </Tooltip>
+        )}
         {widget.caption && <figcaption className="mt-2 text-xs text-muted-foreground">{widget.caption}</figcaption>}
       </figure>
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
