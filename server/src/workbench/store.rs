@@ -16,6 +16,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
+mod upkeep;
+pub use upkeep::{archive_file, archived_chats, archived_session, drop_archive, ArchivedChat, TRIM_OVER};
+
 /// Provider-history normalization generations. A provider advances only when
 /// replaying its record can add or correct canonical events; changing Claude
 /// must not force every Codex transcript through an unrelated rebuild.
@@ -3680,6 +3683,7 @@ pub fn scrub_stored_base64(path: &Path, batch: usize) -> rusqlite::Result<Option
         };
         let transaction = connection.unchecked_transaction()?;
         let mut rewritten = 0;
+        let mut touched = std::collections::HashSet::new();
         for (session_id, seq, size) in rows {
             if (size as usize) <= BASE64_KEPT {
                 continue;
@@ -3697,6 +3701,7 @@ pub fn scrub_stored_base64(path: &Path, batch: usize) -> rusqlite::Result<Option
                     "UPDATE event SET json = ?3 WHERE session_id = ?1 AND seq = ?2",
                     params![session_id, seq, value.to_string()],
                 )?;
+                touched.insert(session_id.clone());
                 rewritten += 1;
             }
         }
@@ -3705,6 +3710,7 @@ pub fn scrub_stored_base64(path: &Path, batch: usize) -> rusqlite::Result<Option
              ON CONFLICT(type) DO UPDATE SET session_id = ?2, seq = ?3",
             params![kind, last_session, last_seq],
         )?;
+        upkeep::note_rewrites(&transaction, &touched)?;
         transaction.commit()?;
         return Ok(Some(rewritten));
     }

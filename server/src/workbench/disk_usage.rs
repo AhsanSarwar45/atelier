@@ -46,6 +46,12 @@ pub struct Usage {
     pub disk: Option<Disk>,
     /// Space inside the chat database that deleted chats left behind.
     pub unused_chat_bytes: Option<u64>,
+    /// Whether that space goes back to the disk as cleanups free it, which
+    /// it does once the database has been shrunk once.
+    pub reclaims: bool,
+    /// Stored files no chat shows.
+    pub unused_files: super::cleanup::Unused,
+    pub archived: usize,
     pub chats: usize,
     pub ages: Vec<AgeGroup>,
     pub index: Progress,
@@ -75,11 +81,12 @@ fn part_of(name: &str) -> &'static str {
         "presentation-media" => "media",
         "library-snapshots" | "skill-bundles" => "skills",
         "migration-backups" => "backups",
+        "chat-archive" => "archive",
         _ => "other",
     }
 }
 
-const ORDER: [&str; 9] = ["chats", "media", "claude", "codex", "search", "skills", "browser", "backups", "other"];
+const ORDER: [&str; 10] = ["chats", "archive", "media", "claude", "codex", "search", "skills", "browser", "backups", "other"];
 
 /// Measure the data folder, the shared media folder when it lives elsewhere,
 /// and the browser profiles the app keeps.

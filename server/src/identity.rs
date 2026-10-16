@@ -147,6 +147,12 @@ pub fn presentation_media_dir() -> Option<PathBuf> {
     )
 }
 
+/// The chat record of the copy installed for this user: the one copy whose
+/// chats a cleanup in any other copy must never take pictures from unseen.
+pub fn owner_chats_db() -> Option<PathBuf> {
+    shared_presentation_data_dir().map(|dir| dir.join("workbench.db"))
+}
+
 /// The durable presentation store, ignoring a disposable test copy's media
 /// override. Normal presenter and screen-check commands use this path, so
 /// pointing one at a throwaway app port cannot make its widget temporary.

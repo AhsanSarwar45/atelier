@@ -55,8 +55,12 @@ pub struct SnapshotParts {
     pub agents: Vec<serde_json::Value>,
 }
 
+/// Upkeep the writer runs as one command: archiving, trimming, reclaiming.
+type Upkeep = Box<dyn FnOnce(&mut Store) -> Result<serde_json::Value, String> + Send>;
+
 enum Command {
     CreateSession(Session, Reply<()>),
+    Upkeep(Upkeep, Reply<serde_json::Value>),
     DeleteSession(String, Reply<()>),
     Notices(Reply<HashMap<String, Notice>>),
     MarkRead(Vec<(String, String)>, String, Reply<()>),
@@ -254,6 +258,15 @@ impl ChatDb {
     pub async fn delete_session(&self, id: String) -> Result<(), String> {
         self.request(|reply| Command::DeleteSession(id, reply))
             .await
+    }
+
+    /// Run upkeep on the writer, between appends: archiving or restoring a
+    /// chat, trimming its output, handing unused pages back (`store/upkeep.rs`).
+    pub async fn upkeep(
+        &self,
+        work: impl FnOnce(&mut Store) -> Result<serde_json::Value, String> + Send + 'static,
+    ) -> Result<serde_json::Value, String> {
+        self.request(|reply| Command::Upkeep(Box::new(work), reply)).await
     }
 
     pub async fn get_session(&self, id: String) -> Result<Option<Session>, String> {
@@ -1317,6 +1330,9 @@ fn run(
                     live_menus.remove(&id);
                 }
                 respond(reply, result)
+            }
+            Command::Upkeep(work, reply) => {
+                let _ = reply.send(work(&mut store));
             }
             Command::GetSession(id, reply) => respond(reply, store.get_session(&id)),
             Command::Notices(reply) => respond(reply, store.notices()),

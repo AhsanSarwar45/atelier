@@ -603,6 +603,7 @@ async fn serve(open_browser: bool) {
             index,
             identity::presentation_media_dir(),
             data_dir.join("workbench.db"),
+            data_dir.join("chat-archive"),
         ));
         workbench::cleanup::watch(cleaner.clone(), workbench_state.registry().clone());
         routes::storage::StorageState::new(cleaner, workbench_state.registry().clone(), data_dir.clone())
