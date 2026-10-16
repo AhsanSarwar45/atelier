@@ -685,8 +685,7 @@ impl Cleaner {
     /// What the chat record, the archives and the store take together: what
     /// a run frees is this before less this after.
     fn disk_bytes(&self) -> u64 {
-        let file = |path: &Path| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-        file(&self.chats_db)
+        record_bytes(&self.chats_db)
             + super::disk_usage::size_of(&self.archive)
             + self.media.as_deref().map_or(0, super::disk_usage::size_of)
     }
@@ -774,8 +773,14 @@ impl Cleaner {
         let Ok(_running) = self.running.try_lock() else {
             return Err("A cleanup is already running.".into());
         };
+        // Caught up first, so a chat just restored or written names its files.
         let index = self.index.clone();
-        let indexed = tokio::task::spawn_blocking(move || index.read()).await.map_err(|e| e.to_string())??;
+        let indexed = tokio::task::spawn_blocking(move || -> Result<_, String> {
+            index.refresh()?;
+            index.read()
+        })
+        .await
+        .map_err(|e| e.to_string())??;
         let mut done = 0;
         let mut error = None;
         for id in ids {
@@ -891,7 +896,7 @@ impl Cleaner {
         if !registry.database().active_session_ids().await?.is_empty() {
             return Err("Stop running chats first.".into());
         }
-        let size = std::fs::metadata(&self.chats_db).map(|m| m.len()).unwrap_or(0);
+        let size = record_bytes(&self.chats_db);
         let unused = self.index.unused_chat_bytes().unwrap_or(0);
         // The rebuild writes a full copy beside the record, then the record
         // again through its log.
@@ -908,7 +913,7 @@ impl Cleaner {
             .database()
             .upkeep(|store| store.compact().map(|()| Value::Null).map_err(|e| e.to_string()))
             .await?;
-        let after = std::fs::metadata(&self.chats_db).map(|m| m.len()).unwrap_or(0);
+        let after = record_bytes(&self.chats_db);
         Ok(json!({"before": size, "after": after}))
     }
 
@@ -963,6 +968,14 @@ fn archived_assets(dir: &Path) -> HashMap<String, Vec<String>> {
 }
 
 /// Every stored file not in use and older than `UNUSED_AFTER`, with its size.
+/// The chat record on disk, with what its log holds that is not yet in it.
+fn record_bytes(path: &Path) -> u64 {
+    let file = |path: &Path| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let mut log = path.as_os_str().to_owned();
+    log.push("-wal");
+    file(path) + file(Path::new(&log))
+}
+
 fn unused_files(media: &Path, indexed: &Indexed) -> Vec<(String, u64)> {
     let now = std::time::SystemTime::now();
     std::fs::read_dir(media)
@@ -1319,5 +1332,105 @@ mod tests {
         long.unit = Unit::Months;
         assert!(check(&[long]).is_err());
         assert!(check(&[rule("a", 30, Target::Chats, None)]).is_ok());
+    }
+
+    #[tokio::test]
+    async fn chats_archived_restored_and_deleted_by_hand_keep_and_free_the_right_files() {
+        use crate::workbench::actor::ChatDb;
+        use crate::workbench::registry::{RegistryPaths, UnavailableFactory};
+        use crate::workbench::store::Session;
+        use std::time::SystemTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let chats_db = dir.path().join("workbench.db");
+        let database = ChatDb::open(&chats_db).unwrap();
+        let media = dir.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let paths = RegistryPaths {
+            home: dir.path().to_path_buf(),
+            claude_config: dir.path().join("claude"),
+            codex_home: dir.path().join("codex"),
+            profiles: dir.path().join("profiles"),
+            media: media.clone(),
+        };
+        let registry = WorkbenchRegistry::new(database.clone(), paths, Arc::new(UnavailableFactory));
+        database
+            .create_session(Session {
+                id: "c".into(),
+                brand: "claude".into(),
+                external_id: None,
+                project_id: "p".into(),
+                project_path: dir.path().join("p").to_string_lossy().into(),
+                cwd: dir.path().to_string_lossy().into(),
+                model: None,
+                permission_mode: "default".into(),
+                effort: None,
+                collaboration_mode: None,
+                profile: None,
+                title: Some("Big chat".into()),
+                state: "dormant".into(),
+                origin: "atelier".into(),
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                last_active_at: "2026-01-02T00:00:00.000Z".into(),
+                last_spoke_at: None,
+                begun_by: None,
+                named_by_owner: false,
+            })
+            .await
+            .unwrap();
+        let writer = rusqlite::Connection::open(&chats_db).unwrap();
+        writer
+            .execute(
+                "INSERT INTO event (session_id, seq, at, type, json) VALUES ('c', 1, '2026-01-01T00:00:00.000Z', 'message', ?1)",
+                [format!(r#"{{"text":"{}","asset":"{A}"}}"#, "z".repeat(200_000))],
+            )
+            .unwrap();
+        drop(writer);
+        // A picture the chat shows, and one nothing shows; both old enough.
+        let old = SystemTime::now() - Duration::from_secs(30 * 86_400);
+        for name in [A, B] {
+            let path = media.join(name);
+            std::fs::write(&path, b"picture").unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(old).unwrap();
+        }
+
+        let settings = Arc::new(crate::db::Database::new_in_memory().unwrap());
+        let index = Arc::new(StorageIndex::new(dir.path().join("storage.db"), chats_db.clone()));
+        let archive = dir.path().join("chat-archive");
+        let cleaner = Cleaner::new(settings, index, Some(media.clone()), chats_db.clone(), archive.clone());
+        assert!(cleaner.may_delete_files());
+
+        let found = cleaner.gather(&registry, true).await.unwrap();
+        let largest = Cleaner::largest(&found, 10);
+        assert_eq!(largest[0].id, "c");
+        assert!(largest[0].bytes > 200_000);
+        let unused = cleaner.unused(&found).await;
+        assert_eq!((unused.files, unused.allowed), (1, true));
+
+        // Archived: the chat leaves the list, its picture stays through a sweep.
+        let done = cleaner.clear_chats(&registry, &["c".into()], true).await.unwrap();
+        assert_eq!(done["done"], 1, "{done}");
+        assert_eq!(chat_store::archived_chats(&archive).len(), 1);
+        assert!(database.get_session("c".into()).await.unwrap().is_none());
+        assert_eq!(cleaner.delete_unused(&registry).await.unwrap(), (1, 0));
+        assert!(media.join(A).exists());
+        assert!(!media.join(B).exists());
+
+        // Restored whole, picture and all.
+        cleaner.restore(&registry, "c").await.unwrap();
+        assert!(database.get_session("c".into()).await.unwrap().is_some());
+        assert!(chat_store::archived_chats(&archive).is_empty());
+        assert!(media.join(A).exists());
+
+        // Deleted by hand: the picture only it showed goes too.
+        let done = cleaner.clear_chats(&registry, &["c".into()], false).await.unwrap();
+        assert_eq!(done["done"], 1, "{done}");
+        assert!(database.get_session("c".into()).await.unwrap().is_none());
+        assert!(!media.join(A).exists());
+
+        // The emptied database shrinks, and gives space back by itself after.
+        let shrunk = cleaner.compact(&registry).await.unwrap();
+        assert!(shrunk["after"].as_u64() < shrunk["before"].as_u64(), "{shrunk}");
+        assert!(cleaner.index.reclaims());
     }
 }

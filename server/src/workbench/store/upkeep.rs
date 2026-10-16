@@ -310,20 +310,41 @@ impl Store {
 
     /// Put an archived chat back in the record, as it was, and remove its
     /// archive. Columns added since it was archived take their defaults.
-    pub fn restore_session(&mut self, id: &str, dir: &Path) -> rusqlite::Result<()> {
+    /// Put an archived chat back and delete its archive. The archive is kept
+    /// unless the whole chat went back in.
+    pub fn restore_session(&mut self, id: &str, dir: &Path) -> Result<(), String> {
+        let failed = |e: rusqlite::Error| format!("Couldn’t restore the chat: {e}");
         let exists = self
             .connection
             .query_row("SELECT 1 FROM session WHERE id = ?1", [id], |_| Ok(()))
-            .optional()?
+            .optional()
+            .map_err(failed)?
             .is_some();
         if exists {
-            return Err(rusqlite::Error::InvalidParameterName(format!("chat {id} is already here")));
+            return Err("The chat is already in the chat list.".into());
         }
         let mut text = String::new();
-        let file = std::fs::File::open(archive_file(dir, id)).map_err(io)?;
-        flate2::read::GzDecoder::new(file).read_to_string(&mut text).map_err(io)?;
-        let archive: Value = serde_json::from_str(&text).map_err(|e| io(std::io::Error::other(e)))?;
+        let file = std::fs::File::open(archive_file(dir, id)).map_err(|e| format!("Couldn’t read the archive: {e}"))?;
+        flate2::read::GzDecoder::new(file)
+            .read_to_string(&mut text)
+            .map_err(|e| format!("Couldn’t read the archive: {e}"))?;
+        let archive: Value = serde_json::from_str(&text).map_err(|e| format!("Couldn’t read the archive: {e}"))?;
         let tables = archive["tables"].as_object().cloned().unwrap_or_default();
+        if tables.get("session").and_then(|t| t["rows"].as_array()).map_or(0, Vec::len) != 1 {
+            return Err("The archive has no chat in it.".into());
+        }
+        self.insert_archived(id, &tables).map_err(|e| match e {
+            // The provider's chat was opened again since it was archived.
+            rusqlite::Error::SqliteFailure(code, _) if code.code == rusqlite::ErrorCode::ConstraintViolation => {
+                "This chat was opened again after it was archived, so it can’t be restored.".to_string()
+            }
+            e => failed(e),
+        })?;
+        drop_archive(dir, id).map_err(|e| format!("Restored, but couldn’t delete the archive: {e}"))?;
+        Ok(())
+    }
+
+    fn insert_archived(&mut self, id: &str, tables: &serde_json::Map<String, Value>) -> rusqlite::Result<()> {
         let transaction = self.connection.transaction()?;
         // The chat first: everything else is filed under it.
         let mut order: Vec<&String> = tables.keys().collect();
@@ -345,8 +366,9 @@ impl Store {
             }
             let names = kept.iter().map(|at| format!("\"{}\"", saved[*at])).collect::<Vec<_>>().join(",");
             let marks = (1..=kept.len()).map(|n| format!("?{n}")).collect::<Vec<_>>().join(",");
-            let mut insert =
-                transaction.prepare(&format!("INSERT OR IGNORE INTO \"{table}\" ({names}) VALUES ({marks})"))?;
+            // The chat row must go in; a clash drops the whole restore.
+            let verb = if table == "session" { "INSERT" } else { "INSERT OR IGNORE" };
+            let mut insert = transaction.prepare(&format!("{verb} INTO \"{table}\" ({names}) VALUES ({marks})"))?;
             for row in tables[table]["rows"].as_array().into_iter().flatten() {
                 let values: Vec<SqlValue> = kept
                     .iter()
@@ -357,9 +379,7 @@ impl Store {
         }
         // Measured again from the start, whatever an earlier copy of it left.
         note_rewrite(&transaction, id)?;
-        transaction.commit()?;
-        drop_archive(dir, id).map_err(io)?;
-        Ok(())
+        transaction.commit()
     }
 
     /// Shorten every tool output in one chat longer than `TRIM_OVER`, keeping
@@ -547,6 +567,29 @@ mod tests {
         assert_eq!(store.beads_for_session("c").unwrap(), vec!["bw-1".to_string()]);
         assert!(archived_chats(&archives).is_empty());
         assert!(!archive_file(&archives, "c").exists());
+    }
+
+    #[test]
+    fn a_chat_opened_again_since_its_archive_is_not_restored_and_the_archive_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("workbench.db")).unwrap();
+        let provider = Session { external_id: Some("ext-1".into()), ..session("c") };
+        store.create_session(&provider).unwrap();
+        event(&store, "c", 1, "message", &json!({"text": "hello"}).to_string());
+        let archives = dir.path().join("archive");
+        store.archive_session("c", &archives, "2026-02-01T00:00:00.000Z").unwrap();
+        // The same provider chat, opened again under a new id.
+        store.create_session(&Session { id: "d".into(), ..provider }).unwrap();
+
+        let refused = store.restore_session("c", &archives).unwrap_err();
+        assert!(refused.contains("opened again"), "{refused}");
+        assert!(store.get_session("c").unwrap().is_none());
+        let orphans: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM event WHERE session_id = 'c'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(orphans, 0);
+        assert!(archive_file(&archives, "c").exists());
     }
 
     #[test]
