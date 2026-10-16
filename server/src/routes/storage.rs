@@ -60,7 +60,7 @@ async fn usage(State(state): State<StorageState>, Query(measure): Query<Measure>
     }
     let (chats, indexed, sizes) = state
         .cleaner
-        .gather(&state.registry)
+        .gather(&state.registry, false)
         .await
         .map_err(|why| failed("Couldn't read chats", why))?;
     let data = state.data.clone();

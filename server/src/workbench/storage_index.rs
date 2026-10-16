@@ -98,11 +98,13 @@ impl Indexed {
 pub struct Progress {
     pub chats: usize,
     pub measured: usize,
+    /// Every chat has been measured at least once.
+    pub ready: bool,
 }
 
 impl Progress {
     pub fn ready(&self) -> bool {
-        self.measured >= self.chats
+        self.ready
     }
 }
 
@@ -122,6 +124,9 @@ pub struct StorageIndex {
     /// One fill at a time; a second caller waits and then finds little to do.
     filling: Mutex<()>,
     progress: Mutex<Progress>,
+    /// Whether one fill has ever finished, after which a fill only catches up
+    /// and is quick enough to wait for.
+    filled: std::sync::atomic::AtomicBool,
 }
 
 impl StorageIndex {
@@ -131,7 +136,25 @@ impl StorageIndex {
             chats,
             filling: Mutex::new(()),
             progress: Mutex::new(Progress::default()),
+            filled: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    pub fn filled(&self) -> bool {
+        self.filled.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Start a fill on a thread of its own unless one is under way.
+    pub fn fill_in_background(self: &std::sync::Arc<Self>) {
+        if self.filling.try_lock().is_err() {
+            return;
+        }
+        let index = self.clone();
+        std::thread::spawn(move || {
+            if let Err(error) = index.refresh() {
+                tracing::warn!(%error, "storage index not filled");
+            }
+        });
     }
 
     /// How far the last fill got, without waiting for one under way.
@@ -184,7 +207,8 @@ impl StorageIndex {
             progress
         };
         if !self.chats.exists() {
-            return Ok(report(Progress::default()));
+            self.filled.store(true, std::sync::atomic::Ordering::Relaxed);
+            return Ok(report(Progress { ready: true, ..Progress::default() }));
         }
         let text = |e: rusqlite::Error| e.to_string();
         let chats = self.open_chats().map_err(text)?;
@@ -213,6 +237,7 @@ impl StorageIndex {
         let mut progress = Progress {
             chats: sessions.len(),
             measured: self.progress().measured.min(sessions.len()),
+            ready: self.filled(),
         };
         // A fill that only catches up is not shown as starting again.
         let mut counted = 0;
@@ -238,6 +263,8 @@ impl StorageIndex {
             }
         }
         progress.measured = sessions.len();
+        progress.ready = true;
+        self.filled.store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(report(progress))
     }
 

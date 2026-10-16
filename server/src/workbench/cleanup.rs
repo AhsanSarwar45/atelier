@@ -188,6 +188,19 @@ pub struct Plan {
 /// Rules that delete chats go first, so a pictures rule never counts a chat a
 /// chat rule removes. Within each, every chat is credited to the first rule
 /// in the list that takes it.
+/// Of the rules that apply to a chat, the one it is credited to: the youngest
+/// age, then every project before one, then the first. A rule the screen calls
+/// covered by another is then never the one credited, so its preview reads no
+/// matches rather than taking the other's.
+fn broadest(rules: &[Rule], applies: impl Fn(&Rule) -> bool) -> Option<usize> {
+    rules
+        .iter()
+        .enumerate()
+        .filter(|(_, rule)| applies(rule))
+        .min_by_key(|(at, rule)| (rule.days(), rule.project_id.is_some(), *at))
+        .map(|(at, _)| at)
+}
+
 pub fn plan(rules: &[Rule], chats: &[Chat], indexed: &Indexed, sizes: &HashMap<String, u64>, now: DateTime<Utc>) -> Plan {
     let mut effects: Vec<Effect> = rules
         .iter()
@@ -214,10 +227,7 @@ pub fn plan(rules: &[Rule], chats: &[Chat], indexed: &Indexed, sizes: &HashMap<S
         refs_by_chat.entry(r.session_id.as_str()).or_default().push(r);
     }
     for chat in &by_age {
-        let Some(at) = rules
-            .iter()
-            .position(|rule| rule.delete == Target::Chats && matches(rule, chat))
-        else {
+        let Some(at) = broadest(rules, |rule| rule.delete == Target::Chats && matches(rule, chat)) else {
             continue;
         };
         effects[at].chats += 1;
@@ -235,10 +245,7 @@ pub fn plan(rules: &[Rule], chats: &[Chat], indexed: &Indexed, sizes: &HashMap<S
             continue;
         }
         for kind in [Kind::Images, Kind::Files] {
-            let Some(at) = rules
-                .iter()
-                .position(|rule| rule.delete.kind() == Some(kind) && matches(rule, chat))
-            else {
+            let Some(at) = broadest(rules, |rule| rule.delete.kind() == Some(kind) && matches(rule, chat)) else {
                 continue;
             };
             let through = indexed.chats.get(&chat.id).map_or(-1, |(_, through)| *through);
@@ -303,13 +310,19 @@ impl Cleaner {
 
     /// The index caught up, the chats as they stand and the size of every
     /// stored file a chat names.
-    pub(crate) async fn gather(&self, registry: &WorkbenchRegistry) -> Result<(Vec<Chat>, Indexed, HashMap<String, u64>), String> {
+    /// `wait` holds until every chat is measured; without it a first fill is
+    /// started in the background and what is measured so far is answered.
+    pub(crate) async fn gather(&self, registry: &WorkbenchRegistry, wait: bool) -> Result<(Vec<Chat>, Indexed, HashMap<String, u64>), String> {
         let index = self.index.clone();
         let chats_db = self.chats_db.clone();
         let media = self.media.clone();
         let active: HashSet<String> = registry.database().active_session_ids().await?.into_iter().collect();
         let (chats, indexed, sizes) = tokio::task::spawn_blocking(move || -> Result<_, String> {
-            index.refresh()?;
+            if wait || index.filled() {
+                index.refresh()?;
+            } else {
+                index.fill_in_background();
+            }
             let indexed = index.read()?;
             let chats = read_chats(&chats_db)?;
             let mut sizes = HashMap::new();
@@ -342,7 +355,7 @@ impl Cleaner {
 
     pub async fn preview(&self, registry: &WorkbenchRegistry, rules: &[Rule]) -> Result<Vec<Effect>, String> {
         check(rules)?;
-        let (chats, indexed, sizes) = self.gather(registry).await?;
+        let (chats, indexed, sizes) = self.gather(registry, false).await?;
         Ok(plan(rules, &chats, &indexed, &sizes, Utc::now()).effects)
     }
 
@@ -352,7 +365,7 @@ impl Cleaner {
             return Err("A cleanup is already running.".into());
         };
         let rules = rules(&self.settings)?;
-        let (chats, indexed, sizes) = self.gather(registry).await?;
+        let (chats, indexed, sizes) = self.gather(registry, true).await?;
         let plan = plan(&rules, &chats, &indexed, &sizes, Utc::now());
         let mut report = RunReport {
             at: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -490,7 +503,9 @@ pub fn watch(cleaner: Arc<Cleaner>, registry: Arc<WorkbenchRegistry>) {
     let registry = Arc::downgrade(&registry);
     tokio::spawn(async move {
         // Let a starting app settle before reading every chat.
-        tokio::time::sleep(Duration::from_secs(600)).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        cleaner.index.fill_in_background();
+        tokio::time::sleep(Duration::from_secs(540)).await;
         let mut every = tokio::time::interval(LOOK_EVERY);
         every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -560,6 +575,20 @@ mod tests {
             entry.1 = entry.1.max(*seq);
         }
         indexed
+    }
+
+    #[test]
+    fn a_chat_is_credited_to_the_rule_that_covers_the_others() {
+        let now = Utc::now();
+        let chats = vec![chat("old", "p", 200, now), chat("mid", "p", 100, now)];
+        let rules = vec![
+            rule("in-p", 90, Target::Chats, Some("p")),
+            rule("older", 180, Target::Chats, None),
+            rule("all", 90, Target::Chats, None),
+        ];
+        let plan = plan(&rules, &chats, &Indexed::default(), &HashMap::new(), now);
+        let credited: Vec<usize> = plan.effects.iter().map(|e| e.chats).collect();
+        assert_eq!(credited, vec![0, 0, 2]);
     }
 
     #[test]
