@@ -74,12 +74,18 @@ pub struct Indexed {
     pub refs: Vec<AssetRef>,
     /// Through which event a chat's pictures or files were removed.
     pub cleared: HashMap<(String, Kind), i64>,
+    /// Files another copy of the app on this computer still shows, from the
+    /// list the copies keep beside the shared store (`Holders`).
+    pub elsewhere: HashSet<String>,
 }
 
 impl Indexed {
     /// Whether this file is still shown by any chat the index holds, leaving
     /// out the chats named in `gone`.
     pub fn in_use(&self, asset: &str, gone: &HashSet<String>) -> bool {
+        if self.elsewhere.contains(asset) {
+            return true;
+        }
         let kind = Kind::of(asset);
         self.refs.iter().any(|r| {
             r.asset == asset
@@ -312,6 +318,12 @@ impl StorageIndex {
         }
     }
 
+    /// The chat database this index reads, which names this copy of the app
+    /// in the list the copies share.
+    pub fn chats_path(&self) -> &Path {
+        &self.chats
+    }
+
     /// Everything the index holds.
     pub fn read(&self) -> Result<Indexed, String> {
         let text = |e: rusqlite::Error| e.to_string();
@@ -346,7 +358,12 @@ impl StorageIndex {
             .into_iter()
             .filter_map(|(id, kind, through)| Kind::from_word(&kind).map(|kind| ((id, kind), through)))
             .collect();
-        Ok(Indexed { chats, refs, cleared })
+        Ok(Indexed {
+            chats,
+            refs,
+            cleared,
+            elsewhere: HashSet::new(),
+        })
     }
 
     /// Write down that these chats' pictures or files are removed through the
@@ -377,6 +394,90 @@ impl StorageIndex {
     }
 }
 
+/// Which files each copy of the app on this computer shows, kept beside the
+/// store they share. Every copy writes its own list before it plans a cleanup
+/// and reads the others', so one copy never removes a file another copy's chat
+/// still shows. A copy is named by its chat database; one whose database is
+/// gone (a deleted worktree) holds nothing any more.
+pub struct Holders {
+    path: PathBuf,
+}
+
+impl Holders {
+    pub const FILE: &'static str = ".holders.db";
+
+    pub fn beside(media: &Path) -> Self {
+        Self { path: media.join(Self::FILE) }
+    }
+
+    fn open(&self) -> rusqlite::Result<Connection> {
+        let connection = Connection::open(&self.path)?;
+        connection.busy_timeout(Duration::from_secs(10))?;
+        connection.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE IF NOT EXISTS held (
+               copy TEXT NOT NULL,
+               asset TEXT NOT NULL,
+               PRIMARY KEY (copy, asset)
+             ) WITHOUT ROWID;
+             CREATE INDEX IF NOT EXISTS held_by_asset ON held(asset);",
+        )?;
+        Ok(connection)
+    }
+
+    /// Write down what this copy shows now, and forget copies that are gone.
+    pub fn publish(&self, copy: &Path, indexed: &Indexed) -> Result<(), String> {
+        let text = |e: rusqlite::Error| e.to_string();
+        let copy_name = copy.to_string_lossy().to_string();
+        let shown: HashSet<&str> = indexed
+            .refs
+            .iter()
+            .filter(|r| {
+                indexed
+                    .cleared
+                    .get(&(r.session_id.clone(), Kind::of(&r.asset)))
+                    .map_or(true, |through| r.last_seq > *through)
+            })
+            .map(|r| r.asset.as_str())
+            .collect();
+        let mut connection = self.open().map_err(text)?;
+        let copies: Vec<String> = connection
+            .prepare("SELECT DISTINCT copy FROM held")
+            .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
+            .map_err(text)?;
+        let had: HashSet<String> = connection
+            .prepare("SELECT asset FROM held WHERE copy = ?1")
+            .and_then(|mut s| s.query_map([&copy_name], |r| r.get(0))?.collect())
+            .map_err(text)?;
+        let transaction = connection.transaction().map_err(text)?;
+        for other in copies.iter().filter(|other| **other != copy_name && !Path::new(other).exists()) {
+            transaction.execute("DELETE FROM held WHERE copy = ?1", [other]).map_err(text)?;
+        }
+        for asset in had.iter().filter(|asset| !shown.contains(asset.as_str())) {
+            transaction
+                .execute("DELETE FROM held WHERE copy = ?1 AND asset = ?2", params![copy_name, asset])
+                .map_err(text)?;
+        }
+        for asset in shown.iter().filter(|asset| !had.contains(**asset)) {
+            transaction
+                .execute("INSERT OR IGNORE INTO held (copy, asset) VALUES (?1, ?2)", params![copy_name, asset])
+                .map_err(text)?;
+        }
+        transaction.commit().map_err(text)
+    }
+
+    /// The files any other copy still shows.
+    pub fn elsewhere(&self, copy: &Path) -> Result<HashSet<String>, String> {
+        let text = |e: rusqlite::Error| e.to_string();
+        let connection = self.open().map_err(text)?;
+        let held = connection
+            .prepare("SELECT DISTINCT asset FROM held WHERE copy != ?1")
+            .and_then(|mut s| s.query_map([copy.to_string_lossy().as_ref()], |r| r.get(0))?.collect())
+            .map_err(text)?;
+        Ok(held)
+    }
+}
+
 /// The path of one stored file, when the name is one this store could hold.
 pub fn stored_file(media: &Path, asset: &str) -> Option<PathBuf> {
     let (digest, ext) = asset.split_once('.')?;
@@ -403,6 +504,46 @@ mod tests {
 
     const PNG: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png";
     const PDF: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.pdf";
+
+    #[test]
+    fn a_file_another_copy_shows_is_in_use_until_that_copy_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let media = dir.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let copy = |name: &str, shows: &[&str]| {
+            let folder = dir.path().join(name);
+            std::fs::create_dir_all(&folder).unwrap();
+            let chats = chats_db(&folder.join("workbench.db"));
+            chats.execute("INSERT INTO session VALUES ('c')", []).unwrap();
+            for (seq, asset) in shows.iter().enumerate() {
+                chats
+                    .execute("INSERT INTO event VALUES ('c', ?1, ?2)", params![seq as i64 + 1, format!(r#"{{"asset":"{asset}"}}"#)])
+                    .unwrap();
+            }
+            let index = StorageIndex::new(folder.join("storage.db"), folder.join("workbench.db"));
+            index.refresh().unwrap();
+            (folder, index)
+        };
+        let (a_folder, a) = copy("a", &[PNG, PDF]);
+        let (b_folder, b) = copy("b", &[PNG]);
+        let holders = Holders::beside(&media);
+        holders.publish(&a_folder.join("workbench.db"), &a.read().unwrap()).unwrap();
+        holders.publish(&b_folder.join("workbench.db"), &b.read().unwrap()).unwrap();
+
+        // Copy A has cleared its own chat's pictures: only B keeps the PNG.
+        let mut seen_by_a = a.read().unwrap();
+        a.mark_cleared(&[("c".into(), Kind::Images, 9), ("c".into(), Kind::Files, 9)]).unwrap();
+        seen_by_a.cleared = a.read().unwrap().cleared;
+        seen_by_a.elsewhere = holders.elsewhere(&a_folder.join("workbench.db")).unwrap();
+        assert!(seen_by_a.in_use(PNG, &HashSet::new()));
+        assert!(!seen_by_a.in_use(PDF, &HashSet::new()));
+
+        // Once B's folder is gone, the next publish forgets what it held.
+        drop(b);
+        std::fs::remove_dir_all(&b_folder).unwrap();
+        holders.publish(&a_folder.join("workbench.db"), &seen_by_a).unwrap();
+        assert!(holders.elsewhere(&a_folder.join("workbench.db")).unwrap().is_empty());
+    }
 
     #[test]
     fn storage_index_reads_new_events_once_and_forgets_deleted_chats() {

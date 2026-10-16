@@ -318,12 +318,16 @@ impl Cleaner {
         let media = self.media.clone();
         let active: HashSet<String> = registry.database().active_session_ids().await?.into_iter().collect();
         let (chats, indexed, sizes) = tokio::task::spawn_blocking(move || -> Result<_, String> {
-            if wait || index.filled() {
+            let refreshed = wait || index.filled();
+            if refreshed {
                 index.refresh()?;
             } else {
                 index.fill_in_background();
             }
-            let indexed = index.read()?;
+            let mut indexed = index.read()?;
+            if let Some(media) = &media {
+                shared_holders(&index, media, &mut indexed, refreshed)?;
+            }
             let chats = read_chats(&chats_db)?;
             let mut sizes = HashMap::new();
             if let Some(media) = media {
@@ -351,6 +355,21 @@ impl Cleaner {
             })
             .collect();
         Ok((chats, indexed, sizes))
+    }
+
+    /// Catch the index up and write down what this copy shows.
+    pub async fn publish(&self) -> Result<(), String> {
+        let index = self.index.clone();
+        let Some(media) = self.media.clone() else {
+            return Ok(());
+        };
+        tokio::task::spawn_blocking(move || {
+            index.refresh()?;
+            let mut indexed = index.read()?;
+            shared_holders(&index, &media, &mut indexed, true)
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
 
     pub async fn preview(&self, registry: &WorkbenchRegistry, rules: &[Rule]) -> Result<Vec<Effect>, String> {
@@ -396,11 +415,12 @@ impl Cleaner {
             // Read again: deleted chats drop out, and anything a chat began to
             // show while this ran keeps its file.
             index.refresh()?;
-            let now = index.read()?;
+            let mut now = index.read()?;
             let (mut images, mut files, mut bytes) = (0, 0, 0);
             let Some(media) = media else {
                 return Ok((images, files, bytes));
             };
+            shared_holders(&index, &media, &mut now, true)?;
             for asset in candidates {
                 if now.in_use(&asset, &HashSet::new()) {
                     continue;
@@ -431,6 +451,18 @@ impl Cleaner {
         tracing::info!(chats = report.chats, images, files, bytes, failed = report.failed, "storage cleanup ran");
         Ok(report)
     }
+}
+
+/// Publish what this copy shows, when its index is complete, and take in what
+/// every other copy sharing the store shows, so neither plans to remove it.
+fn shared_holders(index: &StorageIndex, media: &std::path::Path, indexed: &mut Indexed, complete: bool) -> Result<(), String> {
+    let holders = super::storage_index::Holders::beside(media);
+    let copy = std::fs::canonicalize(index.chats_path()).unwrap_or_else(|_| index.chats_path().to_path_buf());
+    if complete {
+        holders.publish(&copy, indexed)?;
+    }
+    indexed.elsewhere = holders.elsewhere(&copy)?;
+    Ok(())
 }
 
 /// Delete one chat the way a person's own delete does, provider record and all.
@@ -504,8 +536,6 @@ pub fn watch(cleaner: Arc<Cleaner>, registry: Arc<WorkbenchRegistry>) {
     tokio::spawn(async move {
         // Let a starting app settle before reading every chat.
         tokio::time::sleep(Duration::from_secs(60)).await;
-        cleaner.index.fill_in_background();
-        tokio::time::sleep(Duration::from_secs(540)).await;
         let mut every = tokio::time::interval(LOOK_EVERY);
         every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -513,6 +543,11 @@ pub fn watch(cleaner: Arc<Cleaner>, registry: Arc<WorkbenchRegistry>) {
             let Some(registry) = registry.upgrade() else {
                 break;
             };
+            // Every copy says what it shows, rules or none, so a copy that does
+            // clean up knows what to leave in the store they share.
+            if let Err(error) = cleaner.publish().await {
+                tracing::warn!(%error, "storage index not caught up");
+            }
             match rules(&cleaner.settings) {
                 Ok(rules) if rules.iter().any(|rule| rule.enabled) => {}
                 Ok(_) => continue,

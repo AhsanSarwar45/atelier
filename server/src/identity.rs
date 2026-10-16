@@ -137,8 +137,8 @@ pub fn rules_dir() -> Option<PathBuf> {
 /// names are the contents' own digests: two copies that store the same
 /// picture write the same bytes to the same name, and nothing here is ever
 /// rewritten. A file is removed only by a cleanup rule the owner set, once no
-/// remaining chat of that copy shows it (`workbench::cleanup`); another copy's
-/// chat then draws it as not available. `ATELIER_PRESENTATION_MEDIA_DIR` overrides it, for a
+/// chat of any copy that has written down what it shows still shows it
+/// (`storage_index::Holders`). `ATELIER_PRESENTATION_MEDIA_DIR` overrides it, for a
 /// check that must not write into the reader's store.
 pub fn presentation_media_dir() -> Option<PathBuf> {
     resolve_presentation_media_dir(
