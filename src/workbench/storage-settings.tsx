@@ -905,13 +905,13 @@ function LargestChats({ ran, projects, onChanged }: { ran: number; projects: Pro
       {chats.length === 0 ? (
         <div className="px-4 py-6 text-center text-sm text-t-muted">No chats</div>
       ) : (
-        <table className="w-full text-sm">
+        <table className="w-full table-fixed text-sm">
           <thead>
             <tr className="text-left text-xs text-t-muted">
               <th className="px-4 py-2 font-medium">Chat</th>
-              <th className="hidden px-2 py-2 font-medium sm:table-cell">Last used</th>
-              <th className="px-2 py-2 text-right font-medium">Size</th>
-              <th className="px-4 py-2" aria-label="Actions" />
+              <th className="hidden w-28 px-2 py-2 font-medium sm:table-cell">Last used</th>
+              <th className="w-20 px-2 py-2 text-right font-medium">Size</th>
+              <th className="w-36 px-4 py-2" aria-label="Actions" />
             </tr>
           </thead>
           <tbody className="divide-y divide-border/40">
@@ -920,14 +920,16 @@ function LargestChats({ ran, projects, onChanged }: { ran: number; projects: Pro
               const blocked = chat.active ? 'Stop the chat first' : null;
               return (
                 <tr key={chat.id} data-testid="storage-largest-chat">
-                  <td className="max-w-0 px-4 py-2">
+                  <td className="px-4 py-2">
+                    <Link
+                      href={`/project?id=${encodeURIComponent(chat.projectId)}&tab=chat&chat=${encodeURIComponent(chat.id)}`}
+                      className="block truncate text-t-primary hover:underline"
+                      title={name}
+                    >
+                      {name}
+                    </Link>
                     <div className="flex min-w-0 items-center gap-2">
-                      <Link
-                        href={`/project?id=${encodeURIComponent(chat.projectId)}&tab=chat&chat=${encodeURIComponent(chat.id)}`}
-                        className="truncate text-t-primary hover:underline"
-                      >
-                        {name}
-                      </Link>
+                      <span className="truncate text-xs text-t-muted">{projectName(projects, chat.projectId)}</span>
                       {chat.kept && (
                         <Badge variant="info" appearance="light" size="sm" className="shrink-0">
                           Open card
@@ -939,7 +941,6 @@ function LargestChats({ ran, projects, onChanged }: { ran: number; projects: Pro
                         </Badge>
                       )}
                     </div>
-                    <div className="truncate text-xs text-t-muted">{projectName(projects, chat.projectId)}</div>
                   </td>
                   <td className="hidden whitespace-nowrap px-2 py-2 text-t-tertiary sm:table-cell">{dateWords(chat.lastAt)}</td>
                   <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">{bytesWords(chat.bytes + chat.media)}</td>
