@@ -459,7 +459,9 @@ impl Store {
         if events > 0 {
             // The transcript rows hold the long text too; they are a cache,
             // and the next read builds them again from the shortened events.
-            transaction.execute("DELETE FROM transcript_projection WHERE session_id = ?1", [id])?;
+            for table in ["transcript_item", "transcript_agent", "transcript_projection"] {
+                transaction.execute(&format!("DELETE FROM {table} WHERE session_id = ?1"), [id])?;
+            }
             note_rewrite(&transaction, id)?;
         }
         transaction.commit()?;
@@ -657,11 +659,25 @@ mod tests {
         store.create_session(&session("c")).unwrap();
         let long = format!("START{}END", "x".repeat(40_000));
         let picture = format!("see {}.png {}", "b".repeat(64), "y".repeat(40_000));
-        event(&store, "c", 1, "tool.completed", &json!({"output": long, "acp": {"rawOutput": long}}).to_string());
-        event(&store, "c", 2, "tool.completed", &json!({"output": picture}).to_string());
-        event(&store, "c", 3, "tool.started", &json!({"input": long}).to_string());
+        let tool = |kind: &str, id: &str, fields: Value| {
+            let mut value = json!({"type": kind, "sessionId": "c", "toolCallId": id, "seq": 0});
+            value.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());
+            value.to_string()
+        };
+        event(&store, "c", 1, "tool.completed", &tool("tool.completed", "t1", json!({"output": long, "acp": {"rawOutput": long}})));
+        event(&store, "c", 2, "tool.completed", &tool("tool.completed", "t2", json!({"output": picture})));
+        event(&store, "c", 3, "tool.started", &tool("tool.started", "t3", json!({"input": long})));
+        store.ensure_transcript_projection("c").unwrap();
+        let cached = |store: &Store| -> i64 {
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM transcript_item WHERE session_id = 'c'", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert!(cached(&store) > 0);
 
         let (events, saved) = store.trim_tool_output("c").unwrap();
+        assert_eq!(cached(&store), 0, "the cached transcript kept the long text");
         assert_eq!(events, 1);
         assert!(saved > 60_000, "{saved}");
         let kept: String = store
