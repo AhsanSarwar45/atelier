@@ -486,7 +486,7 @@ function RulesSection({ projects, onRan }: { projects: Project[]; onRan: () => v
           <AlertDialogDescription>
             {nothing
               ? 'No chats match the enabled rules right now.'
-              : `This ${listWords(steps)}${totals.bytes ? `, and frees about ${bytesWords(totals.bytes)}` : ''}.${
+              : `This ${listWords(steps)}${totals.bytes ? `, and frees about ${bytesWords(totals.bytes)}` : ''}. Images and files no chat shows are deleted too.${
                   lasting ? ' You can’t undo this.' : ' You can restore archived chats later.'
                 }`}
           </AlertDialogDescription>
@@ -862,6 +862,13 @@ function LargestChats({ ran, projects, onChanged }: { ran: number; projects: Pro
       gone = true;
     };
   }, [ran, attempt]);
+
+  // Sizes from a part-measured index are low; read again until it is whole.
+  useEffect(() => {
+    if (ready) return;
+    const timer = window.setTimeout(() => setAttempt((n) => n + 1), 3000);
+    return () => window.clearTimeout(timer);
+  }, [ready, chats]);
 
   if (unread && !chats) {
     return <ReadFailed data-testid="storage-largest-error" what="Couldn’t load the largest chats." why={unread} onRetry={() => setAttempt((n) => n + 1)} />;
