@@ -1770,13 +1770,15 @@ export interface StorageRule {
   enabled: boolean;
   amount: number;
   unit: 'days' | 'weeks' | 'months';
-  delete: 'chats' | 'images' | 'files';
+  delete: 'chats' | 'archive' | 'images' | 'files' | 'output';
   projectId?: string | null;
 }
 
 export interface StorageRunReport {
   at: string;
   chats: number;
+  archived?: number;
+  trimmed?: number;
   images: number;
   files: number;
   bytes: number;
@@ -1787,6 +1789,8 @@ export interface StorageRunReport {
 
 export interface StorageRules {
   rules: StorageRule[];
+  /** Chats linked to an open card are left alone. */
+  keepLinked: boolean;
   lastRun: StorageRunReport | null;
 }
 
@@ -1797,7 +1801,7 @@ export interface StorageEffect {
   bytes: number;
 }
 
-export type StoragePartId = 'chats' | 'media' | 'claude' | 'codex' | 'search' | 'skills' | 'browser' | 'backups' | 'other';
+export type StoragePartId = 'chats' | 'archive' | 'media' | 'claude' | 'codex' | 'search' | 'skills' | 'browser' | 'backups' | 'other';
 export type StorageAgeId = 'week' | 'month' | 'quarter' | 'half' | 'year' | 'older';
 
 /** What the app takes on disk (server/src/workbench/disk_usage.rs). */
@@ -1806,6 +1810,11 @@ export interface StorageUsage {
   parts: { id: StoragePartId; bytes: number }[];
   disk: { free: number; total: number } | null;
   unusedChatBytes: number | null;
+  /** Freed space goes back to the disk on its own (after one shrink). */
+  reclaims: boolean;
+  /** Stored files no chat shows; `allowed` is false while they can't be deleted from this copy. */
+  unusedFiles: { files: number; bytes: number; allowed: boolean };
+  archived: number;
   chats: number;
   ages: { id: StorageAgeId; chats: number; bytes: number; media: number }[];
   index: { chats: number; measured: number; ready: boolean };
@@ -1818,13 +1827,51 @@ async function storageAnswer<T>(answer: Response): Promise<T> {
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
+/** One of the largest chats. */
+export interface StorageChat {
+  id: string;
+  title: string | null;
+  projectId: string;
+  lastAt: string;
+  bytes: number;
+  /** Images and files only this chat shows. */
+  media: number;
+  active: boolean;
+  /** Linked to an open card. */
+  kept: boolean;
+}
+
+/** One archived chat (server/src/workbench/store/upkeep.rs). */
+export interface ArchivedChat {
+  id: string;
+  title: string | null;
+  brand: string;
+  projectId: string;
+  lastAt: string;
+  archivedAt: string;
+  bytes: number;
+  size: number;
+}
+
+const post = (path: string, body?: unknown, deadlineMs?: number) =>
+  request(path, { method: 'POST', headers: JSON_HEADERS, body: body === undefined ? undefined : JSON.stringify(body), deadlineMs });
+
 export const storage = {
   usage: async (fresh = false) => storageAnswer<StorageUsage>(await request(`/api/storage${fresh ? '?fresh=true' : ''}`)),
   rules: async () => storageAnswer<StorageRules>(await request('/api/storage/rules')),
-  saveRules: async (rules: StorageRule[]) =>
-    storageAnswer<StorageRules>(await request('/api/storage/rules', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ rules }) })),
-  preview: async (rules: StorageRule[]) =>
-    (await storageAnswer<{ effects: StorageEffect[] }>(await request('/api/storage/preview', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ rules }) }))).effects,
+  saveRules: async (rules: StorageRule[], keepLinked: boolean) =>
+    storageAnswer<StorageRules>(await request('/api/storage/rules', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ rules, keepLinked }) })),
+  preview: async (rules: StorageRule[], keepLinked: boolean) =>
+    (await storageAnswer<{ effects: StorageEffect[] }>(await post('/api/storage/preview', { rules, keepLinked }))).effects,
+  largest: async (limit = 20) =>
+    storageAnswer<{ chats: StorageChat[]; ready: boolean }>(await request(`/api/storage/chats?limit=${limit}`)),
+  clearChats: async (ids: string[], action: 'delete' | 'archive') =>
+    storageAnswer<{ done: number; failed: number; error: string | null }>(await post('/api/storage/chats', { ids, action }, 15 * 60_000)),
+  archived: async () => (await storageAnswer<{ chats: ArchivedChat[] }>(await request('/api/storage/archived'))).chats,
+  restore: async (id: string) => storageAnswer<{ ok: true }>(await post('/api/storage/archived/restore', { id }, 5 * 60_000)),
+  deleteArchive: async (id: string) => storageAnswer<{ ok: true }>(await post('/api/storage/archived/delete', { id }, 5 * 60_000)),
+  deleteUnused: async () => storageAnswer<{ images: number; files: number }>(await post('/api/storage/unused', undefined, 15 * 60_000)),
+  compact: async () => storageAnswer<{ before: number; after: number }>(await post('/api/storage/compact', undefined, 60 * 60_000)),
   run: async () => storageAnswer<StorageRunReport>(await request('/api/storage/run', { method: 'POST', deadlineMs: 15 * 60_000 })),
 };
 

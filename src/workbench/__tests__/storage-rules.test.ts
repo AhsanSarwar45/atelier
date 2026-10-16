@@ -36,6 +36,22 @@ describe('storage rule conflicts', () => {
     expect(conflicts([rule('all', 7, 'chats'), rule('p', 30, 'images', { projectId: 'x' })]).get('p')?.kind).toBe('covered');
   });
 
+  it('lets a delete rule take archives but not the other way round', () => {
+    expect(conflicts([rule('a', 30, 'archive'), rule('d', 365, 'chats')]).size).toBe(0);
+    expect(conflicts([rule('d', 30, 'chats'), rule('a', 90, 'archive')]).get('a')?.message).toBe(
+      'No effect. Rule 1 already deletes these chats.',
+    );
+    expect(conflicts([rule('a', 30, 'archive'), rule('t', 60, 'output')]).get('t')?.message).toBe(
+      'No effect. Rule 1 already archives these chats.',
+    );
+  });
+
+  it('flags an archive rule a delete rule of the same age empties', () => {
+    const found = conflicts([rule('a', 30, 'archive'), rule('d', 30, 'chats')]);
+    expect(found.get('a')?.message).toBe('No effect. Rule 2 already deletes these chats.');
+    expect(found.has('d')).toBe(false);
+  });
+
   it('ignores turned-off rules and keeps images and files apart', () => {
     expect(conflicts([rule('c', 1, 'chats', { enabled: false }), rule('i', 60, 'images')]).size).toBe(0);
     expect(conflicts([rule('i', 1, 'images'), rule('f', 60, 'files')]).size).toBe(0);
@@ -45,6 +61,7 @@ describe('storage rule conflicts', () => {
 describe('storage words', () => {
   it('reads a rule as one line and sizes as people write them', () => {
     expect(ruleTitle(rule('a', 1, 'files', { unit: 'months' }))).toBe('Delete files in chats older than 1 month');
+    expect(ruleTitle(rule('a', 2, 'output', { unit: 'weeks' }))).toBe('Trim tool output in chats older than 2 weeks');
     expect(bytesWords(512)).toBe('512 B');
     expect(bytesWords(1536)).toBe('1.5 KB');
     expect(bytesWords(5 * 1024 ** 3)).toBe('5.0 GB');

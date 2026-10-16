@@ -3,18 +3,21 @@
  *
  * Kept apart from the screen so the conflict rules can be tested without
  * drawing anything. The server follows the same order (cleanup.rs `plan`):
- * rules that delete chats go first, so a pictures rule on a chat a chat rule
- * already deletes never does anything.
+ * rules that delete or archive chats go first, so a pictures rule on a chat a
+ * chat rule already removes never does anything. A delete rule also deletes
+ * archives of its age, so an archive rule never makes one do nothing.
  */
 import type { StorageAgeId, StoragePartId, StorageRule } from '@/lib/api';
 import { newId } from '@/workbench/protocol';
 
 export const UNIT_DAYS: Record<StorageRule['unit'], number> = { days: 1, weeks: 7, months: 30 };
 
-export const TARGETS: { id: StorageRule['delete']; label: string }[] = [
-  { id: 'chats', label: 'Entire chat' },
-  { id: 'images', label: 'Images' },
-  { id: 'files', label: 'Files' },
+export const TARGETS: { id: StorageRule['delete']; label: string; hint: string }[] = [
+  { id: 'chats', label: 'Delete chat', hint: 'Deletes the chat and its images and files.' },
+  { id: 'archive', label: 'Archive chat', hint: 'Moves the chat to a compressed archive. You can restore it later.' },
+  { id: 'images', label: 'Delete images', hint: 'Keeps the chat and deletes its images.' },
+  { id: 'files', label: 'Delete files', hint: 'Keeps the chat and deletes its attached files.' },
+  { id: 'output', label: 'Trim tool output', hint: 'Keeps the start and end of long tool output and removes the middle.' },
 ];
 
 export const UNITS: { id: StorageRule['unit']; label: string; one: string }[] = [
@@ -25,6 +28,7 @@ export const UNITS: { id: StorageRule['unit']; label: string; one: string }[] = 
 
 export const PART_LABELS: Record<StoragePartId, string> = {
   chats: 'Chats',
+  archive: 'Archived chats',
   media: 'Images and files',
   claude: 'Claude Code',
   codex: 'Codex',
@@ -54,10 +58,17 @@ export function ageWords(rule: Pick<StorageRule, 'amount' | 'unit'>): string {
   return `${rule.amount} ${rule.amount === 1 ? unit.one : `${unit.one}s`}`;
 }
 
+const TITLES: Record<StorageRule['delete'], string> = {
+  chats: 'Delete chats',
+  archive: 'Archive chats',
+  images: 'Delete images in chats',
+  files: 'Delete files in chats',
+  output: 'Trim tool output in chats',
+};
+
 /** The rule as one line: "Delete chats older than 30 days". */
 export function ruleTitle(rule: StorageRule): string {
-  const what = rule.delete === 'chats' ? 'chats' : rule.delete === 'images' ? 'images in chats' : 'files in chats';
-  return `Delete ${what} older than ${ageWords(rule)}`;
+  return `${TITLES[rule.delete]} older than ${ageWords(rule)}`;
 }
 
 export interface Conflict {
@@ -67,11 +78,24 @@ export interface Conflict {
   message: string;
 }
 
-/** Whether rule `a`, when on, already removes everything rule `b` would. */
+/**
+ * Whether rule `a`, when on, already takes everything rule `b` would. A chat
+ * rule takes the whole chat, archived or not; an archive rule takes the chat
+ * out of reach of every rule but a delete.
+ */
 function covers(a: StorageRule, b: StorageRule): boolean {
   const scope = !a.projectId || a.projectId === (b.projectId ?? null);
-  const target = a.delete === 'chats' || a.delete === b.delete;
+  const target =
+    a.delete === 'chats' || (a.delete === 'archive' && b.delete !== 'chats') || a.delete === b.delete;
   return scope && target && days(a) <= days(b);
+}
+
+/** What rule `a` already does to what rule `b` would take. */
+function already(a: StorageRule, b: StorageRule): string {
+  if (a.delete === 'chats') return 'deletes these chats';
+  if (a.delete === 'archive') return 'archives these chats';
+  if (b.delete === 'output') return 'trims this output';
+  return `deletes these ${b.delete}`;
 }
 
 function same(a: StorageRule, b: StorageRule): boolean {
@@ -91,12 +115,12 @@ export function conflicts(rules: StorageRule[]): Map<string, Conflict> {
       const a = rules[ai];
       if (ai === bi || !a.enabled || !covers(a, b)) continue;
       const name = `rule ${ai + 1}`;
+      // Of two rules that take each other's chats, the earlier one does.
+      if (ai > bi && covers(b, a)) continue;
       if (same(a, b)) {
-        if (ai > bi) continue;
         found.set(b.id, { by: a.id, kind: 'duplicate', message: `Same as ${name}.` });
       } else {
-        const what = a.delete === 'chats' ? 'chats' : b.delete === 'images' ? 'images' : 'files';
-        found.set(b.id, { by: a.id, kind: 'covered', message: `No effect. ${name[0].toUpperCase()}${name.slice(1)} already deletes these ${what}.` });
+        found.set(b.id, { by: a.id, kind: 'covered', message: `No effect. ${name[0].toUpperCase()}${name.slice(1)} already ${already(a, b)}.` });
       }
       return;
     }
