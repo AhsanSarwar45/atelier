@@ -129,6 +129,9 @@ impl Progress {
     }
 }
 
+/// Raised when the index learns to count something new in old events.
+const INDEX_VERSION: i64 = 1;
+
 fn asset_name() -> &'static Regex {
     static NAME: OnceLock<Regex> = OnceLock::new();
     NAME.get_or_init(|| Regex::new(r"\b[0-9a-f]{64}\.[a-z0-9]{1,12}\b").expect("asset pattern"))
@@ -218,6 +221,18 @@ impl StorageIndex {
                generation INTEGER NOT NULL
              );",
         )?;
+        // An index written before it counted long tool output never reads
+        // old events again, so it measures every chat once more. What a
+        // cleanup cleared is kept.
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version < INDEX_VERSION {
+            connection.execute_batch(&format!(
+                "BEGIN IMMEDIATE;
+                 DELETE FROM measured; DELETE FROM asset_ref; DELETE FROM trimmable; DELETE FROM rewrite_seen;
+                 PRAGMA user_version = {INDEX_VERSION};
+                 COMMIT;"
+            ))?;
+        }
         Ok(connection)
     }
 
@@ -701,6 +716,27 @@ mod tests {
         let read = index.read().unwrap();
         assert!(read.chats["a"].0 < before / 10, "{}", read.chats["a"].0);
         assert!(!read.trimmable.contains_key("a"));
+    }
+
+    #[test]
+    fn an_index_from_before_long_output_was_counted_measures_every_chat_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = chats_db(&dir.path().join("workbench.db"));
+        chats.execute("INSERT INTO session VALUES ('a')", []).unwrap();
+        let long = format!(r#"{{"output":"{}"}}"#, "x".repeat(TRIM_OVER + 1000));
+        chats
+            .execute("INSERT INTO event (session_id, seq, json, type) VALUES ('a', 1, ?1, 'tool.completed')", [&long])
+            .unwrap();
+        let index = StorageIndex::new(dir.path().join("storage.db"), dir.path().join("workbench.db"));
+        index.refresh().unwrap();
+        // As the older build left it: chat measured, no long output counted.
+        let old = Connection::open(dir.path().join("storage.db")).unwrap();
+        old.execute_batch("DELETE FROM trimmable; PRAGMA user_version = 0;").unwrap();
+        drop(old);
+
+        let index = StorageIndex::new(dir.path().join("storage.db"), dir.path().join("workbench.db"));
+        index.refresh().unwrap();
+        assert_eq!(index.read().unwrap().trimmable["a"].0, 1);
     }
 
     #[test]
