@@ -128,6 +128,19 @@ pub fn drop_archive(dir: &Path, id: &str) -> std::io::Result<u64> {
     Ok(size)
 }
 
+/// Provider chats whose rows are archived, so provider discovery does not
+/// take them in again as new chats while the archive holds them.
+fn shelf(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS archived_external (
+           brand TEXT NOT NULL,
+           external_id TEXT NOT NULL,
+           session_id TEXT NOT NULL,
+           PRIMARY KEY (brand, external_id)
+         );",
+    )
+}
+
 fn note_rewrite(connection: &Connection, session_id: &str) -> rusqlite::Result<()> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS event_rewrite (
@@ -304,14 +317,39 @@ impl Store {
             serde_json::to_vec(&summary).map_err(|e| io(std::io::Error::other(e)))?,
         )
         .map_err(io)?;
+        // Before the row goes: while the row is here, discovery matches it.
+        if let (Some(brand), Some(external)) = (field("brand").as_str(), field("external_id").as_str()) {
+            shelf(&self.connection)?;
+            self.connection.execute(
+                "INSERT OR REPLACE INTO archived_external (brand, external_id, session_id) VALUES (?1, ?2, ?3)",
+                params![brand, external, id],
+            )?;
+        }
         self.delete_session(id)?;
         Ok(summary)
     }
 
-    /// Put an archived chat back in the record, as it was, and remove its
-    /// archive. Columns added since it was archived take their defaults.
-    /// Put an archived chat back and delete its archive. The archive is kept
-    /// unless the whole chat went back in.
+    /// "brand:external id" of every archived provider chat.
+    pub fn shelved_chats(&mut self) -> rusqlite::Result<Vec<String>> {
+        shelf(&self.connection)?;
+        let mut query = self
+            .connection
+            .prepare("SELECT brand || ':' || external_id FROM archived_external")?;
+        let keys = query.query_map([], |row| row.get(0))?.collect();
+        keys
+    }
+
+    /// The archive is gone, so discovery may take the provider chat in again.
+    pub fn unshelve(&mut self, id: &str) -> rusqlite::Result<()> {
+        shelf(&self.connection)?;
+        self.connection
+            .execute("DELETE FROM archived_external WHERE session_id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Put an archived chat back in the record, as it was, and delete its
+    /// archive. Columns added since it was archived take their defaults. The
+    /// archive is kept unless the whole chat went back in.
     pub fn restore_session(&mut self, id: &str, dir: &Path) -> Result<(), String> {
         let failed = |e: rusqlite::Error| format!("Couldn’t restore the chat: {e}");
         let exists = self
@@ -379,6 +417,8 @@ impl Store {
         }
         // Measured again from the start, whatever an earlier copy of it left.
         note_rewrite(&transaction, id)?;
+        shelf(&transaction)?;
+        transaction.execute("DELETE FROM archived_external WHERE session_id = ?1", [id])?;
         transaction.commit()
     }
 

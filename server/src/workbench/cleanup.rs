@@ -867,6 +867,11 @@ impl Cleaner {
             .map(|a| a.assets.into_iter().collect())
             .unwrap_or_default();
         chat_store::drop_archive(&self.archive, id).map_err(|e| e.to_string())?;
+        let gone = id.to_string();
+        registry
+            .database()
+            .upkeep(move |store| store.unshelve(&gone).map(|()| Value::Null).map_err(|e| e.to_string()))
+            .await?;
         self.free_files(assets).await?;
         Ok(())
     }

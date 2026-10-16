@@ -2397,6 +2397,14 @@ async fn restore(
             restore_row(session, linked, &holds, &checkouts)
         })
         .collect();
+    // Archived chats stay out until restored (store/upkeep.rs, `shelf`).
+    let shelved: HashSet<String> = state
+        .database()
+        .upkeep(|store| store.shelved_chats().map(|keys| json!(keys)).map_err(|e| e.to_string()))
+        .await
+        .ok()
+        .and_then(|keys| serde_json::from_value(keys).ok())
+        .unwrap_or_default();
     for known in known_sessions {
         let key = format!(
             "{}:{}",
@@ -2516,6 +2524,9 @@ async fn restore(
         // only the adapter names, with no record to say who began it, is not
         // a person's on a guess (bw-p61.17).
         if !everything && known["begunBy"] != "person" {
+            continue;
+        }
+        if shelved.contains(&key) {
             continue;
         }
         // A provider thread whose writable rollout disappeared can remain in
@@ -4770,6 +4781,65 @@ mod tests {
         let mut every = vec![json!({"externalId":"anywhere","cwd":"/tmp"})];
         only_in_this_folder(&mut every, None, &[]);
         assert_eq!(every.len(), 1);
+    }
+
+    /// An archived chat's provider record stays out of the chat list until
+    /// the archive is restored or deleted, and is taken in again after.
+    #[tokio::test]
+    async fn an_archived_provider_chat_is_not_taken_in_again() {
+        let (directory, state) = fixture();
+        let listed = vec![json!({
+            "brand": "claude", "externalId": "thread-1", "cwd": "/work/project",
+            "begunBy": "person", "lastActiveAt": "2026-01-02T00:00:00.000Z",
+        })];
+        let session = Session {
+            id: "c".into(),
+            brand: "claude".into(),
+            external_id: Some("thread-1".into()),
+            project_id: "p".into(),
+            project_path: "/work/project".into(),
+            cwd: "/work/project".into(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            profile: None,
+            title: Some("Old chat".into()),
+            state: "dormant".into(),
+            origin: "atelier".into(),
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            last_active_at: "2026-01-02T00:00:00.000Z".into(),
+            last_spoke_at: None,
+            begun_by: Some("person".into()),
+            named_by_owner: false,
+        };
+        state.database().create_session(session).await.unwrap();
+        let archives = directory.path().join("chat-archive");
+        state
+            .database()
+            .upkeep(move |store| {
+                store.archive_session("c", &archives, "2026-02-01T00:00:00.000Z").map(|_| Value::Null).map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap();
+        let load = || async {
+            state
+                .discovery_cache
+                .lock()
+                .await
+                .insert("/work/project".to_string(), (std::time::Instant::now(), listed.clone()));
+            restore(
+                State(state.clone()),
+                Query(RestoreQuery { project: Some("p".into()), path: Some("/work/project".into()), all: None, local: None }),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("the chat list failed"));
+            state.database().session_by_external_id("thread-1".into()).await.unwrap()
+        };
+        assert!(load().await.is_none(), "an archived chat came back as a new one");
+
+        state.database().upkeep(|store| store.unshelve("c").map(|()| Value::Null).map_err(|e| e.to_string())).await.unwrap();
+        assert!(load().await.is_some(), "with the archive gone the chat is taken in");
     }
 
     /**
