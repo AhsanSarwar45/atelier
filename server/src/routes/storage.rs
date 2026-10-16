@@ -226,7 +226,7 @@ async fn restore(State(state): State<StorageState>, Json(asked): Json<OneChat>) 
 async fn delete_archive(State(state): State<StorageState>, Json(asked): Json<OneChat>) -> Result<Json<Value>, Refusal> {
     state
         .cleaner
-        .delete_archive(&asked.id)
+        .delete_archive(&state.registry, &asked.id)
         .await
         .map_err(|why| (StatusCode::CONFLICT, why))?;
     *state.measured.lock().await = None;

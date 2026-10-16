@@ -631,7 +631,7 @@ impl Cleaner {
             }
         }
         for id in &plan.drop {
-            match self.delete_archive(id).await {
+            match self.delete_archive(registry, id).await {
                 Ok(()) => report.chats += 1,
                 Err(error) => fail(&mut report, error),
             }
@@ -847,10 +847,19 @@ impl Cleaner {
 
     /// Delete an archive, and ask the chat's provider to delete its own copy
     /// as a person's delete would. The archive stays when the provider can't.
-    pub async fn delete_archive(&self, id: &str) -> Result<(), String> {
+    pub async fn delete_archive(&self, registry: &WorkbenchRegistry, id: &str) -> Result<(), String> {
         let session = chat_store::archived_session(&self.archive, id)?;
-        if session.external_id.is_some() {
-            super::acp::client::delete_session(&session).await?;
+        if let Some(external) = session.external_id.clone() {
+            // A chat opened again since it was archived still uses the
+            // provider's record; only the archive goes.
+            let reopened = registry
+                .database()
+                .session_by_external_id(external)
+                .await?
+                .is_some_and(|live| live.brand == session.brand);
+            if !reopened {
+                super::acp::client::delete_session(&session).await?;
+            }
         }
         let assets: HashSet<String> = chat_store::archived_chats(&self.archive)
             .into_iter()
@@ -1165,7 +1174,11 @@ pub fn watch(cleaner: Arc<Cleaner>, registry: Arc<WorkbenchRegistry>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::actor::ChatDb;
+    use crate::workbench::registry::{RegistryPaths, UnavailableFactory};
     use crate::workbench::storage_index::AssetRef;
+    use crate::workbench::store::Session;
+    use std::time::SystemTime;
 
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png";
@@ -1334,50 +1347,74 @@ mod tests {
         assert!(check(&[rule("a", 30, Target::Chats, None)]).is_ok());
     }
 
-    #[tokio::test]
-    async fn chats_archived_restored_and_deleted_by_hand_keep_and_free_the_right_files() {
-        use crate::workbench::actor::ChatDb;
-        use crate::workbench::registry::{RegistryPaths, UnavailableFactory};
-        use crate::workbench::store::Session;
-        use std::time::SystemTime;
-
-        let dir = tempfile::tempdir().unwrap();
-        let chats_db = dir.path().join("workbench.db");
+    fn stage(dir: &Path) -> (ChatDb, WorkbenchRegistry, PathBuf, PathBuf) {
+        let chats_db = dir.join("workbench.db");
         let database = ChatDb::open(&chats_db).unwrap();
-        let media = dir.path().join("media");
+        let media = dir.join("media");
         std::fs::create_dir_all(&media).unwrap();
         let paths = RegistryPaths {
-            home: dir.path().to_path_buf(),
-            claude_config: dir.path().join("claude"),
-            codex_home: dir.path().join("codex"),
-            profiles: dir.path().join("profiles"),
+            home: dir.to_path_buf(),
+            claude_config: dir.join("claude"),
+            codex_home: dir.join("codex"),
+            profiles: dir.join("profiles"),
             media: media.clone(),
         };
         let registry = WorkbenchRegistry::new(database.clone(), paths, Arc::new(UnavailableFactory));
-        database
-            .create_session(Session {
-                id: "c".into(),
-                brand: "claude".into(),
-                external_id: None,
-                project_id: "p".into(),
-                project_path: dir.path().join("p").to_string_lossy().into(),
-                cwd: dir.path().to_string_lossy().into(),
-                model: None,
-                permission_mode: "default".into(),
-                effort: None,
-                collaboration_mode: None,
-                profile: None,
-                title: Some("Big chat".into()),
-                state: "dormant".into(),
-                origin: "atelier".into(),
-                created_at: "2026-01-01T00:00:00.000Z".into(),
-                last_active_at: "2026-01-02T00:00:00.000Z".into(),
-                last_spoke_at: None,
-                begun_by: None,
-                named_by_owner: false,
-            })
-            .await
-            .unwrap();
+        (database, registry, chats_db, media)
+    }
+
+    fn saved(dir: &Path, id: &str, external: Option<&str>) -> Session {
+        Session {
+            id: id.into(),
+            brand: "claude".into(),
+            external_id: external.map(String::from),
+            project_id: "p".into(),
+            project_path: dir.join("p").to_string_lossy().into(),
+            cwd: dir.to_string_lossy().into(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            profile: None,
+            title: Some("Big chat".into()),
+            state: "dormant".into(),
+            origin: "atelier".into(),
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            last_active_at: "2026-01-02T00:00:00.000Z".into(),
+            last_spoke_at: None,
+            begun_by: None,
+            named_by_owner: false,
+        }
+    }
+
+    fn cleaner(dir: &Path, chats_db: &Path, media: &Path) -> Cleaner {
+        let settings = Arc::new(crate::db::Database::new_in_memory().unwrap());
+        let index = Arc::new(StorageIndex::new(dir.join("storage.db"), chats_db.to_path_buf()));
+        Cleaner::new(settings, index, Some(media.to_path_buf()), chats_db.to_path_buf(), dir.join("chat-archive"))
+    }
+
+    #[tokio::test]
+    async fn deleting_an_archive_leaves_the_provider_record_a_reopened_chat_uses() {
+        let dir = tempfile::tempdir().unwrap();
+        let (database, registry, chats_db, media) = stage(dir.path());
+        database.create_session(saved(dir.path(), "c", Some("thread-1"))).await.unwrap();
+        let cleaner = cleaner(dir.path(), &chats_db, &media);
+        let done = cleaner.clear_chats(&registry, &["c".into()], true).await.unwrap();
+        assert_eq!(done["done"], 1, "{done}");
+        // The provider's chat, taken in again under a new id.
+        database.create_session(saved(dir.path(), "d", Some("thread-1"))).await.unwrap();
+
+        // No provider here to ask: a delete request would fail the call.
+        cleaner.delete_archive(&registry, "c").await.unwrap();
+        assert!(chat_store::archived_chats(&cleaner.archive).is_empty());
+        assert!(database.get_session("d".into()).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn chats_archived_restored_and_deleted_by_hand_keep_and_free_the_right_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let (database, registry, chats_db, media) = stage(dir.path());
+        database.create_session(saved(dir.path(), "c", None)).await.unwrap();
         let writer = rusqlite::Connection::open(&chats_db).unwrap();
         writer
             .execute(
@@ -1394,10 +1431,8 @@ mod tests {
             std::fs::File::options().write(true).open(&path).unwrap().set_modified(old).unwrap();
         }
 
-        let settings = Arc::new(crate::db::Database::new_in_memory().unwrap());
-        let index = Arc::new(StorageIndex::new(dir.path().join("storage.db"), chats_db.clone()));
-        let archive = dir.path().join("chat-archive");
-        let cleaner = Cleaner::new(settings, index, Some(media.clone()), chats_db.clone(), archive.clone());
+        let cleaner = cleaner(dir.path(), &chats_db, &media);
+        let archive = cleaner.archive.clone();
         assert!(cleaner.may_delete_files());
 
         let found = cleaner.gather(&registry, true).await.unwrap();
