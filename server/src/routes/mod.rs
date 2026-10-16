@@ -21,6 +21,7 @@ pub mod remote_access;
 pub mod memory_settings;
 pub mod limit_settings;
 pub mod search_settings;
+pub mod storage;
 pub mod projects;
 pub mod update_run;
 pub mod update_settings;

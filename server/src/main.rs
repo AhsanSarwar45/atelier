@@ -591,6 +591,23 @@ async fn serve(open_browser: bool) {
     // (workbench/limit_resume.rs).
     workbench::limit_resume::watch(database.clone(), workbench_state.registry().clone());
 
+    // What clears old chats by the owner's rules, about once a day. Does
+    // nothing at all while no rule is on (workbench/cleanup.rs).
+    let storage_state = {
+        let index = Arc::new(workbench::storage_index::StorageIndex::new(
+            data_dir.join("storage.db"),
+            data_dir.join("workbench.db"),
+        ));
+        let cleaner = Arc::new(workbench::cleanup::Cleaner::new(
+            database.clone(),
+            index,
+            identity::presentation_media_dir(),
+            data_dir.join("workbench.db"),
+        ));
+        workbench::cleanup::watch(cleaner.clone(), workbench_state.registry().clone());
+        routes::storage::StorageState::new(cleaner, workbench_state.registry().clone(), data_dir.clone())
+    };
+
     // A chat whose driver died with the last run of the server still has its
     // driven stretch ahead of its cursor; hand it back once, before a follower
     // could read it again as new (workbench/handback.rs).
@@ -833,6 +850,9 @@ async fn serve(open_browser: bool) {
             "/api/workbench",
             routes::workbench::router(workbench_state.clone()),
         )
+        // What the app takes on disk, and the rules that clear old chats
+        // (routes/storage.rs).
+        .nest("/api", routes::storage::storage_routes(storage_state))
         // The shells are held by this process and not by any socket, so a page
         // that reloads finds what it left running (terminal/register.rs). The
         // guard that asks whether the caller is really talking to this machine

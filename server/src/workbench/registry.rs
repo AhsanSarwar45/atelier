@@ -2332,7 +2332,11 @@ impl WorkbenchRegistry {
                     .get_session(session_id.to_string())
                     .await?
                     .ok_or_else(|| format!("no session {session_id}"))?;
-                super::acp::client::delete_session(&session).await?;
+                // A chat its provider never named has no provider record to
+                // delete; only the app's own copy is left to remove.
+                if session.external_id.is_some() {
+                    super::acp::client::delete_session(&session).await?;
+                }
                 self.database.delete_session(session_id.to_string()).await?;
                 Ok(json!({"ok":true}))
             }

@@ -660,6 +660,11 @@ impl Store {
         transaction.execute("DELETE FROM session_handoff WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_notice WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_external_alias WHERE session_id = ?1", [id])?;
+        // Everything else kept by chat. `turn` stays: it is what was spent,
+        // and the spend totals still count it.
+        for table in ["message", "held_message", "transcript_item", "transcript_projection", "transcript_agent"] {
+            transaction.execute(&format!("DELETE FROM {table} WHERE session_id = ?1"), [id])?;
+        }
         transaction.execute("DELETE FROM session WHERE id = ?1", [id])?;
         transaction.commit()
     }
