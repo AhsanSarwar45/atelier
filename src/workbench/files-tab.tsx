@@ -529,9 +529,9 @@ export default function FilesTab({ projectId, projectPath, file: current, line }
           <Picker
             label="Files root"
             data-testid="files-root"
-            placeholder="Select a checkout"
-            searchPlaceholder="Search checkouts"
-            empty="No checkout matches"
+            placeholder="Select a worktree"
+            searchPlaceholder="Search worktrees"
+            empty="No worktree matches"
             value={root ?? ''}
             onChange={chooseRoot}
             choices={roots.map((tree) => ({
