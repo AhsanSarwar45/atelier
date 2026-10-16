@@ -446,6 +446,9 @@ impl Store {
                 continue;
             }
             let shorter = value.to_string();
+            if shorter.len() >= text.len() {
+                continue;
+            }
             saved += text.len().saturating_sub(shorter.len()) as u64;
             transaction.execute(
                 "UPDATE event SET json = ?3 WHERE session_id = ?1 AND seq = ?2",
@@ -498,6 +501,21 @@ impl Store {
 
 /// Whether a long text is one an old chat can do without: anything but a
 /// picture's or file's name, or a widget, which the chat still draws.
+/// How many bytes `trim_tool_output` would take out of one event's JSON, so
+/// what is counted as trimmable is exactly what a trim shortens.
+pub fn trim_saves(json: &str) -> u64 {
+    if json.len() <= TRIM_OVER {
+        return 0;
+    }
+    let Ok(mut value) = serde_json::from_str::<Value>(json) else {
+        return 0;
+    };
+    if shorten(&mut value) == 0 {
+        return 0;
+    }
+    json.len().saturating_sub(value.to_string().len()) as u64
+}
+
 fn may_shorten(text: &str) -> bool {
     text.len() > KEEP_HEAD + KEEP_TAIL + 256
         && !text.contains("atelier-")

@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use regex::Regex;
 
-use super::store::TRIM_OVER;
+use super::store::{trim_saves, TRIM_OVER};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 /// Events read per query while catching a chat up.
@@ -363,12 +363,15 @@ impl StorageIndex {
 
     fn catch_up(&self, chats: &Connection, index: &mut Connection, id: &str, mut through: i64) -> rusqlite::Result<()> {
         let mut read = chats.prepare(
-            "SELECT seq, octet_length(json), type, CASE WHEN instr(json, 'asset') > 0 THEN json END
+            "SELECT seq, octet_length(json), type,
+                    CASE WHEN instr(json, 'asset') > 0
+                           OR (type IN ('tool.progress', 'tool.completed') AND octet_length(json) > ?4)
+                         THEN json END
                FROM event WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
         )?;
         loop {
             let rows: Vec<(i64, i64, String, Option<String>)> = read
-                .query_map(params![id, through, BATCH], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                .query_map(params![id, through, BATCH, TRIM_OVER as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
                 .collect::<rusqlite::Result<_>>()?;
             let Some(last) = rows.last().map(|row| row.0) else {
                 return Ok(());
@@ -378,11 +381,13 @@ impl StorageIndex {
             let mut named: HashMap<String, i64> = HashMap::new();
             for (seq, size, kind, json) in &rows {
                 bytes += size;
-                // Output that names a stored file is never shortened.
-                let names_file = json.as_deref().is_some_and(|json| names_in(json).next().is_some());
-                if matches!(kind.as_str(), "tool.progress" | "tool.completed") && *size as usize > TRIM_OVER && !names_file {
-                    long += 1;
-                    spare += size - TRIM_OVER as i64;
+                // Counted only where a trim would shorten it (store/upkeep.rs).
+                if matches!(kind.as_str(), "tool.progress" | "tool.completed") && *size as usize > TRIM_OVER {
+                    let saves = json.as_deref().map_or(0, trim_saves);
+                    if saves > 0 {
+                        long += 1;
+                        spare += saves as i64;
+                    }
                 }
                 for asset in json.as_deref().into_iter().flat_map(names_in) {
                     named.insert(asset.to_string(), *seq);
@@ -698,6 +703,11 @@ mod tests {
         let long = format!(r#"{{"output":"{}"}}"#, "x".repeat(TRIM_OVER + 1000));
         chats
             .execute("INSERT INTO event (session_id, seq, json, type) VALUES ('a', 1, ?1, 'tool.completed')", [&long])
+            .unwrap();
+        // Long, but a trim leaves a widget whole, so it is not counted.
+        let widget = format!(r#"{{"output":"atelier-widget {}"}}"#, "x".repeat(TRIM_OVER + 1000));
+        chats
+            .execute("INSERT INTO event (session_id, seq, json, type) VALUES ('a', 2, ?1, 'tool.completed')", [&widget])
             .unwrap();
         let index = StorageIndex::new(dir.path().join("storage.db"), dir.path().join("workbench.db"));
         index.refresh().unwrap();

@@ -17,7 +17,7 @@ use std::path::Path;
 use std::time::Duration;
 
 mod upkeep;
-pub use upkeep::{archive_file, archived_chats, archived_session, drop_archive, ArchivedChat, TRIM_OVER};
+pub use upkeep::{archive_file, archived_chats, archived_session, drop_archive, trim_saves, ArchivedChat, TRIM_OVER};
 
 /// Provider-history normalization generations. A provider advances only when
 /// replaying its record can add or correct canonical events; changing Claude
