@@ -631,7 +631,7 @@ function LastRun({ run }: { run: StorageRunReport }) {
         {run.bytes > 0 && ` · Freed ${bytesWords(run.bytes)}`}
       </div>
       {run.failed > 0 && (
-        <div className="text-warning" title={run.error ?? undefined}>
+        <div className="text-warning">
           Couldn’t delete {count(run.failed, 'chat')}.{run.error ? ` ${run.error}` : ''}
         </div>
       )}

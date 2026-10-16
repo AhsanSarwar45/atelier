@@ -21,7 +21,7 @@ export function StoredImage({ className, style, alt, onError, ...rest }: Compone
         aria-label={alt ? `${alt} (not available)` : 'Image not available'}
         data-testid="image-missing"
         className={cn(
-          'flex min-h-20 items-center justify-center gap-1.5 rounded-md border border-dashed border-border bg-muted/30 p-3 text-xs text-t-muted',
+          'flex min-h-20 items-center justify-center gap-1.5 rounded-md border border-dashed border-border p-3 text-xs text-t-muted',
           className,
           'object-none',
         )}
