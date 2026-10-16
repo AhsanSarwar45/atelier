@@ -171,6 +171,12 @@ export function useNow(live: boolean): number {
   return now;
 }
 
+/** Whether {@link AgentSteering} draws anything for this agent: it is still going, and one of its controls applies. */
+export function steerable(row: SentAway, controls: AgentControl[]): boolean {
+  if (isOver(row.state)) return false;
+  return controls.includes('stop') || (controls.includes('park') && row.state !== 'parked');
+}
+
 /**
  * The two exact controls on one running row (docs/agent-workbench.md §8.2.7):
  * stop it, or send it to the background and let it run on. Both are the
@@ -194,16 +200,23 @@ export function AgentSteering({
   row,
   sessionId,
   controls,
+  placement = 'row',
 }: {
   row: SentAway;
   sessionId: string;
   controls: AgentControl[];
+  /**
+   * `row` is the strip under a card in the list, ruled off from it. `header`
+   * is the same two buttons in the pane's top bar, beside its close button,
+   * where a rule above them is a line through the middle of the bar.
+   */
+  placement?: 'row' | 'header';
 }) {
   const [busy, setBusy] = useState<AgentControl | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const canStop = controls.includes('stop');
   const canBackground = controls.includes('park') && row.state !== 'parked';
-  if (isOver(row.state) || (!canStop && !canBackground)) return null;
+  if (!steerable(row, controls)) return null;
 
   const act = (what: 'stop' | 'park'): void => {
     setBusy(what);
@@ -220,19 +233,20 @@ export function AgentSteering({
       .finally(() => setBusy(null));
   };
 
+  const header = placement === 'header';
   return (
-    <div className="border-t border-border/60">
-      <div data-testid="sent-away-steer" className="flex items-center gap-1 px-2 py-1">
+    <div className={header ? 'flex flex-col items-end' : 'border-t border-border/60'}>
+      <div data-testid="sent-away-steer" className={cn('flex items-center gap-1', !header && 'px-2 py-1')}>
         {canBackground && (
           <Tooltip label="Run in background">
             <Button
-              size="xs"
-              variant="ghost"
+              size={header ? 'sm' : 'xs'}
+              variant={header ? 'outline' : 'ghost'}
               data-testid="sent-away-park"
               disabled={busy !== null}
               onClick={() => act('park')}
             >
-              <SendToBack className="h-3 w-3" aria-hidden="true" />
+              <SendToBack className={header ? 'h-3.5 w-3.5' : 'h-3 w-3'} aria-hidden="true" />
               Background
             </Button>
           </Tooltip>
@@ -240,20 +254,20 @@ export function AgentSteering({
         {canStop && (
           <Tooltip label="Stop subagent">
             <Button
-              size="xs"
-              variant="ghost"
+              size={header ? 'sm' : 'xs'}
+              variant={header ? 'outline' : 'ghost'}
               data-testid="sent-away-stop"
               disabled={busy !== null}
               onClick={() => act('stop')}
             >
-              <Square className="h-3 w-3" aria-hidden="true" />
+              <Square className={header ? 'h-3.5 w-3.5' : 'h-3 w-3'} aria-hidden="true" />
               Stop
             </Button>
           </Tooltip>
         )}
       </div>
       {refused && (
-        <p data-testid="sent-away-steer-error" className="px-2 pb-1 text-[11px] text-red-500">
+        <p data-testid="sent-away-steer-error" className={cn('text-[11px] text-red-500', header ? 'mt-1 max-w-64 text-right' : 'px-2 pb-1')}>
           {refused}
         </p>
       )}

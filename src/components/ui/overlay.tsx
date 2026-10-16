@@ -31,6 +31,7 @@ export function Overlay({
   label,
   className,
   onClose,
+  onOpenAutoFocus,
   children,
   ...rest
 }: {
@@ -47,6 +48,12 @@ export function Overlay({
    * all (bw-81wt.18).
    */
   onClose?: () => void;
+  /**
+   * Where focus lands when the panel opens. Left alone, the library picks the
+   * first control, and a button focused on arrival wears its ring and pops its
+   * tooltip before anyone has touched it.
+   */
+  onOpenAutoFocus?: (event: Event) => void;
   children: ReactNode;
 } & Record<`data-${string}`, string | number | undefined>) {
   return (
@@ -63,6 +70,7 @@ export function Overlay({
         // a conversation the reader is still reading round the edges of.
         overlayClassName="bg-black/50"
         aria-describedby={undefined}
+        onOpenAutoFocus={onOpenAutoFocus}
         data-testid={testId}
         className={cn('flex items-start justify-center p-0 sm:p-8', className)}
         onClick={

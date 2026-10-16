@@ -40,7 +40,7 @@
  * see the comment beside it below.
  */
 
-import { forwardRef, memo, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, memo, useEffect, useImperativeHandle, useRef, type ReactNode } from 'react';
 
 import { acceptCompletion, closeCompletion, completionStatus, moveCompletionSelection } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
@@ -60,7 +60,11 @@ import {
 } from '@codemirror/view';
 
 import { FILE_BADGE_CLASS, FILE_KINDS, fileKind, type FileKind } from '@/components/file-kinds';
+import { ArrowUp } from 'lucide-react';
+
 import { badgeElement } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
 import { ExternalChange } from '@/workbench/code-editor';
 import type { DraftPicture } from '@/workbench/composer-attachments';
@@ -374,6 +378,8 @@ export interface ComposerEditorProps {
    */
   isReal?: IsReal;
   className?: string;
+  /** The form control's test id. A second box on the page needs a name of its own. */
+  testId?: string;
 }
 
 /** Every file kind's icon, drawn once rather than again on every keystroke. */
@@ -389,7 +395,7 @@ const FileKindIcons = memo(function FileKindIcons() {
 });
 
 export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(function ComposerEditor(
-  { value, onChange, onKey, onFiles, pictures = [], onOpenPicture = () => {}, placeholder, extra, describe, isReal, className },
+  { value, onChange, onKey, onFiles, pictures = [], onOpenPicture = () => {}, placeholder, extra, describe, isReal, className, testId = 'composer' },
   ref,
 ) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -543,7 +549,7 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
           either — and hidden from assistive technology too, since the drawn
           line above is the one composer a reader is offered. */}
       <textarea
-        data-testid="composer"
+        data-testid={testId}
         aria-hidden="true"
         tabIndex={-1}
         value={value}
@@ -571,3 +577,58 @@ export const ComposerEditor = forwardRef<ComposerHandle, ComposerEditorProps>(fu
     </div>
   );
 });
+
+/**
+ * The frame every writing box sits in: the chat's own, and the one in a
+ * helper's pane. One drawing, so the two never read as different controls.
+ */
+export function ComposerFrame({
+  testId,
+  className,
+  children,
+}: {
+  testId?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Panel
+      tone="overlay"
+      inset="none"
+      data-testid={testId}
+      className={cn(
+        'mx-auto w-full max-w-[110ch] px-4 py-3 shadow-sm transition-colors',
+        'focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
+        className,
+      )}
+    >
+      {children}
+    </Panel>
+  );
+}
+
+/** The round send button at the end of a writing box's row. */
+export function SendButton({
+  testId = 'send-button',
+  disabled,
+  onClick,
+}: {
+  testId?: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      variant="primary"
+      mode="icon"
+      size="sm"
+      aria-label="Send"
+      data-testid={testId}
+      radius="full"
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <ArrowUp className="h-4 w-4" />
+    </Button>
+  );
+}

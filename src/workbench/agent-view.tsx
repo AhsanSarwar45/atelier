@@ -20,27 +20,27 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 
-import { Clock, Coins, Send, X } from 'lucide-react';
+import { Clock, Coins, X } from 'lucide-react';
 
 import type { Mentions } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Overlay, overlayPanel } from '@/components/ui/overlay';
 import { Panel } from '@/components/ui/panel';
-import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { commandRun } from '@/workbench/command-run';
+import { ComposerEditor, ComposerFrame, SendButton, type ComposerHandle } from '@/workbench/composer-editor';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import type { AgentControl } from '@/workbench/protocol';
 // A finished shell's output is drawn with xterm, fetched when one is shown (bw-fbzd.4).
 const RanTerminal = dynamic(() => import('@/workbench/ran-terminal').then((m) => m.RanTerminal), { ssr: false });
-import { AgentSteering, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, useNow } from '@/workbench/sent-away';
+import { AgentSteering, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, steerable, useNow } from '@/workbench/sent-away';
 import { withPresented } from '@/workbench/presented';
-import { TranscriptRow } from '@/workbench/transcript-rows';
+import { InHelperPane, TranscriptRow } from '@/workbench/transcript-rows';
 import { sendCommand } from '@/workbench/use-session';
 
 
@@ -79,7 +79,7 @@ export function saidBy(items: TranscriptItem[], row: Pick<SentAway, 'id' | 'tool
  * this pane says the words went; clearing it on a refusal would be the same lie
  * with the evidence thrown away (bw-7ks.22.34).
  */
-function RelayBox({ row, sessionId }: { row: SentAway; sessionId: string }) {
+function RelayBox({ row, sessionId, typing }: { row: SentAway; sessionId: string; typing: RefObject<ComposerHandle> }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
@@ -95,38 +95,36 @@ function RelayBox({ row, sessionId }: { row: SentAway; sessionId: string }) {
       .finally(() => setSending(false));
   };
 
+  // The chat's own box, frame and button, so the two places a reader writes
+  // to an agent are one control and not two that look alike (composer-editor.tsx).
   return (
     <div className="border-t border-border/60 px-4 py-3" data-testid="agent-view-relay">
-      <div className="flex items-end gap-2">
-        <Textarea
-          rows={2}
-          value={text}
-          data-testid="agent-view-relay-text"
-          placeholder="Message subagent"
-          className="min-h-0 flex-1 resize-none text-xs"
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              send();
-            }
-          }}
-        />
-        <Button
-          size="sm"
-          data-testid="agent-view-relay-send"
-          disabled={sending || text.trim() === ''}
-          onClick={send}
-        >
-          <Send className="h-3.5 w-3.5" aria-hidden="true" />
-          Send
-        </Button>
-      </div>
       {refused && (
-        <p data-testid="agent-view-relay-error" className="mt-2 text-[11px] text-red-500">
-          {refused}
-        </p>
+        <Panel asChild tone="danger" className="mb-2 text-xs text-danger">
+          <p data-testid="agent-view-relay-error">{refused}</p>
+        </Panel>
       )}
+      <ComposerFrame>
+        <ComposerEditor
+          ref={typing}
+          testId="agent-view-relay-text"
+          value={text}
+          onChange={setText}
+          onKey={(e) => {
+            if (e.key !== 'Enter' || e.shiftKey) return false;
+            send();
+            return true;
+          }}
+          // Only words reach a helper: the chat passes them on as a sentence.
+          onFiles={() => {}}
+          placeholder="Message subagent"
+          className="w-full leading-6"
+        />
+        <div className="mt-1.5 flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">Sent through the main chat</span>
+          <SendButton testId="agent-view-relay-send" disabled={sending || text.trim() === ''} onClick={send} />
+        </div>
+      </ComposerFrame>
     </div>
   );
 }
@@ -262,6 +260,9 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
   // beside a row reading `2s` is two accounts of one agent (measured 2026-08-20).
   const now = useNow(!isOver(row.state));
   const shell = isShell ? commandRun(row, items, liveSeconds(row, now)) : null;
+  const relaying = !isShell && !isOver(row.state) && controls.includes('say');
+  const sheet = useRef<HTMLDivElement>(null);
+  const typing = useRef<ComposerHandle>(null);
 
   return (
     <Overlay
@@ -270,52 +271,90 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
       data-agent={row.id}
       data-said={said.length}
       onClose={onClose}
+      // Into the message box when there is one, and onto the pane itself when
+      // not. Left to the dialog, focus went to Background, the first button,
+      // which then wore its ring and showed its tooltip on every opening.
+      onOpenAutoFocus={(event) => {
+        event.preventDefault();
+        if (typing.current) typing.current.focus();
+        else sheet.current?.focus();
+      }}
     >
       {/* One shape every time it is opened, and only the conversation inside it
           moves. Sized to its content, a pane opened on a helper that has said one
-          line is a toast, and it grows under the reader as the helper talks. */}
-      <Panel tone="overlay" inset="none" className={cn(overlayPanel, 'max-w-4xl sm:h-[85vh]')}>
-        <div className="flex items-start gap-2 border-b border-border/60 px-4 py-3">
-          <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          line is a toast, and it grows under the reader as the helper talks.
+          A shell is the exception: its terminal is a fixed number of lines, so
+          it is already one shape, and stretching the pane past it left half
+          the screen empty under the grid. */}
+      <Panel
+        ref={sheet}
+        tabIndex={-1}
+        tone="overlay"
+        inset="none"
+        className={cn(overlayPanel, 'max-w-4xl outline-none', !isShell && 'sm:h-[85vh]')}
+      >
+        <header className="flex items-center gap-3 border-b border-border/60 px-4 py-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground">
+            <Icon className="h-4 w-4" aria-hidden="true" />
+          </span>
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold text-foreground" data-testid="agent-view-what">
-              {row.what || kind}
-            </h2>
-            {/* The same three numbers the row carries, off the same clock, so
-                opening one is not a different account of it from the one that
-                was clicked — and none of them for a shell, which has no model,
+            {/* What it is, what it was asked, then where it stands: the same
+                three things the row says, in the same order, top to bottom. */}
+            <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <span data-testid="agent-view-kind">{kind}</span>
+              {row.agentType && row.agentType !== kind && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="truncate normal-case tracking-normal" data-testid="agent-view-agent-type">{row.agentType}</span>
+                </>
+              )}
+            </div>
+            <Tooltip label={row.what || kind}>
+              <h2
+                className={cn('truncate text-sm font-semibold text-foreground', isShell && 'font-mono')}
+                data-testid="agent-view-what"
+              >
+                {row.what || kind}
+              </h2>
+            </Tooltip>
+            {/* The same numbers the row carries, off the same clock, so opening
+                one is not a different account of it from the one that was
+                clicked — and none of them for a shell, which has no model,
                 spent nothing, and keeps its own clock in the terminal's footer
-                a few pixels below. What is left in this bar for a shell is the
-                command and the badge, which is all it was ever asked for
-                (bw-sb5g.3). */}
-            {!isShell && (
-              <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-                {model && (
-                  <Tooltip label={row.model ?? undefined}>
-                    <span data-testid="agent-view-model">{model}</span>
-                  </Tooltip>
-                )}
+                a few pixels below (bw-sb5g.3). */}
+            <div className="mt-1 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+              <Badge variant={state.variant} appearance="light" size="xs" data-testid="agent-view-state">
+                {state.label}
+              </Badge>
+              {!isShell && model && (
+                <Tooltip label={row.model ?? undefined}>
+                  <span data-testid="agent-view-model">{model}</span>
+                </Tooltip>
+              )}
+              {!isShell && (
                 <span className="flex items-center gap-1" data-testid="agent-view-for">
                   <Clock className="h-3 w-3" aria-hidden="true" />
                   {forHowLong(liveSeconds(row, now))}
                 </span>
+              )}
+              {!isShell && (
                 <Tooltip label={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}>
                   <span className="flex items-center gap-1" data-testid="agent-view-spend">
                     <Coins className="h-3 w-3" aria-hidden="true" />
                     {spend(row.tokens)}
                   </span>
                 </Tooltip>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-          <AgentSteering row={row} sessionId={sessionId} controls={controls} />
-          <Badge variant={state.variant} appearance="light" size="xs" data-testid="agent-view-state">
-            {state.label}
-          </Badge>
-          <Button size="xs" variant="ghost" data-testid="agent-view-close" aria-label="Close" onClick={onClose}>
+          <AgentSteering row={row} sessionId={sessionId} controls={controls} placement="header" />
+          {steerable(row, controls) && (
+            <span aria-hidden="true" className="h-5 w-px shrink-0 bg-border" />
+          )}
+          <Button size="sm" mode="icon" variant="ghost" data-testid="agent-view-close" aria-label="Close" onClick={onClose}>
             <X className="h-4 w-4" aria-hidden="true" />
           </Button>
-        </div>
+        </header>
 
         {shell ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="agent-view-shell">
@@ -333,9 +372,11 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
           >
             {loadingOlder && <div className="text-center text-[11px] text-muted-foreground" data-testid="agent-view-older-loading">Loading older messages…</div>}
             {historyError && <div className="text-center text-[11px] text-red-500" data-testid="agent-view-history-error">{historyError}</div>}
-            {said.map((item) => (
-              <TranscriptRow key={item.id} item={item} sessionId={sessionId} mentions={mentions} onLook={() => {}} />
-            ))}
+            <InHelperPane.Provider value={true}>
+              {said.map((item) => (
+                <TranscriptRow key={item.id} item={item} sessionId={sessionId} mentions={mentions} onLook={() => {}} />
+              ))}
+            </InHelperPane.Provider>
           </div>
         )}
 
@@ -344,7 +385,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
         {row.relayed.length > 0 && (
           <div className="border-t border-border/60 px-4 py-3" data-testid="agent-view-relayed" data-count={row.relayed.length}>
             <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Messages
+              Your messages
             </h3>
             {row.relayed.map((said, i) => (
               <p key={i} className="mt-1 whitespace-pre-wrap text-xs text-foreground">
@@ -358,7 +399,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
             command's stdin, and a box captioned "Message subagent" under a
             terminal is an offer it cannot keep. Stopping it still can, and
             that control is in the header where it always was. */}
-        {!isShell && !isOver(row.state) && controls.includes('say') && <RelayBox row={row} sessionId={sessionId} />}
+        {relaying && <RelayBox row={row} sessionId={sessionId} typing={typing} />}
 
         {/* Its answer, kept where a reader who opened this to find it looks:
             at the end of what it said, not scrolled back into the chat. Never

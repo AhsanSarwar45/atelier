@@ -13,7 +13,7 @@
  */
 'use client';
 
-import { memo, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
+import { createContext, memo, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 
 import { request } from '@/lib/api';
 
@@ -548,6 +548,20 @@ export const SENT_OFF = 'ml-6 border-l-2 border-violet-500/50 pl-3';
 export const sentOff = (parentId: string | null | undefined): boolean => parentId != null;
 
 /**
+ * Whether these rows are drawn inside the helper's own pane (agent-view.tsx).
+ *
+ * There every row is the helper's, so the rail that tells its rows apart from
+ * the chat's says nothing, and a stripe and an indent on every row of the pane
+ * is all it adds.
+ */
+export const InHelperPane = createContext(false);
+
+/** The rail's classes where it means something, and nothing in the helper's own pane. */
+function useRail(): string {
+  return useContext(InHelperPane) ? '' : SENT_OFF;
+}
+
+/**
  * Whether a row's own title already names this file.
  *
  * Loosely, on the last two segments, because a title is written for a reader
@@ -571,6 +585,7 @@ export const ToolRow = memo(function ToolRow({
   sessionId?: string;
   onLook?: OnLook;
 }) {
+  const rail = useRail();
   // What the row IS, asked of the row itself rather than of what a click has
   // fetched: a paged transcript keeps the kind and drops the diff, so this is
   // the only thing an edit row knows about itself before it is opened.
@@ -656,7 +671,7 @@ export const ToolRow = memo(function ToolRow({
       data-ran-band={ranKind ? lookOfRan(ranKind).band : undefined}
       data-grave={ranGrave ? 'yes' : undefined}
       data-open={open}
-      className={cn(nested && SENT_OFF)}
+      className={cn(nested && rail)}
     >
       <Panel inset="none" className="px-2.5 py-1 font-mono text-xs text-muted-foreground md:py-1.5">
         <Row
@@ -866,6 +881,7 @@ function sameRow(a: MachineRow, b: MachineRow): boolean {
 export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extract<TranscriptItem, { kind: 'thinking' }> }) {
   const [openedByHand, setOpenedByHand] = useState<boolean | null>(null);
   const open = openedByHand ?? !item.done;
+  const rail = useRail();
   // Provider chunks commonly put blank lines around a reasoning summary. They
   // are transport separators, not part of the thought: preserving them made
   // the body begin with a conspicuous empty column (bw-s9e4.1).
@@ -880,7 +896,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
       data-testid="thinking-block"
       data-done={item.done}
       data-sent-by={item.parentId ?? undefined}
-      className={cn('text-sm', sentOff(item.parentId) && SENT_OFF)}
+      className={cn('text-sm', sentOff(item.parentId) && rail)}
     >
       <Row
         look="quiet"
@@ -1103,6 +1119,7 @@ const MessageRow = memo(function MessageRow({
   onLook: OnLook;
 }) {
   const sentBy = item.parentId;
+  const rail = useRail();
   // Right-click, or a long press on a phone, for what can be done with it
   // (bw-yszdw).
   const actions = useMessageActions(item);
@@ -1143,7 +1160,7 @@ const MessageRow = memo(function MessageRow({
         item.role === 'user'
           ? 'ml-auto max-w-[75ch] border-l-2 border-primary/70 bg-primary/15 text-foreground'
           : 'border-r-2 border-muted-foreground/40 bg-muted/40 text-foreground',
-        sentOff(sentBy) && SENT_OFF,
+        sentOff(sentBy) && rail,
       )}
     >
       {/* His own message shows every file it carries; the agent's shows

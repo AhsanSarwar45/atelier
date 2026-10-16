@@ -46,7 +46,7 @@ import { cn } from '@/lib/utils';
 import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { ChatRightRail, useGitDiff, useGitPanel, useLeftRail, useRightRail, type RailView } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
-import { ComposerEditor, type ComposerHandle } from '@/workbench/composer-editor';
+import { ComposerEditor, ComposerFrame, SendButton, type ComposerHandle } from '@/workbench/composer-editor';
 import { commandFeed, mentionCompletions } from '@/workbench/composer-files';
 import {
   readUnsentLine,
@@ -887,25 +887,12 @@ const SendButtons = memo(function SendButtons({
           </Button>
         </Tooltip>
       )}
-      {!midTurn && (
-        <Button
-          variant="primary"
-          mode="icon"
-          size="sm"
-          aria-label="Send"
-          data-testid="send-button"
-          radius="full"
-          onClick={onSend}
-          // Nothing about who holds the chat here: a held one draws no
-          // box at all a few lines up, so a second half to this test
-          // could never come out true. What stops a send while someone
-          // else is in there is the composer not being drawn at all,
-          // which is what the browser checks measure (bw-96is.23).
-          disabled={!sendable}
-        >
-          <ArrowUp className="h-4 w-4" />
-        </Button>
-      )}
+      {/* Nothing about who holds the chat here: a held one draws no box at
+          all a few lines up, so a second half to this test could never come
+          out true. What stops a send while someone else is in there is the
+          composer not being drawn at all, which is what the browser checks
+          measure (bw-96is.23). */}
+      {!midTurn && <SendButton onClick={onSend} disabled={!sendable} />}
     </>
   );
 });
@@ -3348,15 +3335,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             {heldLine(state)}
           </p>
         ) : (
-        <Panel
-          tone="overlay"
-          inset="none"
-          data-testid="composer-frame"
-          className={cn(
-            'mx-auto w-full max-w-[110ch] px-4 py-3 shadow-sm transition-colors',
-            'focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
-          )}
-        >
+        <ComposerFrame testId="composer-frame">
           <ComposerBody
             sessionId={chatId}
             where={where}
@@ -3391,7 +3370,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               the window, which is everywhere bw-e3dw.11 measured; it differs
               only where the rails are columns. */}
           {settingsRow}
-        </Panel>
+        </ComposerFrame>
         )}
         {mobileSettings}
       </div>
