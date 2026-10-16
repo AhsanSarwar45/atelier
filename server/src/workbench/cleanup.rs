@@ -396,6 +396,8 @@ pub struct Gathered {
     pub sizes: HashMap<String, u64>,
     /// Archived chats, each with whether it is kept for an open card.
     pub archived: Vec<(ArchivedChat, bool)>,
+    /// The index was whole when read, so what it does not name is unused.
+    pub complete: bool,
 }
 
 /// A chat in the list of the largest.
@@ -487,7 +489,7 @@ impl Cleaner {
         let media = self.media.clone();
         let archive = self.archive.clone();
         let active: HashSet<String> = registry.database().active_session_ids().await?.into_iter().collect();
-        let (mut chats, indexed, sizes, archived, links) = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let (mut chats, indexed, sizes, archived, links, complete) = tokio::task::spawn_blocking(move || -> Result<_, String> {
             let refreshed = wait || index.filled();
             if refreshed {
                 index.refresh()?;
@@ -517,7 +519,7 @@ impl Cleaner {
                     }
                 }
             }
-            Ok((chats, indexed, sizes, archived, links))
+            Ok((chats, indexed, sizes, archived, links, refreshed))
         })
         .await
         .map_err(|e| e.to_string())??;
@@ -563,6 +565,7 @@ impl Cleaner {
             indexed,
             sizes,
             archived,
+            complete,
         })
     }
 
@@ -734,7 +737,8 @@ impl Cleaner {
         let Some(media) = self.media.clone() else {
             return Unused::default();
         };
-        if !self.index.progress().ready {
+        // Read from a part-filled index, every file looks unused.
+        if !found.complete {
             return Unused::default();
         }
         let allowed = self.may_delete_files();

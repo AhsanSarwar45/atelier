@@ -79,7 +79,12 @@ async fn usage(State(state): State<StorageState>, Query(measure): Query<Measure>
             archived: found.archived.len(),
             chats: found.chats.len(),
             ages: disk_usage::ages(&found.chats, &found.indexed, &found.sizes),
-            index: index.progress(),
+            // Read before the index was whole: ask again rather than keep it.
+            index: {
+                let mut progress = index.progress();
+                progress.ready &= found.complete;
+                progress
+            },
         }
     })
     .await
@@ -161,7 +166,8 @@ async fn largest(State(state): State<StorageState>, Query(most): Query<Most>) ->
         .await
         .map_err(|why| failed("Couldn't read chats", why))?;
     let chats = Cleaner::largest(&found, most.limit.unwrap_or(20).clamp(1, 100));
-    Ok(Json(json!({"chats": chats, "ready": state.cleaner.index.progress().ready})))
+    let ready = found.complete && state.cleaner.index.progress().ready;
+    Ok(Json(json!({"chats": chats, "ready": ready})))
 }
 
 #[derive(Deserialize)]
