@@ -40,11 +40,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
-import { Tooltip } from '@/components/ui/tooltip';
 import { Spinner } from '@/components/ui/spinner';
-import { toast } from '@/hooks/use-toast';
+import { Tooltip } from '@/components/ui/tooltip';
 import { git, request } from '@/lib/api';
+import { copyAndSay } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
+import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { chatState, holderOnly, HOLDER_WORD, type HeldChat } from '@/workbench/chat-state';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
 import { CloseChatDialog } from '@/workbench/close-chat-dialog';
@@ -57,14 +58,13 @@ import {
   useRunningElsewhere,
   type LiveSession,
 } from '@/workbench/live';
+import { PointerAnchor, type PointerAt } from '@/workbench/menu-anchor';
+import { ModelIcon } from '@/workbench/model-icon';
 import { byWhatIsWorking, laterOf, laterSpoke, whenHeSpoke, type Brand, type RestoreRow } from '@/workbench/protocol';
+import { useProviders, whyUnavailable } from '@/workbench/providers';
 import { formatAtelierReference } from '@/workbench/references';
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
-import { BrandIcon, brandName } from '@/workbench/brand-icon';
-import { useProviders, whyUnavailable } from '@/workbench/providers';
-import { ModelIcon } from '@/workbench/model-icon';
-import { PointerAnchor, type PointerAt } from '@/workbench/menu-anchor';
 import { clockTime, dayHeading } from '@/workbench/when';
 
 /**
@@ -1011,8 +1011,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   const copyId = useCallback((row: RestoreRow) => {
     const id = row.sessionId ? formatAtelierReference('chat', row.sessionId) : row.externalId;
     if (!id) return;
-    const copied = navigator.clipboard?.writeText(id);
-    if (copied) void copied.then(() => toast({ title: 'Chat ID copied' }));
+    copyAndSay(id, 'Chat ID copied');
   }, []);
 
   // A screenful, then more as it is pulled: a project with hundreds of chats

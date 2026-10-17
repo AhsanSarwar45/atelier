@@ -33,7 +33,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { toast } from '@/hooks/use-toast';
+import { copyAndSay } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { paintLines } from '@/workbench/colouring';
 import { under } from '@/workbench/git-view';
@@ -117,12 +117,6 @@ function lineUnder(table: HTMLTableElement, target: EventTarget | null, rows: Di
   if (row.rightNo) return { side: 'new', no: row.rightNo };
   if (row.leftNo) return { side: 'old', no: row.leftNo };
   return null;
-}
-
-/** Put something on the clipboard and say so, since nothing on screen moves. */
-function copyOut(text: string, said: string): void {
-  const done = navigator.clipboard?.writeText(text);
-  if (done) void done.then(() => toast({ title: said }));
 }
 
 /** What a right-click in the table was about. */
@@ -654,7 +648,7 @@ function DiffMenu({
         <DropdownMenuItem
           data-testid="diff-menu-copy"
           disabled={!asked.copied}
-          onSelect={() => asked.copied && copyOut(asked.copied.text, 'Copied')}
+          onSelect={() => asked.copied && copyAndSay(asked.copied.text, 'Copied')}
         >
           <Copy aria-hidden="true" /> Copy
         </DropdownMenuItem>
@@ -662,23 +656,23 @@ function DiffMenu({
           <TextSelect aria-hidden="true" /> Select all
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem data-testid="diff-menu-copy-reference" onSelect={() => copyOut(diff, 'Reference copied')}>
+        <DropdownMenuItem data-testid="diff-menu-copy-reference" onSelect={() => copyAndSay(diff, 'Reference copied')}>
           <Quote aria-hidden="true" /> Copy reference
         </DropdownMenuItem>
         {(asked.line === null || newLine !== null) && (
           <DropdownMenuItem
             data-testid="diff-menu-copy-file-reference"
-            onSelect={() => copyOut(file, 'File reference copied')}
+            onSelect={() => copyAndSay(file, 'File reference copied')}
           >
             <Quote aria-hidden="true" /> Copy file reference
           </DropdownMenuItem>
         )}
         {root && (
-          <DropdownMenuItem data-testid="diff-menu-copy-path" onSelect={() => copyOut(under(root, path), 'Path copied')}>
+          <DropdownMenuItem data-testid="diff-menu-copy-path" onSelect={() => copyAndSay(under(root, path), 'Path copied')}>
             <Copy aria-hidden="true" /> Copy path
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem data-testid="diff-menu-copy-relative-path" onSelect={() => copyOut(path, 'Relative path copied')}>
+        <DropdownMenuItem data-testid="diff-menu-copy-relative-path" onSelect={() => copyAndSay(path, 'Relative path copied')}>
           <Copy aria-hidden="true" /> Copy relative path
         </DropdownMenuItem>
         {root && (

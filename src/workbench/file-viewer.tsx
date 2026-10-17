@@ -32,6 +32,7 @@ import {
 import { Panel } from '@/components/ui/panel';
 import { Tooltip } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
+import { COPY_REFUSED, copyAndSay, copyText as copyToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { CodeEditor, type CopiedSelection, type EditorMenuAsk } from '@/workbench/code-editor';
 import { MarkdownPane, SourceSwitch } from '@/workbench/file-preview';
@@ -220,7 +221,7 @@ export function FileViewer({
   /** The escape hatch: the code itself, the selection's or the whole file's. */
   const copyText = useCallback(() => {
     const wanted = selection?.copied.text ?? (file?.kind === 'text' ? file.text : '');
-    if (wanted) void navigator.clipboard?.writeText(wanted);
+    if (wanted) void copyToClipboard(wanted).then((copied) => { if (!copied) toast(COPY_REFUSED); });
   }, [selection, file]);
   // Opening the file up, and the strip told about it: pinning is the tab's to
   // do, and it only ever has this to go on.
@@ -422,12 +423,6 @@ export function FileViewer({
   );
 }
 
-/** Put something on the clipboard and say so, since nothing on screen moves. */
-function copyOut(text: string, said: string): void {
-  const done = navigator.clipboard?.writeText(text);
-  if (done) void done.then(() => toast({ title: said }));
-}
-
 /**
  * The menu behind a right-click in the text: copy and select, a reference to
  * the selected lines or the line under the pointer, the file's paths, and the
@@ -463,7 +458,7 @@ function ViewerMenu({
         <DropdownMenuItem
           data-testid="file-viewer-menu-copy"
           disabled={!asked.selection}
-          onSelect={() => asked.selection && copyOut(asked.selection.text, 'Copied')}
+          onSelect={() => asked.selection && copyAndSay(asked.selection.text, 'Copied')}
         >
           <Copy aria-hidden="true" /> Copy
         </DropdownMenuItem>
@@ -473,16 +468,16 @@ function ViewerMenu({
         <DropdownMenuSeparator />
         <DropdownMenuItem
           data-testid="file-viewer-menu-copy-reference"
-          onSelect={() => copyOut(reference, 'Reference copied')}
+          onSelect={() => copyAndSay(reference, 'Reference copied')}
         >
           <Quote aria-hidden="true" /> Copy reference
         </DropdownMenuItem>
-        <DropdownMenuItem data-testid="file-viewer-menu-copy-path" onSelect={() => copyOut(path, 'Path copied')}>
+        <DropdownMenuItem data-testid="file-viewer-menu-copy-path" onSelect={() => copyAndSay(path, 'Path copied')}>
           <Copy aria-hidden="true" /> Copy path
         </DropdownMenuItem>
         <DropdownMenuItem
           data-testid="file-viewer-menu-copy-relative-path"
-          onSelect={() => copyOut(relative, 'Relative path copied')}
+          onSelect={() => copyAndSay(relative, 'Relative path copied')}
         >
           <Copy aria-hidden="true" /> Copy relative path
         </DropdownMenuItem>

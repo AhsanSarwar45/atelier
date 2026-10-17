@@ -29,6 +29,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { toast } from '@/hooks/use-toast';
+import { COPY_REFUSED, copyText } from '@/lib/clipboard';
 import { forgetStanding } from '@/workbench/account-standing';
 import { brandName } from '@/workbench/brand-icon';
 import type { Brand, ProfileChoice, SignInProgress } from '@/workbench/protocol';
@@ -283,7 +285,7 @@ function SignInSteps({ progress }: { progress: SignInProgress }) {
           variant="outline"
           size="sm"
           onClick={() => {
-            void navigator.clipboard?.writeText(url).then(() => setCopied(true));
+            void copyText(url).then((done) => (done ? setCopied(true) : toast(COPY_REFUSED)));
           }}
           data-testid="account-signin-copy"
         >

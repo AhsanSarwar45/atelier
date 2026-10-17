@@ -35,7 +35,7 @@ import { Copy, Link, Pencil, Quote, RotateCcw, TextSelect } from 'lucide-react';
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PointerAnchor } from '@/components/ui/point-anchor';
-import { toast } from '@/hooks/use-toast';
+import { copyAndSay } from '@/lib/clipboard';
 import { imageMarker, pictureId, type DraftPicture } from '@/workbench/composer-attachments';
 import type { TranscriptItem } from '@/workbench/fold';
 import { chipUnder } from '@/workbench/path-chip';
@@ -105,11 +105,6 @@ function selectedIn(box: HTMLElement): string {
 function hasItsOwnMenu(target: EventTarget | null): boolean {
   if (chipUnder(target)) return true;
   return Boolean((target as HTMLElement | null)?.closest?.('a[href]'));
-}
-
-function copy(text: string, title: string) {
-  const done = navigator.clipboard?.writeText(text);
-  if (done) void done.then(() => toast({ title }));
 }
 
 /** What a message puts on itself, and the menu it draws inside itself. */
@@ -185,12 +180,12 @@ export function useMessageActions(item: Message): MessageActions {
         <PointerAnchor at={{ left: asked.x, top: asked.y }} />
         <DropdownMenuContent align="start" side="bottom" sideOffset={0} className="w-52" data-testid="message-menu">
           {asked.selected && (
-            <DropdownMenuItem data-testid="message-menu-copy-selection" onSelect={() => copy(asked.selected, 'Selection copied')}>
+            <DropdownMenuItem data-testid="message-menu-copy-selection" onSelect={() => copyAndSay(asked.selected, 'Selection copied')}>
               <TextSelect />
               Copy selection
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem data-testid="message-menu-copy" onSelect={() => copy(item.text, 'Message copied')}>
+          <DropdownMenuItem data-testid="message-menu-copy" onSelect={() => copyAndSay(item.text, 'Message copied')}>
             <Copy />
             Copy message
           </DropdownMenuItem>
@@ -198,7 +193,7 @@ export function useMessageActions(item: Message): MessageActions {
             <>
               <DropdownMenuItem
                 data-testid="message-menu-copy-link"
-                onSelect={() => copy(new URL(replies.linkTo(item.id), window.location.origin).toString(), 'Link copied')}
+                onSelect={() => copyAndSay(new URL(replies.linkTo(item.id), window.location.origin).toString(), 'Link copied')}
               >
                 <Link />
                 Copy link to message

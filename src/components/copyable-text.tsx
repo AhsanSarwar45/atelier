@@ -6,6 +6,8 @@ import { Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
+import { toast } from "@/hooks/use-toast";
+import { COPY_REFUSED, copyText as copyToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 interface CopyableTextProps {
@@ -25,13 +27,9 @@ export function CopyableText({ children, copyText, className }: CopyableTextProp
 
   const handleCopy = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(copyText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback for insecure contexts
-    }
+    if (!(await copyToClipboard(copyText))) return void toast(COPY_REFUSED);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }, [copyText]);
 
   if (copied) {

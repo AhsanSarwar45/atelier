@@ -93,10 +93,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Check, Copy, ExternalLink } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { AddressRow } from "@/components/settings/address-row";
 import { SettingRow, SettingsGroup } from "@/components/settings/section";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -109,6 +109,7 @@ import { Panel } from "@/components/ui/panel";
 import { RadioGroup, RadioGroupOption } from "@/components/ui/radio-group";
 import { ReadFailed } from "@/components/ui/read-failed";
 import { Spinner } from "@/components/ui/spinner";
+import { toast } from '@/hooks/use-toast';
 import {
   remoteAccess,
   RemoteAccessRefused,
@@ -117,6 +118,7 @@ import {
   type RemoteAccess,
   type RemoteAccessChange,
 } from "@/lib/api";
+import { COPY_REFUSED, copyText } from '@/lib/clipboard';
 
 /** The one command that needs a password, spelled once. */
 const INSTALL = "atelier remote install";
@@ -275,7 +277,8 @@ export function RemoteAccessSettings() {
   }, [change]);
 
   const copy = useCallback((said: string) => {
-    void navigator.clipboard?.writeText(said).then(() => {
+    void copyText(said).then((done) => {
+      if (!done) return void toast(COPY_REFUSED);
       setCopied(said);
       setTimeout(() => setCopied((was) => (was === said ? null : was)), 1500);
     });

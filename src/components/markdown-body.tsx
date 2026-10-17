@@ -7,10 +7,6 @@
  */
 import { memo, useMemo, useState, type ClipboardEvent, type ComponentPropsWithoutRef, type ReactNode } from "react";
 
-import ReactMarkdown, { type Components, type Options } from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
 import {
   Check,
   CircleDot,
@@ -20,13 +16,19 @@ import {
   Globe2,
   type LucideIcon,
 } from "lucide-react";
+import ReactMarkdown, { type Components, type Options } from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 
 import "highlight.js/styles/github-dark.css";
 
+import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from "@/components/file-kinds";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FILE_BADGE_CLASS, FILE_KINDS, fileKind } from "@/components/file-kinds";
 import { Tooltip } from "@/components/ui/tooltip";
+import { toast } from "@/hooks/use-toast";
+import { COPY_REFUSED, copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
 import { usePathActions } from "@/workbench/path-menu";
@@ -209,9 +211,8 @@ function CodeBlock({ code, children, className, ...props }: ComponentPropsWithou
 }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    const done = navigator.clipboard?.writeText(code);
-    if (!done) return;
-    void done.then(() => {
+    void copyText(code).then((done) => {
+      if (!done) return void toast(COPY_REFUSED);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

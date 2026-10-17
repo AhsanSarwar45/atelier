@@ -59,7 +59,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { toast } from '@/hooks/use-toast';
+import { copyAndSay } from '@/lib/clipboard';
 import {
   FILE_ACTION_ITEMS,
   folderFor,
@@ -112,12 +112,6 @@ export const PATH_MENU_ITEMS = [
   'path-menu-copy-reference',
   ...FILE_ACTION_ITEMS,
 ] as const;
-
-/** Put something on the clipboard and say so, since nothing on screen moves. */
-function copyOut(text: string, said: string): void {
-  const done = navigator.clipboard?.writeText(text);
-  if (done) void done.then(() => toast({ title: said }));
-}
 
 /**
  * The reference a reader would paste back into a chat for this path.
@@ -202,7 +196,7 @@ export function usePathMenuItems(onMoved?: PathMoved, onMade?: (path: string) =>
           <DropdownMenuItem
             data-testid="path-menu-copy-path"
             className="text-xs"
-            onSelect={() => copyOut(path.absolute, 'Path copied')}
+            onSelect={() => copyAndSay(path.absolute, 'Path copied')}
           >
             <Copy aria-hidden="true" /> Copy path
           </DropdownMenuItem>
@@ -213,14 +207,14 @@ export function usePathMenuItems(onMoved?: PathMoved, onMade?: (path: string) =>
             data-testid="path-menu-copy-relative-path"
             className="text-xs"
             disabled={!inside}
-            onSelect={() => copyOut(relativeToRoot(path.root ?? '', path.absolute), 'Relative path copied')}
+            onSelect={() => copyAndSay(relativeToRoot(path.root ?? '', path.absolute), 'Relative path copied')}
           >
             <Copy aria-hidden="true" /> Copy relative path
           </DropdownMenuItem>
           <DropdownMenuItem
             data-testid="path-menu-copy-reference"
             className="text-xs"
-            onSelect={() => copyOut(referenceOf(path), 'Reference copied')}
+            onSelect={() => copyAndSay(referenceOf(path), 'Reference copied')}
           >
             <Quote aria-hidden="true" /> Copy reference
           </DropdownMenuItem>

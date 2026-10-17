@@ -7,29 +7,31 @@
  */
 'use client';
 
-import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import dynamic from 'next/dynamic';
 
 import { ChevronLeft, ChevronRight, Copy, ExternalLink, FileCode2, FilePlus2, FolderOpen, Search } from 'lucide-react';
 
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from '@/components/ui/alert-dialog';
-import { PointerAnchor, type PointerAt } from '@/workbench/menu-anchor';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Row } from '@/components/ui/row';
-import { Tooltip } from '@/components/ui/tooltip';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { fs } from '@/lib/api';
+import { COPY_REFUSED, copyText } from '@/lib/clipboard';
 import { NOT_PHONE_SCREEN } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
+import { PointerAnchor, type PointerAt } from '@/workbench/menu-anchor';
+import { sendCommand } from '@/workbench/use-session';
 // CodeMirror is fetched when a file is opened for editing, not with the list (bw-fbzd.4).
 const CodeEditor = dynamic(() => import('@/workbench/code-editor').then((m) => m.CodeEditor), { ssr: false });
-import { sendCommand } from '@/workbench/use-session';
 
 export interface AgentFileRow {
   id: string;
@@ -243,7 +245,7 @@ export function AgentFilesBrowser({
       </aside>
       <main className={cn('min-h-0 flex-col overflow-hidden bg-surface-base', chosen ? 'flex' : 'hidden md:flex')}>
         {!chosen ? <div className="m-auto text-center text-t-muted"><FileCode2 className="mx-auto mb-3 size-8" /><p className="text-sm">No file selected</p></div> : <>
-          <header className="flex items-start gap-2 border-b border-border/50 px-4 py-3 sm:gap-3 sm:px-6"><Button variant="ghost" size="sm" aria-label="All files" className="-ml-2 shrink-0 md:hidden" onClick={() => setSelected(null)}><ChevronLeft /></Button><div className="min-w-0 flex-1"><div className="flex flex-wrap items-baseline gap-2"><h2 className="break-all text-base font-semibold text-t-primary" data-testid="agent-file-name">{chosen.name}</h2>{dirty && <span className="text-xs text-amber-500" data-testid="agent-file-dirty">Unsaved</span>}</div><Tooltip label={chosen.path}><p className="mt-1 truncate font-mono text-xs text-t-muted">{chosen.path}</p></Tooltip>{chosen.symlinkTarget && <p className="mt-1 truncate text-xs text-t-muted">Links to {chosen.symlinkTarget}</p>}</div><div className="flex shrink-0 gap-1"><Button size="sm" variant="outline" aria-label="Copy path" onClick={() => void navigator.clipboard.writeText(chosen.path).then(() => toast({ title: 'Path copied' }))}><Copy /></Button><Button size="sm" variant="outline" aria-label="Reveal in file manager" onClick={() => void outside(chosen.path, 'finder', 'Opened file location')}><FolderOpen /></Button><Button size="sm" variant="outline" aria-label="Open in external editor" onClick={() => void outside(chosen.path, 'vscode', 'Opened in external editor')}><ExternalLink /></Button><Button size="sm" data-testid="agent-file-save" disabled={!dirty || saving || truncated} onClick={() => void save()}>{saving ? <Spinner size="inherit" /> : null} Save</Button></div></header>
+          <header className="flex items-start gap-2 border-b border-border/50 px-4 py-3 sm:gap-3 sm:px-6"><Button variant="ghost" size="sm" aria-label="All files" className="-ml-2 shrink-0 md:hidden" onClick={() => setSelected(null)}><ChevronLeft /></Button><div className="min-w-0 flex-1"><div className="flex flex-wrap items-baseline gap-2"><h2 className="break-all text-base font-semibold text-t-primary" data-testid="agent-file-name">{chosen.name}</h2>{dirty && <span className="text-xs text-amber-500" data-testid="agent-file-dirty">Unsaved</span>}</div><Tooltip label={chosen.path}><p className="mt-1 truncate font-mono text-xs text-t-muted">{chosen.path}</p></Tooltip>{chosen.symlinkTarget && <p className="mt-1 truncate text-xs text-t-muted">Links to {chosen.symlinkTarget}</p>}</div><div className="flex shrink-0 gap-1"><Button size="sm" variant="outline" aria-label="Copy path" onClick={() => void copyText(chosen.path).then((copied) => toast(copied ? { title: 'Path copied' } : COPY_REFUSED))}><Copy /></Button><Button size="sm" variant="outline" aria-label="Reveal in file manager" onClick={() => void outside(chosen.path, 'finder', 'Opened file location')}><FolderOpen /></Button><Button size="sm" variant="outline" aria-label="Open in external editor" onClick={() => void outside(chosen.path, 'vscode', 'Opened in external editor')}><ExternalLink /></Button><Button size="sm" data-testid="agent-file-save" disabled={!dirty || saving || truncated} onClick={() => void save()}>{saving ? <Spinner size="inherit" /> : null} Save</Button></div></header>
           {error && <Panel shape="strip" tone="danger" className="px-6 text-sm text-danger">{error}</Panel>}
           {truncated && <Panel shape="strip" tone="attention" className="px-6 text-xs text-t-secondary">First 2 MB, read only</Panel>}
           <div className="min-h-0 flex-1 overflow-auto" data-testid="agent-file-editor"><CodeEditor text={content} path={chosen.path} editable={!truncated} onChange={setDraft} onSave={() => void save()} className="min-h-full" /></div>

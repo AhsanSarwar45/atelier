@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import type { GitCommitDetail, GitDiffFile } from '@/lib/api';
+import { copyText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 
 /** How many lines of the message are shown before it has to be asked for. */
@@ -81,14 +82,11 @@ export function CommitDetails({ commit, files, onOpen, onLeave }: CommitDetailsP
   const long = rest.split('\n').length > LINES_SHOWN;
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(commit.sha);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1_500);
-    } catch {
-      // A browser that will not hand over the clipboard is not a failure worth
-      // a red panel over a commit header.
-    }
+    // A browser that will not hand over the clipboard is not a failure worth
+    // a red panel over a commit header; the button just does not change.
+    if (!(await copyText(commit.sha))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1_500);
   };
 
   return (
