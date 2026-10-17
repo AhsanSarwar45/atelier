@@ -20,8 +20,9 @@ import { Check, Copy, GitCommitHorizontal, GitMerge, Tag } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
+import { toast } from '@/hooks/use-toast';
 import type { GitCommitDetail, GitDiffFile } from '@/lib/api';
-import { copyText } from '@/lib/clipboard';
+import { COPY_REFUSED, copyText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 
 /** How many lines of the message are shown before it has to be asked for. */
@@ -82,9 +83,7 @@ export function CommitDetails({ commit, files, onOpen, onLeave }: CommitDetailsP
   const long = rest.split('\n').length > LINES_SHOWN;
 
   const copy = async () => {
-    // A browser that will not hand over the clipboard is not a failure worth
-    // a red panel over a commit header; the button just does not change.
-    if (!(await copyText(commit.sha))) return;
+    if (!(await copyText(commit.sha))) return void toast(COPY_REFUSED);
     setCopied(true);
     setTimeout(() => setCopied(false), 1_500);
   };

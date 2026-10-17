@@ -31,8 +31,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
 import { Tooltip } from '@/components/ui/tooltip';
-import { toast } from '@/hooks/use-toast';
-import { COPY_REFUSED, copyAndSay, copyText as copyToClipboard } from '@/lib/clipboard';
+import { copyAndSay } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { CodeEditor, type CopiedSelection, type EditorMenuAsk } from '@/workbench/code-editor';
 import { MarkdownPane, SourceSwitch } from '@/workbench/file-preview';
@@ -221,7 +220,7 @@ export function FileViewer({
   /** The escape hatch: the code itself, the selection's or the whole file's. */
   const copyText = useCallback(() => {
     const wanted = selection?.copied.text ?? (file?.kind === 'text' ? file.text : '');
-    if (wanted) void copyToClipboard(wanted).then((copied) => { if (!copied) toast(COPY_REFUSED); });
+    if (wanted) copyAndSay(wanted, 'Copied');
   }, [selection, file]);
   // Opening the file up, and the strip told about it: pinning is the tab's to
   // do, and it only ever has this to go on.
