@@ -459,8 +459,19 @@ async fn supervise_driver(
                 continue;
             }
             Ok(DriverRequest::Close(command, reply)) => {
-                let result = driver.command(&command).await;
-                if let Err(error) = driver.close().await {
+                // Close, like Stop, must not wait on the agent it lets go. A
+                // busy agent answered so late that the browser gave up and the
+                // chat stayed open (bw-lid06). Past the limit the driver is
+                // dropped here and the registry ends the process.
+                let closing = async {
+                    let result = driver.command(&command).await;
+                    (result, driver.close().await)
+                };
+                let Ok((result, closed)) = tokio::time::timeout(CLOSE_WAIT, closing).await else {
+                    let _ = reply.send(Ok(json!({"ok":true,"unanswered":true})));
+                    return;
+                };
+                if let Err(error) = closed {
                     // Closing means Atelier has already detached this driver.
                     // A provider teardown failure is important conversation
                     // evidence, but cannot turn that completed detach into a
@@ -518,6 +529,9 @@ async fn supervise_driver(
 
 /// How long Stop waits for a live chat's agent to answer before letting it go.
 const STOP_WAIT: Duration = Duration::from_secs(5);
+
+/// How long Close waits for a live chat's agent to let go before ending it.
+const CLOSE_WAIT: Duration = STOP_WAIT;
 
 pub struct WorkbenchRegistry {
     database: ChatDb,
@@ -1331,6 +1345,21 @@ impl WorkbenchRegistry {
         driver
             .send(request)
             .map_err(|_| format!("provider for {session_id} stopped"))?;
+        if closing {
+            let reply = tokio::time::timeout(CLOSE_WAIT + Duration::from_secs(3), receive).await;
+            match reply {
+                Ok(Ok(Ok(value))) if value["unanswered"] != true => return Ok(value),
+                Ok(Ok(Err(error))) => return Err(error),
+                _ => {}
+            }
+            // Already out of the table, so nothing sends to it again. What it
+            // left running is ended now, and the chat sleeps as any closed
+            // chat does.
+            tracing::warn!(session_id, "the agent did not answer Close in time; it was ended");
+            let _ = self.prepare_unattached(command, false).await;
+            self.mark_dormant(session_id).await?;
+            return Ok(json!({"ok":true,"unanswered":true}));
+        }
         if command.kind != CommandKind::SessionStop {
             return receive
                 .await
@@ -1363,6 +1392,34 @@ impl WorkbenchRegistry {
         let _ = self.prepare_unattached(command, false).await;
         self.mark_stopped(session_id).await?;
         Ok(json!({"ok":true,"detached":true,"unanswered":true}))
+    }
+
+    /// Asleep, as a closed chat is.
+    async fn mark_dormant(&self, session_id: &str) -> Result<(), String> {
+        let session = self
+            .database
+            .get_session(session_id.to_string())
+            .await?
+            .ok_or_else(|| format!("no session {session_id}"))?;
+        if session.state != "dormant" {
+            self.database
+                .update_session(
+                    session_id.to_string(),
+                    crate::workbench::store::SessionPatch {
+                        state: Some("dormant".into()),
+                        ..Default::default()
+                    },
+                    None,
+                )
+                .await?;
+            let event: crate::workbench::protocol::Event = serde_json::from_value(json!({
+                "type":"session.state","sessionId":session_id,"seq":0,
+                "at":chrono::Utc::now().to_rfc3339(),"state":"dormant","label":"Asleep"
+            }))
+            .map_err(|error| error.to_string())?;
+            self.database.append(event).await?;
+        }
+        Ok(())
     }
 
     async fn mark_stopped(&self, session_id: &str) -> Result<(), String> {
@@ -2489,30 +2546,7 @@ impl WorkbenchRegistry {
                 if !self.has_driver(Self::field(command, "sessionId")?).await =>
             {
                 self.prepare_unattached(command, false).await?;
-                let session_id = Self::field(command, "sessionId")?;
-                let session = self
-                    .database
-                    .get_session(session_id.to_string())
-                    .await?
-                    .ok_or_else(|| format!("no session {session_id}"))?;
-                if session.state != "dormant" {
-                    self.database
-                        .update_session(
-                            session_id.to_string(),
-                            crate::workbench::store::SessionPatch {
-                                state: Some("dormant".into()),
-                                ..Default::default()
-                            },
-                            None,
-                        )
-                        .await?;
-                    let event: crate::workbench::protocol::Event = serde_json::from_value(json!({
-                        "type":"session.state","sessionId":session_id,"seq":0,
-                        "at":chrono::Utc::now().to_rfc3339(),"state":"dormant","label":"Asleep"
-                    }))
-                    .map_err(|error| error.to_string())?;
-                    self.database.append(event).await?;
-                }
+                self.mark_dormant(Self::field(command, "sessionId")?).await?;
                 Ok(json!({"ok":true}))
             }
             // Opening a saved conversation is deliberately read-only. The
@@ -2889,7 +2923,7 @@ mod tests {
             }))
         }
         fn command<'a>(&'a mut self, command: &'a Command) -> DriverFuture<'a> {
-            let stuck = command.kind == CommandKind::SessionStop;
+            let stuck = matches!(command.kind, CommandKind::SessionStop | CommandKind::SessionClose);
             Box::pin(async move {
                 if stuck {
                     std::future::pending::<()>().await;
@@ -3061,6 +3095,36 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("the chat's driver was never handed back");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn close_closes_a_chat_whose_agent_never_answers_it() {
+        let root = tempfile::tempdir().unwrap();
+        let (database, registry, probe, _) = stuck_chat(root.path()).await;
+        let answering = {
+            let probe = probe.clone();
+            tokio::spawn(async move {
+                loop {
+                    probe.notify_waiters();
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+        };
+
+        // A busy agent that never lets go: Close returning at all is the proof.
+        let reply = tokio::time::timeout(
+            CLOSE_WAIT * 4,
+            registry.execute(&command(CommandKind::SessionClose, json!({"sessionId":"session-1"}))),
+        )
+        .await
+        .expect("Close waited for an agent that never answers")
+        .unwrap();
+        answering.abort();
+
+        assert_eq!(reply["ok"], json!(true));
+        assert!(!registry.has_driver("session-1").await, "the closed chat still had an agent");
+        let session = database.get_session("session-1".into()).await.unwrap().unwrap();
+        assert_eq!(session.state, "dormant");
     }
 
     async fn say_state(database: &ChatDb, state: &str) {

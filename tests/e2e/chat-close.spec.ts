@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { backend, command, openChatTab } from './fixture-held';
+import { backend, command, openChatTab, processesOf } from './fixture-held';
 
 /**
  * Closing a chat, on a real stack.
@@ -205,10 +205,9 @@ test.describe('closing a chat', () => {
       await expect.poll(async () => row.getAttribute('data-state'), { timeout: 60_000 }).toBe('dormant');
 
       // And now there is nothing of ours left holding it. This is the whole
-      // difference between the two controls, and it is a real process.
-      await expect
-        .poll(async () => (await command(request, { type: 'session.stop', sessionId: id })).ok, { timeout: 30_000 })
-        .toBe(false);
+      // difference between the two controls, and it is a real process. Asked
+      // of the processes themselves: Stop answers yes to a chat with no agent.
+      await expect.poll(() => processesOf(id), { timeout: 30_000 }).toEqual([]);
     } finally {
       await project.remove();
     }

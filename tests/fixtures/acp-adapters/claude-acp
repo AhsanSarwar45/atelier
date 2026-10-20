@@ -18,6 +18,15 @@ const readline = require('node:readline');
 const MISSING_CODEX_ROLLOUT = process.env.BEADS_E2E_ACP_MISSING_ROLLOUT === '1'
   && !process.env.CLAUDE_CODE_EXECUTABLE;
 
+/**
+ * How long this agent takes to answer `session/close`, when set: an agent on a
+ * busy computer, or one still unwinding a turn. Unset, it does not offer close
+ * at all and is let go with a cancel, as before.
+ */
+const CLOSE_MS = process.env.BEADS_E2E_ACP_CLOSE_MS === undefined
+  ? undefined
+  : Number(process.env.BEADS_E2E_ACP_CLOSE_MS);
+
 function providerModels() {
   const provider = process.env.CLAUDE_CODE_EXECUTABLE ?? process.env.CODEX_PATH;
   if (!provider) return ['fixture-model-one', 'fixture-model-two'];
@@ -196,6 +205,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
           sessionCapabilities: {
             list: {},
             ...(MISSING_CODEX_ROLLOUT ? { resume: {} } : {}),
+            ...(CLOSE_MS === undefined ? {} : { close: {} }),
           },
         },
         authMethods: [],
@@ -248,6 +258,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     }
     if (model) selectedModels.set(sessionId, model);
     say({ id, result: { configOptions: configOptions(selectedModels.get(sessionId)) } });
+    return;
+  }
+  if (method === 'session/close' && CLOSE_MS !== undefined) {
+    setTimeout(() => say({ id, result: {} }), CLOSE_MS);
     return;
   }
   if (method === 'session/prompt') {

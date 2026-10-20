@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -370,4 +370,18 @@ export async function openChatTab(page: Page, project: Project): Promise<void> {
   await page.goto(`/project?id=${project.id}&tab=chat`);
   await listed;
   await page.getByTestId('restore-row').first().waitFor({ timeout: 60_000 });
+}
+
+/** The processes still running for a chat: the app marks each one with its id. */
+export function processesOf(chat: string): number[] {
+  const mark = `ATELIER_CHAT_SESSION_ID=${chat}`;
+  const found: number[] = [];
+  for (const pid of readdirSync('/proc').filter((name) => /^\d+$/.test(name))) {
+    try {
+      if (readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(mark)) found.push(Number(pid));
+    } catch {
+      // Gone while it was being read, or not ours to read.
+    }
+  }
+  return found;
 }
