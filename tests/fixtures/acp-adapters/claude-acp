@@ -361,6 +361,30 @@ const stillOpen = (id, sessionId) => openTurns.get(sessionId) === id;
 const LONG_COMMAND = 'run the long command';
 const LONG_COMMAND_MS = Number(process.env.BEADS_E2E_ACP_LONG_COMMAND_MS ?? 180_000);
 const SAY_YOU_READ = 'say you read this';
+/**
+ * A turn that leaves a command behind growing its memory, as a build that
+ * runs away does. It keeps what it took until the chat's processes are killed.
+ */
+const HOLD_MEMORY = 'hold memory';
+const HOLD_MB = Number(process.env.BEADS_E2E_ACP_HOLD_MB ?? 3_000);
+
+function holdMemory(id, params) {
+  const grow = `const held = []; const until = ${HOLD_MB};
+    const step = () => { if (held.length * 32 < until) { held.push(Buffer.alloc(32 << 20, 1)); setTimeout(step, 50); } };
+    step(); setInterval(() => held.length, 60_000);`;
+  spawn(process.execPath, ['-e', grow], { stdio: 'ignore' });
+  say({
+    method: 'session/update',
+    params: {
+      sessionId: params?.sessionId,
+      update: {
+        sessionUpdate: 'agent_message_chunk', messageId: `hold-${id}`,
+        content: { type: 'text', text: 'Holding memory.' },
+      },
+    },
+  });
+  endTurn(id, params?.sessionId, 'end_turn');
+}
 
 async function longCommand(id, params) {
   const sessionId = params?.sessionId;
@@ -462,6 +486,10 @@ async function turn(id, params) {
   }
   if (asked.includes(LONG_COMMAND)) {
     await longCommand(id, params);
+    return;
+  }
+  if (asked.includes(HOLD_MEMORY)) {
+    holdMemory(id, params);
     return;
   }
   if (asked.includes(SAY_YOU_READ)) {

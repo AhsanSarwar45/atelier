@@ -326,6 +326,39 @@ fn service_memory(_ours: &[Found]) -> Option<ServiceMemory> {
     None
 }
 
+/// How long, in microseconds, every process in the app's own service has
+/// spent stalled for memory at once since the service started: the running
+/// total behind the pressure figure, read without walking every process the
+/// way `report` does. Two readings a few seconds apart give the share of those
+/// seconds spent stalled, which is current where the ten-second average lags.
+/// Only a systemd service's group counts: a terminal's group holds programs
+/// this app has no say over.
+#[cfg(target_os = "linux")]
+pub fn service_stall() -> Option<u64> {
+    let own = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    if !group_is_ours(cgroup_path(&own)?, false) {
+        return None;
+    }
+    let group = own_group()?;
+    full_total(&std::fs::read_to_string(group.join("memory.pressure")).ok()?)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn service_stall() -> Option<u64> {
+    None
+}
+
+/// The `full total` figure of a pressure file, in microseconds.
+fn full_total(pressure: &str) -> Option<u64> {
+    pressure
+        .lines()
+        .find_map(|line| line.strip_prefix("full "))?
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("total="))?
+        .parse()
+        .ok()
+}
+
 /// The proportional share of the pages a process holds itself, resident and
 /// swapped together. The name says both halves because a reader who saw "pss"
 /// would reasonably expect a number that ignores swap, which is the bug this
@@ -1009,6 +1042,7 @@ mod tests {
     fn pressure_is_the_full_ten_second_average() {
         let pressure = "some avg10=91.50 avg60=40.00 avg300=9.00 total=1\nfull avg10=77.23 avg60=54.69 avg300=17.55 total=2\n";
         assert_eq!(full_pressure(pressure), Some(77.23));
+        assert_eq!(full_total(pressure), Some(2));
         assert_eq!(full_pressure("some avg10=1.00 avg60=0 avg300=0 total=0\n"), None);
     }
 

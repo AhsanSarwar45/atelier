@@ -14,6 +14,16 @@
 //! the same dormant path a person's own message takes to a sleeping chat, and
 //! the chat comes back on a fresh process. Its first sight of that process is
 //! the bill for the last one.
+//!
+//! The same watcher keeps the whole app alive when the computer runs short.
+//! Every chat, every build it runs and this server share one systemd service,
+//! and `systemd-oomd` kills that service outright, every chat with it, once
+//! it has been stalled for memory for twenty seconds. Long before that the
+//! server itself is stalled with everything else, which is when screens start
+//! saying the app gave no answer. So when the service is stalled for memory
+//! two samples running, the chat holding the most is stopped and told why,
+//! whether or not a limit is set: one chat starting over is better than all
+//! of them dying with the app (bw-jb5nf).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,6 +48,64 @@ const STRIKES: u32 = 2;
 /// time to settle, and striking it on the two samples that follow its own
 /// restart would be a loop rather than a limit.
 const SETTLING: Duration = Duration::from_secs(60);
+
+/// The share of a sample the service may spend stalled for memory before the
+/// heaviest chat is stopped. `systemd-oomd` kills the whole service once its
+/// ten-second average has stayed over 80% for twenty seconds; this acts at
+/// half that, two samples running, so a build that is merely busy is left
+/// alone and one that is starving the app is stopped seconds after it starts.
+const CROWDED: f64 = 0.4;
+
+/// How long after stopping a chat for the service's sake before another is
+/// stopped. A stopped chat's memory takes a few seconds to come back, and
+/// stopping a second chat while it does would cost a chat for nothing.
+const EASING: Duration = Duration::from_secs(15);
+
+/// What the watcher remembers about the service as a whole.
+#[derive(Default)]
+struct Crowding {
+    strikes: u32,
+    eased_at: Option<Instant>,
+    /// The last reading of the stall total, and when it was read.
+    last: Option<(u64, Instant)>,
+}
+
+impl Crowding {
+    /// The share of the time since the last reading the service spent
+    /// stalled for memory, given the running total read now.
+    fn share(&mut self, stall: Option<u64>, now: Instant) -> Option<f64> {
+        let last = self.last.take();
+        let stall = stall?;
+        self.last = Some((stall, now));
+        let (before, then) = last?;
+        let micros = now.checked_duration_since(then)?.as_micros() as f64;
+        (micros > 0.0).then(|| stall.saturating_sub(before) as f64 / micros)
+    }
+
+    /// Whether this sample should cost the heaviest chat its run.
+    fn judge(&mut self, stall: Option<u64>, now: Instant) -> bool {
+        let share = self.share(stall, now);
+        if self.eased_at.is_some_and(|at| now < at + EASING) {
+            return false;
+        }
+        if !share.is_some_and(|share| share >= CROWDED) {
+            self.strikes = 0;
+            return false;
+        }
+        self.strikes += 1;
+        if self.strikes < STRIKES {
+            return false;
+        }
+        self.strikes = 0;
+        self.eased_at = Some(now);
+        true
+    }
+}
+
+/// The chat holding the most, which is the one to stop for the service.
+fn heaviest(report: &memory::MemoryReport) -> Option<&memory::ChatMemory> {
+    report.chats.iter().filter(|chat| chat.bytes > 0).max_by_key(|chat| chat.bytes)
+}
 
 /// What the watcher remembers between samples: who is over, and who was only
 /// just dealt with.
@@ -84,30 +152,37 @@ impl Standing {
     }
 }
 
-/// Watch every chat against the limit, for as long as the registry lives.
+/// Watch every chat against the limit, and the service against running out,
+/// for as long as the registry lives.
 pub fn watch(settings: Arc<crate::db::Database>, registry: Arc<WorkbenchRegistry>) {
     let registry = Arc::downgrade(&registry);
     tokio::spawn(async move {
         let mut every = tokio::time::interval(EVERY);
         every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut standing = Standing::default();
+        let mut crowding = Crowding::default();
         loop {
             every.tick().await;
             let Some(registry) = registry.upgrade() else {
                 break;
             };
+            let now = Instant::now();
+            let crowded = crowding.judge(memory::service_stall(), now);
             let limit = match crate::routes::memory_settings::limit_bytes(&settings) {
-                Ok(Some(limit)) => limit,
-                Ok(None) => {
-                    standing.forget();
-                    continue;
-                }
+                Ok(limit) => limit,
                 Err(error) => {
-                    tracing::warn!(%error, "memory limit unreadable; no chat will be stopped");
-                    standing.forget();
-                    continue;
+                    tracing::warn!(%error, "memory limit unreadable; no chat will be stopped for it");
+                    None
                 }
             };
+            if limit.is_none() {
+                standing.forget();
+            }
+            // Walking every process is the costly part, so it waits until
+            // something is to be judged against it.
+            if limit.is_none() && !crowded {
+                continue;
+            }
             let report = match memory::report(registry.database()).await {
                 Ok(report) => report,
                 Err(error) => {
@@ -115,14 +190,33 @@ pub fn watch(settings: Arc<crate::db::Database>, registry: Arc<WorkbenchRegistry
                     continue;
                 }
             };
-            let measured: Vec<(String, u64)> = report
-                .chats
-                .iter()
-                .map(|chat| (chat.session_id.clone(), chat.bytes))
-                .collect();
-            for id in standing.judge(&measured, limit, Instant::now()) {
-                let invoice = invoice(&report, &id, limit);
-                stop_and_tell(&registry, &id, &invoice).await;
+            let mut stopped = Vec::new();
+            if let Some(limit) = limit {
+                let measured: Vec<(String, u64)> = report
+                    .chats
+                    .iter()
+                    .map(|chat| (chat.session_id.clone(), chat.bytes))
+                    .collect();
+                for id in standing.judge(&measured, limit, now) {
+                    let invoice = invoice(&report, &id, Some(limit));
+                    stop_and_tell(&registry, &id, &invoice).await;
+                    stopped.push(id);
+                }
+            }
+            if crowded && stopped.is_empty() {
+                match heaviest(&report) {
+                    Some(chat) => {
+                        tracing::warn!(
+                            service = report.service.as_ref().map(|service| service.total_bytes),
+                            "the app is stalled for memory; stopping the chat holding the most"
+                        );
+                        let invoice = invoice(&report, &chat.session_id, None);
+                        stop_and_tell(&registry, &chat.session_id, &invoice).await;
+                    }
+                    None => tracing::warn!(
+                        "the app is stalled for memory and no chat is holding any to stop"
+                    ),
+                }
             }
         }
     });
@@ -131,13 +225,14 @@ pub fn watch(settings: Arc<crate::db::Database>, registry: Arc<WorkbenchRegistry
 /// What the chat was holding when it was stopped, and what it was holding it
 /// in. Kept to the largest few processes: a chat over its limit is over it
 /// because of one or two of them, and the rest is noise to whoever reads this.
+/// With no limit, the chat was stopped because the app was running out.
 struct Invoice {
     held: u64,
-    limit: u64,
+    limit: Option<u64>,
     largest: Vec<String>,
 }
 
-fn invoice(report: &memory::MemoryReport, session_id: &str, limit: u64) -> Invoice {
+fn invoice(report: &memory::MemoryReport, session_id: &str, limit: Option<u64>) -> Invoice {
     let held = report
         .chats
         .iter()
@@ -169,11 +264,18 @@ fn invoice(report: &memory::MemoryReport, session_id: &str, limit: u64) -> Invoi
 impl Invoice {
     /// The line the transcript shows a person who comes back to a stopped chat.
     fn notice(&self) -> String {
-        format!(
-            "Atelier stopped this chat: it was holding {}, over its {} memory limit.",
-            words(self.held),
-            words(self.limit)
-        )
+        match self.limit {
+            Some(limit) => format!(
+                "Atelier stopped this chat: it was holding {}, over its {} memory limit.",
+                words(self.held),
+                words(limit)
+            ),
+            None => format!(
+                "Atelier stopped this chat: the app was running out of memory, and this chat \
+                 was holding the most, {}.",
+                words(self.held)
+            ),
+        }
     }
 
     /// The message the chat is restarted with, addressed to the agent that ran
@@ -184,6 +286,22 @@ impl Invoice {
             String::new()
         } else {
             format!(" The largest were: {}.", self.largest.join("; "))
+        };
+        let Some(limit) = self.limit else {
+            return format!(
+                "Your run was stopped because the computer was running out of memory and this \
+                 chat was holding more than any other.\n\n\
+                 At the moment it was stopped this chat was holding {}.{}\n\n\
+                 Everything that run owned has been killed — the provider, every subagent and \
+                 every shell it had started — and you are now on a fresh process with none of it \
+                 left. Restarting it as it was will fail: do not run it the same way again, \
+                 because whatever was holding that memory will hold it again and this chat will \
+                 be stopped again.\n\n\
+                 Please use less memory and continue what you were working on: smaller batches, \
+                 fewer processes at once, and nothing left running in the background.",
+                words(self.held),
+                largest
+            );
         };
         format!(
             "Your run was stopped because it went over the memory limit set for this chat.\n\n\
@@ -197,9 +315,9 @@ impl Invoice {
              you were working on: smaller batches, fewer processes at once, and nothing left \
              running in the background.",
             words(self.held),
-            words(self.limit),
+            words(limit),
             largest,
-            words(self.limit)
+            words(limit)
         )
     }
 }
@@ -212,7 +330,7 @@ async fn stop_and_tell(registry: &WorkbenchRegistry, session_id: &str, invoice: 
         chat = session_id,
         held = invoice.held,
         limit = invoice.limit,
-        "stopping a chat that went over its memory limit"
+        "stopping a chat for its memory"
     );
     let close = Command {
         kind: CommandKind::SessionClose,
@@ -365,7 +483,7 @@ mod tests {
     fn the_message_names_the_bill_the_limit_and_what_was_holding_it() {
         let invoice = Invoice {
             held: 9 * 1024 * 1024 * 1024,
-            limit: LIMIT,
+            limit: Some(LIMIT),
             largest: vec!["node (PID 41) holding 6.0 GB".into()],
         };
         let message = invoice.message();
@@ -373,6 +491,72 @@ mod tests {
         assert!(message.contains("8.0 GB"), "{message}");
         assert!(message.contains("node (PID 41) holding 6.0 GB"), "{message}");
         assert!(invoice.notice().contains("9.0 GB"));
+    }
+
+    /// The stall totals a service would show if it spent `shares` of each
+    /// sample stalled, one reading per sample.
+    fn stalled(shares: &[f64]) -> Vec<Option<u64>> {
+        let mut total = 0u64;
+        let mut readings = vec![Some(total)];
+        for share in shares {
+            total += (EVERY.as_micros() as f64 * share) as u64;
+            readings.push(Some(total));
+        }
+        readings
+    }
+
+    fn verdicts(crowding: &mut Crowding, readings: &[Option<u64>], from: Instant) -> Vec<bool> {
+        readings
+            .iter()
+            .enumerate()
+            .map(|(at, stall)| crowding.judge(*stall, from + EVERY * at as u32))
+            .collect()
+    }
+
+    #[test]
+    fn one_stalled_sample_is_not_enough_to_stop_a_chat_for_the_app() {
+        let mut crowding = Crowding::default();
+        let said = verdicts(&mut crowding, &stalled(&[0.9, 0.1, 0.9, 0.0]), Instant::now());
+        assert!(said.iter().all(|stop| !stop), "{said:?}");
+    }
+
+    #[test]
+    fn two_stalled_samples_stop_a_chat_then_the_app_is_given_time_to_recover() {
+        let mut crowding = Crowding::default();
+        let shares = [CROWDED, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95];
+        let said = verdicts(&mut crowding, &stalled(&shares), Instant::now());
+        // The first reading has nothing to compare with; the next two are the
+        // strikes; then five samples, fifteen seconds, are left to recover.
+        assert_eq!(said, [false, false, true, false, false, false, false, false, true]);
+    }
+
+    #[test]
+    fn a_busy_app_that_is_not_short_of_memory_keeps_every_chat() {
+        let mut crowding = Crowding::default();
+        let said = verdicts(&mut crowding, &stalled(&[0.2; 20]), Instant::now());
+        assert!(said.iter().all(|stop| !stop), "{said:?}");
+    }
+
+    #[test]
+    fn an_app_with_no_service_of_its_own_never_stops_a_chat_for_it() {
+        let mut crowding = Crowding::default();
+        let said = verdicts(&mut crowding, &[None; 6], Instant::now());
+        assert!(said.iter().all(|stop| !stop), "{said:?}");
+    }
+
+    #[test]
+    fn a_chat_stopped_for_the_app_is_told_it_held_the_most() {
+        let invoice = Invoice {
+            held: 6 * 1024 * 1024 * 1024,
+            limit: None,
+            largest: vec!["rustc (PID 7) holding 5.0 GB".into()],
+        };
+        let message = invoice.message();
+        assert!(message.contains("running out of memory"), "{message}");
+        assert!(message.contains("6.0 GB"), "{message}");
+        assert!(message.contains("rustc (PID 7) holding 5.0 GB"), "{message}");
+        assert!(!message.contains("limit"), "{message}");
+        assert!(invoice.notice().contains("holding the most, 6.0 GB"));
     }
 
     #[test]
@@ -482,7 +666,7 @@ mod tests {
 
             let invoice = Invoice {
                 held: 9 * 1024 * 1024 * 1024,
-                limit: LIMIT,
+                limit: Some(LIMIT),
                 largest: vec!["node (PID 41) holding 6.0 GB".into()],
             };
             stop_and_tell(&registry, "session-1", &invoice).await;
