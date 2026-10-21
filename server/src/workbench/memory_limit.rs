@@ -102,9 +102,29 @@ impl Crowding {
     }
 }
 
-/// The chat holding the most, which is the one to stop for the service.
+/// The least share of what the service holds, file cache aside, that a chat
+/// must hold to be stopped for it. When the memory is somewhere else — a Dolt
+/// server left running, or the server itself — stopping chats would not free
+/// it, and the watcher would stop one after another for nothing.
+const SHARE_TO_STOP: u64 = 8;
+
+/// The chat holding the most, which is the one to stop for the service, when
+/// it holds enough that stopping it would help.
 fn heaviest(report: &memory::MemoryReport) -> Option<&memory::ChatMemory> {
-    report.chats.iter().filter(|chat| chat.bytes > 0).max_by_key(|chat| chat.bytes)
+    let held = report
+        .service
+        .as_ref()
+        .map(|service| service.total_bytes.saturating_sub(service.cache_bytes));
+    report
+        .chats
+        .iter()
+        .max_by_key(|chat| chat.bytes)
+        .filter(|chat| worth_stopping(chat.bytes, held))
+}
+
+/// Whether a chat holding `bytes` holds enough of what the service holds.
+fn worth_stopping(bytes: u64, service_held: Option<u64>) -> bool {
+    bytes > 0 && service_held.is_none_or(|held| bytes.saturating_mul(SHARE_TO_STOP) >= held)
 }
 
 /// What the watcher remembers between samples: who is over, and who was only
@@ -214,7 +234,12 @@ pub fn watch(settings: Arc<crate::db::Database>, registry: Arc<WorkbenchRegistry
                         stop_and_tell(&registry, &chat.session_id, &invoice).await;
                     }
                     None => tracing::warn!(
-                        "the app is stalled for memory and no chat is holding any to stop"
+                        service = report.service.as_ref().map(|service| service.total_bytes),
+                        others = ?report
+                            .service
+                            .as_ref()
+                            .map(|service| service.others.iter().map(|other| (&other.name, other.bytes)).collect::<Vec<_>>()),
+                        "the app is stalled for memory and no chat holds enough of it to stop"
                     ),
                 }
             }
@@ -535,6 +560,16 @@ mod tests {
         let mut crowding = Crowding::default();
         let said = verdicts(&mut crowding, &stalled(&[0.2; 20]), Instant::now());
         assert!(said.iter().all(|stop| !stop), "{said:?}");
+    }
+
+    #[test]
+    fn a_chat_holding_little_of_what_the_app_holds_is_not_stopped_for_it() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        assert!(worth_stopping(2 * GB, Some(10 * GB)));
+        assert!(worth_stopping(2 * GB, Some(16 * GB)));
+        assert!(!worth_stopping(GB, Some(16 * GB)), "the memory is somewhere else");
+        assert!(!worth_stopping(0, None));
+        assert!(worth_stopping(GB, None));
     }
 
     #[test]
