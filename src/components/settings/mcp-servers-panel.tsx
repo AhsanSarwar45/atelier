@@ -355,7 +355,8 @@ export function McpServersPanel({
   const toggle = (s: McpServer, key: string, on: boolean) =>
     act(key, () => sendCommand({ type: 'mcp.set-enabled', brand, ...wireScope(scope), source: s.source, id: s.id, enabled: on }));
 
-  const page = open ? servers.find((s) => s.id === open) : undefined;
+  // A plugin's page names its server bare; Claude lists it as `plugin:<plugin>:<name>`.
+  const page = open ? servers.find((s) => s.id === open) ?? servers.find((s) => s.source === 'plugin' && s.id.endsWith(`:${open}`)) : undefined;
   if (open && page) {
     const key = `${page.source}:${page.id}`;
     return (

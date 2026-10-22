@@ -186,7 +186,8 @@ export function ExtensionsPanel({
         scope={scope}
         summary={page}
         onBack={() => setOpen(null)}
-        onServer={onServer}
+        // A switched-off plugin's servers are not listed, so there is nothing to open.
+        onServer={page.enabled !== false ? onServer : undefined}
         actions={
           <>
             <label className="flex items-center gap-2 text-sm text-t-secondary">

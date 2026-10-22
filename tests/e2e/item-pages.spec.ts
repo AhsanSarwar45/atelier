@@ -78,6 +78,18 @@ test('a catalogue plugin opens its page, is installed from it, and the installed
   await page.getByTestId('item-back').click();
   await expect(page.getByTestId(`plugin-enabled-${TIDY}`)).not.toBeChecked();
 
+  // Off, its servers are not linked; back on, a server it adds opens that server's page on the MCP tab.
+  await page.getByTestId(`plugin-open-${TIDY}`).click();
+  const servers = page.getByTestId('plugin-page-includes-mcp-servers');
+  await expect(servers.getByRole('button', { name: 'tidy-index' })).toHaveCount(0);
+  await on.click();
+  await expect(on).toBeChecked({ timeout: 30_000 });
+  await servers.getByRole('button', { name: 'tidy-index' }).click();
+  await expect(page).toHaveURL(/tab=mcp/);
+  await expect(page.getByTestId('mcp-page-title')).toHaveText('tidy-index', { timeout: 30_000 });
+  await expect(page.getByTestId('mcp-page-details')).toContainText('tidy-notes plugin');
+  await page.goto('/settings?section=claude&tab=plugins&account=system');
+
   // Uninstalled from its page, it leaves the list.
   await page.getByTestId(`plugin-open-${TIDY}`).click();
   await page.getByTestId(`plugin-page-remove-${TIDY}`).click();
