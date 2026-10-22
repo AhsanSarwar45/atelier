@@ -244,11 +244,14 @@ pub async fn browse(account_dir: &Path) -> Listing {
         }
     }
 
-    for repo in PUBLISHED {
-        if origins.contains(&repo.to_ascii_lowercase()) {
-            continue;
-        }
-        match fetch(repo).await {
+    // Fetched side by side, so a slow one costs its own wait and not the sum.
+    let wanted: Vec<&str> = PUBLISHED
+        .into_iter()
+        .filter(|repo| !origins.contains(&repo.to_ascii_lowercase()))
+        .collect();
+    let fetched = futures::future::join_all(wanted.iter().map(|repo| fetch_kept(repo))).await;
+    for (repo, got) in wanted.into_iter().zip(fetched) {
+        match got {
             Ok(manifest) => entries.extend(from_manifest(&manifest, repo, false, &installed)),
             Err(why) => unreachable.push(format!("{repo} could not be read: {why}")),
         }
@@ -262,6 +265,30 @@ pub async fn browse(account_dir: &Path) -> Listing {
         entries,
         unreachable,
     }
+}
+
+/// How long a fetched marketplace is reused before it is asked for again.
+const KEEP: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Published manifests fetched recently, so reopening the catalogue is instant.
+fn kept() -> &'static std::sync::Mutex<HashMap<String, (std::time::Instant, std::sync::Arc<Value>)>> {
+    static KEPT: std::sync::OnceLock<std::sync::Mutex<HashMap<String, (std::time::Instant, std::sync::Arc<Value>)>>> =
+        std::sync::OnceLock::new();
+    KEPT.get_or_init(Default::default)
+}
+
+async fn fetch_kept(repo: &str) -> Result<std::sync::Arc<Value>, String> {
+    if let Some((at, manifest)) = kept().lock().unwrap().get(repo) {
+        if at.elapsed() < KEEP {
+            return Ok(manifest.clone());
+        }
+    }
+    let manifest = std::sync::Arc::new(fetch(repo).await?);
+    kept()
+        .lock()
+        .unwrap()
+        .insert(repo.to_string(), (std::time::Instant::now(), manifest.clone()));
+    Ok(manifest)
 }
 
 async fn fetch(repo: &str) -> Result<Value, String> {

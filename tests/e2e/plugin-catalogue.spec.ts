@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -45,6 +45,13 @@ test('a plugin is found by shelf and by name, and installed in one click', async
   await page.getByTestId('plugin-browse').click();
   const sheet = page.getByTestId('plugin-catalogue');
   await expect(sheet).toBeVisible();
+  // The published marketplaces can add thousands of rows, and only the rows in
+  // view are drawn, so the fixture's own row is found by name.
+  const search = page.getByTestId('plugin-catalogue-search');
+  const list = page.getByTestId('plugin-catalogue-list');
+  await expect(list).toBeVisible({ timeout: 30_000 });
+  const total = Number(await list.getAttribute('data-count'));
+  await search.fill('tidy notes');
   const tidy = page.getByTestId('plugin-entry-tidy-notes@beads-web-fixture');
   await expect(tidy).toBeVisible({ timeout: 30_000 });
   await expect(tidy).toContainText('Tidy Notes');
@@ -53,12 +60,12 @@ test('a plugin is found by shelf and by name, and installed in one click', async
   await page.screenshot({ path: join(results, 'catalogue.png') });
 
   // A shelf narrows it to its own…
+  await search.fill('');
   await page.getByTestId('plugin-shelf-productivity').click();
-  await expect(page.getByTestId('plugin-entry-loud-logs@beads-web-fixture')).toHaveCount(0);
-  await expect(tidy).toBeVisible();
+  await expect.poll(async () => Number(await list.getAttribute('data-count'))).toBeLessThan(total);
 
   // …and a search is across everything, whatever shelf was ticked before it.
-  await page.getByTestId('plugin-catalogue-search').fill('loud');
+  await page.getByTestId('plugin-catalogue-search').fill('loud logs');
   await expect(page.getByTestId('plugin-entry-loud-logs@beads-web-fixture')).toBeVisible();
   await expect(tidy).toHaveCount(0);
   await page.screenshot({ path: join(results, 'searched.png') });
@@ -94,6 +101,53 @@ test('on a phone the plugin catalogue is a sheet on the bottom edge', async ({ p
   const box = (await sheet.boundingBox())!;
   expect(box.x).toBe(0);
   expect(box.width).toBe(390);
+  await page.getByTestId('plugin-catalogue-search').fill('tidy notes');
   await expect(page.getByTestId('plugin-entry-tidy-notes@beads-web-fixture')).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: join(results, 'phone.png') });
+});
+
+test('a marketplace of thousands opens with only the rows in view drawn, and typing never waits on the list', async ({ page }) => {
+  test.slow();
+  // A marketplace as big as the community one, written for this run.
+  const big = resolve(`${process.env.WORKBENCH_E2E_RUN ?? 'tests/.e2e-run'}/big-marketplace`);
+  mkdirSync(join(big, '.claude-plugin'), { recursive: true });
+  const plugins = Array.from({ length: 3000 }, (_, i) => ({
+    name: `bulk-${i}`,
+    description: `Bulk plugin number ${i} for testing a long catalogue`,
+    category: ['productivity', 'development', 'security'][i % 3],
+    keywords: ['bulk', `n${i}`],
+    source: `./plugins/bulk-${i}`,
+  }));
+  writeFileSync(join(big, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'beads-web-bulk', owner: { name: 'Beads Web' }, plugins }));
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/settings?section=claude&tab=plugins&account=system');
+  await page.getByTestId('marketplace-add').click();
+  await page.getByTestId('marketplace-add-input').fill(big);
+  await page.getByTestId('marketplace-add-submit').click();
+  await expect(page.getByTestId('extension-marketplaces-beads-web-bulk')).toBeVisible({ timeout: 60_000 });
+
+  await page.getByTestId('plugin-browse').click();
+  const list = page.getByTestId('plugin-catalogue-list');
+  await expect(list).toBeVisible({ timeout: 30_000 });
+  expect(Number(await list.getAttribute('data-count'))).toBeGreaterThanOrEqual(3000);
+  // Thousands listed, a screenful drawn.
+  expect(await list.locator('li').count()).toBeLessThan(80);
+
+  // Each keystroke lands in the box at once.
+  const search = page.getByTestId('plugin-catalogue-search');
+  await search.click();
+  const started = Date.now();
+  await page.keyboard.type('bulk-2999', { delay: 0 });
+  await expect(search).toHaveValue('bulk-2999');
+  expect(Date.now() - started).toBeLessThan(3000);
+  await expect(page.getByTestId('plugin-entry-bulk-2999@beads-web-bulk')).toBeVisible();
+
+  // Scrolled to the end of the full list, the last rows are drawn there.
+  await search.fill('');
+  const scroller = page.getByTestId('plugin-catalogue-list-scroller');
+  await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await expect(list.locator('li').last()).toBeVisible();
+  expect(await list.locator('li').count()).toBeLessThan(80);
+  await page.screenshot({ path: join(results, 'bulk.png') });
 });

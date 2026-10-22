@@ -13,17 +13,17 @@
  */
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Boxes, Plus, Search } from 'lucide-react';
 
+import { CatalogueList } from '@/components/settings/catalogue-list';
 import { KindIcon } from '@/components/settings/kind-icon';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Spinner } from '@/components/ui/spinner';
@@ -51,7 +51,7 @@ export function shelfName(id: string): string {
 }
 
 /** One row, and the boxes it asks for before it can be added. */
-function Row({
+const Row = memo(function Row({
   entry,
   busy,
   onAdd,
@@ -66,7 +66,7 @@ function Row({
   const missing = needs.some((need) => !(given[need.name] ?? '').trim());
 
   return (
-    <li className="flex flex-col gap-2 px-3 py-2" data-testid={`catalogue-entry-${entry.id}`}>
+    <div className="flex flex-col gap-2 px-3 py-2" data-testid={`catalogue-entry-${entry.id}`}>
       <div className="flex items-start gap-3">
         <KindIcon kind="server" src={entry.icon} />
         <div className="min-w-0 flex-1">
@@ -123,8 +123,17 @@ function Row({
           </Button>
         </div>
       )}
-    </li>
+    </div>
   );
+});
+
+function entryKey(entry: McpCatalogueEntry): string {
+  return `${entry.registryName ?? ''}:${entry.id}`;
+}
+
+/** What a row is matched by while the registry has not answered yet. */
+function locallyMatches(entry: McpCatalogueEntry, want: string): boolean {
+  return [entry.id, entry.title, entry.description ?? ''].join(' ').toLowerCase().includes(want);
 }
 
 export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; scope: Scope; source: McpSource; onAdded: (servers: McpServer[]) => void }) {
@@ -135,6 +144,10 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
   const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
   const [unread, setUnread] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  // The search the shown catalogue answered; while it differs from `search`, a
+  // newer answer is on its way.
+  const [answered, setAnswered] = useState<string | null>(null);
   const { toast } = useToast();
 
   // A keystroke is not a search: the registry is asked once the typing stops.
@@ -146,15 +159,21 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
   useEffect(() => {
     if (!open) return;
     let live = true;
+    const asked = search.trim();
     setUnread(null);
-    setCatalogue(null);
-    sendCommand<Catalogue>({ type: 'mcp.catalogue', ...(search.trim() ? { search: search.trim() } : {}) })
-      .then((r) => live && setCatalogue(r))
+    // The last answer stays up while the next one is fetched, so the list never
+    // blanks out between keystrokes.
+    sendCommand<Catalogue>({ type: 'mcp.catalogue', ...(asked ? { search: asked } : {}) })
+      .then((r) => {
+        if (!live) return;
+        setCatalogue(r);
+        setAnswered(asked);
+      })
       .catch((e: unknown) => live && setUnread(said(e)));
     return () => {
       live = false;
     };
-  }, [open, search]);
+  }, [open, search, attempt]);
 
   const add = useCallback(
     async (entry: McpCatalogueEntry, env: Record<string, string>) => {
@@ -182,11 +201,16 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
 
   // A search is across everything. The shelves are put away while one is typed,
   // and a shelf left ticked from before must not quietly narrow what it found.
-  const searching = search.trim().length > 0;
+  const want = typed.trim().toLowerCase();
+  const searching = want.length > 0;
+  const waiting = catalogue !== null && answered !== typed.trim();
   const shown = useMemo(() => {
     const entries = catalogue?.entries ?? [];
-    return shelf && !searching ? entries.filter((e) => e.category === shelf) : entries;
-  }, [catalogue, shelf, searching]);
+    if (!searching) return shelf ? entries.filter((e) => e.category === shelf) : entries;
+    // Until the registry answers, what is already on screen is narrowed to the
+    // words typed so far.
+    return waiting ? entries.filter((e) => locallyMatches(e, want)) : entries;
+  }, [catalogue, shelf, searching, waiting, want]);
 
   return (
     <>
@@ -201,6 +225,7 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
           </DialogHeader>
           <Input
             start={<Search className="text-t-muted" aria-hidden="true" />}
+            end={waiting ? <Spinner size="inherit" label="Searching" data-testid="mcp-catalogue-searching" /> : undefined}
             aria-label="Search servers"
             placeholder="Search servers…"
             value={typed}
@@ -227,23 +252,28 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
             </Tooltip>
           )}
           {unread ? (
-            <ReadFailed what="Catalogue unavailable" why={unread} onRetry={() => setSearch((s) => `${s}`)} />
+            <ReadFailed what="Catalogue unavailable" why={unread} onRetry={() => setAttempt((n) => n + 1)} />
           ) : !catalogue ? (
             <p className="flex items-center gap-2 p-3 text-sm text-t-tertiary">
               <Spinner /> Reading…
             </p>
           ) : shown.length === 0 ? (
-            <p className="p-3 text-sm text-t-tertiary" data-testid="mcp-catalogue-none">
-              No matches
+            <p className="flex items-center gap-2 p-3 text-sm text-t-tertiary" data-testid="mcp-catalogue-none">
+              {waiting ? (
+                <>
+                  <Spinner /> Searching…
+                </>
+              ) : (
+                'No matches'
+              )}
             </p>
           ) : (
-            <Panel asChild tone="frame" inset="none" className="max-h-[50vh] divide-y divide-border overflow-y-auto">
-              <ul data-testid="mcp-catalogue-list">
-                {shown.map((entry) => (
-                  <Row key={`${entry.registryName ?? ''}:${entry.id}`} entry={entry} busy={busy === entry.id} onAdd={add} />
-                ))}
-              </ul>
-            </Panel>
+            <CatalogueList
+              items={shown}
+              itemKey={entryKey}
+              render={(entry) => <Row entry={entry} busy={busy === entry.id} onAdd={add} />}
+              testId="mcp-catalogue-list"
+            />
           )}
         </DialogContent>
       </Dialog>

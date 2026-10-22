@@ -10,17 +10,17 @@
  */
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 
 import { Search, Store } from 'lucide-react';
 
+import { CatalogueList } from '@/components/settings/catalogue-list';
 import { KindIcon } from '@/components/settings/kind-icon';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Panel } from '@/components/ui/panel';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Spinner } from '@/components/ui/spinner';
@@ -43,17 +43,13 @@ export function shelfName(id: string): string {
 }
 
 /** Everything the row is searched by, not only its name. */
-function matches(entry: OfferedPlugin, want: string): boolean {
-  if (!want) return true;
-  const hay = [entry.name, entry.title, entry.description ?? '', entry.marketplace, ...(entry.keywords ?? [])].join(' ').toLowerCase();
-  return hay.includes(want);
+function haystack(entry: OfferedPlugin): string {
+  return [entry.name, entry.title, entry.description ?? '', entry.marketplace, ...(entry.keywords ?? [])].join(' ').toLowerCase();
 }
 
-// Codex's store alone lists thousands; a row off screen is not laid out or
-// painted until it is scrolled to, so the sheet opens as fast with all of them.
-function Row({ entry, busy, onInstall }: { entry: OfferedPlugin; busy: boolean; onInstall: (entry: OfferedPlugin) => Promise<void> }) {
+const Row = memo(function Row({ entry, busy, onInstall }: { entry: OfferedPlugin; busy: boolean; onInstall: (entry: OfferedPlugin) => Promise<void> }) {
   return (
-    <li className="flex items-start gap-3 px-3 py-2 [contain-intrinsic-size:auto_4rem] [content-visibility:auto]" data-testid={`plugin-entry-${entry.id}`}>
+    <div className="flex items-start gap-3 px-3 py-2" data-testid={`plugin-entry-${entry.id}`}>
       <KindIcon kind="plugin" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -85,9 +81,9 @@ function Row({ entry, busy, onInstall }: { entry: OfferedPlugin; busy: boolean; 
       >
         {busy && <Spinner size="inherit" />} {entry.installed ? 'Installed' : 'Install'}
       </Button>
-    </li>
+    </div>
   );
-}
+});
 
 export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; scope: Scope; onInstalled: (kinds: ExtensionKindList[]) => void }) {
   const [open, setOpen] = useState(false);
@@ -142,12 +138,18 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
     [brand, scope, onInstalled, toast],
   );
 
-  const want = typed.trim().toLowerCase();
-  const shown = useMemo(() => {
-    const entries = catalogue?.entries ?? [];
-    // A shelf ticked before a search must not narrow what the search finds.
-    return entries.filter((e) => matches(e, want) && (!shelf || want !== '' || e.category === shelf));
-  }, [catalogue, shelf, want]);
+  // Each entry's search text is built once per catalogue, not once per keystroke.
+  const indexed = useMemo(() => (catalogue?.entries ?? []).map((entry) => ({ entry, hay: haystack(entry) })), [catalogue]);
+  // The box takes every keystroke at once; the list catches up when React has time.
+  const want = useDeferredValue(typed.trim().toLowerCase());
+  const shown = useMemo(
+    () =>
+      indexed
+        // A shelf ticked before a search must not narrow what the search finds.
+        .filter(({ entry, hay }) => (want ? hay.includes(want) : !shelf || entry.category === shelf))
+        .map(({ entry }) => entry),
+    [indexed, shelf, want],
+  );
 
   return (
     <>
@@ -198,13 +200,12 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
               No matches
             </p>
           ) : (
-            <Panel asChild tone="frame" inset="none" className="max-h-[50vh] divide-y divide-border overflow-y-auto">
-              <ul data-testid="plugin-catalogue-list">
-                {shown.map((entry) => (
-                  <Row key={entry.id} entry={entry} busy={busy === entry.id} onInstall={install} />
-                ))}
-              </ul>
-            </Panel>
+            <CatalogueList
+              items={shown}
+              itemKey={(entry) => entry.id}
+              render={(entry) => <Row entry={entry} busy={busy === entry.id} onInstall={install} />}
+              testId="plugin-catalogue-list"
+            />
           )}
         </DialogContent>
       </Dialog>

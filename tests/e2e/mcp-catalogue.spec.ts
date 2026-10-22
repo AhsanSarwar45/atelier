@@ -42,9 +42,9 @@ test('a shelf narrows the catalogue and a server on it is added in one click', a
   await page.screenshot({ path: join(results, 'shelves.png') });
 
   // A shelf narrows the list to its own servers…
-  const all = await list.locator('li').count();
+  const all = Number(await list.getAttribute('data-count'));
   await page.getByTestId('catalogue-shelf-monitoring').click();
-  await expect.poll(async () => list.locator('li').count()).toBeLessThan(all);
+  await expect.poll(async () => Number(await list.getAttribute('data-count'))).toBeLessThan(all);
   // …and what is on it says what it is, not just what starts it.
   const row = page.getByTestId('catalogue-entry-inspektor-gadget');
   await expect(row).toContainText('Inspektor Gadget');
