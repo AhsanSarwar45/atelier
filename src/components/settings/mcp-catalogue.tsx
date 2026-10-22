@@ -19,6 +19,7 @@ import { Boxes, Plus, Search } from 'lucide-react';
 
 import { CatalogueList } from '@/components/settings/catalogue-list';
 import { KindIcon } from '@/components/settings/kind-icon';
+import { infoOfEntry, McpPage } from '@/components/settings/mcp-page';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -61,12 +62,14 @@ const Row = memo(function Row({
   form,
   onForm,
   onAdd,
+  onOpen,
 }: {
   entry: McpCatalogueEntry;
   busy: boolean;
   form: Record<string, string> | undefined;
   onForm: (key: string, form: Record<string, string>) => void;
   onAdd: (entry: McpCatalogueEntry, env: Record<string, string>) => Promise<void>;
+  onOpen: (entry: McpCatalogueEntry) => void;
 }) {
   const needs = entry.needs ?? [];
   const asking = form !== undefined;
@@ -75,10 +78,16 @@ const Row = memo(function Row({
   const missing = needs.some((need) => !(given[need.name] ?? '').trim());
 
   return (
-    <div className="flex flex-col gap-2 px-3 py-2" data-testid={`catalogue-entry-${entry.id}`}>
+    <div className="flex flex-col gap-2 px-3 py-2 transition-colors hover:bg-surface-overlay/40" data-testid={`catalogue-entry-${entry.id}`}>
       <div className="flex items-start gap-3">
         <KindIcon kind="server" src={entry.icon} />
-        <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left"
+          aria-label={`Open ${entry.title}`}
+          onClick={() => onOpen(entry)}
+          data-testid={`catalogue-open-${entry.id}`}
+        >
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-t-primary">{entry.title}</span>
             {entry.category && (
@@ -100,7 +109,7 @@ const Row = memo(function Row({
             )}
           </div>
           {entry.description && <p className="line-clamp-1 text-xs text-t-muted">{entry.description}</p>}
-        </div>
+        </button>
         <Button
           size="sm"
           variant="outline"
@@ -136,6 +145,59 @@ const Row = memo(function Row({
   );
 });
 
+/** A catalogue server's page, with the boxes it needs filled in before Add. */
+function EntryPage({
+  entry,
+  busy,
+  form,
+  onForm,
+  onAdd,
+  onBack,
+}: {
+  entry: McpCatalogueEntry;
+  busy: boolean;
+  form: Record<string, string> | undefined;
+  onForm: (key: string, form: Record<string, string>) => void;
+  onAdd: (entry: McpCatalogueEntry, env: Record<string, string>) => Promise<void>;
+  onBack: () => void;
+}) {
+  const needs = entry.needs ?? [];
+  const given = form ?? {};
+  const missing = needs.some((need) => !(given[need.name] ?? '').trim());
+  return (
+    <McpPage
+      info={infoOfEntry(entry)}
+      backLabel="All servers"
+      onBack={onBack}
+      wide={false}
+      actions={
+        <Button size="sm" disabled={busy || missing} onClick={() => void onAdd(entry, given)} data-testid={`mcp-page-add-${entry.id}`}>
+          {busy ? <Spinner size="inherit" /> : <Plus />} Add
+        </Button>
+      }
+    >
+      {needs.length > 0 && (
+        <div className="space-y-2" data-testid={`mcp-page-needs-${entry.id}`}>
+          <p className="text-xs font-medium text-t-secondary">Required</p>
+          {needs.map((need) => (
+            <div key={need.name} className="space-y-1">
+              <Input
+                aria-label={need.name}
+                placeholder={need.name}
+                value={given[need.name] ?? ''}
+                onChange={(e) => onForm(entryKey(entry), { ...given, [need.name]: e.target.value })}
+                className="font-mono text-xs"
+                data-testid={`mcp-page-need-${entry.id}-${need.name}`}
+              />
+              {need.description && <p className="text-xs text-t-muted">{need.description}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </McpPage>
+  );
+}
+
 function entryKey(entry: McpCatalogueEntry): string {
   return `${entry.registryName ?? ''}:${entry.id}`;
 }
@@ -160,6 +222,8 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
   // The boxes each row has opened, by entry, kept while the sheet is open.
   const [forms, setForms] = useState<Record<string, Record<string, string>>>({});
   const onForm = useCallback((key: string, form: Record<string, string>) => setForms((was) => ({ ...was, [key]: form })), []);
+  /** The entry whose page is drawn in place of the list. */
+  const [viewing, setViewing] = useState<McpCatalogueEntry | null>(null);
   const { toast } = useToast();
 
   // A keystroke is not a search: the registry is asked once the typing stops.
@@ -203,6 +267,7 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
         toast({ title: `${entry.title} added` });
         setOpen(false);
         setForms({});
+        setViewing(null);
       } catch (e) {
         toast({ title: 'Not added', description: said(e), variant: 'destructive' });
       } finally {
@@ -234,14 +299,19 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
-          if (!next) setForms({});
+          if (!next) {
+            setForms({});
+            setViewing(null);
+          }
         }}
       >
         <DialogContent shape="sheet" className="sm:max-w-2xl" data-testid="mcp-catalogue">
-          <DialogHeader>
+          <DialogHeader className={viewing ? 'sr-only' : undefined}>
             <DialogTitle>Add server</DialogTitle>
             <DialogDescription className="sr-only">Add an MCP server from the catalogue</DialogDescription>
           </DialogHeader>
+          {viewing && <EntryPage entry={viewing} busy={busy === viewing.id} form={forms[entryKey(viewing)]} onForm={onForm} onAdd={add} onBack={() => setViewing(null)} />}
+          <div className={viewing ? 'hidden' : 'contents'}>
           <Input
             start={<Search className="text-t-muted" aria-hidden="true" />}
             end={waiting ? <Spinner size="inherit" label="Searching" data-testid="mcp-catalogue-searching" /> : undefined}
@@ -290,10 +360,11 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
             <CatalogueList
               items={shown}
               itemKey={entryKey}
-              render={(entry) => <Row entry={entry} busy={busy === entry.id} form={forms[entryKey(entry)]} onForm={onForm} onAdd={add} />}
+              render={(entry) => <Row entry={entry} busy={busy === entry.id} form={forms[entryKey(entry)]} onForm={onForm} onAdd={add} onOpen={setViewing} />}
               testId="mcp-catalogue-list"
             />
           )}
+          </div>
         </DialogContent>
       </Dialog>
     </>

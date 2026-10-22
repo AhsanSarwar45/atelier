@@ -166,6 +166,9 @@ pub struct Server {
     /// For a plugin's server: the plugin it comes with.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plugin: Option<String>,
+    /// Where the catalogue says it is published, for its page's README.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
 }
 
 impl Server {
@@ -181,6 +184,7 @@ impl Server {
                 self.description = Some(entry.description.clone());
             }
             self.icon = entry.icon.clone();
+            self.repository = entry.repository.clone();
         }
         self
     }
@@ -933,6 +937,7 @@ fn claude_server(
         description: None,
         icon: None,
         plugin: None,
+        repository: None,
     }
 }
 
@@ -974,6 +979,7 @@ fn codex_file(path: &Path, source: Source) -> Result<Vec<Server>, String> {
                 description: None,
                 icon: None,
                 plugin: None,
+                repository: None,
             }
         })
         .collect())
@@ -2160,6 +2166,7 @@ mod tests {
                 description: None,
                 icon: None,
                 plugin: None,
+                repository: None,
             }],
             // Empty, and the shape below says so: an account with nothing to
             // report elsewhere sends no `elsewhere` key at all.

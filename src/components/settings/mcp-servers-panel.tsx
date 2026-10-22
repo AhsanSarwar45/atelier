@@ -6,10 +6,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { LogIn, LogOut, Plus, Trash2 } from 'lucide-react';
+import { ChevronRight, LogIn, LogOut, Plus, Trash2 } from 'lucide-react';
 
 import { KindIcon } from '@/components/settings/kind-icon';
+import { useOpenItem } from '@/components/settings/item-page';
 import { McpCatalogue } from '@/components/settings/mcp-catalogue';
+import { infoOfServer, McpPage } from '@/components/settings/mcp-page';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
@@ -96,7 +99,7 @@ function Subtitle({ server }: { server: McpServer }) {
   return (
     <Collapsible className="min-w-0">
       <p className="truncate text-xs text-t-muted">{server.description}</p>
-      <CollapsibleTriggerRow size="sm" className="mt-0.5 text-t-tertiary hover:text-t-secondary" data-testid={`mcp-launch-toggle-${server.id}`}>
+      <CollapsibleTriggerRow size="sm" className="mt-0.5 text-t-tertiary hover:text-t-secondary" data-row-own="" data-testid={`mcp-launch-toggle-${server.id}`}>
         Command
       </CollapsibleTriggerRow>
       <CollapsibleContent asChild>
@@ -239,7 +242,22 @@ function AddServer({ brand, scope, onAdded }: { brand: Brand; scope: Scope; onAd
   );
 }
 
-export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }) {
+export function McpServersPanel({
+  brand,
+  scope,
+  item,
+  onItem,
+  onPlugin,
+}: {
+  brand: Brand;
+  scope: Scope;
+  /** The server whose page is open. */
+  item?: string | null;
+  onItem?: (item: string | null) => void;
+  /** Opens the plugin a server comes with on the Plugins tab. */
+  onPlugin?: (plugin: string) => void;
+}) {
+  const [open, setOpen] = useOpenItem(item, onItem);
   const [servers, setServers] = useState<McpServer[] | null>(null);
   const [elsewhere, setElsewhere] = useState<McpElsewhere[]>([]);
   const [unread, setUnread] = useState<string | null>(null);
@@ -306,6 +324,77 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
 
   const canToggle = brand === 'codex' || scope.kind === 'project';
 
+  /** Sign in or out, for a remote server; a connector signs in and out on claude.ai. */
+  const signButton = (s: McpServer, key: string) =>
+    s.transport !== 'stdio' &&
+    !(s.source === 'connector' && s.auth === 'signedIn') &&
+    (s.auth === 'signedIn' ? (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busy !== null}
+        onClick={() => void act(key, () => sendCommand({ type: 'mcp.logout', brand, ...wireScope(scope), id: s.id }), 'Signed out')}
+        data-testid={`mcp-logout-${s.id}`}
+      >
+        <LogOut /> Sign out
+      </Button>
+    ) : (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busy !== null}
+        onClick={() => void act(key, () => sendCommand({ type: 'mcp.login', brand, ...wireScope(scope), id: s.id }), 'Sign-in opened in the browser')}
+        data-testid={`mcp-login-${s.id}`}
+      >
+        <LogIn /> Sign in
+      </Button>
+    ));
+  const removeServer = (s: McpServer, key: string) =>
+    act(key, () => sendCommand({ type: 'mcp.remove', brand, ...wireScope(scope), source: s.source, id: s.id }), 'Removed');
+  const toggle = (s: McpServer, key: string, on: boolean) =>
+    act(key, () => sendCommand({ type: 'mcp.set-enabled', brand, ...wireScope(scope), source: s.source, id: s.id, enabled: on }));
+
+  const page = open ? servers.find((s) => s.id === open) : undefined;
+  if (open && page) {
+    const key = `${page.source}:${page.id}`;
+    return (
+      <McpPage
+        info={infoOfServer(page, shownName(page), sourceLabel(page))}
+        onBack={() => setOpen(null)}
+        onPlugin={onPlugin}
+        actions={
+          <>
+            {canToggle && (
+              <label className="flex items-center gap-2 text-sm text-t-secondary">
+                {busy === key && <Spinner size="2xs" />}
+                On
+                <Switch
+                  aria-label={`${page.id} on`}
+                  checked={page.enabled}
+                  disabled={busy !== null}
+                  onCheckedChange={(on) => void toggle(page, key, on)}
+                  data-testid={`mcp-page-enabled-${page.id}`}
+                />
+              </label>
+            )}
+            {signButton(page, key)}
+            {!bundled(page) && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy !== null}
+                onClick={() => void removeServer(page, key).then(() => setOpen(null))}
+                data-testid={`mcp-page-remove-${page.id}`}
+              >
+                <Trash2 /> Remove
+              </Button>
+            )}
+          </>
+        }
+      />
+    );
+  }
+
   return (
     <div className="space-y-4" data-testid={`mcp-servers-${brand}`}>
       <SettingsGroup
@@ -321,22 +410,37 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
         {servers.map((s) => {
           const key = `${s.source}:${s.id}`;
           return (
-            <div key={key} className="flex items-center gap-3 px-3 py-2" data-testid={`mcp-server-${s.id}`}>
+            <div key={key} className="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-overlay/40" data-testid={`mcp-server-${s.id}`}>
               {canToggle ? (
                 <Checkbox
                   aria-label={`${s.id} on`}
                   checked={s.enabled}
                   disabled={busy !== null}
-                  onCheckedChange={(c) =>
-                    void act(key, () => sendCommand({ type: 'mcp.set-enabled', brand, ...wireScope(scope), source: s.source, id: s.id, enabled: c === true }))
-                  }
+                  onCheckedChange={(c) => void toggle(s, key, c === true)}
                   data-testid={`mcp-enabled-${s.id}`}
                 />
               ) : (
                 <span className="size-4" />
               )}
               <KindIcon kind="server" src={s.icon} />
-              <div className="min-w-0 flex-1">
+              <div
+                className="min-w-0 flex-1 cursor-pointer"
+                role="button"
+                tabIndex={0}
+                aria-label={`Open ${shownName(s)}`}
+                onClick={(e) => {
+                  // The command toggle inside opens itself, not the page.
+                  if ((e.target as HTMLElement).closest('[data-row-own]')) return;
+                  setOpen(s.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    setOpen(s.id);
+                  }
+                }}
+                data-testid={`mcp-open-${s.id}`}
+              >
                 <div className="flex items-center gap-2">
                   <Tooltip label={s.id}>
                     <span className="truncate text-sm font-medium text-t-primary">{shownName(s)}</span>
@@ -364,30 +468,10 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
                 </div>
                 <Subtitle server={s} />
               </div>
-              {/* A connector signs in and out on claude.ai, not here. */}
-              {s.transport !== 'stdio' &&
-                !(s.source === 'connector' && s.auth === 'signedIn') &&
-                (s.auth === 'signedIn' ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy !== null}
-                    onClick={() => void act(key, () => sendCommand({ type: 'mcp.logout', brand, ...wireScope(scope), id: s.id }), 'Signed out')}
-                    data-testid={`mcp-logout-${s.id}`}
-                  >
-                    <LogOut /> Sign out
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy !== null}
-                    onClick={() => void act(key, () => sendCommand({ type: 'mcp.login', brand, ...wireScope(scope), id: s.id }), 'Sign-in opened in the browser')}
-                    data-testid={`mcp-login-${s.id}`}
-                  >
-                    <LogIn /> Sign in
-                  </Button>
-                ))}
+              {signButton(s, key)}
+              <Button variant="ghost" size="sm" aria-label={`Open ${shownName(s)}`} onClick={() => setOpen(s.id)} tabIndex={-1}>
+                <ChevronRight />
+              </Button>
               {bundled(s) ? (
                 <span className="size-8" />
               ) : (
@@ -396,7 +480,7 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
                 size="sm"
                 aria-label={`Remove ${s.id}`}
                 disabled={busy !== null}
-                onClick={() => void act(key, () => sendCommand({ type: 'mcp.remove', brand, ...wireScope(scope), source: s.source, id: s.id }), 'Removed')}
+                onClick={() => void removeServer(s, key)}
                 data-testid={`mcp-remove-${s.id}`}
               >
                 <Trash2 />
