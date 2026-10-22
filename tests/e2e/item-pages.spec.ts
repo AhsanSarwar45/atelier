@@ -117,3 +117,53 @@ test('a catalogue server and an added server each open a page that says how they
   await expect(mcpPage).toHaveCount(0);
   await expect(page.getByTestId('mcp-server-page-probe')).toHaveCount(0);
 });
+
+test('Codex gets the same pages, and a server that comes with a Codex plugin is listed, linked and switched', async ({ page }) => {
+  test.slow();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/settings?section=codex&tab=plugins&account=system');
+  await expect(page.getByTestId('extensions-plugins')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('marketplace-add').click();
+  await page.getByTestId('marketplace-add-input').fill(marketplace);
+  await page.getByTestId('marketplace-add-submit').click();
+  await expect(page.getByTestId('extension-marketplaces-beads-web-fixture')).toBeVisible({ timeout: 60_000 });
+
+  // The catalogue row opens the same page Claude's does, and installs from it.
+  await page.getByTestId('plugin-browse').click();
+  await page.getByTestId('plugin-catalogue-search').fill('tidy');
+  await page.getByTestId(`plugin-catalogue-open-${TIDY}`).click();
+  await expect(page.getByTestId('plugin-page-readme')).toContainText('Sorts your notes by date', { timeout: 30_000 });
+  await expect(page.getByTestId('plugin-page-includes-mcp-servers')).toContainText('tidy-index');
+  await page.screenshot({ path: join(results, 'codex-catalogue-page.png') });
+  await page.getByTestId(`plugin-page-install-${TIDY}`).click();
+  await expect(page.getByTestId('plugin-catalogue')).toHaveCount(0, { timeout: 60_000 });
+
+  // The installed plugin's server is on the MCP tab, under its own name.
+  await page.getByTestId('provider-tabs-codex').getByTestId('provider-tab-mcp').click();
+  const row = page.getByTestId('mcp-server-tidy-index');
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('mcp-source-tidy-index')).toHaveText('tidy-notes plugin');
+  await expect(page.getByTestId('mcp-remove-tidy-index')).toHaveCount(0);
+
+  // Its page links to the plugin it comes with.
+  await page.getByTestId('mcp-open-tidy-index').click();
+  await expect(page.getByTestId('mcp-page-details')).toContainText('index.js');
+  await page.screenshot({ path: join(results, 'codex-plugin-server.png') });
+  await page.getByTestId('mcp-page-plugin').click();
+  await expect(page).toHaveURL(/tab=plugins/);
+  await expect(page.getByTestId('plugin-page-title')).toHaveText('Tidy Notes', { timeout: 30_000 });
+
+  // Switched off on its page, it stays off when the list is read again.
+  await page.goto('/settings?section=codex&tab=mcp&account=system&item=tidy-index');
+  const on = page.getByTestId('mcp-page-enabled-tidy-index');
+  await expect(on).toBeChecked({ timeout: 30_000 });
+  await on.click();
+  await expect(on).not.toBeChecked({ timeout: 30_000 });
+  await page.reload();
+  await expect(on).not.toBeChecked({ timeout: 30_000 });
+
+  await page.goto('/settings?section=codex&tab=plugins&account=system');
+  await page.getByTestId(`extension-remove-${TIDY}`).click();
+  await expect(page.getByTestId(`extension-plugins-${TIDY}`)).toHaveCount(0, { timeout: 60_000 });
+  await page.getByTestId('extension-remove-beads-web-fixture').click();
+});

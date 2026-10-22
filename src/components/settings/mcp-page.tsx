@@ -115,10 +115,10 @@ export function McpPage({
         info.plugin &&
         (onPlugin ? (
           <button type="button" className="text-info underline-offset-4 hover:underline" onClick={() => onPlugin(info.plugin!)} data-testid="mcp-page-plugin">
-            {info.plugin}
+            {info.plugin.split('@')[0]}
           </button>
         ) : (
-          info.plugin
+          info.plugin.split('@')[0]
         )),
     },
     { label: 'Category', value: info.category && shelfName(info.category) },

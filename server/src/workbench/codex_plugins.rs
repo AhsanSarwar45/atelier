@@ -436,6 +436,22 @@ fn remote_release(home: &Path, name: &str) -> Option<Value> {
     })
 }
 
+/// Every plugin installed on an account, as `name@market` and its newest copy.
+pub fn installed_copies(home: &Path) -> Vec<(String, PathBuf)> {
+    let mut found = Vec::new();
+    for market in fs::read_dir(home.join("plugins/cache")).into_iter().flatten().flatten() {
+        let market_name = market.file_name().to_string_lossy().into_owned();
+        for plugin in fs::read_dir(market.path()).into_iter().flatten().flatten() {
+            let name = plugin.file_name().to_string_lossy().into_owned();
+            if let Some(dir) = installed_copy(home, &market_name, &name) {
+                found.push((format!("{name}@{market_name}"), dir));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
 /// The newest installed copy of a plugin, if the account has one.
 fn installed_copy(home: &Path, market: &str, name: &str) -> Option<PathBuf> {
     let base = home.join("plugins/cache").join(market).join(name);
@@ -444,7 +460,8 @@ fn installed_copy(home: &Path, market: &str, name: &str) -> Option<PathBuf> {
         .flatten()
         .flatten()
         .map(|entry| entry.path())
-        .filter(|path| path.join(".codex-plugin/plugin.json").is_file())
+        // Codex installs a plugin in Claude's layout as readily as its own.
+        .filter(|path| path.join(".codex-plugin/plugin.json").is_file() || path.join(".claude-plugin/plugin.json").is_file())
         .map(|path| (fs::metadata(&path).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), path))
         .collect();
     versions.sort();

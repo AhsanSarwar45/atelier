@@ -60,7 +60,8 @@ function shownName(s: McpServer): string {
 
 /** Where a server comes from, as its badge says it. */
 function sourceLabel(s: McpServer): string {
-  return s.source === 'plugin' && s.plugin ? `${s.plugin} plugin` : SOURCE_NAME[s.source];
+  // A Codex plugin is named `name@marketplace`; the badge says the name.
+  return s.source === 'plugin' && s.plugin ? `${s.plugin.split('@')[0]} plugin` : SOURCE_NAME[s.source];
 }
 
 /** What `mcp.list` answers with: this account's servers, and the other accounts'. */

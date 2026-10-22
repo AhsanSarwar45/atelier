@@ -1134,6 +1134,8 @@ export interface PluginDetail {
   /** The folder the README was read from, so its relative links resolve. */
   readmeBase?: string;
   contents?: PluginContents;
+  /** The plugin's own logo, as a file in its folder. */
+  logo?: string;
   installed: boolean;
 }
 

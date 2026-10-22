@@ -78,8 +78,9 @@ pub enum Source {
     Project,
     /// Claude's `.claude.json` entry for one project path.
     Local,
-    /// Bundled with a Claude plugin the account loads, in the plugin's own
-    /// `.mcp.json` or `plugin.json`. Claude names it `plugin:<plugin>:<id>`.
+    /// Bundled with a plugin the account loads, in the plugin's own
+    /// `.mcp.json` or manifest. Claude names it `plugin:<plugin>:<id>`; Codex
+    /// keeps the name the plugin gives it.
     Plugin,
     /// A connector the claude.ai account brings, named `claude.ai <Name>`.
     Connector,
@@ -262,7 +263,14 @@ pub fn list_with(
             servers
         }
         ("codex", Scope::Account { .. }) => {
-            codex_file(&account.dir.join("config.toml"), Source::User)?
+            let mut servers = codex_file(&account.dir.join("config.toml"), Source::User)?;
+            for server in codex_bundled(account)? {
+                // A server of the account's own by the same name is the one Codex starts.
+                if !servers.iter().any(|s| s.id == server.id) {
+                    servers.push(server);
+                }
+            }
+            servers
         }
         ("codex", Scope::Project { path }) => {
             codex_file(&path.join(".codex/config.toml"), Source::Project)?
@@ -723,6 +731,47 @@ fn claude_bundled(account: &Account, project: Option<&Path>) -> Result<Vec<Serve
     Ok(servers)
 }
 
+/// The servers that come with the Codex plugins an account has installed and
+/// switched on (bw-moh1k.3). Codex keeps each server's own name, and switches
+/// one off with `[plugins."<plugin>".mcp_servers.<name>] enabled = false`.
+fn codex_bundled(account: &Account) -> Result<Vec<Server>, String> {
+    let config = provider_settings::item_to_json(load_toml(&account.dir.join("config.toml"))?.as_item());
+    let plugins = config.get("plugins");
+    let mut servers: Vec<Server> = Vec::new();
+    for (id, dir) in super::codex_plugins::installed_copies(&account.dir) {
+        let own = plugins.and_then(|p| p.get(&id));
+        if own.and_then(|o| o.get("enabled")) == Some(&Value::Bool(false)) {
+            continue;
+        }
+        for (file, defined) in plugin_server_files(&dir) {
+            for (server_name, config) in entries(Some(&defined)) {
+                if servers.iter().any(|s| s.id == server_name) {
+                    continue;
+                }
+                let on = own
+                    .and_then(|o| o.get("mcp_servers"))
+                    .and_then(|m| m.get(server_name))
+                    .and_then(|m| m.get("enabled"))
+                    != Some(&Value::Bool(false));
+                let config = with_plugin_root(config, &dir);
+                let mut server = claude_server(server_name, &config, Source::Plugin, &file, on, None);
+                server.plugin = Some(id.clone());
+                servers.push(server);
+            }
+        }
+    }
+    servers.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(servers)
+}
+
+/// The installed Codex plugin a server of this name comes with.
+fn codex_plugin_of(account: &Account, server: &str) -> Option<String> {
+    super::codex_plugins::installed_copies(&account.dir)
+        .into_iter()
+        .find(|(_, dir)| plugin_server_files(dir).iter().any(|(_, defined)| entries(Some(defined)).any(|(name, _)| name == server)))
+        .map(|(id, _)| id)
+}
+
 /// A plugin's server definitions: its `.mcp.json` (bare, or under
 /// `mcpServers`), and `mcpServers` in its manifest, inline or as a file.
 fn plugin_server_files(dir: &Path) -> Vec<(PathBuf, Value)> {
@@ -735,7 +784,11 @@ fn plugin_server_files(dir: &Path) -> Vec<(PathBuf, Value)> {
     if let Ok(value) = load_json(&mcp_json) {
         out.push((mcp_json, unwrap(value)));
     }
-    let manifest_path = dir.join(".claude-plugin/plugin.json");
+    let manifest_path = [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]
+        .iter()
+        .map(|m| dir.join(m))
+        .find(|m| m.is_file())
+        .unwrap_or_else(|| dir.join(".claude-plugin/plugin.json"));
     if let Ok(manifest) = load_json(&manifest_path) {
         match manifest.get("mcpServers") {
             Some(Value::Object(inline)) => out.push((manifest_path, Value::Object(inline.clone()))),
@@ -756,7 +809,7 @@ fn plugin_server_files(dir: &Path) -> Vec<(PathBuf, Value)> {
 fn with_plugin_root(config: &Value, dir: &Path) -> Value {
     let root = dir.to_string_lossy();
     match config {
-        Value::String(text) => Value::String(text.replace("${CLAUDE_PLUGIN_ROOT}", &root)),
+        Value::String(text) => Value::String(text.replace("${CLAUDE_PLUGIN_ROOT}", &root).replace("${PLUGIN_ROOT}", &root)),
         Value::Array(items) => Value::Array(items.iter().map(|v| with_plugin_root(v, dir)).collect()),
         Value::Object(map) => Value::Object(
             map.iter()
@@ -787,6 +840,32 @@ fn set_bundled_enabled(
     id: &str,
     enabled: bool,
 ) -> Result<Listing, String> {
+    if let ("codex", Scope::Account { .. }, Source::Plugin) = (brand, scope, source) {
+        check_id(id)?;
+        let plugin = codex_plugin_of(account, id).ok_or_else(|| format!("no installed plugin has a server called {id}"))?;
+        provider_settings::rewrite_toml(&account.dir.join("config.toml"), |document| {
+            let table = |item: &mut toml_edit::Item| {
+                if item.is_none() {
+                    let mut t = toml_edit::Table::new();
+                    t.set_implicit(true);
+                    *item = toml_edit::Item::Table(t);
+                }
+            };
+            let plugins = &mut document["plugins"];
+            table(plugins);
+            let own = &mut plugins[plugin.as_str()];
+            table(own);
+            let servers = &mut own["mcp_servers"];
+            table(servers);
+            let entry = &mut servers[id];
+            if entry.is_none() {
+                *entry = toml_edit::Item::Table(toml_edit::Table::new());
+            }
+            entry["enabled"] = toml_edit::value(enabled);
+            Ok(())
+        })?;
+        return list(brand, scope, account);
+    }
     check_bundled_name(id)?;
     let project = match (brand, scope) {
         ("claude", Scope::Project { path }) => path,
@@ -2363,5 +2442,40 @@ mod tests {
         assert!(login("gemini", &account(), &account_files, "x", false)
             .await
             .is_err());
+    }
+
+    #[test]
+    fn native_workbench_mcp_servers_lists_and_switches_codex_plugin_servers() {
+        let home = tempfile::tempdir().unwrap();
+        let files = account_in(home.path());
+        let copy = files.dir.join("plugins/cache/market/notes/1.0.0");
+        fs::create_dir_all(copy.join(".codex-plugin")).unwrap();
+        fs::write(copy.join(".codex-plugin/plugin.json"), r#"{"name":"notes"}"#).unwrap();
+        fs::write(
+            copy.join(".mcp.json"),
+            r#"{"mcpServers":{"notes-db":{"command":"node","args":["${PLUGIN_ROOT}/db.js"]},"docs":{"url":"https://docs.example/mcp"}}}"#,
+        )
+        .unwrap();
+        // A switched-off plugin brings no servers.
+        let off = files.dir.join("plugins/cache/market/quiet/1.0.0");
+        fs::create_dir_all(off.join(".codex-plugin")).unwrap();
+        fs::write(off.join(".codex-plugin/plugin.json"), r#"{"name":"quiet","mcpServers":{"hush":{"command":"x"}}}"#).unwrap();
+        fs::write(files.dir.join("config.toml"), "[plugins.\"quiet@market\"]\nenabled = false\n").unwrap();
+
+        let listing = list_with("codex", &account(), &files, &|_, _| None).unwrap();
+        let db = listing.servers.iter().find(|s| s.id == "notes-db").expect("listed under its own name");
+        assert_eq!(db.source, Source::Plugin);
+        assert_eq!(db.plugin.as_deref(), Some("notes@market"));
+        assert!(db.enabled);
+        assert_eq!(db.args.as_deref().unwrap()[0], format!("{}/db.js", copy.display()));
+        assert!(listing.servers.iter().any(|s| s.id == "docs" && s.transport == "http"));
+        assert!(!listing.servers.iter().any(|s| s.id == "hush"));
+
+        let listing = set_enabled("codex", &account(), &files, Source::Plugin, "notes-db", false).unwrap();
+        assert!(!listing.servers.iter().find(|s| s.id == "notes-db").unwrap().enabled);
+        let written = fs::read_to_string(files.dir.join("config.toml")).unwrap();
+        assert!(written.contains("[plugins.\"notes@market\".mcp_servers.notes-db]"), "{written}");
+        assert!(written.contains("enabled = false"));
+        assert!(remove("codex", &account(), &files, Source::Plugin, "notes-db").is_err());
     }
 }

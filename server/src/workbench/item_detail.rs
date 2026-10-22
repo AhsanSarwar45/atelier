@@ -106,6 +106,9 @@ pub struct PluginDetail {
     /// "nothing".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub contents: Option<Contents>,
+    /// The plugin's own logo, as a file in its folder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo: Option<PathBuf>,
     pub installed: bool,
 }
 
@@ -484,6 +487,13 @@ pub fn fill_from_folder(detail: &mut PluginDetail, dir: &Path) {
     if detail.title.is_empty() {
         detail.title = detail.name.clone();
     }
+    detail.logo = ["logo", "composerIcon"]
+        .iter()
+        .map(|key| shown(key))
+        .filter(|rel| !rel.is_empty() && !rel.contains(".."))
+        .map(|rel| dir.join(rel.trim_start_matches("./")))
+        .find(|path| path.is_file())
+        .or(detail.logo.take());
     detail.readme = readme_in(dir);
     detail.readme_base = detail.readme.as_ref().map(|_| dir.to_path_buf());
     detail.contents = Some(contents(dir));
@@ -753,8 +763,9 @@ mod tests {
         let d = dir.path();
         write(
             &d.join(".codex-plugin/plugin.json"),
-            r#"{"name":"mail","skills":"./skills/","mcpServers":"./.mcp.json","apps":"./.app.json","interface":{"displayName":"Mail","category":"Communication"}}"#,
+            r#"{"name":"mail","skills":"./skills/","mcpServers":"./.mcp.json","apps":"./.app.json","interface":{"displayName":"Mail","category":"Communication","logo":"./assets/logo.png"}}"#,
         );
+        write(&d.join("assets/logo.png"), "png");
         write(&d.join("skills/read/SKILL.md"), "---\nname: read\ndescription: Read mail\n---\n");
         write(&d.join(".mcp.json"), r#"{"mcpServers":{"mail":{"url":"https://example.test/mcp"}}}"#);
         write(&d.join(".app.json"), r#"{"apps":{"gmail":{"id":"connector_1"}}}"#);
@@ -762,6 +773,7 @@ mod tests {
         fill_from_folder(&mut detail, d);
         assert_eq!(detail.title, "Mail");
         assert_eq!(detail.category, "Communication");
+        assert_eq!(detail.logo, Some(d.join("assets/logo.png")));
         let c = detail.contents.unwrap();
         assert_eq!(c.skills.len(), 1);
         assert_eq!(c.mcp_servers.len(), 1);

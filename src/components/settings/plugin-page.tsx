@@ -14,6 +14,7 @@ import { shelfName } from '@/components/settings/plugin-catalogue';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { Badge } from '@/components/ui/badge';
 import { ReadFailed } from '@/components/ui/read-failed';
+import { apiUrl } from '@/lib/api-base';
 import type { Brand, PluginDetail } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -90,6 +91,7 @@ export function PluginPage({
   return (
     <ItemPage
       kind="plugin"
+      icon={d?.logo ? apiUrl(`/api/fs/media?path=${encodeURIComponent(d.logo)}`) : undefined}
       title={d?.title || summary.title || d?.name || summary.name}
       byline={d?.author ? `By ${d.author}` : undefined}
       badges={
