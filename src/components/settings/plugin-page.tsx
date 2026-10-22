@@ -38,7 +38,7 @@ export function PluginPage({
   summary,
   actions,
   onBack,
-  backLabel = 'Plugins',
+  backLabel,
   onServer,
   wide,
 }: {
@@ -46,7 +46,7 @@ export function PluginPage({
   scope: Scope;
   summary: PluginSummary;
   actions?: ReactNode;
-  onBack: () => void;
+  onBack?: () => void;
   backLabel?: string;
   /** Opens one of the plugin's MCP servers on the MCP servers tab. */
   onServer?: (name: string) => void;

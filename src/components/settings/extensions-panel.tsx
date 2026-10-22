@@ -12,7 +12,7 @@ import { ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { KindIcon } from '@/components/settings/kind-icon';
 import { wireScope } from '@/components/settings/mcp-servers-panel';
 import { PluginCatalogue } from '@/components/settings/plugin-catalogue';
-import { useOpenItem } from '@/components/settings/item-page';
+import { ItemDialog, useOpenItem } from '@/components/settings/item-page';
 import { PluginPage } from '@/components/settings/plugin-page';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { SettingsGroup } from '@/components/settings/section';
@@ -178,48 +178,51 @@ export function ExtensionsPanel({
   const plugins = kinds.find((k) => k.kind === 'plugins')?.items ?? [];
   // A link may name a plugin by `name@market` or by its bare name.
   const page = open ? plugins.find((p) => p.id === open) ?? plugins.find((p) => p.name === open) : undefined;
-  if (open && page) {
-    const key = `plugins:${page.id}`;
-    return (
-      <PluginPage
-        brand={brand}
-        scope={scope}
-        summary={page}
-        onBack={() => setOpen(null)}
-        // A switched-off plugin's servers are not listed, so there is nothing to open.
-        onServer={page.enabled !== false ? onServer : undefined}
-        actions={
-          <>
-            <label className="flex items-center gap-2 text-sm text-t-secondary">
-              {busy === key && <Spinner size="2xs" />}
-              On
-              <Switch
-                aria-label={`${page.name} on`}
-                checked={page.enabled !== false}
-                disabled={busy !== null}
-                onCheckedChange={(on) => void toggle(page, on)}
-                data-testid={`plugin-page-enabled-${page.id}`}
-              />
-            </label>
-            {page.removable !== false && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy !== null}
-                onClick={() => void remove('plugins', page).then(() => setOpen(null))}
-                data-testid={`plugin-page-remove-${page.id}`}
-              >
-                <Trash2 /> Uninstall
-              </Button>
-            )}
-          </>
-        }
-      />
-    );
-  }
+  const key = page ? `plugins:${page.id}` : '';
+  const dialog = (
+    <ItemDialog open={!!page} onClose={() => setOpen(null)} title={page?.name ?? 'Plugin'} testId="plugin-dialog">
+      {page && (
+        <PluginPage
+          brand={brand}
+          scope={scope}
+          summary={page}
+          wide={false}
+          // A switched-off plugin's servers are not listed, so there is nothing to open.
+          onServer={page.enabled !== false ? onServer : undefined}
+          actions={
+            <>
+              <label className="flex items-center gap-2 text-sm text-t-secondary">
+                {busy === key && <Spinner size="2xs" />}
+                On
+                <Switch
+                  aria-label={`${page.name} on`}
+                  checked={page.enabled !== false}
+                  disabled={busy !== null}
+                  onCheckedChange={(on) => void toggle(page, on)}
+                  data-testid={`plugin-page-enabled-${page.id}`}
+                />
+              </label>
+              {page.removable !== false && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() => void remove('plugins', page).then(() => setOpen(null))}
+                  data-testid={`plugin-page-remove-${page.id}`}
+                >
+                  <Trash2 /> Uninstall
+                </Button>
+              )}
+            </>
+          }
+        />
+      )}
+    </ItemDialog>
+  );
 
   return (
     <div className="space-y-4" data-testid={`extensions-${brand}`}>
+      {dialog}
       {kinds.map(({ kind, items }) => {
         const actions =
           kind === 'plugins' ? (

@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ChevronRight, LogIn, LogOut, Plus, Trash2 } from 'lucide-react';
 
 import { KindIcon } from '@/components/settings/kind-icon';
-import { useOpenItem } from '@/components/settings/item-page';
+import { ItemDialog, useOpenItem } from '@/components/settings/item-page';
 import { McpCatalogue } from '@/components/settings/mcp-catalogue';
 import { infoOfServer, McpPage } from '@/components/settings/mcp-page';
 import type { Scope } from '@/components/settings/provider-settings-api';
@@ -357,48 +357,51 @@ export function McpServersPanel({
 
   // A plugin's page names its server bare; Claude lists it as `plugin:<plugin>:<name>`.
   const page = open ? servers.find((s) => s.id === open) ?? servers.find((s) => s.source === 'plugin' && s.id.endsWith(`:${open}`)) : undefined;
-  if (open && page) {
-    const key = `${page.source}:${page.id}`;
-    return (
-      <McpPage
-        info={infoOfServer(page, shownName(page), sourceLabel(page))}
-        onBack={() => setOpen(null)}
-        onPlugin={onPlugin}
-        actions={
-          <>
-            {canToggle && (
-              <label className="flex items-center gap-2 text-sm text-t-secondary">
-                {busy === key && <Spinner size="2xs" />}
-                On
-                <Switch
-                  aria-label={`${page.id} on`}
-                  checked={page.enabled}
+  const key = page ? `${page.source}:${page.id}` : '';
+  const dialog = (
+    <ItemDialog open={!!page} onClose={() => setOpen(null)} title={page ? shownName(page) : 'MCP server'} testId="mcp-dialog">
+      {page && (
+        <McpPage
+          info={infoOfServer(page, shownName(page), sourceLabel(page))}
+          wide={false}
+          onPlugin={onPlugin}
+          actions={
+            <>
+              {canToggle && (
+                <label className="flex items-center gap-2 text-sm text-t-secondary">
+                  {busy === key && <Spinner size="2xs" />}
+                  On
+                  <Switch
+                    aria-label={`${page.id} on`}
+                    checked={page.enabled}
+                    disabled={busy !== null}
+                    onCheckedChange={(on) => void toggle(page, key, on)}
+                    data-testid={`mcp-page-enabled-${page.id}`}
+                  />
+                </label>
+              )}
+              {signButton(page, key)}
+              {!bundled(page) && (
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={busy !== null}
-                  onCheckedChange={(on) => void toggle(page, key, on)}
-                  data-testid={`mcp-page-enabled-${page.id}`}
-                />
-              </label>
-            )}
-            {signButton(page, key)}
-            {!bundled(page) && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy !== null}
-                onClick={() => void removeServer(page, key).then(() => setOpen(null))}
-                data-testid={`mcp-page-remove-${page.id}`}
-              >
-                <Trash2 /> Remove
-              </Button>
-            )}
-          </>
-        }
-      />
-    );
-  }
+                  onClick={() => void removeServer(page, key).then(() => setOpen(null))}
+                  data-testid={`mcp-page-remove-${page.id}`}
+                >
+                  <Trash2 /> Remove
+                </Button>
+              )}
+            </>
+          }
+        />
+      )}
+    </ItemDialog>
+  );
 
   return (
     <div className="space-y-4" data-testid={`mcp-servers-${brand}`}>
+      {dialog}
       <SettingsGroup
         title="MCP servers"
         actions={

@@ -78,14 +78,14 @@ export function McpPage({
   info,
   actions,
   onBack,
-  backLabel = 'MCP servers',
+  backLabel,
   onPlugin,
   wide,
   children,
 }: {
   info: McpInfo;
   actions?: ReactNode;
-  onBack: () => void;
+  onBack?: () => void;
   backLabel?: string;
   /** Opens the plugin this server comes with. */
   onPlugin?: (plugin: string) => void;

@@ -15,6 +15,7 @@ import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { MarkdownBody } from '@/components/markdown-body';
 import { KindIcon, type IconKind } from '@/components/settings/kind-icon';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Panel } from '@/components/ui/panel';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
@@ -84,6 +85,24 @@ export function useOpenItem(item?: string | null, onItem?: (item: string | null)
   return onItem ? [item ?? null, onItem] : [own, setOwn];
 }
 
+/**
+ * The popup an item's page opens in. The catalogues and the installed lists
+ * share it, so a plugin or a server looks the same wherever it is opened from.
+ */
+export function ItemDialog({ open, onClose, title, testId, children }: { open: boolean; onClose: () => void; title: string; testId: string; children: ReactNode }) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent shape="sheet" className="sm:max-w-2xl" data-testid={testId}>
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{title}</DialogDescription>
+        </DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ItemPage({
   kind,
   icon,
@@ -119,9 +138,9 @@ export function ItemPage({
   readmeLoading?: boolean;
   facts: Fact[];
   groups?: PartGroup[];
-  /** What Back returns to, such as "Plugins". */
-  backLabel: string;
-  onBack: () => void;
+  /** What Back returns to, such as "All plugins". No Back when the page is all the popup shows. */
+  backLabel?: string;
+  onBack?: () => void;
   /** Room for a side column. False inside a sheet. */
   wide?: boolean;
   testId: string;
@@ -158,9 +177,11 @@ export function ItemPage({
 
   return (
     <div className="space-y-5" data-testid={testId}>
-      <Button variant="ghost" size="sm" className="-ml-2" onClick={onBack} data-testid="item-back">
-        <ArrowLeft /> {backLabel}
-      </Button>
+      {onBack && (
+        <Button variant="ghost" size="sm" className="-ml-2" onClick={onBack} data-testid="item-back">
+          <ArrowLeft /> {backLabel}
+        </Button>
+      )}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start">
         <KindIcon kind={kind} src={icon} className="size-14 [&>svg]:size-7" />
         <div className="min-w-0 flex-1 space-y-1.5">
@@ -170,7 +191,8 @@ export function ItemPage({
           {byline && <p className="text-sm text-t-tertiary">{byline}</p>}
           {badges && <div className="flex flex-wrap items-center gap-1.5">{badges}</div>}
         </div>
-        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+        {/* Without a Back row the popup's close button sits beside the actions, so leave it room. */}
+        {actions && <div className={cn('flex shrink-0 flex-wrap items-center gap-2', !onBack && 'sm:mr-8')}>{actions}</div>}
       </header>
       <div className={cn('grid gap-6', wide && 'lg:grid-cols-[minmax(0,1fr)_18rem]')}>
         <div className="min-w-0 space-y-4">

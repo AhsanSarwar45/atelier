@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 /**
  * Every plugin and MCP server row opens a page of its own (bw-moh1k).
@@ -18,6 +18,11 @@ const marketplace = resolve('tests/fixtures/plugin-marketplace');
 const TIDY = 'tidy-notes@beads-web-fixture';
 
 test.describe.configure({ mode: 'serial' });
+
+/** Waits for a popup to finish opening, so a screenshot shows it, not its fade. */
+async function settled(page: Page, testId: string) {
+  await page.getByTestId(testId).evaluate((el) => Promise.allSettled(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+}
 
 test.beforeAll(() => {
   mkdirSync(results, { recursive: true });
@@ -47,6 +52,7 @@ test('a catalogue plugin opens its page, is installed from it, and the installed
   await expect(page.getByTestId('plugin-page-includes-skills')).toContainText('sort-notes');
   await expect(page.getByTestId('plugin-page-includes-skills')).toContainText('Puts notes in date order');
   await expect(page.getByTestId('plugin-page-details')).toContainText('1.0.0');
+  await settled(page, 'plugin-catalogue');
   await page.screenshot({ path: join(results, 'catalogue-page.png') });
 
   // Back returns to the list as it was left.
@@ -61,13 +67,16 @@ test('a catalogue plugin opens its page, is installed from it, and the installed
   await expect(page.getByTestId('plugin-catalogue')).toHaveCount(0, { timeout: 60_000 });
   await expect(page.getByTestId(`extension-plugins-${TIDY}`)).toBeVisible();
 
-  // The installed row opens the page, named in the address.
+  // The installed row opens the same page in the same popup, over the list, named in the address.
   await page.getByTestId(`plugin-open-${TIDY}`).click();
-  await expect(pluginPage).toBeVisible();
+  await expect(page.getByTestId('plugin-dialog').getByTestId('plugin-page')).toBeVisible();
+  await expect(page.getByTestId(`extension-plugins-${TIDY}`)).toBeAttached();
+  await expect(page.getByTestId('item-back')).toHaveCount(0);
   await expect(page).toHaveURL(/item=tidy-notes%40beads-web-fixture/);
   await expect(page.getByTestId('plugin-page-readme')).toContainText('Sorts your notes by date');
   const on = page.getByTestId(`plugin-page-enabled-${TIDY}`);
   await expect(on).toBeChecked();
+  await settled(page, 'plugin-dialog');
   await page.screenshot({ path: join(results, 'installed-page.png') });
 
   // A reload lands on the same page; switching it off there is seen on the list.
@@ -75,7 +84,9 @@ test('a catalogue plugin opens its page, is installed from it, and the installed
   await expect(on).toBeChecked({ timeout: 30_000 });
   await on.click();
   await expect(on).not.toBeChecked({ timeout: 30_000 });
-  await page.getByTestId('item-back').click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('plugin-dialog')).toHaveCount(0);
+  await expect(page).not.toHaveURL(/item=/);
   await expect(page.getByTestId(`plugin-enabled-${TIDY}`)).not.toBeChecked();
 
   // Off, its servers are not linked; back on, a server it adds opens that server's page on the MCP tab.
@@ -86,7 +97,7 @@ test('a catalogue plugin opens its page, is installed from it, and the installed
   await expect(on).toBeChecked({ timeout: 30_000 });
   await servers.getByRole('button', { name: 'tidy-index' }).click();
   await expect(page).toHaveURL(/tab=mcp/);
-  await expect(page.getByTestId('mcp-page-title')).toHaveText('tidy-index', { timeout: 30_000 });
+  await expect(page.getByTestId('mcp-dialog').getByTestId('mcp-page-title')).toHaveText('tidy-index', { timeout: 30_000 });
   await expect(page.getByTestId('mcp-page-details')).toContainText('tidy-notes plugin');
   await page.goto('/settings?section=claude&tab=plugins&account=system');
 
@@ -109,6 +120,7 @@ test('a catalogue server and an added server each open a page that says how they
   await expect(page.getByTestId('mcp-page-title')).toHaveText('Inspektor Gadget');
   await expect(mcpPage).toContainText('Needs Docker');
   await expect(page.getByTestId('mcp-page-details')).toContainText('Runs');
+  await settled(page, 'mcp-catalogue');
   await page.screenshot({ path: join(results, 'catalogue-server.png') });
   await page.getByTestId('item-back').click();
   await expect(page.getByTestId('catalogue-entry-inspektor-gadget')).toBeVisible();
@@ -120,10 +132,12 @@ test('a catalogue server and an added server each open a page that says how they
   await page.getByTestId('mcp-add-command').fill('node probe.js --quiet');
   await page.getByTestId('mcp-add-submit').click();
   await page.getByTestId('mcp-open-page-probe').click();
-  await expect(mcpPage).toBeVisible();
+  await expect(page.getByTestId('mcp-dialog').getByTestId('mcp-page')).toBeVisible();
+  await expect(page.getByTestId('mcp-server-page-probe')).toBeAttached();
   await expect(page).toHaveURL(/item=page-probe/);
   await expect(page.getByTestId('mcp-page-details')).toContainText('node probe.js --quiet');
   await expect(page.getByTestId('mcp-page-enabled-page-probe')).toBeChecked();
+  await settled(page, 'mcp-dialog');
   await page.screenshot({ path: join(results, 'added-server.png') });
   await page.getByTestId('mcp-page-remove-page-probe').click();
   await expect(mcpPage).toHaveCount(0);
@@ -146,6 +160,7 @@ test('Codex gets the same pages, and a server that comes with a Codex plugin is 
   await page.getByTestId(`plugin-catalogue-open-${TIDY}`).click();
   await expect(page.getByTestId('plugin-page-readme')).toContainText('Sorts your notes by date', { timeout: 30_000 });
   await expect(page.getByTestId('plugin-page-includes-mcp-servers')).toContainText('tidy-index');
+  await settled(page, 'plugin-catalogue');
   await page.screenshot({ path: join(results, 'codex-catalogue-page.png') });
   await page.getByTestId(`plugin-page-install-${TIDY}`).click();
   await expect(page.getByTestId('plugin-catalogue')).toHaveCount(0, { timeout: 60_000 });
@@ -160,6 +175,7 @@ test('Codex gets the same pages, and a server that comes with a Codex plugin is 
   // Its page links to the plugin it comes with.
   await page.getByTestId('mcp-open-tidy-index').click();
   await expect(page.getByTestId('mcp-page-details')).toContainText('index.js');
+  await settled(page, 'mcp-dialog');
   await page.screenshot({ path: join(results, 'codex-plugin-server.png') });
   await page.getByTestId('mcp-page-plugin').click();
   await expect(page).toHaveURL(/tab=plugins/);
