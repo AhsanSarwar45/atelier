@@ -50,19 +50,28 @@ export function shelfName(id: string): string {
   return words[id] ?? id.charAt(0).toUpperCase() + id.slice(1).replace(/-/g, ' ');
 }
 
-/** One row, and the boxes it asks for before it can be added. */
+/**
+ * One row, and the boxes it asks for before it can be added. What was typed
+ * lives in the list, not the row: a row scrolled out of view is unmounted, and
+ * scrolling back must find the boxes as they were left.
+ */
 const Row = memo(function Row({
   entry,
   busy,
+  form,
+  onForm,
   onAdd,
 }: {
   entry: McpCatalogueEntry;
   busy: boolean;
+  form: Record<string, string> | undefined;
+  onForm: (key: string, form: Record<string, string>) => void;
   onAdd: (entry: McpCatalogueEntry, env: Record<string, string>) => Promise<void>;
 }) {
   const needs = entry.needs ?? [];
-  const [asking, setAsking] = useState(false);
-  const [given, setGiven] = useState<Record<string, string>>({});
+  const asking = form !== undefined;
+  const given = form ?? {};
+  const setAsking = () => onForm(entryKey(entry), {});
   const missing = needs.some((need) => !(given[need.name] ?? '').trim());
 
   return (
@@ -96,7 +105,7 @@ const Row = memo(function Row({
           size="sm"
           variant="outline"
           disabled={busy}
-          onClick={() => (needs.length > 0 && !asking ? setAsking(true) : void onAdd(entry, given))}
+          onClick={() => (needs.length > 0 && !asking ? setAsking() : void onAdd(entry, given))}
           data-testid={`catalogue-add-${entry.id}`}
         >
           {busy ? <Spinner size="inherit" /> : <Plus />} Add
@@ -111,7 +120,7 @@ const Row = memo(function Row({
                 aria-label={need.name}
                 placeholder={need.name}
                 value={given[need.name] ?? ''}
-                onChange={(e) => setGiven((was) => ({ ...was, [need.name]: e.target.value }))}
+                onChange={(e) => onForm(entryKey(entry), { ...given, [need.name]: e.target.value })}
                 className="font-mono text-xs"
                 data-testid={`catalogue-need-${entry.id}-${need.name}`}
               />
@@ -148,6 +157,9 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
   // The search the shown catalogue answered; while it differs from `search`, a
   // newer answer is on its way.
   const [answered, setAnswered] = useState<string | null>(null);
+  // The boxes each row has opened, by entry, kept while the sheet is open.
+  const [forms, setForms] = useState<Record<string, Record<string, string>>>({});
+  const onForm = useCallback((key: string, form: Record<string, string>) => setForms((was) => ({ ...was, [key]: form })), []);
   const { toast } = useToast();
 
   // A keystroke is not a search: the registry is asked once the typing stops.
@@ -190,6 +202,7 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
         onAdded(servers);
         toast({ title: `${entry.title} added` });
         setOpen(false);
+        setForms({});
       } catch (e) {
         toast({ title: 'Not added', description: said(e), variant: 'destructive' });
       } finally {
@@ -217,7 +230,13 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
       <Button variant="outline" size="sm" onClick={() => setOpen(true)} data-testid="mcp-browse">
         <Boxes /> Browse
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setForms({});
+        }}
+      >
         <DialogContent shape="sheet" className="sm:max-w-2xl" data-testid="mcp-catalogue">
           <DialogHeader>
             <DialogTitle>Add server</DialogTitle>
@@ -271,7 +290,7 @@ export function McpCatalogue({ brand, scope, source, onAdded }: { brand: Brand; 
             <CatalogueList
               items={shown}
               itemKey={entryKey}
-              render={(entry) => <Row entry={entry} busy={busy === entry.id} onAdd={add} />}
+              render={(entry) => <Row entry={entry} busy={busy === entry.id} form={forms[entryKey(entry)]} onForm={onForm} onAdd={add} />}
               testId="mcp-catalogue-list"
             />
           )}

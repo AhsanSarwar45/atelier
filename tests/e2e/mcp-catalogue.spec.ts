@@ -76,6 +76,12 @@ test('a server that cannot start without a key asks for it before it is added', 
   await page.screenshot({ path: join(results, 'needs.png') });
 
   await page.getByTestId('catalogue-need-brave-BRAVE_API_KEY').fill('a-test-key');
+  // Only rows in view are drawn. Moving to another shelf and back unmounts the
+  // row, and what was typed must still be there.
+  await page.getByTestId('catalogue-shelf-monitoring').click();
+  await expect(needs).toHaveCount(0);
+  await page.getByTestId('catalogue-shelf-search').click();
+  await expect(page.getByTestId('catalogue-need-brave-BRAVE_API_KEY')).toHaveValue('a-test-key');
   await page.getByTestId('catalogue-confirm-brave').click();
   await expect(page.getByTestId('mcp-catalogue')).toHaveCount(0);
   await expect(page.getByTestId('mcp-server-brave')).toBeVisible();
