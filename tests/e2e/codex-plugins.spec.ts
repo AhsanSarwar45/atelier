@@ -34,6 +34,9 @@ test('a Codex account browses, installs, switches off and removes a plugin', asy
   await expect(page.getByTestId('extension-marketplaces-beads-web-fixture')).toBeVisible({ timeout: 60_000 });
 
   await page.getByTestId('plugin-browse').click();
+  // Codex's store lists thousands and only the rows in view are drawn, so the
+  // fixture's row is found by name.
+  await page.getByTestId('plugin-catalogue-search').fill('tidy');
   const tidy = page.getByTestId('plugin-entry-tidy-notes@beads-web-fixture');
   await expect(tidy).toBeVisible({ timeout: 30_000 });
   await expect(tidy).toContainText('beads-web-fixture');
