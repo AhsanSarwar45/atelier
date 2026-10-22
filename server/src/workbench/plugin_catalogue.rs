@@ -267,6 +267,87 @@ pub async fn browse(account_dir: &Path) -> Listing {
     }
 }
 
+/// One plugin's page (bw-moh1k.1): what its marketplace says, and, when it is
+/// on this computer, its own manifest, README and what it adds. A plugin only a
+/// published marketplace has is read from GitHub: its README, and nothing it
+/// adds until it is installed.
+pub async fn detail(account_dir: &Path, installed_at: Option<PathBuf>, id: &str) -> super::item_detail::PluginDetail {
+    use super::item_detail::{self, entry_place, fill_from_entry, fill_from_folder, Place, PluginDetail};
+    let (name, market) = id.split_once('@').unwrap_or((id, ""));
+    let mut detail = PluginDetail {
+        id: id.to_string(),
+        name: name.to_string(),
+        marketplace: market.to_string(),
+        installed: installed_at.is_some() || installed_ids(account_dir).contains(id),
+        ..PluginDetail::default()
+    };
+    let find = |manifest: &Value| -> Option<Value> {
+        manifest
+            .get("plugins")?
+            .as_array()?
+            .iter()
+            .find(|entry| text(entry.get("name")) == name)
+            .cloned()
+    };
+    let known = known_marketplaces(account_dir);
+    let mut entry: Option<Value> = None;
+    let mut root: Option<PathBuf> = None;
+    let mut repo: Option<String> = None;
+    if let Some((path, origin)) = known.get(market) {
+        entry = read_json(&path.join(".claude-plugin/marketplace.json")).and_then(|m| find(&m));
+        root = Some(path.clone());
+        repo = github_of(origin);
+    }
+    if entry.is_none() {
+        for published in PUBLISHED {
+            if let Ok(manifest) = fetch_kept(published).await {
+                if text(manifest.get("name")) == market {
+                    entry = find(&manifest);
+                    repo = Some(published.to_string());
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(entry) = &entry {
+        fill_from_entry(&mut detail, entry);
+    }
+    if let Some(dir) = installed_at.filter(|dir| dir.is_dir()) {
+        fill_from_folder(&mut detail, &dir);
+        detail.installed = true;
+        return detail;
+    }
+    match entry.as_ref().map(|e| entry_place(e, root.as_deref(), repo.as_deref())) {
+        Some(Place::Folder(dir)) => fill_from_folder(&mut detail, &dir),
+        Some(Place::GitHub { repo, path }) => {
+            detail.readme = item_detail::github_readme(&repo, &path).await.ok().flatten();
+            if detail.repository.is_empty() {
+                detail.repository = if path.is_empty() {
+                    format!("https://github.com/{repo}")
+                } else {
+                    format!("https://github.com/{repo}/tree/HEAD/{path}")
+                };
+            }
+        }
+        _ => {}
+    }
+    if detail.title.is_empty() {
+        detail.title = detail.name.clone();
+    }
+    detail
+}
+
+/// `owner/repo` out of the address a marketplace was added from, when that is
+/// GitHub.
+fn github_of(origin: &str) -> Option<String> {
+    if let Some((repo, _)) = super::item_detail::github_repo(origin) {
+        return Some(repo);
+    }
+    let parts: Vec<&str> = origin.split('/').collect();
+    (parts.len() == 2 && !origin.contains(':') && !origin.starts_with('.') && parts.iter().all(|p| !p.is_empty()))
+        .then(|| origin.to_string())
+}
+
 /// How long a fetched marketplace is reused before it is asked for again.
 const KEEP: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 

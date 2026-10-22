@@ -993,6 +993,8 @@ export interface McpServer {
   title?: string;
   description?: string;
   icon?: string;
+  /** Where its source lives, when the catalogue knows. */
+  repository?: string;
 }
 
 /**
@@ -1087,6 +1089,60 @@ export interface PluginCatalogue {
   unreachable?: string[];
 }
 
+/** One command, skill or agent a plugin adds, and the line it describes itself with. */
+export interface NamedPart {
+  name: string;
+  description?: string;
+}
+
+/** An MCP server a plugin starts, and what it runs or connects to. */
+export interface BundledServer {
+  name: string;
+  transport: string;
+  target?: string;
+}
+
+/** Everything a plugin adds when it is on. */
+export interface PluginContents {
+  commands: NamedPart[];
+  skills: NamedPart[];
+  agents: NamedPart[];
+  hooks: string[];
+  mcpServers: BundledServer[];
+  apps: NamedPart[];
+}
+
+/** What `plugin.detail` answers with: the page a plugin opens to. */
+export interface PluginDetail {
+  id: string;
+  name: string;
+  title?: string;
+  description?: string;
+  longDescription?: string;
+  version?: string;
+  author?: string;
+  homepage?: string;
+  repository?: string;
+  privacyPolicy?: string;
+  terms?: string;
+  license?: string;
+  category?: string;
+  keywords?: string[];
+  marketplace?: string;
+  /** The README, as written. */
+  readme?: string;
+  /** The folder the README was read from, so its relative links resolve. */
+  readmeBase?: string;
+  contents?: PluginContents;
+  installed: boolean;
+}
+
+/** What `mcp.detail` answers with: the server's README, when it can be fetched. */
+export interface McpDetail {
+  readme?: string;
+  unread?: string;
+}
+
 export type ExtensionKind = 'plugins' | 'marketplaces';
 
 export interface ExtensionItem {
@@ -1130,6 +1186,8 @@ export type WbpCommand =
   | ({ type: 'plugin.install'; brand: Brand; id: string } & SettingsScope)
   | ({ type: 'plugin.uninstall'; brand: Brand; id: string } & SettingsScope)
   | ({ type: 'plugin.catalogue'; brand: Brand } & SettingsScope)
+  | ({ type: 'plugin.detail'; brand: Brand; id: string } & SettingsScope)
+  | { type: 'mcp.detail'; repository?: string }
   | ({ type: 'plugin.install-from-catalogue'; brand: Brand; id: string; origin?: string; known?: boolean } & SettingsScope)
   | ({ type: 'marketplace.add'; brand: Brand; source: string } & SettingsScope)
   | ({ type: 'marketplace.remove'; brand: Brand; name: string } & SettingsScope)

@@ -415,6 +415,115 @@ pub async fn browse(program: &Path, spawn_dir: Option<&Path>, home: &Path) -> Re
     Ok(catalogue(&available, &about_everything(home, &markets)))
 }
 
+/// The newest `release` the remote catalogue cache holds for a plugin name.
+fn remote_release(home: &Path, name: &str) -> Option<Value> {
+    let mut caches: Vec<(String, Value)> = fs::read_dir(home.join("cache/remote_plugin_catalog"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| read_json(&entry.path()))
+        .map(|cache| (text(cache.get("fetched_at")), cache))
+        .collect();
+    caches.sort_by(|a, b| a.0.cmp(&b.0));
+    caches.into_iter().rev().find_map(|(_, cache)| {
+        cache
+            .get("plugins")?
+            .as_array()?
+            .iter()
+            .find(|plugin| text(plugin.get("name")) == name)?
+            .get("release")
+            .cloned()
+    })
+}
+
+/// The newest installed copy of a plugin, if the account has one.
+fn installed_copy(home: &Path, market: &str, name: &str) -> Option<PathBuf> {
+    let base = home.join("plugins/cache").join(market).join(name);
+    let mut versions: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(&base)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.join(".codex-plugin/plugin.json").is_file())
+        .map(|path| (fs::metadata(&path).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), path))
+        .collect();
+    versions.sort();
+    versions.pop().map(|(_, path)| path)
+}
+
+/// One plugin's page (bw-moh1k.1), from the same places the lists read: the
+/// installed copy, else the marketplace's own copy, else what the remote
+/// catalogue Codex caches says about it.
+pub async fn detail(program: &Path, spawn_dir: Option<&Path>, home: &Path, id: &str) -> super::item_detail::PluginDetail {
+    use super::item_detail::{entry_place, fill_from_entry, fill_from_folder, Place, PluginDetail};
+    let (name, market) = id.split_once('@').unwrap_or((id, ""));
+    let mut detail = PluginDetail {
+        id: id.to_string(),
+        name: name.to_string(),
+        marketplace: market.to_string(),
+        ..PluginDetail::default()
+    };
+    // The remote catalogue's longer account, which its short line leaves out.
+    if let Some(release) = remote_release(home, name) {
+        detail.long_description = text(release.get("description"));
+        detail.version = text(release.get("version"));
+        let face = release.get("interface");
+        detail.privacy_policy = text(face.and_then(|f| f.get("privacy_policy_url")));
+        detail.terms = text(face.and_then(|f| f.get("terms_of_service_url")));
+    }
+    if let Some(about) = remote_catalogue(home).get(id) {
+        detail.title = about.title.clone();
+        detail.description = about.description.clone();
+        detail.category = about.category.clone();
+        detail.keywords = about.keywords.clone();
+        detail.author = about.author.clone();
+        detail.homepage = about.homepage.clone();
+    }
+    let markets = extensions::run_cli_json(
+        program,
+        HOME_VARIABLE,
+        spawn_dir,
+        &["plugin", "marketplace", "list", "--json"],
+        extensions::QUICK_CLI,
+    )
+    .await
+    .unwrap_or(Value::Null);
+    let mut place = Place::Unknown;
+    for (named, root) in roots(&markets) {
+        let Some(manifest) = marketplace_manifest(&root) else {
+            continue;
+        };
+        let called = match text(manifest.get("name")) {
+            own if own.is_empty() => named.clone(),
+            own => own,
+        };
+        if called != market {
+            continue;
+        }
+        let entry = manifest
+            .get("plugins")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|entry| text(entry.get("name")) == name);
+        if let Some(entry) = entry {
+            fill_from_entry(&mut detail, entry);
+            place = entry_place(entry, Some(&root), None);
+        }
+        break;
+    }
+    if let Some(dir) = installed_copy(home, market, name) {
+        detail.installed = true;
+        fill_from_folder(&mut detail, &dir);
+    } else if let Place::Folder(dir) = place {
+        fill_from_folder(&mut detail, &dir);
+    }
+    if detail.title.is_empty() {
+        detail.title = detail.name.clone();
+    }
+    detail
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

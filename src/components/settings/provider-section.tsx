@@ -99,13 +99,19 @@ export function ProviderSection({
   tab,
   onAccount,
   onTab,
+  item,
+  onItem,
   pages,
 }: {
   brand: Brand;
   account: string | null;
   tab: string;
   onAccount: (profileId: string) => void;
-  onTab: (tab: string) => void;
+  /** Opens a tab, and on it the page of one item, when one is named. */
+  onTab: (tab: string, item?: string) => void;
+  /** The plugin or server whose page is open on the current tab. */
+  item?: string | null;
+  onItem?: (item: string | null) => void;
   pages?: (scope: Scope, tab: string) => ReactNode;
 }) {
   const { profiles, unread } = useProfiles(brand);
@@ -127,13 +133,13 @@ export function ProviderSection({
           <span className="text-sm text-t-tertiary">Reading accounts…</span>
         )}
       </div>
-      <ProviderTabs brand={brand} tab={known} onOpen={onTab}>
+      <ProviderTabs brand={brand} tab={known} onOpen={(t) => onTab(t)}>
         {isPage ? (
           <ProviderSettingsPanel brand={brand} scope={scope} page={known} layer="user" />
         ) : known === 'mcp' ? (
-          <McpServersPanel brand={brand} scope={scope} />
+          <McpServersPanel brand={brand} scope={scope} item={item} onItem={onItem} onPlugin={(p) => onTab('plugins', p)} />
         ) : known === 'plugins' ? (
-          <ExtensionsPanel brand={brand} scope={scope} />
+          <ExtensionsPanel brand={brand} scope={scope} item={item} onItem={onItem} onServer={(s) => onTab('mcp', s)} />
         ) : (
           pages?.(scope, known)
         )}

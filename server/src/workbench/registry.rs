@@ -2144,6 +2144,32 @@ impl WorkbenchRegistry {
                 self.claude_plugin_cli(command, words, extensions::QUICK_CLI)
                     .await
             }
+            CommandKind::McpDetail => {
+                let repository = Self::maybe(command, "repository");
+                serde_json::to_value(super::item_detail::mcp_detail(repository).await).map_err(|e| e.to_string())
+            }
+            CommandKind::PluginDetail => {
+                let id = Self::field(command, "id")?.to_string();
+                if let Some((dir, spawn_dir)) = self.codex_plugin_account(command)? {
+                    let program = Self::codex_program()?;
+                    let detail = codex_plugins::detail(&program, spawn_dir.as_deref(), &dir, &id).await;
+                    return serde_json::to_value(detail).map_err(|e| e.to_string());
+                }
+                let (brand, scope, dir, _) = self.extension_account(command)?;
+                if brand != "claude" {
+                    return Err("brand must be claude or codex".into());
+                }
+                // The folder the list itself shows, so an installed or synced
+                // plugin's page is read from exactly what a chat loads.
+                let installed_at = extensions::list(&brand, &scope, &dir)?
+                    .into_iter()
+                    .filter(|list| list.kind == extensions::Kind::Plugins)
+                    .flat_map(|list| list.items)
+                    .find(|item| item.id == id)
+                    .map(|item| item.path);
+                let detail = plugin_catalogue::detail(&dir, installed_at, &id).await;
+                serde_json::to_value(detail).map_err(|e| e.to_string())
+            }
             CommandKind::McpCatalogue => {
                 let search = Self::maybe(command, "search");
                 let listing = mcp_catalogue::browse(search).await;

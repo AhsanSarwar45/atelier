@@ -5,13 +5,15 @@
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 
-import { Plus, Trash2 } from 'lucide-react';
+import { ChevronRight, Plus, Trash2 } from 'lucide-react';
 
 import { KindIcon } from '@/components/settings/kind-icon';
 import { wireScope } from '@/components/settings/mcp-servers-panel';
 import { PluginCatalogue } from '@/components/settings/plugin-catalogue';
+import { useOpenItem } from '@/components/settings/item-page';
+import { PluginPage } from '@/components/settings/plugin-page';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +24,7 @@ import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Spinner } from '@/components/ui/spinner';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import type { Brand, ExtensionItem, ExtensionKind, ExtensionKindList } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -102,7 +105,22 @@ function AddOne({
   );
 }
 
-export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }) {
+export function ExtensionsPanel({
+  brand,
+  scope,
+  item: openItem,
+  onItem,
+  onServer,
+}: {
+  brand: Brand;
+  scope: Scope;
+  /** The plugin whose page is open. */
+  item?: string | null;
+  onItem?: (item: string | null) => void;
+  /** Opens one of a plugin's MCP servers on the MCP servers tab. */
+  onServer?: (name: string) => void;
+}) {
+  const [open, setOpen] = useOpenItem(openItem, onItem);
   const [kinds, setKinds] = useState<ExtensionKindList[] | null>(null);
   const [unread, setUnread] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -154,6 +172,50 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
     if (kind === 'plugins') return act(key, () => sendCommand({ type: 'plugin.uninstall', brand, ...wire, id: item.id }), 'Uninstalled');
     return act(key, () => sendCommand({ type: 'marketplace.remove', brand, ...wire, name: item.id }), 'Removed');
   };
+  const toggle = (item: ExtensionItem, on: boolean) =>
+    act(`plugins:${item.id}`, () => sendCommand({ type: 'plugin.set-enabled', brand, ...wire, id: item.id, enabled: on }));
+
+  const plugins = kinds.find((k) => k.kind === 'plugins')?.items ?? [];
+  // A link may name a plugin by `name@market` or by its bare name.
+  const page = open ? plugins.find((p) => p.id === open) ?? plugins.find((p) => p.name === open) : undefined;
+  if (open && page) {
+    const key = `plugins:${page.id}`;
+    return (
+      <PluginPage
+        brand={brand}
+        scope={scope}
+        summary={page}
+        onBack={() => setOpen(null)}
+        onServer={onServer}
+        actions={
+          <>
+            <label className="flex items-center gap-2 text-sm text-t-secondary">
+              {busy === key && <Spinner size="2xs" />}
+              On
+              <Switch
+                aria-label={`${page.name} on`}
+                checked={page.enabled !== false}
+                disabled={busy !== null}
+                onCheckedChange={(on) => void toggle(page, on)}
+                data-testid={`plugin-page-enabled-${page.id}`}
+              />
+            </label>
+            {page.removable !== false && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy !== null}
+                onClick={() => void remove('plugins', page).then(() => setOpen(null))}
+                data-testid={`plugin-page-remove-${page.id}`}
+              >
+                <Trash2 /> Uninstall
+              </Button>
+            )}
+          </>
+        }
+      />
+    );
+  }
 
   return (
     <div className="space-y-4" data-testid={`extensions-${brand}`}>
@@ -186,18 +248,39 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
               const key = `${kind}:${item.id}`;
               const detail = item.description ?? '';
               return (
-                <div key={key} className="flex items-center gap-3 px-3 py-2" data-testid={`extension-${kind}-${item.id}`}>
+                <div
+                  key={key}
+                  className={`flex items-center gap-3 px-3 py-2 ${kind === 'plugins' ? 'transition-colors hover:bg-surface-overlay/40' : ''}`}
+                  data-testid={`extension-${kind}-${item.id}`}
+                >
                   {kind === 'plugins' && (
                     <Checkbox
                       aria-label={`${item.name} on`}
                       checked={item.enabled !== false}
                       disabled={busy !== null}
-                      onCheckedChange={(c) => void act(key, () => sendCommand({ type: 'plugin.set-enabled', brand, ...wire, id: item.id, enabled: c === true }))}
+                      onCheckedChange={(c) => void toggle(item, c === true)}
                       data-testid={`plugin-enabled-${item.id}`}
                     />
                   )}
                   <KindIcon kind={kind === 'plugins' ? 'plugin' : 'marketplace'} />
-                  <div className="min-w-0 flex-1">
+                  <div
+                    className={`min-w-0 flex-1 ${kind === 'plugins' ? 'cursor-pointer' : ''}`}
+                    {...(kind === 'plugins'
+                      ? {
+                          role: 'button',
+                          tabIndex: 0,
+                          'aria-label': `Open ${item.name}`,
+                          onClick: () => setOpen(item.id),
+                          onKeyDown: (e: KeyboardEvent) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setOpen(item.id);
+                            }
+                          },
+                          'data-testid': `plugin-open-${item.id}`,
+                        }
+                      : {})}
+                  >
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium text-t-primary">{item.name}</span>
                       {item.version && (
@@ -223,6 +306,11 @@ export function ExtensionsPanel({ brand, scope }: { brand: Brand; scope: Scope }
                       </Tooltip>
                     )}
                   </div>
+                  {kind === 'plugins' && (
+                    <Button variant="ghost" size="sm" aria-label={`Open ${item.name}`} onClick={() => setOpen(item.id)} tabIndex={-1}>
+                      <ChevronRight />
+                    </Button>
+                  )}
                   {item.removable === false ? (
                     <Badge variant="secondary" size="sm" data-testid={`extension-fixed-${item.id}`}>
                       {item.marketplace === 'synced' ? 'Synced' : 'Built in'}

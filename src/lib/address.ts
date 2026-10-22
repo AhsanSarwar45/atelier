@@ -9,6 +9,7 @@
  *   …&message=<id>                            a search's jump into the chat, dropped once made
  *   …&diff=<@diff id>                          a diff to show, dropped once shown
  *   …&settings=<section>&ptab=<provider tab>   the project's settings, over the top
+ *   …&pitem=<plugin or server>                 the page of one item on that tab
  *
  * Design: docs/designs/app-shell.md §1.7.
  */
@@ -38,6 +39,8 @@ export interface Where {
   settings: string | null;
   /** The provider tab inside a settings section. */
   ptab: string | null;
+  /** The plugin or MCP server whose page is open on that tab. */
+  pitem: string | null;
 }
 
 /**
@@ -87,6 +90,7 @@ export function whereFrom(params: URLSearchParams): Where {
     diff: params.get('diff'),
     settings: params.get('settings'),
     ptab: params.get('ptab'),
+    pitem: params.get('pitem'),
   };
 }
 

@@ -82,7 +82,7 @@ function ProjectTabs() {
   // The address decides which tab is showing, which chat is drawn in it and
   // which card is over the top, so every one of them survives a link, a fresh
   // tab and the Back button (docs/designs/app-shell.md §1.7).
-  const { id: projectId, tab, chat: openChat, card: openCard, file: openFile, line: openLine, settings: openSettings, ptab } = whereFrom(params);
+  const { id: projectId, tab, chat: openChat, card: openCard, file: openFile, line: openLine, settings: openSettings, ptab, pitem } = whereFrom(params);
   const { project, error: projectError, refetch } = useProject(projectId);
   // The folder this screen is showing, which is where a shell opened from
   // its bar starts. `projectDir` and not `project.path`, because a
@@ -254,7 +254,7 @@ function ProjectTabs() {
             // The list, not the first section: on a phone the list is the
             // screen settings open on, and a wide screen shows the first
             // section beside it anyway.
-            onClick={() => goSettings({ settings: 'list', ptab: null })}
+            onClick={() => goSettings({ settings: 'list', ptab: null, pitem: null })}
           >
             <EllipsisVertical className="h-4 w-4 opacity-100" />
           </Button>
@@ -372,9 +372,11 @@ function ProjectTabs() {
             archivedAt={project.archivedAt ?? undefined}
             section={openSettings === 'list' ? null : openSettings}
             tab={ptab}
-            onOpen={(id) => goSettings({ settings: id ?? 'list', ptab: null })}
-            onTab={(id) => goSettings({ ptab: id })}
-            backHref={addressWith(params, { settings: null, ptab: null })}
+            item={pitem}
+            onOpen={(id) => goSettings({ settings: id ?? 'list', ptab: null, pitem: null })}
+            onTab={(id, item) => goSettings({ ptab: id, pitem: item ?? null })}
+            onItem={(item) => goSettings({ pitem: item })}
+            backHref={addressWith(params, { settings: null, ptab: null, pitem: null })}
             backSteps={() => stepsOut((url) => !url.searchParams.has('settings'), settingsPushes.current)}
             onUpdated={refetch}
           />

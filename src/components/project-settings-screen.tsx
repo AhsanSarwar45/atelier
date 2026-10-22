@@ -81,7 +81,11 @@ export interface ProjectSettingsScreenProps {
   /** Which provider tab is open inside a provider section. */
   tab: string | null;
   onOpen: (section: string | null) => void;
-  onTab: (tab: string) => void;
+  /** Opens a tab, and on it the page of one item, when one is named. */
+  onTab: (tab: string, item?: string) => void;
+  /** The plugin or server whose page is open on the current tab. */
+  item?: string | null;
+  onItem?: (item: string | null) => void;
   /** Where the arrow goes when nothing of ours is behind. */
   backHref: string;
   /** How many entries this visit to the settings pushed, so the arrow steps over all of them. */
@@ -98,7 +102,19 @@ export interface ProjectSettingsScreenProps {
  * signed in all live in the account's own files, so the list is drawn for one
  * account: the one new chats open on, unless another is picked here.
  */
-function ProjectMcp({ brand, folder }: { brand: Brand; folder: string }) {
+function ProjectMcp({
+  brand,
+  folder,
+  item,
+  onItem,
+  onPlugin,
+}: {
+  brand: Brand;
+  folder: string;
+  item?: string | null;
+  onItem?: (item: string | null) => void;
+  onPlugin?: (plugin: string) => void;
+}) {
   const { profiles } = useProfiles(brand);
   const [chosen, setChosen] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -122,7 +138,7 @@ function ProjectMcp({ brand, folder }: { brand: Brand; folder: string }) {
           <AccountPicker brand={brand} profiles={profiles} value={chosen} onChange={setChosen} />
         </div>
       )}
-      <McpServersPanel brand={brand} scope={scope} />
+      <McpServersPanel brand={brand} scope={scope} item={item} onItem={onItem} onPlugin={onPlugin} />
     </div>
   );
 }
@@ -137,6 +153,8 @@ export function ProjectSettingsScreen({
   tab,
   onOpen,
   onTab,
+  item,
+  onItem,
   backHref,
   backSteps,
   onUpdated,
@@ -319,13 +337,19 @@ export function ProjectSettingsScreen({
             </Select>
           </div>
         )}
-        <ProviderTabs brand={brand} tab={known} onOpen={onTab} tabs={tabs}>
+        <ProviderTabs brand={brand} tab={known} onOpen={(t) => onTab(t)} tabs={tabs}>
           {isPage ? (
             <ProviderSettingsPanel brand={brand} scope={projectScope} page={known} layer={layer} />
           ) : known === 'mcp' ? (
-            <ProjectMcp brand={brand} folder={folder} />
+            <ProjectMcp
+              brand={brand}
+              folder={folder}
+              item={item}
+              onItem={onItem}
+              onPlugin={tabs.some((t) => t.id === 'plugins') ? (p) => onTab('plugins', p) : undefined}
+            />
           ) : known === 'plugins' ? (
-            <ExtensionsPanel brand={brand} scope={projectScope} />
+            <ExtensionsPanel brand={brand} scope={projectScope} item={item} onItem={onItem} onServer={(s) => onTab('mcp', s)} />
           ) : null}
         </ProviderTabs>
       </div>

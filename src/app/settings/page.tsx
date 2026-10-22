@@ -72,6 +72,7 @@ function Settings() {
       // What a section was looking at is that section's, not the next one's.
       next.delete('account');
       next.delete('tab');
+      next.delete('item');
       const q = next.toString();
       router.push(q ? `/settings?${q}` : '/settings');
     },
@@ -96,16 +97,19 @@ function Settings() {
   const codexStanding = useStanding('codex', known === 'files');
   const filesAccount = accounts.find((a) => a.id === (account ?? SYSTEM_PROFILE)) ?? accounts[0];
 
-  /** Changes one part of the address, keeping the rest; pushed so Back undoes it. */
-  const set = useCallback(
-    (key: string, value: string | null) => {
+  /** Changes some parts of the address, keeping the rest; pushed so Back undoes it. */
+  const patch = useCallback(
+    (changes: Record<string, string | null>) => {
       const next = new URLSearchParams(params.toString());
-      if (value) next.set(key, value);
-      else next.delete(key);
+      for (const [key, value] of Object.entries(changes)) {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      }
       router.push(`/settings?${next.toString()}`);
     },
     [router, params],
   );
+  const set = useCallback((key: string, value: string | null) => patch({ [key]: value }), [patch]);
 
   return (
     <SettingsScreen
@@ -135,8 +139,10 @@ function Settings() {
           brand={known}
           account={account}
           tab={tab}
-          onAccount={(id) => set('account', id)}
-          onTab={(id) => set('tab', id)}
+          onAccount={(id) => patch({ account: id, item: null })}
+          onTab={(id, item) => patch({ tab: id, item: item ?? null })}
+          item={params.get('item')}
+          onItem={(item) => set('item', item)}
         />
       )}
       {known === 'files' && (

@@ -22,6 +22,7 @@ pub mod extensions;
 pub mod external;
 pub mod handback;
 pub mod hunks;
+pub mod item_detail;
 pub mod kit_words;
 pub mod leftovers;
 pub mod library;

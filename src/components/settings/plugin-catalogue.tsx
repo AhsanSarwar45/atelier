@@ -16,6 +16,7 @@ import { Search, Store } from 'lucide-react';
 
 import { CatalogueList } from '@/components/settings/catalogue-list';
 import { KindIcon } from '@/components/settings/kind-icon';
+import { PluginPage } from '@/components/settings/plugin-page';
 import type { Scope } from '@/components/settings/provider-settings-api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -47,11 +48,27 @@ function haystack(entry: OfferedPlugin): string {
   return [entry.name, entry.title, entry.description ?? '', entry.marketplace, ...(entry.keywords ?? [])].join(' ').toLowerCase();
 }
 
-const Row = memo(function Row({ entry, busy, onInstall }: { entry: OfferedPlugin; busy: boolean; onInstall: (entry: OfferedPlugin) => Promise<void> }) {
+const Row = memo(function Row({
+  entry,
+  busy,
+  onInstall,
+  onOpen,
+}: {
+  entry: OfferedPlugin;
+  busy: boolean;
+  onInstall: (entry: OfferedPlugin) => Promise<void>;
+  onOpen: (entry: OfferedPlugin) => void;
+}) {
   return (
-    <div className="flex items-start gap-3 px-3 py-2" data-testid={`plugin-entry-${entry.id}`}>
+    <div className="flex items-start gap-3 px-3 py-2 transition-colors hover:bg-surface-overlay/40" data-testid={`plugin-entry-${entry.id}`}>
       <KindIcon kind="plugin" />
-      <div className="min-w-0 flex-1">
+      <button
+        type="button"
+        className="min-w-0 flex-1 text-left"
+        aria-label={`Open ${entry.title}`}
+        onClick={() => onOpen(entry)}
+        data-testid={`plugin-catalogue-open-${entry.id}`}
+      >
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-t-primary">{entry.title}</span>
           {entry.category && (
@@ -71,7 +88,7 @@ const Row = memo(function Row({ entry, busy, onInstall }: { entry: OfferedPlugin
           )}
         </div>
         {entry.description && <p className="line-clamp-1 text-xs text-t-muted">{entry.description}</p>}
-      </div>
+      </button>
       <Button
         size="sm"
         variant={entry.installed ? 'ghost' : 'outline'}
@@ -93,8 +110,14 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
   const [unread, setUnread] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  /** The entry whose page is drawn in place of the list. */
+  const [viewing, setViewing] = useState<OfferedPlugin | null>(null);
   const { toast } = useToast();
   const scopeKey = JSON.stringify(scope);
+
+  useEffect(() => {
+    if (!open) setViewing(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -158,10 +181,32 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent shape="sheet" className="sm:max-w-2xl" data-testid="plugin-catalogue">
-          <DialogHeader>
+          <DialogHeader className={viewing ? 'sr-only' : undefined}>
             <DialogTitle>Install plugin</DialogTitle>
             <DialogDescription className="sr-only">Install a plugin from a marketplace</DialogDescription>
           </DialogHeader>
+          {viewing && (
+            <PluginPage
+              brand={brand}
+              scope={scope}
+              summary={viewing}
+              backLabel="All plugins"
+              onBack={() => setViewing(null)}
+              wide={false}
+              actions={
+                <Button
+                  size="sm"
+                  variant={viewing.installed ? 'ghost' : 'primary'}
+                  disabled={busy !== null || viewing.installed}
+                  onClick={() => void install(viewing)}
+                  data-testid={`plugin-page-install-${viewing.id}`}
+                >
+                  {busy === viewing.id && <Spinner size="inherit" />} {viewing.installed ? 'Installed' : 'Install'}
+                </Button>
+              }
+            />
+          )}
+          <div className={viewing ? 'hidden' : 'contents'}>
           <Input
             start={<Search className="text-t-muted" aria-hidden="true" />}
             aria-label="Search plugins"
@@ -203,10 +248,11 @@ export function PluginCatalogue({ brand, scope, onInstalled }: { brand: Brand; s
             <CatalogueList
               items={shown}
               itemKey={(entry) => entry.id}
-              render={(entry) => <Row entry={entry} busy={busy === entry.id} onInstall={install} />}
+              render={(entry) => <Row entry={entry} busy={busy === entry.id} onInstall={install} onOpen={setViewing} />}
               testId="plugin-catalogue-list"
             />
           )}
+          </div>
         </DialogContent>
       </Dialog>
     </>
