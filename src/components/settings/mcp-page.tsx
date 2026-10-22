@@ -10,6 +10,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { ItemPage, Link, type Fact } from '@/components/settings/item-page';
 import { shelfName } from '@/components/settings/mcp-catalogue';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import type { McpCatalogueEntry, McpDetail, McpServer } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -114,9 +115,9 @@ export function McpPage({
       value:
         info.plugin &&
         (onPlugin ? (
-          <button type="button" className="text-info underline-offset-4 hover:underline" onClick={() => onPlugin(info.plugin!)} data-testid="mcp-page-plugin">
+          <Button mode="link" size="inherit" className="text-info underline-offset-4 hover:underline" onClick={() => onPlugin(info.plugin!)} data-testid="mcp-page-plugin">
             {info.plugin.split('@')[0]}
-          </button>
+          </Button>
         ) : (
           info.plugin.split('@')[0]
         )),

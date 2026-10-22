@@ -56,9 +56,9 @@ function Parts({ group, testId }: { group: PartGroup; testId: string }) {
         {shown.map((part) => (
           <li key={part.name} className="min-w-0 text-sm">
             {part.onOpen ? (
-              <button type="button" className="font-mono text-xs text-info underline-offset-4 hover:underline" onClick={part.onOpen}>
+              <Button mode="link" size="inherit" className="font-mono text-xs text-info underline-offset-4 hover:underline" onClick={part.onOpen}>
                 {part.name}
-              </button>
+              </Button>
             ) : (
               <span className="font-mono text-xs text-t-primary">{part.name}</span>
             )}
@@ -68,7 +68,7 @@ function Parts({ group, testId }: { group: PartGroup; testId: string }) {
       </ul>
       {group.parts.length > LIMIT && (
         <Button variant="ghost" size="sm" className="h-6 px-1 text-xs" onClick={() => setAll((a) => !a)}>
-          {all ? 'Show less' : `Show all ${group.parts.length}`}
+          {all ? 'Show fewer' : `Show all ${group.parts.length}`}
         </Button>
       )}
     </div>

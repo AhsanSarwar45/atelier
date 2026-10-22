@@ -62,9 +62,10 @@ const Row = memo(function Row({
   return (
     <div className="flex items-start gap-3 px-3 py-2 transition-colors hover:bg-surface-overlay/40" data-testid={`plugin-entry-${entry.id}`}>
       <KindIcon kind="plugin" />
-      <button
-        type="button"
-        className="min-w-0 flex-1 text-left"
+      <Button
+        variant="ghost"
+        size="none"
+        className="block h-auto min-w-0 flex-1 whitespace-normal text-left font-normal hover:bg-transparent"
         aria-label={`Open ${entry.title}`}
         onClick={() => onOpen(entry)}
         data-testid={`plugin-catalogue-open-${entry.id}`}
@@ -88,7 +89,7 @@ const Row = memo(function Row({
           )}
         </div>
         {entry.description && <p className="line-clamp-1 text-xs text-t-muted">{entry.description}</p>}
-      </button>
+      </Button>
       <Button
         size="sm"
         variant={entry.installed ? 'ghost' : 'outline'}
