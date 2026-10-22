@@ -967,11 +967,14 @@ export type SettingsScope = { scope: 'account'; profileId?: string } | { scope: 
 export type SettingsLayer = 'managed' | 'user' | 'project' | 'local';
 
 /** Which file an MCP server is written in: the account's, the project's shared one, or the account's entry for that project. */
-export type McpSource = 'user' | 'project' | 'local';
+/** `plugin`: bundled with a Claude plugin. `connector`: a claude.ai connector. Neither is removed here. */
+export type McpSource = 'user' | 'project' | 'local' | 'plugin' | 'connector';
 
 export interface McpServer {
   id: string;
   source: McpSource;
+  /** For a plugin's server: the plugin it comes with. */
+  plugin?: string;
   path: string;
   enabled: boolean;
   /** Claude's answer on a project server: whether the reader has approved it. */

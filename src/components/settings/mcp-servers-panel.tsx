@@ -20,9 +20,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
-import { Spinner } from '@/components/ui/spinner';
 import { useToast } from '@/hooks/use-toast';
 import type { Brand, McpElsewhere, McpServer, McpSource, SettingsScope } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -35,7 +35,30 @@ export function wireScope(scope: Scope): SettingsScope {
   return scope.kind === 'account' ? { scope: 'account', profileId: scope.profileId } : { scope: 'project', projectPath: scope.projectPath, profileId: scope.profileId };
 }
 
-const SOURCE_NAME: Record<McpSource, string> = { user: 'Account', project: 'Project', local: 'Project, this computer' };
+const SOURCE_NAME: Record<McpSource, string> = {
+  user: 'Account',
+  project: 'Project',
+  local: 'Project, this computer',
+  plugin: 'Plugin',
+  connector: 'claude.ai',
+};
+
+/** Comes with a plugin or with claude.ai, so it is switched, never removed here. */
+function bundled(s: McpServer): boolean {
+  return s.source === 'plugin' || s.source === 'connector';
+}
+
+/** `plugin:design:slack` reads as `slack`; `claude.ai Gmail` as `Gmail`. */
+function shownName(s: McpServer): string {
+  if (s.source === 'plugin') return s.id.split(':').slice(2).join(':') || s.id;
+  if (s.source === 'connector') return s.id.replace(/^claude\.ai /, '');
+  return s.id;
+}
+
+/** Where a server comes from, as its badge says it. */
+function sourceLabel(s: McpServer): string {
+  return s.source === 'plugin' && s.plugin ? `${s.plugin} plugin` : SOURCE_NAME[s.source];
+}
 
 /** What `mcp.list` answers with: this account's servers, and the other accounts'. */
 type Listed = { servers: McpServer[]; elsewhere?: McpElsewhere[] };
@@ -48,6 +71,7 @@ function sourcesFor(brand: Brand, scope: Scope): McpSource[] {
 
 /** What a server is started by, as one line. */
 function launchOf(s: McpServer): string {
+  if (s.source === 'connector') return 'Connected through claude.ai';
   return s.command ? [s.command, ...(s.args ?? [])].join(' ') : s.url ?? '';
 }
 
@@ -314,14 +338,16 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
               <KindIcon kind="server" src={s.icon} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-t-primary">{s.id}</span>
+                  <Tooltip label={s.id}>
+                    <span className="truncate text-sm font-medium text-t-primary">{shownName(s)}</span>
+                  </Tooltip>
                   {s.title && s.title.toLowerCase() !== s.id.toLowerCase() && <span className="truncate text-xs text-t-tertiary">{s.title}</span>}
                   <Badge variant="outline" size="sm">
                     {s.transport}
                   </Badge>
-                  {scope.kind === 'project' && (
-                    <Badge variant="secondary" size="sm">
-                      {SOURCE_NAME[s.source]}
+                  {(scope.kind === 'project' || bundled(s)) && (
+                    <Badge variant="secondary" size="sm" data-testid={`mcp-source-${s.id}`}>
+                      {sourceLabel(s)}
                     </Badge>
                   )}
                   {s.approval === 'pending' && (
@@ -338,7 +364,9 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
                 </div>
                 <Subtitle server={s} />
               </div>
+              {/* A connector signs in and out on claude.ai, not here. */}
               {s.transport !== 'stdio' &&
+                !(s.source === 'connector' && s.auth === 'signedIn') &&
                 (s.auth === 'signedIn' ? (
                   <Button
                     variant="outline"
@@ -360,7 +388,10 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
                     <LogIn /> Sign in
                   </Button>
                 ))}
-              <Button
+              {bundled(s) ? (
+                <span className="size-8" />
+              ) : (
+                <Button
                 variant="ghost"
                 size="sm"
                 aria-label={`Remove ${s.id}`}
@@ -370,6 +401,7 @@ export function McpServersPanel({ brand, scope }: { brand: Brand; scope: Scope }
               >
                 <Trash2 />
               </Button>
+              )}
             </div>
           );
         })}

@@ -134,6 +134,36 @@ pub fn list(brand: &str, scope: &Scope, account_dir: &Path) -> Result<Vec<KindLi
 
 // ----- Claude plugins and marketplaces -----
 
+/// The Claude plugins a chat on this account loads, as the name each gives
+/// itself and the folder it is in (bw-xrffk.1). A project's own settings files
+/// switch a plugin on or off for that project, over what the account says.
+pub fn loaded_plugins(account_dir: &Path, project: Option<&Path>) -> Vec<(String, PathBuf)> {
+    let settings = account_dir.join("settings.json");
+    let synced = synced_plugins(account_dir, &settings);
+    let mut plugins = installed_plugins(account_dir, &settings);
+    plugins.retain(|plugin| !synced.iter().any(|one| one.id == plugin.id));
+    plugins.extend(synced);
+    let mut overrides = Map::new();
+    if let Some(project) = project {
+        for file in [".claude/settings.json", ".claude/settings.local.json"] {
+            overrides.extend(enabled_plugins(&read_object(&project.join(file))));
+        }
+    }
+    plugins
+        .into_iter()
+        .filter(|plugin| {
+            overrides
+                .get(&plugin.id)
+                .and_then(Value::as_bool)
+                .or(plugin.enabled)
+                .unwrap_or(false)
+        })
+        .filter(|plugin| plugin.path.is_dir())
+        .map(|plugin| (plugin.name, plugin.path))
+        .collect()
+}
+
+
 fn read_object(path: &Path) -> Map<String, Value> {
     fs::read_to_string(path)
         .ok()

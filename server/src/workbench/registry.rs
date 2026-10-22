@@ -814,6 +814,11 @@ impl WorkbenchRegistry {
                 continue;
             };
             for server in listing.servers {
+                // A plugin's server or a connector belongs to that account's
+                // plugins and claude.ai sign-in; there is nothing to copy.
+                if matches!(server.source, mcp_servers::Source::Plugin | mcp_servers::Source::Connector) {
+                    continue;
+                }
                 if mine.servers.iter().any(|s| s.id == server.id) {
                     continue;
                 }

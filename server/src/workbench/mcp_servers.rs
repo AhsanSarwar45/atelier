@@ -78,6 +78,11 @@ pub enum Source {
     Project,
     /// Claude's `.claude.json` entry for one project path.
     Local,
+    /// Bundled with a Claude plugin the account loads, in the plugin's own
+    /// `.mcp.json` or `plugin.json`. Claude names it `plugin:<plugin>:<id>`.
+    Plugin,
+    /// A connector the claude.ai account brings, named `claude.ai <Name>`.
+    Connector,
 }
 
 impl Source {
@@ -86,6 +91,8 @@ impl Source {
             Source::User => "user",
             Source::Project => "project",
             Source::Local => "local",
+            Source::Plugin => "plugin",
+            Source::Connector => "connector",
         }
     }
 }
@@ -156,6 +163,9 @@ pub struct Server {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// For a plugin's server: the plugin it comes with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
 }
 
 impl Server {
@@ -237,8 +247,16 @@ pub fn list_with(
 ) -> Result<Listing, String> {
     check(brand, scope)?;
     let mut servers = match (brand, scope) {
-        ("claude", Scope::Account { .. }) => claude_user(account)?,
-        ("claude", Scope::Project { path }) => claude_project(account, path)?,
+        ("claude", Scope::Account { .. }) => {
+            let mut servers = claude_user(account)?;
+            servers.extend(claude_bundled(account, None)?);
+            servers
+        }
+        ("claude", Scope::Project { path }) => {
+            let mut servers = claude_project(account, path)?;
+            servers.extend(claude_bundled(account, Some(path))?);
+            servers
+        }
         ("codex", Scope::Account { .. }) => {
             codex_file(&account.dir.join("config.toml"), Source::User)?
         }
@@ -250,7 +268,11 @@ pub fn list_with(
     match brand {
         "claude" => {
             let store = claude_credentials(account);
-            for server in servers.iter_mut().filter(|s| s.transport != "stdio") {
+            // A connector signs in on claude.ai, so its state was read with it.
+            for server in servers
+                .iter_mut()
+                .filter(|s| s.transport != "stdio" && s.source != Source::Connector)
+            {
                 server.auth = Some(claude_auth(&store, &server.id));
             }
         }
@@ -353,6 +375,15 @@ pub fn remove(
     id: &str,
 ) -> Result<Listing, String> {
     check(brand, scope)?;
+    match source {
+        Source::Plugin => {
+            return Err(format!("{id} comes with a plugin; switch the plugin off on the Plugins tab"))
+        }
+        Source::Connector => {
+            return Err(format!("{id} is a claude.ai connector; remove it in claude.ai settings"))
+        }
+        _ => {}
+    }
     check_id(id)?;
     let path = file_for(brand, scope, account, source)?;
     let missing = || format!("{} has no server called {id}", path.display());
@@ -394,6 +425,9 @@ pub fn set_enabled(
     enabled: bool,
 ) -> Result<Listing, String> {
     check(brand, scope)?;
+    if matches!(source, Source::Plugin | Source::Connector) {
+        return set_bundled_enabled(brand, scope, account, source, id, enabled);
+    }
     check_id(id)?;
     let path = file_for(brand, scope, account, source)?;
     let missing = || format!("{} has no server called {id}", path.display());
@@ -508,7 +542,9 @@ pub async fn login(
     out: bool,
 ) -> Result<Started, String> {
     check(brand, scope)?;
-    check_id(id)?;
+    if check_id(id).is_err() {
+        check_bundled_name(id)?;
+    }
     let program = crate::routes::find_tool(brand, &[])
         .ok_or_else(|| format!("the {brand} program was not found on this computer"))?;
     let verb = if out { "logout" } else { "login" };
@@ -613,6 +649,166 @@ fn claude_user(account: &Account) -> Result<Vec<Server>, String> {
             claude_server(id, config, Source::User, &account.claude_json, true, None)
         })
         .collect())
+}
+
+/// The servers Claude brings in without a settings entry (bw-xrffk.1): those
+/// bundled with a plugin the account loads, and the claude.ai connectors. In a
+/// project each can be switched off through `disabledMcpServers`, which is what
+/// `/mcp` writes for them too; on an account they are always on.
+fn claude_bundled(account: &Account, project: Option<&Path>) -> Result<Vec<Server>, String> {
+    let root = load_json(&account.claude_json)?;
+    let disabled = project
+        .map(|project| {
+            names(
+                root.get("projects")
+                    .and_then(|projects| projects.get(project_key(project)))
+                    .and_then(|entry| entry.get("disabledMcpServers")),
+            )
+        })
+        .unwrap_or_default();
+    let on = |id: &str| !disabled.iter().any(|name| name == id);
+    let mut servers = Vec::new();
+
+    for (plugin, dir) in super::extensions::loaded_plugins(&account.dir, project) {
+        for (file, defined) in plugin_server_files(&dir) {
+            for (name, config) in entries(Some(&defined)) {
+                let id = format!("plugin:{plugin}:{name}");
+                if servers.iter().any(|s: &Server| s.id == id) {
+                    continue;
+                }
+                let config = with_plugin_root(config, &dir);
+                let mut server = claude_server(&id, &config, Source::Plugin, &file, on(&id), None);
+                server.plugin = Some(plugin.clone());
+                servers.push(server);
+            }
+        }
+    }
+
+    servers.sort_by(|a, b| a.id.cmp(&b.id));
+
+    // claude.ai lists an account's connectors only to a running chat; what is
+    // kept on disk is the ones that have connected and the ones waiting on a
+    // sign-in.
+    let waiting: Vec<String> = load_json(&account.dir.join("mcp-needs-auth-cache.json"))
+        .ok()
+        .map(|cache| cache.keys().cloned().collect())
+        .unwrap_or_default();
+    let mut connectors: Vec<String> = names(root.get("claudeAiMcpEverConnected"));
+    connectors.extend(waiting.iter().cloned());
+    connectors.retain(|name| name.starts_with("claude.ai "));
+    connectors.sort();
+    connectors.dedup();
+    for id in connectors {
+        let mut server = claude_server(
+            &id,
+            &json!({ "type": "http" }),
+            Source::Connector,
+            &account.claude_json,
+            on(&id),
+            None,
+        );
+        server.auth = Some(if waiting.contains(&id) {
+            Auth::NotSignedIn
+        } else {
+            Auth::SignedIn
+        });
+        servers.push(server);
+    }
+    // Plugin servers carry a `plugin:` sign-in record of their own, so a
+    // waiting one is told by the credential store, not by the cache.
+    Ok(servers)
+}
+
+/// A plugin's server definitions: its `.mcp.json` (bare, or under
+/// `mcpServers`), and `mcpServers` in its manifest, inline or as a file.
+fn plugin_server_files(dir: &Path) -> Vec<(PathBuf, Value)> {
+    let unwrap = |value: Map<String, Value>| match value.get("mcpServers") {
+        Some(inner) => inner.clone(),
+        None => Value::Object(value),
+    };
+    let mut out = Vec::new();
+    let mcp_json = dir.join(".mcp.json");
+    if let Ok(value) = load_json(&mcp_json) {
+        out.push((mcp_json, unwrap(value)));
+    }
+    let manifest_path = dir.join(".claude-plugin/plugin.json");
+    if let Ok(manifest) = load_json(&manifest_path) {
+        match manifest.get("mcpServers") {
+            Some(Value::Object(inline)) => out.push((manifest_path, Value::Object(inline.clone()))),
+            Some(Value::String(relative)) => {
+                let file = dir.join(relative.trim_start_matches("./"));
+                if let Ok(value) = load_json(&file) {
+                    out.push((file, unwrap(value)));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A plugin's command names its folder as `${CLAUDE_PLUGIN_ROOT}`; the row
+/// shows the folder itself.
+fn with_plugin_root(config: &Value, dir: &Path) -> Value {
+    let root = dir.to_string_lossy();
+    match config {
+        Value::String(text) => Value::String(text.replace("${CLAUDE_PLUGIN_ROOT}", &root)),
+        Value::Array(items) => Value::Array(items.iter().map(|v| with_plugin_root(v, dir)).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), with_plugin_root(v, dir)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// A plugin server's or connector's name, which carries a colon or a space no
+/// settings entry may.
+fn check_bundled_name(id: &str) -> Result<(), String> {
+    let shaped = id.starts_with("plugin:") || id.starts_with("claude.ai ");
+    if !shaped || id.chars().any(char::is_control) || id.len() > 200 {
+        return Err("not a plugin server or claude.ai connector".into());
+    }
+    Ok(())
+}
+
+/// Switch a plugin's server or a connector on or off for one project, the way
+/// `/mcp` does: by its name in that project's `disabledMcpServers`.
+fn set_bundled_enabled(
+    brand: &str,
+    scope: &Scope,
+    account: &Account,
+    source: Source,
+    id: &str,
+    enabled: bool,
+) -> Result<Listing, String> {
+    check_bundled_name(id)?;
+    let project = match (brand, scope) {
+        ("claude", Scope::Project { path }) => path,
+        ("claude", Scope::Account { .. }) => {
+            return Err(
+                "Claude Code switches this server off only inside one project; open the project's MCP tab".into(),
+            )
+        }
+        _ => return Err(format!("a {brand} account has no plugin servers")),
+    };
+    if !claude_bundled(account, Some(project))?
+        .iter()
+        .any(|server| server.source == source && server.id == id)
+    {
+        return Err(format!("this account loads no server called {id}"));
+    }
+    rewrite_json(&account.claude_json, |root| {
+        let entry = project_entry(root, scope)?;
+        if enabled {
+            list_remove(entry, "disabledMcpServers", id);
+        } else {
+            list_insert(entry, "disabledMcpServers", id);
+        }
+        Ok(())
+    })?;
+    list(brand, scope, account)
 }
 
 fn claude_project(account: &Account, project: &Path) -> Result<Vec<Server>, String> {
@@ -736,6 +932,7 @@ fn claude_server(
         title: None,
         description: None,
         icon: None,
+        plugin: None,
     }
 }
 
@@ -776,6 +973,7 @@ fn codex_file(path: &Path, source: Source) -> Result<Vec<Server>, String> {
                 title: None,
                 description: None,
                 icon: None,
+                plugin: None,
             }
         })
         .collect())
@@ -1134,6 +1332,147 @@ mod tests {
 
     fn object(value: Value) -> Map<String, Value> {
         value.as_object().cloned().unwrap()
+    }
+
+    /// An account with a synced plugin bundling Slack (in `.mcp.json`), an
+    /// installed plugin bundling a stdio server (in its manifest), an installed
+    /// plugin switched off, and two claude.ai connectors, one waiting on a
+    /// sign-in.
+    fn account_with_plugins(home: &Path) -> Account {
+        let account = account_in(home);
+        let dir = &account.dir;
+        let synced = dir.join("plugins/synced/bucket");
+        fs::create_dir_all(synced.join("design/.claude-plugin")).unwrap();
+        fs::write(
+            synced.join("manifest.json"),
+            json!({"plugins": [{"name": "design", "version": "1.0.0"}]}).to_string(),
+        )
+        .unwrap();
+        fs::write(synced.join("design/.claude-plugin/plugin.json"), json!({"name": "design"}).to_string()).unwrap();
+        fs::write(
+            synced.join("design/.mcp.json"),
+            json!({"mcpServers": {"slack": {"type": "http", "url": "https://mcp.slack.com/mcp"}}}).to_string(),
+        )
+        .unwrap();
+        let tools = home.join("cache/tools");
+        fs::create_dir_all(tools.join(".claude-plugin")).unwrap();
+        fs::write(
+            tools.join(".claude-plugin/plugin.json"),
+            json!({"name": "tools", "mcpServers": {"grep": {"command": "${CLAUDE_PLUGIN_ROOT}/bin/grep-mcp"}}}).to_string(),
+        )
+        .unwrap();
+        let off = home.join("cache/off");
+        fs::create_dir_all(&off).unwrap();
+        fs::write(off.join(".mcp.json"), json!({"hidden": {"command": "x"}}).to_string()).unwrap();
+        fs::write(
+            dir.join("plugins/installed_plugins.json"),
+            json!({"version": 2, "plugins": {
+                "tools@market": [{"scope": "user", "installPath": tools, "version": "2.0.0"}],
+                "off@market": [{"scope": "user", "installPath": off, "version": "1.0.0"}]
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("settings.json"),
+            json!({"enabledPlugins": {"tools@market": true, "off@market": false}}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            &account.claude_json,
+            json!({"claudeAiMcpEverConnected": ["claude.ai Gmail", "not a connector"]}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("mcp-needs-auth-cache.json"),
+            json!({"claude.ai Canva": {"timestamp": 1}, "plugin:design:slack": {"timestamp": 1}}).to_string(),
+        )
+        .unwrap();
+        account
+    }
+
+    #[test]
+    fn native_workbench_mcp_lists_servers_that_come_with_plugins_and_claude_ai() {
+        let home = tempfile::tempdir().unwrap();
+        let acct = account_with_plugins(home.path());
+        let listing = list("claude", &account(), &acct).unwrap();
+        let ids: Vec<&str> = listing.servers.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["plugin:design:slack", "plugin:tools:grep", "claude.ai Canva", "claude.ai Gmail"]
+        );
+        let slack = &listing.servers[0];
+        assert_eq!(slack.source, Source::Plugin);
+        assert_eq!(slack.plugin.as_deref(), Some("design"));
+        assert_eq!(slack.url.as_deref(), Some("https://mcp.slack.com/mcp"));
+        assert_eq!(slack.auth, Some(Auth::NotSignedIn));
+        assert!(slack.enabled);
+        let grep = &listing.servers[1];
+        assert_eq!(grep.transport, "stdio");
+        assert_eq!(
+            grep.command,
+            Some(format!("{}/bin/grep-mcp", home.path().join("cache/tools").display()))
+        );
+        assert_eq!(grep.auth, None);
+        assert_eq!(listing.servers[2].source, Source::Connector);
+        assert_eq!(listing.servers[2].auth, Some(Auth::NotSignedIn));
+        assert_eq!(listing.servers[3].auth, Some(Auth::SignedIn));
+    }
+
+    #[test]
+    fn native_workbench_mcp_a_plugin_server_is_switched_per_project_the_way_mcp_does() {
+        let home = tempfile::tempdir().unwrap();
+        let acct = account_with_plugins(home.path());
+        let project = home.path().join("repo");
+        fs::create_dir_all(&project).unwrap();
+        let scope = Scope::Project { path: project.clone() };
+
+        let refused = set_enabled("claude", &account(), &acct, Source::Plugin, "plugin:design:slack", false);
+        assert!(refused.unwrap_err().contains("only inside one project"));
+
+        let listing =
+            set_enabled("claude", &scope, &acct, Source::Plugin, "plugin:design:slack", false).unwrap();
+        let slack = listing.servers.iter().find(|s| s.id == "plugin:design:slack").unwrap();
+        assert!(!slack.enabled);
+        let root = load_json(&acct.claude_json).unwrap();
+        assert_eq!(
+            root["projects"][project_key(&project)]["disabledMcpServers"],
+            json!(["plugin:design:slack"])
+        );
+        // Off here, still on for the account and every other project.
+        assert!(list("claude", &account(), &acct).unwrap().servers[0].enabled);
+
+        set_enabled("claude", &scope, &acct, Source::Connector, "claude.ai Gmail", false).unwrap();
+        let listing =
+            set_enabled("claude", &scope, &acct, Source::Plugin, "plugin:design:slack", true).unwrap();
+        assert!(listing.servers.iter().find(|s| s.id == "plugin:design:slack").unwrap().enabled);
+        assert!(!listing.servers.iter().find(|s| s.id == "claude.ai Gmail").unwrap().enabled);
+        let root = load_json(&acct.claude_json).unwrap();
+        assert_eq!(
+            root["projects"][project_key(&project)]["disabledMcpServers"],
+            json!(["claude.ai Gmail"])
+        );
+
+        assert!(set_enabled("claude", &scope, &acct, Source::Plugin, "plugin:off:hidden", false).is_err());
+        assert!(remove("claude", &scope, &acct, Source::Plugin, "plugin:design:slack")
+            .unwrap_err()
+            .contains("Plugins tab"));
+    }
+
+    #[test]
+    fn native_workbench_mcp_a_project_switching_a_plugin_off_hides_its_servers_there() {
+        let home = tempfile::tempdir().unwrap();
+        let acct = account_with_plugins(home.path());
+        let project = home.path().join("repo");
+        fs::create_dir_all(project.join(".claude")).unwrap();
+        fs::write(
+            project.join(".claude/settings.json"),
+            json!({"enabledPlugins": {"design@synced": false}}).to_string(),
+        )
+        .unwrap();
+        let listing = list("claude", &Scope::Project { path: project }, &acct).unwrap();
+        assert!(!listing.servers.iter().any(|s| s.id == "plugin:design:slack"));
+        assert!(listing.servers.iter().any(|s| s.id == "plugin:tools:grep"));
     }
 
     #[test]
@@ -1820,6 +2159,7 @@ mod tests {
                 title: None,
                 description: None,
                 icon: None,
+                plugin: None,
             }],
             // Empty, and the shape below says so: an account with nothing to
             // report elsewhere sends no `elsewhere` key at all.
