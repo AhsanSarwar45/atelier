@@ -135,6 +135,31 @@ test.describe('a chat name template', () => {
       await expect(names.filter({ hasText: 'key-1231-login-fix' })).toHaveCount(0);
       await page.screenshot({ path: `${SHOTS}/rail.png` });
 
+      // A title search finds the chat by the key in the name it is shown
+      // under; the chat the owner renamed is searched by the owner's words.
+      await page.keyboard.press('Control+k');
+      const box = page.getByTestId('search-input');
+      await expect(box).toBeFocused();
+      const found = page.getByTestId('search-chat');
+      // The index reads chats on its own beat, so ask until it has come round.
+      await expect
+        .poll(
+          async () => {
+            await box.fill('');
+            await box.fill('in:title 1231');
+            await page.waitForTimeout(1_000);
+            return found.count();
+          },
+          { timeout: 90_000, intervals: [1_000] },
+        )
+        .toBe(1);
+      await expect(found.getByTestId('search-chat-title')).toContainText('key-1231');
+      await page.screenshot({ path: `${SHOTS}/search.png` });
+      await box.fill('in:title own words');
+      await expect(found).toHaveCount(1);
+      await expect(found.getByTestId('search-chat-title')).toContainText('My own words');
+      await page.keyboard.press('Escape');
+
       const settings = (await (await request.get(`/api/projects/${project.id}/settings`)).json()) as {
         manifest: { chat_name?: { parts: { kind: string }[] } };
       };

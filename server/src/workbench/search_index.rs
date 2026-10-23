@@ -111,6 +111,30 @@ struct SessionRow {
     brand: String,
     external_id: Option<String>,
     title: Option<String>,
+    project_path: String,
+    cwd: String,
+    named_by_owner: bool,
+}
+
+impl SessionRow {
+    /// The title a search finds the chat by: the name it is shown under
+    /// when its project's template builds one — so the ticket key the rail
+    /// puts before the title is found too — and its own title otherwise.
+    fn searched_title(&self) -> Option<String> {
+        let title = self
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty());
+        let named = (!self.named_by_owner)
+            .then(|| crate::workbench::chat_name::template_for(&self.project_path))
+            .flatten()
+            .and_then(|template| {
+                let facts = crate::workbench::chat_name::Facts::read(&template, Some(&self.cwd));
+                crate::workbench::chat_name::render(&template, title, &facts)
+            });
+        named.or_else(|| title.map(str::to_string))
+    }
 }
 
 struct Known {
@@ -848,7 +872,9 @@ impl Inner {
         .map_err(text)?;
         chats.busy_timeout(Duration::from_secs(10)).map_err(text)?;
         let sessions = chats
-            .prepare("SELECT id, brand, external_id, title FROM session")
+            .prepare(
+                "SELECT id, brand, external_id, title, project_path, cwd, named_by_owner FROM session",
+            )
             .and_then(|mut statement| {
                 statement
                     .query_map([], |row| {
@@ -857,6 +883,9 @@ impl Inner {
                             brand: row.get(1)?,
                             external_id: row.get(2)?,
                             title: row.get(3)?,
+                            project_path: row.get(4)?,
+                            cwd: row.get(5)?,
+                            named_by_owner: row.get::<_, i64>(6)? != 0,
                         })
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()
@@ -973,19 +1002,15 @@ fn index_session(
         words_current = true;
         mark = known.map(|known| known.mark.clone()).unwrap_or_default();
     }
-    let title_current = known.is_some_and(|known| known.title == session.title);
+    let title = session.searched_title();
+    let title_current = known.is_some_and(|known| known.title == title);
     if words_current && title_current {
         return Ok(None);
     }
 
     let transaction = index.transaction().map_err(text)?;
     if !title_current {
-        match session
-            .title
-            .as_deref()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-        {
+        match title.as_deref() {
             Some(title) => {
                 transaction
                     .execute(
@@ -1070,7 +1095,7 @@ fn index_session(
         .execute(
             r#"INSERT INTO source (session_id, kind, mark, title) VALUES (?1,?2,?3,?4)
                ON CONFLICT(session_id) DO UPDATE SET kind=excluded.kind, mark=excluded.mark, title=excluded.title"#,
-            params![session.id, kind_name, mark, session.title],
+            params![session.id, kind_name, mark, title],
         )
         .map_err(text)?;
     transaction.commit().map_err(text)?;
@@ -1997,6 +2022,45 @@ mod tests {
             ["chat-a", "chat-b"]
         );
         assert!(chats(&index, "in:tool periwinkle ").is_empty());
+    }
+
+    /// A project whose template puts the ticket key before the title has its
+    /// chats found by that key, as the rail shows them.
+    #[test]
+    fn a_chat_is_found_by_the_name_its_project_gives_it() {
+        use crate::project_manifest::{ChatNamePart, ChatNameSource};
+        let place = place();
+        let project = place.root.join("keystone");
+        let worktree = project.join("worktrees").join("feature-key-1870-feedback");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(worktree.join(".git"), "gitdir: nowhere\n").unwrap();
+        let mut manifest = crate::project_manifest::infer_virtual("Keystone");
+        manifest.chat_name.parts = vec![
+            ChatNamePart::Extract { source: ChatNameSource::Worktree, pattern: r"key-\d+".into() },
+            ChatNamePart::Text { text: ": ".into() },
+            ChatNamePart::Title,
+        ];
+        let manifest_path = crate::project_manifest::repository_path(&project);
+        std::fs::create_dir_all(manifest_path.parent().unwrap()).unwrap();
+        crate::project_manifest::write_atomic(&manifest_path, &manifest).unwrap();
+
+        let store = Store::open(&place.chats).unwrap();
+        for id in ["keyed", "renamed"] {
+            let mut row = session(id, "claude", None, Some("Ticket work"));
+            row.project_path = project.to_string_lossy().into_owned();
+            row.cwd = worktree.to_string_lossy().into_owned();
+            store.create_session(&row).unwrap();
+        }
+        // A name the owner typed is shown as typed, so it is searched as typed.
+        Connection::open(&place.chats)
+            .unwrap()
+            .execute("UPDATE session SET named_by_owner = 1 WHERE id = 'renamed'", [])
+            .unwrap();
+        let index = index(&place);
+        index.refresh().unwrap();
+        assert_eq!(chats(&index, "in:title 1870"), ["keyed"]);
+        assert_eq!(chats(&index, "key-1870 "), ["keyed"]);
+        assert_eq!(sorted(chats(&index, "title:ticket ")), ["keyed", "renamed"]);
     }
 
     #[test]
