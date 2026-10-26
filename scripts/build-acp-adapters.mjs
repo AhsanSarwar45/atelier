@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { patchCodexModelCatalog } from './codex-model-catalog.mjs';
 import { patchClaudeTurnPhase } from './claude-turn-phase.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -710,6 +711,7 @@ if (!platform) {
 const builderFingerprint = createHash('sha256')
   .update(readFileSync(fileURLToPath(import.meta.url)))
   .update(readFileSync(new URL('./claude-turn-phase.mjs', import.meta.url)))
+  .update(readFileSync(new URL('./codex-model-catalog.mjs', import.meta.url)))
   .digest('hex');
 const gooseTarget = join(cacheRoot(), 'goose', target, GOOSE.commit);
 if (cacheInfo) {
@@ -756,6 +758,11 @@ try {
   patchCodexSessionPolicy(codexSource);
   patchCodexSubagentControl(codexSource);
   patchCodexAccounting(codexSource);
+  const modelFile = join(codexSource, 'src', 'ModelConfigOption.ts');
+  const serverFile = join(codexSource, 'src', 'CodexAcpServer.ts');
+  const catalog = patchCodexModelCatalog(readFileSync(modelFile, 'utf8'), readFileSync(serverFile, 'utf8'));
+  writeFileSync(modelFile, catalog.model);
+  writeFileSync(serverFile, catalog.server);
   const claudeAgentFile = join(claudeSource, 'src', 'acp-agent.ts');
   writeFileSync(claudeAgentFile, patchClaudeTurnPhase(readFileSync(claudeAgentFile, 'utf8')));
   patchClaudeWindowNow(claudeSource);
