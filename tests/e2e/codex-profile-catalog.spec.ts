@@ -83,8 +83,8 @@ test('System catalog excludes a retired configured default', async ({ page, requ
     await page.getByTestId('mobile-composer-settings').click();
     const mobile = page.getByTestId('mobile-composer-settings-dialog');
     await expect(mobile).toBeVisible();
-    await mobile.getByTestId('model-picker').click();
-    await expect(page.getByTestId('model-picker-option').first()).toBeVisible();
+    await mobile.getByTestId('mobile-model-picker').click();
+    await expect(page.getByTestId('mobile-model-picker-option').first()).toBeVisible();
     await page.screenshot({path:'/tmp/bw-ohg2y-mobile.png'});
     expect(errors).toEqual([]);
   } finally {
