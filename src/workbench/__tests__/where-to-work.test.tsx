@@ -13,7 +13,10 @@ import type { GitBranch, GitTree } from '@/lib/api';
 
 const trees = vi.fn();
 const branches = vi.fn();
-vi.mock('@/lib/api', () => ({ git: { trees: (...a: unknown[]) => trees(...a), branches: (...a: unknown[]) => branches(...a) } }));
+vi.mock('@/lib/api', async (importOriginal) => ({
+  ApiError: (await importOriginal<typeof import('@/lib/api')>()).ApiError,
+  git: { trees: (...a: unknown[]) => trees(...a), branches: (...a: unknown[]) => branches(...a) },
+}));
 
 const {
   WhereToWork,
@@ -210,11 +213,21 @@ describe('the picker on the screen', () => {
   });
 
   it('falls back to the project, and says why, when git cannot be read', async () => {
-    trees.mockRejectedValue(new Error('not a git repository'));
+    trees.mockRejectedValue(new Error('Could not run git'));
     draw();
     await waitFor(() =>
-      expect(screen.getByTestId('where-unreadable')).toHaveTextContent('not a git repository'),
+      expect(screen.getByTestId('where-unreadable')).toHaveTextContent('Could not run git'),
     );
     expect(screen.getByTestId('where-existing')).toBeDisabled();
+  });
+
+  it('offers no worktree choice at all when the project is not a git repository', async () => {
+    const { ApiError } = await import('@/lib/api');
+    trees.mockRejectedValue(
+      new ApiError('API error: 422 fatal: not a git repository', 422, { notARepository: true }),
+    );
+    draw();
+    await waitFor(() => expect(screen.queryByTestId('where-to-work')).toBeNull());
+    expect(screen.queryByTestId('where-unreadable')).toBeNull();
   });
 });
