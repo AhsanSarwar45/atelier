@@ -160,8 +160,18 @@ test.describe('native provider child-agent lifecycle', () => {
           // The stored panel keeps them too.
           const toggle = page.getByTestId('toggle-stopped-agents');
           if (await toggle.isVisible() && (await toggle.getAttribute('data-showing')) !== 'true') await toggle.click();
-          await expect(page.getByTestId('sent-away-model')).toHaveText(/\S/);
+          // Named as the model picker names it, never as a raw id.
+          await expect(page.getByTestId('sent-away-model')).toHaveText(/^(Opus|Sonnet|Haiku|Fable) \d/);
           await expect(page.getByTestId('sent-away-effort')).toHaveText(/\S/);
+          // The helper's own view says the same.
+          await page.getByTestId('sent-away-open').first().click();
+          const sheet = page.getByTestId('agent-view');
+          await expect(sheet.getByTestId('agent-view-model')).toHaveText(/^(Opus|Sonnet|Haiku|Fable) \d/);
+          await expect(sheet.getByTestId('agent-view-effort')).toHaveText(/\S/);
+          await page.waitForTimeout(500); // let the sheet finish opening before the picture
+          await sheet.locator('header').first().screenshot({ path: `${SHOTS}/provider-agent-view-model-effort-${provider.brand}.png` });
+          await page.keyboard.press('Escape');
+          await expect(sheet).toHaveCount(0);
         }
         if (provider.brand === 'claude') {
           await expect(page.locator('[data-testid="tool-row"][data-tool-name="Agent"]'))

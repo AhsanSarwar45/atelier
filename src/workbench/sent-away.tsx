@@ -42,6 +42,7 @@ import { ChatStateChip } from '@/workbench/chat-state-chip';
 import { forHowLong } from '@/workbench/elapsed';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import { effortInWords } from '@/workbench/machine-words';
+import { modelName } from '@/workbench/what-it-runs';
 import type { AgentControl, AgentKind, AgentState } from '@/workbench/protocol';
 import { isOver } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -98,22 +99,6 @@ export function spend(tokens: number): string {
   if (tokens < 1000) return `${Math.max(0, Math.round(tokens))}`;
   if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
   return `${(tokens / 1_000_000).toFixed(1)}M`;
-}
-
-/**
- * The model, as short as it can be said.
- *
- * The kit answers with the full name it resolved to — `claude-opus-4-5-20251101`
- * — and the column is about 90px wide. The date and the vendor are the parts a
- * reader already knows.
- */
-export function modelNamed(model: string | null): string | null {
-  if (!model) return null;
-  const short = model
-    .replace(/^claude-/, '')
-    .replace(/-\d{8}$/, '')
-    .replace(/-(latest|v\d+)$/, '');
-  return short || model;
 }
 
 /** The reasoning effort a helper runs at, in the words the effort picker uses. */
@@ -297,7 +282,7 @@ function AgentRow({
   onOpen?: (id: string) => void;
 }) {
   const { label: kind, Icon } = KINDS[row.kind];
-  const model = modelNamed(row.model);
+  const model = modelName(row.model);
   const effort = effortNamed(row.effort);
   const over = isOver(row.state);
   // A shell is not a helper, and the row says less about it because there is

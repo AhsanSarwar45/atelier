@@ -38,7 +38,8 @@ import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import type { AgentControl } from '@/workbench/protocol';
 // A finished shell's output is drawn with xterm, fetched when one is shown (bw-fbzd.4).
 const RanTerminal = dynamic(() => import('@/workbench/ran-terminal').then((m) => m.RanTerminal), { ssr: false });
-import { AgentSteering, effortNamed, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, steerable, useNow } from '@/workbench/sent-away';
+import { AgentSteering, effortNamed, forHowLong, isOver, KINDS, liveSeconds, spend, STATES, steerable, useNow } from '@/workbench/sent-away';
+import { modelName } from '@/workbench/what-it-runs';
 import { withPresented } from '@/workbench/presented';
 import { InHelperPane, TranscriptRow } from '@/workbench/transcript-rows';
 import { sendCommand } from '@/workbench/use-session';
@@ -254,7 +255,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
   }, [cursor, hasOlder, sentBy, sessionId]);
   const { label: kind, Icon } = KINDS[row.kind];
   const state = STATES[row.state];
-  const model = modelNamed(row.model);
+  const model = modelName(row.model);
   const effort = effortNamed(row.effort);
   // The row's own clock, not the kit's raw count: the row that was clicked is
   // counting live between the kit's reports, and a pane that answered `0s`

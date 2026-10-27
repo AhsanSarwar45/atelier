@@ -60,6 +60,7 @@ function aChatWithTwoHelpers(): WbpEvent[] {
       what: 'find the callers',
       agentType: 'general-purpose',
       model: 'claude-opus-4-5-20251101',
+      effort: 'high',
     }),
     said({
       type: 'agent.started',
@@ -158,7 +159,8 @@ describe.each(bothWays)('a chat %s', (_name, fold) => {
     render(<AgentView row={row} items={view.items} sessionId="chat-1" controls={[]} mentions={PLAINLY} onClose={() => {}} />);
 
     expect(screen.getByTestId('agent-view-what')).toHaveTextContent('find the callers');
-    expect(screen.getByTestId('agent-view-model')).toHaveTextContent('opus-4-5');
+    expect(screen.getByTestId('agent-view-model')).toHaveTextContent(/^Opus 4\.5$/);
+    expect(screen.getByTestId('agent-view-effort')).toHaveTextContent(/^High$/);
     expect(screen.getByTestId('agent-view-for')).toHaveTextContent('1m 32s');
     expect(screen.getByTestId('agent-view-spend')).toHaveTextContent('20k');
     expect(screen.getByTestId('agent-view-state')).toHaveTextContent('done');

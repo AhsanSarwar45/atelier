@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EMPTY, foldAll, reduce, type SentAway, type SessionView } from '@/workbench/fold';
 import type { WbpEvent } from '@/workbench/protocol';
-import { SentAwayPanel, forHowLong, modelNamed, spend } from '@/workbench/sent-away';
+import { SentAwayPanel, forHowLong, spend } from '@/workbench/sent-away';
 
 /** When everything below was sent away. */
 const OFF = '2026-08-20T09:00:00.000Z';
@@ -194,11 +194,6 @@ describe('the numbers, said short enough to sit in a column', () => {
     expect(spend(1_240_000)).toBe('1.2M');
   });
 
-  it('says the model without the vendor or the date', () => {
-    expect(modelNamed('claude-opus-4-5-20251101')).toBe('opus-4-5');
-    expect(modelNamed('gpt-5-codex')).toBe('gpt-5-codex');
-    expect(modelNamed(null)).toBeNull();
-  });
 });
 
 describe('the panel', () => {
@@ -243,7 +238,7 @@ describe('the panel', () => {
     expect(helper.querySelector('[data-testid="sent-away-kind"]')).toHaveTextContent('helper');
     expect(helper.querySelector('[data-testid="sent-away-agent-type"]')).toHaveTextContent('general-purpose');
     expect(helper.querySelector('[data-testid="sent-away-what"]')).toHaveTextContent('find the callers');
-    expect(helper.querySelector('[data-testid="sent-away-model"]')).toHaveTextContent('opus-4-5');
+    expect(helper.querySelector('[data-testid="sent-away-model"]')).toHaveTextContent(/^Opus 4\.5$/);
     expect(helper.querySelector('[data-testid="sent-away-effort"]')).toHaveTextContent('Extra high');
     // Saying the effort keeps the kind it was already given.
     expect(helper.querySelector('[data-testid="sent-away-agent-type"]')).toHaveTextContent('general-purpose');
