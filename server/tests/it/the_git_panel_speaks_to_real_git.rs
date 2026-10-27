@@ -2799,6 +2799,19 @@ async fn a_folder_with_no_repository_is_told_apart_from_every_other_refusal() {
     assert!(body["error"].as_str().is_some_and(|said| !said.is_empty()));
 }
 
+/// The new-chat dialog reads worktrees and branches of whatever folder the
+/// project is, and leaves the worktree choice out when this mark says there
+/// is no repository — rather than printing git's complaint at the reader.
+#[tokio::test]
+async fn worktrees_and_branches_of_a_plain_folder_carry_the_mark() {
+    let dir = a_plain_folder();
+
+    for (code, body) in [trees_of(&dir).await, branches_of(&dir).await] {
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["notARepository"], true, "{body}");
+    }
+}
+
 #[tokio::test]
 async fn a_repository_never_carries_the_mark() {
     let dir = a_repo();

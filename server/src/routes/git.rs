@@ -620,6 +620,17 @@ async fn is_a_repository(at: &Path) -> bool {
     )
 }
 
+/// A read git answered, or the refusal it earned — marked as no repository at
+/// all when that is why, so a screen offering worktrees or branches can leave
+/// them out rather than print git's complaint.
+async fn read_or_not_a_repository(at: &Path, output: Output) -> Result<Output, Refused> {
+    if !output.status.success() && !is_a_repository(at).await {
+        let said = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(Refused::not_a_repository(said));
+    }
+    spoke_or_refused(output)
+}
+
 // ----------------------------------------------------------------------------
 // POST /api/git/init
 // ----------------------------------------------------------------------------
@@ -1706,13 +1717,15 @@ fn read_drift(track: &str) -> (i32, i32) {
 pub async fn branches(GitQuery(params): GitQuery<PathParams>) -> Answer {
     let repo = checked_repo(&params.path)?;
 
-    let listed = spoke_or_refused(
+    let listed = read_or_not_a_repository(
+        &repo,
         run_git(
             &repo,
             &["for-each-ref", BRANCH_FORMAT, "refs/heads", "refs/remotes"],
         )
         .await?,
-    )?;
+    )
+    .await?;
 
     let listed = String::from_utf8_lossy(&listed.stdout);
     let mut current = String::new();
@@ -2922,7 +2935,11 @@ fn place_for_trees(repo: &Path, trees: &[ListedTree]) -> PathBuf {
 /// `GET /api/git/trees?path=...` — `{ trees: [...], place }`
 pub async fn trees(GitQuery(params): GitQuery<PathParams>) -> Answer {
     let repo = checked_repo(&params.path)?;
-    let listed = spoke_or_refused(run_git(&repo, &["worktree", "list", "--porcelain"]).await?)?;
+    let listed = read_or_not_a_repository(
+        &repo,
+        run_git(&repo, &["worktree", "list", "--porcelain"]).await?,
+    )
+    .await?;
     let listed = read_worktree_list(&String::from_utf8_lossy(&listed.stdout));
     let place = place_for_trees(&repo, &listed);
     // The main checkout's branch is what a worktree nobody has pushed is
@@ -3057,7 +3074,11 @@ pub async fn new_tree(GitJson(body): GitJson<NewTreeRequest>) -> Answer {
     let turn = repo_lock(&repo);
     let _holding = turn.lock().await;
 
-    let listed = spoke_or_refused(run_git(&repo, &["worktree", "list", "--porcelain"]).await?)?;
+    let listed = read_or_not_a_repository(
+        &repo,
+        run_git(&repo, &["worktree", "list", "--porcelain"]).await?,
+    )
+    .await?;
     let listed = read_worktree_list(&String::from_utf8_lossy(&listed.stdout));
     if let Some(taken) = listed.iter().find(|one| name_of(&one.path) == name) {
         return Err(Refused::new(
@@ -3137,7 +3158,11 @@ pub async fn drop_tree(GitJson(body): GitJson<DropTreeRequest>) -> Answer {
     let turn = repo_lock(&repo);
     let _holding = turn.lock().await;
 
-    let listed = spoke_or_refused(run_git(&repo, &["worktree", "list", "--porcelain"]).await?)?;
+    let listed = read_or_not_a_repository(
+        &repo,
+        run_git(&repo, &["worktree", "list", "--porcelain"]).await?,
+    )
+    .await?;
     let listed = read_worktree_list(&String::from_utf8_lossy(&listed.stdout));
     let Some(going) = listed.iter().position(|one| name_of(&one.path) == name) else {
         return Err(Refused::new(

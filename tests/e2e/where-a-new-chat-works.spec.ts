@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
@@ -110,5 +111,44 @@ test('a new chat is offered the project, a worktree of it, or one made here', as
   } finally {
     await request.delete(`/api/projects/${project.id}`);
     rmSync(FIXTURE, { recursive: true, force: true });
+  }
+});
+
+test('a project that is not a git repository is offered no worktree choice', async ({ page, request }) => {
+  // Outside this checkout, or git would find the repository above it. Under
+  // the home directory, because the server refuses paths outside it.
+  mkdirSync(join(homedir(), '.cache'), { recursive: true });
+  const plain = mkdtempSync(join(homedir(), '.cache', 'atelier-e2e-plain-folder-'));
+  writeFileSync(join(plain, 'notes.txt'), 'one\n');
+
+  await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const url = new URL(route.request().url());
+    url.searchParams.set('include_test', 'true');
+    await route.continue({ url: url.toString() });
+  });
+  const made = await request.post('/api/projects', {
+    data: { name: 'a-plain-folder', path: plain, isTest: true },
+  });
+  expect(made.status(), await made.text()).toBe(201);
+  const project = (await made.json()) as { id: string };
+
+  try {
+    await page.goto(`/project?id=${project.id}&tab=chat`);
+    const read = page.waitForResponse((response) => response.url().includes('/api/git/trees'));
+    await page.getByTestId('new-chat-tool').click();
+    const dialog = page.getByTestId('new-chat-provider-dialog');
+    await expect(dialog).toBeVisible();
+    expect((await read).status()).toBe(422);
+
+    // Worktrees are a git idea: with no repository there is nothing to pick
+    // and git's own complaint is not the reader's business.
+    await expect(dialog.getByTestId('where-to-work')).toHaveCount(0);
+    await expect(dialog.getByTestId('where-unreadable')).toHaveCount(0);
+    await expect(dialog).not.toContainText('not a git repository');
+    await dialog.screenshot({ path: 'tests/results/bw-cc1m3-a-plain-folder.png' });
+  } finally {
+    await request.delete(`/api/projects/${project.id}`);
+    rmSync(plain, { recursive: true, force: true });
   }
 });

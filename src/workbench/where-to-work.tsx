@@ -98,6 +98,14 @@ export function suggestedBranch(name: string): string {
   return name.trim();
 }
 
+/** Whether a read was refused because the project folder has no repository. */
+function isNotARepository(reason: unknown): boolean {
+  return (
+    reason instanceof api.ApiError
+    && (reason.body as { notARepository?: boolean } | undefined)?.notARepository === true
+  );
+}
+
 /** The worktrees a person can send a chat to: everything but the project. */
 export function worktreesAmong(trees: GitTree[]): GitTree[] {
   return trees.filter((tree) => !tree.isMain);
@@ -131,6 +139,11 @@ export function WhereToWork({
   const [current, setCurrent] = useState<string>('');
   /** Why the choices below are only "the project", when that is why. */
   const [unreadable, setUnreadable] = useState<string | null>(null);
+  /**
+   * The project is a plain folder. Worktrees are a git idea, so there is
+   * nothing to choose and nothing to explain: the chat runs in the folder.
+   */
+  const [noRepository, setNoRepository] = useState(false);
 
   useEffect(() => {
     const stop = new AbortController();
@@ -145,9 +158,16 @@ export function WhereToWork({
         setBranches(lines.branches);
         setCurrent(lines.current);
         setUnreadable(null);
+        setNoRepository(false);
       })
       .catch((reason: unknown) => {
         if (!live || stop.signal.aborted) return;
+        if (isNotARepository(reason)) {
+          setNoRepository(true);
+          setUnreadable(null);
+          return;
+        }
+        setNoRepository(false);
         setUnreadable(reason instanceof Error ? reason.message : String(reason));
       });
     return () => {
@@ -190,6 +210,8 @@ export function WhereToWork({
       onChange({ kind: 'new', name: '', branch: '', create: true, base: current || 'HEAD' });
     }
   }
+
+  if (noRepository) return null;
 
   return (
     <section className="flex flex-col gap-2" data-testid="where-to-work">
