@@ -16,7 +16,7 @@
  * The rows are folded both ways, live and read back off the record, because a
  * rule that holds only until the page is reloaded is not a rule (fold.ts).
  */
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { Mentions } from '@/components/markdown-body';
@@ -261,6 +261,8 @@ describe('what the helper’s card says it is doing', () => {
   const cardFor = (view: SessionView, doing: string | null = null): HTMLElement => {
     const row = { ...view.agents.find((a) => a.id === 'task-1')!, doing };
     render(<SentAwayPanel agents={[row]} items={view.items} sessionId="chat-1" controls={[]} />);
+    const completed = screen.queryByTestId('toggle-stopped-agents');
+    if (completed) fireEvent.click(completed);
     return screen.getByTestId('sent-away-state');
   };
 
