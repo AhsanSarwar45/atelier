@@ -1020,8 +1020,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // `null` is a real address here: it is the chat screen with no chat on it,
   // which is where a launch that failed has to put him back.
   const open = useCallback(
-    (id: string | null) => router.push(addressWith(params, { tab: 'chat', chat: id, message: null })),
-    [router, params],
+    // This is a selection inside the current page. A router navigation fetches
+    // project.txt before committing the new query, even for a cached chat.
+    // Next's native history integration updates useSearchParams without that
+    // round trip and keeps Back/Forward and copied chat addresses working.
+    (id: string | null) => window.history.pushState(null, '', addressWith(params, { tab: 'chat', chat: id, message: null })),
+    [params],
   );
   /**
    * The chat a click is making, while the server is still making it: the agent
