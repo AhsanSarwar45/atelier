@@ -22,7 +22,7 @@
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 
-import { Clock, Coins, X } from 'lucide-react';
+import { Clock, Coins, Gauge, X } from 'lucide-react';
 
 import type { Mentions } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
@@ -38,7 +38,7 @@ import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import type { AgentControl } from '@/workbench/protocol';
 // A finished shell's output is drawn with xterm, fetched when one is shown (bw-fbzd.4).
 const RanTerminal = dynamic(() => import('@/workbench/ran-terminal').then((m) => m.RanTerminal), { ssr: false });
-import { AgentSteering, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, steerable, useNow } from '@/workbench/sent-away';
+import { AgentSteering, effortNamed, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, steerable, useNow } from '@/workbench/sent-away';
 import { withPresented } from '@/workbench/presented';
 import { InHelperPane, TranscriptRow } from '@/workbench/transcript-rows';
 import { sendCommand } from '@/workbench/use-session';
@@ -255,6 +255,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
   const { label: kind, Icon } = KINDS[row.kind];
   const state = STATES[row.state];
   const model = modelNamed(row.model);
+  const effort = effortNamed(row.effort);
   // The row's own clock, not the kit's raw count: the row that was clicked is
   // counting live between the kit's reports, and a pane that answered `0s`
   // beside a row reading `2s` is two accounts of one agent (measured 2026-08-20).
@@ -329,6 +330,14 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
               {!isShell && model && (
                 <Tooltip label={row.model ?? undefined}>
                   <span data-testid="agent-view-model">{model}</span>
+                </Tooltip>
+              )}
+              {!isShell && effort && (
+                <Tooltip label={`Reasoning effort — ${effort}`}>
+                  <span className="flex items-center gap-1" data-testid="agent-view-effort">
+                    <Gauge className="h-3 w-3" aria-hidden="true" />
+                    {effort}
+                  </span>
                 </Tooltip>
               )}
               {!isShell && (

@@ -62,6 +62,8 @@ function sentAway(): WbpEvent[] {
     }),
     said({ type: 'agent.progress', agentId: 'task-1', seconds: 31, tokens: 12_400, calls: 6, doing: 'Reading the router' }),
     said({ type: 'agent.progress', agentId: 'task-1', seconds: 90, tokens: 20_100, calls: 9 }),
+    // Its effort is read off its own record once its row is drawn.
+    said({ type: 'agent.identified', agentId: 'task-1', effort: 'xhigh' }),
 
     said({
       type: 'agent.started',
@@ -242,6 +244,9 @@ describe('the panel', () => {
     expect(helper.querySelector('[data-testid="sent-away-agent-type"]')).toHaveTextContent('general-purpose');
     expect(helper.querySelector('[data-testid="sent-away-what"]')).toHaveTextContent('find the callers');
     expect(helper.querySelector('[data-testid="sent-away-model"]')).toHaveTextContent('opus-4-5');
+    expect(helper.querySelector('[data-testid="sent-away-effort"]')).toHaveTextContent('Extra high');
+    // Saying the effort keeps the kind it was already given.
+    expect(helper.querySelector('[data-testid="sent-away-agent-type"]')).toHaveTextContent('general-purpose');
     // The kit's own count, which is ahead of the row's: it knows about pauses.
     expect(helper.querySelector('[data-testid="sent-away-for"]')).toHaveTextContent('1m 30s');
     expect(helper.querySelector('[data-testid="sent-away-spend"]')).toHaveTextContent('20k');

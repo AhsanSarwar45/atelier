@@ -358,6 +358,10 @@ impl CodexNormalizer {
                     agent_type.clone().map_or(Value::Null, Value::String),
                 ),
                 ("model", item.get("model").cloned().unwrap_or(Value::Null)),
+                (
+                    "effort",
+                    item.get("reasoningEffort").cloned().unwrap_or(Value::Null),
+                ),
                 ("execution", execution),
             ],
         ));

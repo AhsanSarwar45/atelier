@@ -30,7 +30,7 @@
 
 import { useEffect, useId, useState } from 'react';
 
-import { Bot, ChevronDown, ChevronRight, Clock, Coins, Eye, SendToBack, Square, Terminal, Workflow } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, Clock, Coins, Eye, Gauge, SendToBack, Square, Terminal, Workflow } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
@@ -41,6 +41,7 @@ import { helperState } from '@/workbench/chat-state';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
 import { forHowLong } from '@/workbench/elapsed';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
+import { effortInWords } from '@/workbench/machine-words';
 import type { AgentControl, AgentKind, AgentState } from '@/workbench/protocol';
 import { isOver } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -113,6 +114,11 @@ export function modelNamed(model: string | null): string | null {
     .replace(/-\d{8}$/, '')
     .replace(/-(latest|v\d+)$/, '');
   return short || model;
+}
+
+/** The reasoning effort a helper runs at, in the words the effort picker uses. */
+export function effortNamed(effort: string | null | undefined): string | null {
+  return effort ? effortInWords(effort) : null;
 }
 
 /**
@@ -292,6 +298,7 @@ function AgentRow({
 }) {
   const { label: kind, Icon } = KINDS[row.kind];
   const model = modelNamed(row.model);
+  const effort = effortNamed(row.effort);
   const over = isOver(row.state);
   // A shell is not a helper, and the row says less about it because there is
   // less to say: no agent spent tokens on it, and its answer is the output it
@@ -372,6 +379,14 @@ function AgentRow({
             <Tooltip label={row.model ?? undefined}>
               <span data-testid="sent-away-model" className="max-w-24 shrink truncate">
                 {model}
+              </span>
+            </Tooltip>
+          )}
+          {effort && (
+            <Tooltip label={`Reasoning effort — ${effort}`}>
+              <span data-testid="sent-away-effort" className="flex max-w-20 shrink items-center gap-1 truncate">
+                <Gauge className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">{effort}</span>
               </span>
             </Tooltip>
           )}

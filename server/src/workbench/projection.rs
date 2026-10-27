@@ -461,8 +461,10 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                     if agents[at]["what"].as_str().unwrap_or_default().is_empty() {
                         agents[at]["what"] = value(event, "what");
                     }
-                    if agents[at]["model"].is_null() {
-                        agents[at]["model"] = value(event, "model");
+                    for field in ["model", "effort"] {
+                        if agents[at][field].is_null() {
+                            agents[at][field] = value(event, field);
+                        }
                     }
                 } else {
                     let mut row = Map::new();
@@ -473,6 +475,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                         "what",
                         "agentType",
                         "model",
+                        "effort",
                     ] {
                         let target = if field == "agentId" { "id" } else { field };
                         row.insert(target.into(), value(event, field));
@@ -504,15 +507,17 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                                 agents[at][field] = json!(old.max(integer(event, field)));
                             }
                         }
-                        if agents[at]["model"].as_str().unwrap_or_default().is_empty() {
-                            agents[at]["model"] = truthy_string(event, "model");
+                        for field in ["model", "effort"] {
+                            if agents[at][field].as_str().unwrap_or_default().is_empty() {
+                                agents[at][field] = truthy_string(event, field);
+                            }
                         }
                     } else {
                         for field in ["seconds", "tokens", "calls"] {
                             let old = agents[at][field].as_i64().unwrap_or_default();
                             agents[at][field] = json!(old.max(integer(event, field)));
                         }
-                        for field in ["doing", "model", "state"] {
+                        for field in ["doing", "model", "effort", "state"] {
                             if event
                                 .fields
                                 .get(field)
@@ -535,7 +540,13 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
             }
             EventKind::AgentIdentified => {
                 if let Some(&at) = agent_at.get(&string(event, "agentId")) {
-                    agents[at]["agentType"] = value(event, "agentType");
+                    // Each field is said only when it is known; an absent one
+                    // keeps what the row had.
+                    for field in ["agentType", "model", "effort"] {
+                        if event.fields.get(field).and_then(Value::as_str).is_some_and(|sent| !sent.is_empty()) {
+                            agents[at][field] = value(event, field);
+                        }
+                    }
                 }
             }
             EventKind::AgentFinished => {
@@ -550,8 +561,12 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                             agents[at][field] = value(event, field);
                         }
                     }
-                    if event.fields.contains_key("model") {
-                        agents[at]["model"] = value(event, "model");
+                    // A finish that does not know the model or effort keeps
+                    // what the row already had.
+                    for field in ["model", "effort"] {
+                        if event.fields.get(field).and_then(Value::as_str).is_some_and(|sent| !sent.is_empty()) {
+                            agents[at][field] = value(event, field);
+                        }
                     }
                     if let Some(tool_id) = agents[at]["toolCallId"].as_str() {
                         if let Some(tool_at) = find(&items, "tool", tool_id) {
@@ -1050,6 +1065,25 @@ mod tests {
         assert_eq!(view.agents()[0]["tokens"], 1000);
         assert_eq!(view.agents()[0]["calls"], 4);
         assert_eq!(view.agents()[0]["result"], "Done");
+    }
+
+    /// Model and effort said after a helper started are kept, and a finish
+    /// that knows neither does not wipe them (bw-q2ldn).
+    #[test]
+    fn a_helpers_model_and_effort_survive_its_finish() {
+        let values = vec![
+            json!({"type":"agent.started","sessionId":"chat","seq":1,"at":"2026-09-02T00:00:00Z","agentId":"child","toolCallId":"spawn","kind":"helper","what":"Audit","agentType":"reviewer","model":null}),
+            json!({"type":"agent.identified","sessionId":"chat","seq":2,"at":"2026-09-02T00:00:01Z","agentId":"child","model":"claude-haiku-5-5","effort":"low"}),
+            json!({"type":"agent.finished","sessionId":"chat","seq":3,"at":"2026-09-02T00:00:14Z","agentId":"child","state":"done","seconds":0,"tokens":0,"calls":0,"model":null,"result":"Done"}),
+        ];
+        let events = values
+            .into_iter()
+            .map(|value| serde_json::from_value(value).unwrap())
+            .collect::<Vec<Event>>();
+        let view = fold_all(&events);
+        assert_eq!(view.agents()[0]["agentType"], "reviewer");
+        assert_eq!(view.agents()[0]["model"], "claude-haiku-5-5");
+        assert_eq!(view.agents()[0]["effort"], "low");
     }
 
     /// ACP announces a call before it knows what the call was given, so the

@@ -295,6 +295,8 @@ export interface SentAway {
   what: string;
   agentType: string | null;
   model: string | null;
+  /** The reasoning effort it runs at, or null until anything has said. */
+  effort?: string | null;
   state: AgentState;
   /** Milliseconds since the epoch, from the event that started it. */
   startedAt: number;
@@ -424,7 +426,7 @@ export interface SessionView {
   /** What the session is actually pinned to, as the agent reported it. */
   permissionMode: string | null;
   model: string | null;
-  effort: string | null;
+  effort?: string | null;
   collaborationMode: string | null;
   /** The account this chat runs on, or null for the one the computer is signed in with. */
   profile: string | null;
@@ -808,7 +810,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.agents = known
         ? view.agents.map((a) =>
             a.id === e.agentId
-              ? { ...a, toolCallId: a.toolCallId ?? e.toolCallId, what: a.what || e.what, model: a.model ?? e.model }
+              ? { ...a, toolCallId: a.toolCallId ?? e.toolCallId, what: a.what || e.what, model: a.model ?? e.model, effort: a.effort ?? e.effort ?? null }
               : a,
           )
         : [
@@ -820,6 +822,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
               what: e.what,
               agentType: e.agentType,
               model: e.model,
+              effort: e.effort ?? null,
               state: 'running' as AgentState,
               startedAt: Date.parse(e.at) || 0,
               seconds: 0,
@@ -848,6 +851,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
                 tokens: e.finalUsage ? Math.max(a.tokens, e.tokens) : a.tokens,
                 calls: e.finalUsage ? Math.max(a.calls, e.calls) : a.calls,
                 model: a.model || e.model || null,
+                effort: a.effort || e.effort || null,
               }
             : {
                 ...a,
@@ -858,6 +862,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
                 // tool.progress makes: a blank line would erase it.
                 doing: e.doing || a.doing,
                 model: e.model || a.model,
+                effort: e.effort || a.effort,
                 state: e.state ?? a.state,
               }
           : a,
@@ -869,7 +874,11 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'agent.identified':
-      next.agents = view.agents.map((a) => a.id === e.agentId ? { ...a, agentType: e.agentType } : a);
+      next.agents = view.agents.map((a) =>
+        a.id === e.agentId
+          ? { ...a, agentType: e.agentType || a.agentType, model: e.model || a.model, effort: e.effort || a.effort }
+          : a,
+      );
       return next;
 
     case 'agent.finished':
@@ -907,6 +916,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
               tokens: e.tokens || a.tokens,
               calls: e.calls || a.calls,
               model: e.model ?? a.model,
+              effort: e.effort ?? a.effort,
             }
           : a,
       );
@@ -1342,6 +1352,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
             what: e.what,
             agentType: e.agentType,
             model: e.model,
+            effort: e.effort ?? null,
             state: 'running',
             startedAt: Date.parse(e.at) || 0,
             seconds: 0,
@@ -1357,6 +1368,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           row.toolCallId = row.toolCallId ?? e.toolCallId;
           row.what = row.what || e.what;
           row.model = row.model ?? e.model;
+          row.effort = row.effort ?? e.effort ?? null;
         }
         break;
       }
@@ -1374,6 +1386,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
               row.calls = Math.max(row.calls, e.calls);
             }
             row.model = row.model || e.model || null;
+            row.effort = row.effort || e.effort || null;
             break;
           }
           row.seconds = Math.max(row.seconds, e.seconds);
@@ -1381,6 +1394,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           row.calls = Math.max(row.calls, e.calls);
           if (e.doing) row.doing = e.doing;
           if (e.model) row.model = e.model;
+          if (e.effort) row.effort = e.effort;
           if (e.state) row.state = e.state;
         }
         break;
@@ -1394,7 +1408,12 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
 
       case 'agent.identified': {
         const at = agentAt.get(e.agentId);
-        if (at !== undefined) agents[at]!.agentType = e.agentType;
+        if (at !== undefined) {
+          const row = agents[at]!;
+          if (e.agentType) row.agentType = e.agentType;
+          if (e.model) row.model = e.model;
+          if (e.effort) row.effort = e.effort;
+        }
         break;
       }
 
@@ -1411,6 +1430,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           row.tokens = e.tokens || row.tokens;
           row.calls = e.calls || row.calls;
           row.model = e.model ?? row.model;
+          row.effort = e.effort ?? row.effort;
           if (!stopped) row.result = e.result;
           if (row.toolCallId) {
             const tool = toolAt.get(row.toolCallId);

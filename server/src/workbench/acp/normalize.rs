@@ -2116,7 +2116,8 @@ impl AcpNormalizer {
                             "agentType":update.pointer("/_meta/codex/subagent/name")
                                 .or_else(||update.pointer("/_meta/claudeCode/subagentType"))
                                 .or_else(||input.get("source")),
-                            "model":update.pointer("/_meta/codex/subagent/model").or_else(||input.get("model"))
+                            "model":update.pointer("/_meta/codex/subagent/model").or_else(||input.get("model")),
+                            "effort":input.get("effort")
                         }),
                     ));
                 }

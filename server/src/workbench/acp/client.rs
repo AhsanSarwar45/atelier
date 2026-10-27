@@ -991,6 +991,46 @@ async fn append(database: &ChatDb, events: Vec<Event>) -> Result<(), agent_clien
         .map_err(acp_error)
 }
 
+/**
+ * Tell the chat which model and effort its Claude helpers run on, read from
+ * each helper's own record (bw-q2ldn).
+ *
+ * Claude writes a reply to the record a moment after the adapter streams it,
+ * so a helper that has just answered may not be written down yet. It is asked
+ * again a few times over the next half minute; a helper still running is asked
+ * again with its next report anyway.
+ */
+async fn tell_helper_settings(
+    settings: Arc<std::sync::Mutex<super::super::claude::history::HelperSettings>>,
+    database: ChatDb,
+    session: String,
+    config: std::path::PathBuf,
+    remote: String,
+    helpers: Vec<String>,
+) {
+    for wait in [0, 1, 3, 10, 20] {
+        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+        let (found, waiting) = {
+            let mut settings = settings.lock().unwrap();
+            let found = settings.poll(&config, &remote, &helpers);
+            (found, settings.waiting(&helpers))
+        };
+        let found: Vec<Event> = found
+            .into_iter()
+            .filter_map(|mut value| {
+                value["sessionId"] = json!(session);
+                value["seq"] = json!(0);
+                value["at"] = json!(now());
+                serde_json::from_value(value).ok()
+            })
+            .collect();
+        let _ = append(&database, found).await;
+        if !waiting {
+            return;
+        }
+    }
+}
+
 /// A live turn's standing, taken out of what the normalizer produced.
 ///
 /// The standing is published by the one status decision (`status.rs`) and by
@@ -2605,6 +2645,17 @@ impl AcpDriver {
             let ready_reconcile = task_reconcile.clone();
             let updates_io = task_io.clone();
             let updates_replaying = replaying.clone();
+            // Where this chat's Claude record lives, for the helpers' own
+            // records: they say which model and effort each helper runs on.
+            let helper_config = (brand == "claude")
+                .then(|| {
+                    super::super::profiles::ambient()
+                        .map(|profiles| profiles.chat_dir("claude", task_session.profile.as_deref()))
+                })
+                .flatten();
+            let helper_settings = Arc::new(std::sync::Mutex::new(
+                super::super::claude::history::HelperSettings::default(),
+            ));
             let permission_db = task_database.clone();
             let permission_session = task_session.id.clone();
             let permission_broker = task_permissions.clone();
@@ -2645,7 +2696,28 @@ impl AcpDriver {
                             updates_brand,
                             &raw,
                         ));
+                        let helpers: Vec<String> = events
+                            .iter()
+                            .filter(|event| matches!(
+                                event.kind,
+                                EventKind::AgentStarted | EventKind::AgentProgress | EventKind::AgentFinished
+                            ))
+                            .filter_map(|event| event.fields.get("agentId").and_then(Value::as_str))
+                            .map(str::to_string)
+                            .collect();
                         append(&updates_db, events).await?;
+                        if let (Some(config), Some(remote), false) =
+                            (helper_config.clone(), raw["sessionId"].as_str(), helpers.is_empty())
+                        {
+                            tokio::spawn(tell_helper_settings(
+                                helper_settings.clone(),
+                                updates_db.clone(),
+                                updates_session.clone(),
+                                config,
+                                remote.to_string(),
+                                helpers,
+                            ));
+                        }
                         if withheld {
                             updates_reconcile().await.map_err(acp_error)?;
                         }

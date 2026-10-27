@@ -1697,9 +1697,7 @@ fn helper_facts_from(path: &Path, agent_id: String, rows: &[Value], size: u64) -
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or(Value::Null);
     let tool = as_nonempty(&meta["toolUseId"]);
-    let model = conversation
-        .iter()
-        .find_map(|row| as_nonempty(&row["message"]["model"]));
+    let (model, effort) = helper_settings(&conversation);
     let first = rows.iter().find_map(|row| as_nonempty(&row["timestamp"]));
     let last = rows
         .iter()
@@ -1731,17 +1729,18 @@ fn helper_facts_from(path: &Path, agent_id: String, rows: &[Value], size: u64) -
     let mut events = vec![json!({
         "type":"agent.started", "agentId":agent_id, "toolCallId":tool,
         "kind":"helper", "what":as_nonempty(&meta["description"]).and_then(|text| text.lines().next().map(str::to_string)).unwrap_or_default(),
-        "agentType":as_nonempty(&meta["agentType"]), "model":model
+        "agentType":as_nonempty(&meta["agentType"]), "model":model, "effort":effort
     })];
     events.extend(transcript_events(&conversation, Some(under)));
     events.push(json!({
         "type":"agent.progress", "agentId":agent_id, "state":"running",
-        "seconds":seconds, "tokens":spent.total, "calls":calls, "model":model
+        "seconds":seconds, "tokens":spent.total, "calls":calls, "model":model,
+        "effort":effort
     }));
     let finish = json!({
         "type":"agent.finished", "agentId":agent_id,
         "seconds":seconds, "tokens":spent.total, "calls":calls,
-        "model":model, "result":result
+        "model":model, "effort":effort, "result":result
     });
     HelperFacts {
         agent_id,
@@ -1752,6 +1751,100 @@ fn helper_facts_from(path: &Path, agent_id: String, rows: &[Value], size: u64) -
         spent,
         size,
     }
+}
+
+/// The model and effort a helper runs on, from its own replies. Claude writes
+/// both on every assistant row of the helper's record; a stand-in reply the
+/// kit writes itself names `<synthetic>` and no effort.
+fn helper_settings(rows: &[Value]) -> (Option<String>, Option<String>) {
+    let mut model = None;
+    let mut effort = None;
+    for row in rows.iter().filter(|row| row["type"] == "assistant") {
+        if model.is_none() {
+            model = as_nonempty(&row["message"]["model"]).filter(|model| model != "<synthetic>");
+        }
+        if effort.is_none() {
+            effort = as_nonempty(&row["effort"]);
+        }
+        if model.is_some() && effort.is_some() {
+            break;
+        }
+    }
+    (model, effort)
+}
+
+/**
+ * Model and effort for each helper a driven Claude chat has sent off.
+ *
+ * The adapter never says which model or effort a helper runs on. The helper's
+ * own record does, on its first reply, so the driver asks here each time it
+ * hears of a helper, until that reply is written (bw-q2ldn).
+ *
+ * Said as `agent.identified`, not `agent.progress`: the panel keeps only each
+ * helper's newest progress, so a later count would drop it.
+ */
+#[derive(Default)]
+pub struct HelperSettings {
+    record: Option<PathBuf>,
+    known: HashSet<String>,
+}
+
+impl HelperSettings {
+    /// One event for each named helper whose settings are newly found.
+    /// `config` and `session` say where the chat's record is; it is looked
+    /// up once.
+    pub fn poll(&mut self, config: &Path, session: &str, agents: &[String]) -> Vec<Value> {
+        let wanted: Vec<&String> = agents.iter().filter(|agent| !self.known.contains(*agent)).collect();
+        if wanted.is_empty() {
+            return Vec::new();
+        }
+        if self.record.is_none() {
+            self.record = find_record(config, session);
+        }
+        let Some(record) = &self.record else {
+            return Vec::new();
+        };
+        let Some(stem) = record.file_stem() else {
+            return Vec::new();
+        };
+        let helpers = record.with_file_name(stem).join("subagents");
+        let mut found = Vec::new();
+        for agent in wanted {
+            let Some((model, effort)) = first_settings(&helpers.join(format!("agent-{agent}.jsonl"))) else {
+                continue;
+            };
+            self.known.insert(agent.clone());
+            found.push(json!({
+                "type":"agent.identified", "agentId":agent, "model":model, "effort":effort
+            }));
+        }
+        found
+    }
+
+    /// Whether any of these helpers' settings are still unknown.
+    pub fn waiting(&self, agents: &[String]) -> bool {
+        agents.iter().any(|agent| !self.known.contains(agent))
+    }
+}
+
+/// A helper file read only up to its first reply that names a model.
+fn first_settings(path: &Path) -> Option<(String, Option<String>)> {
+    use std::io::BufRead;
+    let file = fs::File::open(path).ok()?;
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line.ok()?;
+        if !line.contains("\"assistant\"") {
+            continue;
+        }
+        let Ok(row) = serde_json::from_str::<Value>(&line) else { continue };
+        if row["type"] != "assistant" {
+            continue;
+        }
+        if let Some(model) = as_nonempty(&row["message"]["model"]).filter(|model| model != "<synthetic>") {
+            return Some((model, as_nonempty(&row["effort"])));
+        }
+    }
+    None
 }
 
 fn tool_outcomes(rows: &[Value]) -> HashMap<String, bool> {
@@ -3154,6 +3247,39 @@ mod tests {
             .events
             .iter()
             .any(|event| event["type"] == "agent.finished" && event["seconds"] == 2));
+    }
+
+    /// A helper's own record names its model and effort on each reply; the
+    /// replayed row carries both, and a driven chat is told them once its
+    /// row is drawn (bw-q2ldn).
+    #[test]
+    fn a_helpers_model_and_effort_come_from_its_own_record() {
+        let (_home, record) = fixture();
+        let helper_dir = record.with_file_name(CHAT).join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        write(helper_dir.join("agent-h1.meta.json"), json!({"toolUseId":"call-1"}).to_string()).unwrap();
+        write(helper_dir.join("agent-h1.jsonl"), [
+            json!({"type":"user","isSidechain":true,"message":{"content":"search"}}),
+            json!({"type":"assistant","isSidechain":true,"message":{"model":"<synthetic>","content":[]}}),
+            json!({"type":"assistant","isSidechain":true,"effort":"low","message":{"id":"h","model":"claude-haiku-5-5","content":[{"type":"text","text":"found"}]}})
+        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+
+        let history = read_history(&record);
+        for kind in ["agent.started", "agent.finished"] {
+            let event = history.events.iter().find(|event| event["type"] == kind).unwrap();
+            assert_eq!(event["model"], "claude-haiku-5-5", "{kind}");
+            assert_eq!(event["effort"], "low", "{kind}");
+        }
+
+        let config = record.parent().unwrap().parent().unwrap().parent().unwrap();
+        let mut settings = HelperSettings::default();
+        let helper = vec!["h1".to_string()];
+        assert!(settings.poll(config, CHAT, &["h2".to_string()]).is_empty(), "no record, nothing said");
+        let said = settings.poll(config, CHAT, &helper);
+        assert_eq!(said, vec![json!({
+            "type":"agent.identified","agentId":"h1","model":"claude-haiku-5-5","effort":"low"
+        })]);
+        assert!(settings.poll(config, CHAT, &helper).is_empty(), "said once");
     }
 
     #[test]

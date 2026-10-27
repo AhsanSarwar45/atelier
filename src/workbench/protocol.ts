@@ -605,7 +605,8 @@ export type WbpEvent = EventBase &
      * `model` is what the sender knew at the time, which for a helper is
      * usually nothing: the model it actually ran arrives with its first words
      * (their `message.model`) or with its result, and `agent.progress` carries
-     * it up when it does.
+     * it up when it does. `effort` arrives the same way: Claude writes the
+     * level beside the model on every one of a helper's replies.
      */
     | {
         type: 'agent.started';
@@ -617,6 +618,8 @@ export type WbpEvent = EventBase &
         /** Which kind of helper the kit was asked for, when it says. */
         agentType: string | null;
         model: string | null;
+        /** The reasoning effort it runs at, when anything has said. */
+        effort?: string | null;
       }
     /**
      * The numbers on a row, refreshed while it runs. Every field is what the
@@ -639,6 +642,7 @@ export type WbpEvent = EventBase &
         finalUsage?: boolean;
         doing?: string;
         model?: string;
+        effort?: string;
         /** Set when the kit says this row is now running elsewhere, or is now in the background. */
         state?: AgentState;
       }
@@ -655,6 +659,7 @@ export type WbpEvent = EventBase &
         tokens: number;
         calls: number;
         model: string | null;
+        effort?: string | null;
         result: string | null;
       }
     /**
@@ -669,7 +674,11 @@ export type WbpEvent = EventBase &
      * took.
      */
     | { type: 'agent.relayed'; agentId: string; text: string }
-    | { type: 'agent.identified'; agentId: string; agentType: string }
+    /**
+     * What a helper is, said after it started: its kind, and the model and
+     * effort it runs on. Each field is sent only when it is known.
+     */
+    | { type: 'agent.identified'; agentId: string; agentType?: string; model?: string; effort?: string | null }
     /**
      * A file changed. `before` and `after` are bounded on the wire, so for
      * anything but a small edit they are a prefix of the text and not the

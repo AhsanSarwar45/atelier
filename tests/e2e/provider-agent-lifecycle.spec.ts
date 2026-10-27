@@ -110,6 +110,19 @@ test.describe('native provider child-agent lifecycle', () => {
         await expect(rows.first()).toHaveAttribute('data-kind', 'helper');
         await expect(rows.first()).toHaveAttribute('data-state', 'done', { timeout: SETTLE_MS });
 
+        if (provider.brand === 'claude') {
+          // A finished helper is folded away; open the list to read its row.
+          const toggle = page.getByTestId('toggle-stopped-agents');
+          if (await toggle.isVisible() && (await toggle.getAttribute('data-showing')) !== 'true') await toggle.click();
+          // The helper's own record says which model and effort it ran on,
+          // and the row says so too.
+          const model = rows.first().getByTestId('sent-away-model');
+          await model.waitFor({ timeout: SETTLE_MS }).catch(() => undefined);
+          await page.getByTestId('sent-away-panel').screenshot({ path: `${SHOTS}/provider-agent-model-effort-${provider.brand}.png` });
+          await expect(model).toHaveText(/\S/);
+          await expect(rows.first().getByTestId('sent-away-effort')).toHaveText(/\S/);
+        }
+
         const parentMessages = await page.getByTestId('assistant-message').allInnerTexts();
         expect(parentMessages.some((text) => text.includes(provider.childAnswer)),
           `${provider.brand} drew its child's answer as an ordinary parent message`).toBe(false);
@@ -143,6 +156,13 @@ test.describe('native provider child-agent lifecycle', () => {
         await expect(page.getByTestId('sent-away-row')).toHaveCount(1);
         await expect(page.getByTestId('sent-away-row')).toHaveAttribute('data-state', 'done');
         await expect(page.getByTestId('sent-away-row')).toContainText('Done');
+        if (provider.brand === 'claude') {
+          // The stored panel keeps them too.
+          const toggle = page.getByTestId('toggle-stopped-agents');
+          if (await toggle.isVisible() && (await toggle.getAttribute('data-showing')) !== 'true') await toggle.click();
+          await expect(page.getByTestId('sent-away-model')).toHaveText(/\S/);
+          await expect(page.getByTestId('sent-away-effort')).toHaveText(/\S/);
+        }
         if (provider.brand === 'claude') {
           await expect(page.locator('[data-testid="tool-row"][data-tool-name="Agent"]'))
             .toContainText('general-purpose finished');
