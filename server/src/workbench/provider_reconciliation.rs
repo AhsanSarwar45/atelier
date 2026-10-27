@@ -68,6 +68,7 @@ mod tests {
                 last_spoke_at: None,
                 begun_by: None,
                 named_by_owner: false,
+                auto_approve: false,
             })
             .await
             .unwrap();

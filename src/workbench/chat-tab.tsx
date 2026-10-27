@@ -12,7 +12,7 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, CheckCheck, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
 
 import { BeadChip } from '@/components/bead-chip-row';
 import { ReferenceBadge } from '@/components/reference-badge';
@@ -367,6 +367,8 @@ function ChoiceWithStar({
   );
 }
 
+type ProviderDefaultsReply = { model: string | null; effort: string | null; permissionMode: string | null; autoApprove?: boolean };
+
 export function Picker({
   icon,
   label,
@@ -467,6 +469,55 @@ export function Picker({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * Whether the app approves this chat's tool requests itself.
+ *
+ * A setting beside the permission mode rather than one of its entries, so it
+ * can be on while the chat is in plan mode or any other mode (bw-q8ehk.1).
+ * The provider keeps asking as its mode says, and the app presses the
+ * once-only allow button. Plans still wait for the owner.
+ */
+export function AutoApprovePicker({
+  sessionId,
+  on,
+  asleep,
+  mobile = false,
+  defaultOn,
+  onDefault,
+  onError,
+}: {
+  sessionId: string;
+  on: boolean;
+  asleep: boolean;
+  mobile?: boolean;
+  /** The account's default for new chats, or null where there is none to set. */
+  defaultOn: boolean | null;
+  onDefault?: (on: boolean) => void;
+  onError: (message: string | null) => void;
+}) {
+  return (
+    <Picker
+      icon={<CheckCheck className={cn(mobile ? 'h-4 w-4' : 'h-3.5 w-3.5', on && 'text-warning')} />}
+      label="Auto-approve"
+      testid={`${mobile ? 'mobile-' : ''}auto-approve-picker`}
+      current={on ? 'on' : 'off'}
+      asleep={asleep}
+      options={[
+        { value: 'on', label: 'Auto-approve on', hint: 'Atelier approves each tool request for you, in any permission mode. Plans still wait for you.' },
+        { value: 'off', label: 'Auto-approve off', hint: 'Tool requests wait for you, as the permission mode says.' },
+      ]}
+      defaultValue={defaultOn === null ? null : defaultOn ? 'on' : 'off'}
+      onDefault={onDefault && ((value) => onDefault(value === 'on'))}
+      onPick={(value) => {
+        onError(null);
+        void sendCommand({ type: 'session.auto-approve', sessionId, on: value === 'on' }).catch((error: unknown) =>
+          onError(error instanceof Error ? error.message : String(error)),
+        );
+      }}
+    />
   );
 }
 
@@ -1002,6 +1053,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [modelDefaults, setModelDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [effortDefaults, setEffortDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [permissionDefaults, setPermissionDefaults] = useState<Partial<Record<Brand, string>>>({});
+  const [autoApproveDefaults, setAutoApproveDefaults] = useState<Partial<Record<Brand, boolean>>>({});
   const [composerSettingsOpen, setComposerSettingsOpen] = useState(false);
   const availableBrand = firstAvailableProvider(providers);
   const newBrandAvailable = providerIsAvailable(providers, newBrand);
@@ -1768,7 +1820,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   useEffect(() => {
     let current = true;
     if (sessionBrand === 'local') return () => { current = false; };
-    void sendCommand<{ model: string | null; effort: string | null; permissionMode: string | null }>({
+    void sendCommand<ProviderDefaultsReply>({
       type: 'provider-defaults.read', brand: sessionBrand, profileId: view.profile ?? undefined,
     })
       .then((defaults) => {
@@ -1776,18 +1828,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         setModelDefaults((was) => ({ ...was, [sessionBrand]: defaults.model ?? undefined }));
         setEffortDefaults((was) => ({ ...was, [sessionBrand]: defaults.effort ?? undefined }));
         setPermissionDefaults((was) => ({ ...was, [sessionBrand]: defaults.permissionMode ?? undefined }));
+        setAutoApproveDefaults((was) => ({ ...was, [sessionBrand]: defaults.autoApprove === true }));
       })
       .catch((e: unknown) => current && setSteerError(e instanceof Error ? e.message : String(e)));
     return () => { current = false; };
   }, [sessionBrand, view.profile]);
-  const makeProviderDefault = useCallback((kind: 'model' | 'effort' | 'permission', value: string) => {
+  const makeProviderDefault = useCallback((kind: 'model' | 'effort' | 'permission' | 'autoApprove', value: string) => {
     setSteerError(null);
-    void sendCommand<{ model: string | null; effort: string | null; permissionMode: string | null }>({
+    void sendCommand<ProviderDefaultsReply>({
       type: 'provider-defaults.write', brand: sessionBrand, kind, value, profileId: view.profile ?? undefined,
     }).then((defaults) => {
       setModelDefaults((was) => ({ ...was, [sessionBrand]: defaults.model ?? undefined }));
       setEffortDefaults((was) => ({ ...was, [sessionBrand]: defaults.effort ?? undefined }));
       setPermissionDefaults((was) => ({ ...was, [sessionBrand]: defaults.permissionMode ?? undefined }));
+      setAutoApproveDefaults((was) => ({ ...was, [sessionBrand]: defaults.autoApprove === true }));
     }).catch((e: unknown) => setSteerError(e instanceof Error ? e.message : String(e)));
   }, [sessionBrand, view.profile]);
   /** The selected provider account's allowance, never the other provider's. */
@@ -2706,6 +2760,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 );
               }}
             />
+            <AutoApprovePicker
+              sessionId={chatId}
+              on={view.autoApprove}
+              asleep={asleep}
+              defaultOn={sessionBrand === 'local' ? null : autoApproveDefaults[sessionBrand] ?? false}
+              onDefault={sessionBrand === 'local' ? undefined : (on) => makeProviderDefault('autoApprove', on ? 'on' : 'off')}
+              onError={setSteerError}
+            />
             {composer.collaborationModes.length > 0 && (
               <Picker
                 icon={<Workflow className="h-3.5 w-3.5" />}
@@ -2876,7 +2938,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             />
           </div>
     </>
-  ), [asleep, busy, cannotSend, chatId, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, effortDefaults, holdSteady, makeProviderDefault, midTurn, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, sessionStanding, submitSteady, switchAccount, view.collaborationMode, view.effort, view.menu.agentDefinitions, view.menu.configOptions, view.model, view.permissionMode]);
+  ), [asleep, busy, cannotSend, chatId, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, effortDefaults, holdSteady, autoApproveDefaults, makeProviderDefault, midTurn, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, sessionStanding, submitSteady, switchAccount, view.collaborationMode, view.effort, view.menu.agentDefinitions, view.menu.configOptions, view.autoApprove, view.model, view.permissionMode]);
 
   const mobileSettings = useMemo(() => (
     <>
@@ -2905,6 +2967,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                     setSteerError(error instanceof Error ? error.message : String(error)),
                   );
                 }}
+              />
+              <AutoApprovePicker
+                sessionId={chatId}
+                on={view.autoApprove}
+                asleep={asleep}
+                mobile
+                defaultOn={sessionBrand === 'local' ? null : autoApproveDefaults[sessionBrand] ?? false}
+                onDefault={sessionBrand === 'local' ? undefined : (on) => makeProviderDefault('autoApprove', on ? 'on' : 'off')}
+                onError={setSteerError}
               />
               {composer.collaborationModes.length > 0 && (
                 <Picker
@@ -3005,7 +3076,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           </DialogContent>
         </Dialog>
     </>
-  ), [asleep, busy, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, composerSettingsOpen, effortDefaults, makeProviderDefault, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, chatId, sessionProfile, sessionProfileLabel, sessionStanding, switchAccount, view.collaborationMode, view.effort, view.menu.configOptions, view.model, view.permissionMode]);
+  ), [asleep, busy, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, composerSettingsOpen, effortDefaults, autoApproveDefaults, makeProviderDefault, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, chatId, sessionProfile, sessionProfileLabel, sessionStanding, switchAccount, view.collaborationMode, view.effort, view.menu.configOptions, view.autoApprove, view.model, view.permissionMode]);
 
   if (!projectId || !projectPath) {
     return <div className="p-8 text-muted-foreground">Select a project</div>;

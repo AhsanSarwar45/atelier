@@ -755,11 +755,10 @@ enum Control {
         reply: Reply,
     },
     Mode {
-        /// The mode the agent is told to enter.
+        /// The mode the agent is told to enter, in its own word.
         value: String,
-        /// The mode the owner picked, which for the app's own mode is not a
-        /// word the agent was told. It is what the chat is pinned to and what
-        /// the chips draw.
+        /// The mode the owner picked, in the app's word. It is what the chat
+        /// is pinned to and what the chips draw.
         selected: String,
         reply: Reply,
     },
@@ -790,13 +789,13 @@ enum ConfigTarget {
 struct PermissionBroker {
     pending: Mutex<HashMap<String, PendingPermission>>,
     plan_options: Mutex<HashMap<String, (String, String)>>,
-    /// Whether the chat is in the app's own permission mode, in which the app
-    /// presses the allow option instead of drawing a card and waiting.
+    /// Whether the chat has auto-approve on, in which the app presses the
+    /// allow option instead of drawing a card and waiting.
     ///
     /// Kept here rather than read from the chat record on each question: the
     /// question is answered on the reading loop, the record is behind the
     /// database, and the one thing that has to be known is a single bit that
-    /// changes only when the owner changes the mode.
+    /// changes only when the owner flips the setting.
     answers_itself: std::sync::atomic::AtomicBool,
 }
 
@@ -835,12 +834,11 @@ struct PendingElicitation {
 }
 
 impl PermissionBroker {
-    /// Record the mode the chat is now in, as the owner picked it.
-    fn set_mode(&self, mode: &str) {
-        self.answers_itself.store(
-            mode == super::super::answering::ATELIER_AUTO,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+    /// Record whether the owner has auto-approve on for this chat. It is
+    /// independent of the permission mode, so it holds in plan mode too.
+    fn set_auto_approve(&self, on: bool) {
+        self.answers_itself
+            .store(on, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn answers_itself(&self) -> bool {
@@ -1207,12 +1205,12 @@ async fn permission(
         .pointer("/toolCall/rawInput/plan")
         .and_then(Value::as_str)
         .filter(|plan| !plan.trim().is_empty());
-    // In the app's own permission mode the card is not put to the owner: it is
-    // drawn already answered, and the agent is told to go ahead before it has
+    // With auto-approve on the card is not put to the owner: it is drawn
+    // already answered, and the agent is told to go ahead before it has
     // stopped. A plan is not a tool call and is never answered this way — it
     // is the one question in the transcript that asks which direction the work
-    // should take, and the mode is about not being asked to confirm work that
-    // has already been decided (bw-0z25.1).
+    // should take, and auto-approve is about not being asked to confirm work
+    // that has already been decided (bw-0z25.1).
     let answered_by_app = (plan.is_none() && broker.answers_itself())
         .then(|| super::super::answering::allow_option(&options))
         .flatten();
@@ -2175,11 +2173,6 @@ pub(super) fn mode_from_acp(brand: &str, mode: &str) -> String {
 }
 
 fn mode_to_acp(brand: &str, mode: &str) -> String {
-    // "Atelier automatic" is the app's own mode and no agent has ever heard of
-    // it. What the agent is handed is the mode that still asks; the asking is
-    // what the app then answers (`workbench::answering`).
-    let mode = super::super::answering::provider_mode(brand, mode);
-    let mode = mode.as_str();
     if brand != "codex" {
         return mode.to_string();
     }
@@ -2246,24 +2239,13 @@ pub(super) fn menu_fields(
     agent_definitions: &Value,
 ) -> Value {
     let options = options_for_menu(brand, seed_model, options);
-    let mut permission_modes = modes["availableModes"]
+    let permission_modes = modes["availableModes"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|mode| mode["id"].as_str())
         .map(|mode| mode_from_acp(brand, mode))
         .collect::<Vec<_>>();
-    // The app's own mode is offered wherever the provider's are: it is the app
-    // that carries it out, so no agent has to support it. What the agent does
-    // have to allow is being left asking — either by offering the asking mode,
-    // or by listing no modes at all, in which case it is asked for nothing and
-    // keeps the one it started in (`workbench::answering`, `offers_mode`).
-    let lists_no_modes = modes["availableModes"]
-        .as_array()
-        .is_none_or(Vec::is_empty);
-    let can_be_left_asking = lists_no_modes
-        || offers_mode(modes, &mode_to_acp(brand, super::super::answering::ATELIER_AUTO));
-    super::super::answering::offer_in_menu(&mut permission_modes, can_be_left_asking);
     json!({
         "commands":[], "skills":[], "agentDefinitions":agent_definitions, "agentControls":agent_controls,
         "permissionModes":permission_modes,
@@ -3030,12 +3012,9 @@ impl AcpDriver {
                             let response = connection.send_request(SetSessionConfigOptionRequest::new(remote_id.clone(), key, desired)).block_task().await?;
                             config_options = serde_json::to_value(response.config_options).map_err(acp_error)?;
                         }
-                        let pinned_mode = super::super::answering::read_back(
-                            &task_session.permission_mode,
-                            brand,
-                            &mode_from_acp(brand, modes["currentModeId"].as_str().unwrap_or_default()),
-                        );
-                        task_permissions.set_mode(&pinned_mode);
+                        let pinned_mode =
+                            mode_from_acp(brand, modes["currentModeId"].as_str().unwrap_or_default());
+                        task_permissions.set_auto_approve(task_session.auto_approve);
                         let pinned_model = current_option(&config_options, &["model"]).as_str().map(|model| {
                             local_model.as_deref().and_then(super::super::local::decode_model)
                                 .map(|(runtime, _)| super::super::local::encode_model(runtime, model))
@@ -3081,7 +3060,8 @@ impl AcpDriver {
                             .map_err(acp_error)?;
                         task_database.append(event(json!({
                             "type":"session.pinned", "sessionId":task_session.id, "seq":0, "at":now(),
-                            "permissionMode":pinned_mode, "model":pinned_model,
+                            "permissionMode":pinned_mode, "autoApprove":task_session.auto_approve,
+                            "model":pinned_model,
                             "effort":pinned_effort, "collaborationMode":pinned_collaboration
                         }))?).await.map_err(acp_error)?;
                         ready_reconcile().await.map_err(acp_error)?;
@@ -3225,12 +3205,7 @@ impl AcpDriver {
                                     // without: `session/set_mode` names one of
                                     // the modes the agent listed, and an agent
                                     // asked for one it never offered answers
-                                    // with a fatal `Invalid params`. The app's
-                                    // own mode is never a word an agent
-                                    // listed, so for an agent that lists none
-                                    // at all nothing is sent — it keeps the
-                                    // mode it came up in, which is the asking
-                                    // one, and the app answers what it asks.
+                                    // with a fatal `Invalid params`.
                                     let result = if offers_mode(&modes, &value) {
                                         connection
                                             .send_request(SetSessionModeRequest::new(remote_id.clone(), value))
@@ -3243,11 +3218,6 @@ impl AcpDriver {
                                     };
                                     let result = match result {
                                         Ok(_) => {
-                                            // The bit the question-answering
-                                            // path reads moves with the pin,
-                                            // so a mode changed mid-turn takes
-                                            // effect on the next question.
-                                            task_permissions.set_mode(&selected);
                                             task_database.append(serde_json::from_value(json!({
                                                 "type":"session.pinned", "sessionId":task_session.id,
                                                 "seq":0, "at":now(), "permissionMode":selected,
@@ -3688,6 +3658,28 @@ impl AcpDriver {
                 }
                 Ok(result)
             }
+            CommandKind::SessionAutoApprove => {
+                let on = command
+                    .at("on")
+                    .as_bool()
+                    .ok_or_else(|| "on must be true or false".to_string())?;
+                // The bit the question-answering path reads moves with the
+                // pin, so turning it on mid-turn takes effect on the next
+                // question, whatever mode the chat is in.
+                self.permissions.set_auto_approve(on);
+                self.database
+                    .append(
+                        serde_json::from_value(json!({
+                            "type":"session.pinned", "sessionId":self.session.id,
+                            "seq":0, "at":now(), "autoApprove":on,
+                            "permissionMode":Value::Null, "model":Value::Null,
+                            "effort":Value::Null, "collaborationMode":Value::Null
+                        }))
+                        .map_err(|error| error.to_string())?,
+                    )
+                    .await?;
+                Ok(json!({"ok":true}))
+            }
             CommandKind::SessionMode => {
                 let selected = command.at("mode").as_str().unwrap_or_default().to_string();
                 let value = mode_to_acp(self.brand, &selected);
@@ -4084,6 +4076,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         }
     }
 
@@ -4664,6 +4657,48 @@ mod tests {
         assert_eq!(answered.await.unwrap().unwrap()["ok"], true);
     }
 
+    /// Turning auto-approve on in a live chat answers the next question, and
+    /// tells the agent nothing: its mode, plan mode included, is left as it
+    /// was (bw-q8ehk.1).
+    #[tokio::test]
+    async fn auto_approve_turns_on_without_touching_the_agents_mode() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let session = test_session("idle");
+        database.create_session(session.clone()).await.unwrap();
+        let (controls, mut requests) = mpsc::unbounded_channel();
+        let (_, ended) = mpsc::unbounded_channel();
+        let permissions = Arc::new(PermissionBroker::default());
+        let mut driver = AcpDriver {
+            shared_library: Default::default(),
+            pending_guidance: None,
+            brand: "claude",
+            database: database.clone(),
+            session: session.clone(),
+            controls,
+            ended,
+            permissions: permissions.clone(),
+            elicitations: Arc::new(ElicitationBroker::default()),
+            carries: Arc::new(AtomicU8::new(Carries::default().packed())),
+            normalizer: Arc::new(Mutex::new(AcpNormalizer::default())),
+            reconcile: Arc::new(|| Box::pin(async { Ok(json!({})) })),
+            in_flight: Default::default(),
+        };
+        let on = Command {
+            kind: CommandKind::SessionAutoApprove,
+            fields: serde_json::Map::from_iter([
+                ("sessionId".into(), json!("chat-1")),
+                ("on".into(), json!(true)),
+            ]),
+        };
+        assert_eq!(driver.command(&on).await.unwrap()["ok"], true);
+        assert!(permissions.answers_itself());
+        assert!(requests.try_recv().is_err(), "the agent was sent a control");
+        let saved = database.get_session(session.id.clone()).await.unwrap().unwrap();
+        assert!(saved.auto_approve);
+        assert_eq!(saved.permission_mode, session.permission_mode);
+    }
+
     /// A message sent while the agent is asking a question closes the question
     /// as not answered before the message is steered in. A sign-in link is not
     /// a question and stays open (bw-1duw.1).
@@ -4834,36 +4869,21 @@ mod tests {
             .unwrap();
     }
 
-    /// Which agents are offered the app's own permission mode.
-    ///
-    /// It is the app that answers the cards, but the agent has to be left
-    /// asking for there to be any. An agent that offers the asking mode is put
-    /// in it; an agent that offers no modes at all is asked for nothing and
-    /// keeps the one it came up in. An agent that offers modes but not that
-    /// one is neither, and offering it there would be a promise on the picker
-    /// that nothing behind it keeps (bw-0z25.1).
+    /// The menu lists only the agent's own modes. Auto-approve is a setting
+    /// beside them, not one of them, so plan mode and auto-approve can both
+    /// be on (bw-q8ehk.1).
     #[test]
-    fn the_apps_own_mode_is_offered_only_where_the_agent_can_be_left_asking() {
+    fn auto_approve_is_not_offered_as_a_mode() {
         let menu = |modes: Value| {
             menu_fields("codex", None, &modes, &json!([]), &json!([]), &json!([]))
                 ["permissionModes"]
                 .clone()
         };
-
-        // Codex, which offers the asking mode under its own name.
         assert_eq!(
             menu(json!({"availableModes":[{"id":"read-only"},{"id":"agent"}]})),
-            json!(["untrusted", "on-request", "atelierAuto"])
+            json!(["untrusted", "on-request"])
         );
-        // An agent that lists nothing, as goose does (bw-u6cl.11). Nothing is
-        // sent to it and it keeps the mode it started in.
-        assert_eq!(menu(json!({"availableModes":[]})), json!(["atelierAuto"]));
-        assert_eq!(menu(json!({})), json!(["atelierAuto"]));
-        // An agent with modes of its own, none of which leaves it asking.
-        assert_eq!(
-            menu(json!({"availableModes":[{"id":"agent-full-access"}]})),
-            json!(["never"])
-        );
+        assert_eq!(menu(json!({"availableModes":[]})), json!([]));
     }
 
     /// The card the app answered for him.
@@ -4872,13 +4892,13 @@ mod tests {
     /// and the transcript still carries both halves of the exchange — what was
     /// asked, and that it was the app rather than the owner that answered.
     #[tokio::test]
-    async fn the_apps_own_mode_answers_the_card_and_says_who_answered_it() {
+    async fn auto_approve_answers_the_card_and_says_who_answered_it() {
         let root = tempfile::tempdir().unwrap();
         let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
         let session = test_session("working");
         database.create_session(session.clone()).await.unwrap();
         let broker = Arc::new(PermissionBroker::default());
-        broker.set_mode(crate::workbench::answering::ATELIER_AUTO);
+        broker.set_auto_approve(true);
 
         let answering = permission(
             asking_to_run_a_tool(),
@@ -4914,15 +4934,15 @@ mod tests {
         assert_eq!(resolved.fields["by"], "atelier");
     }
 
-    /// Every other mode still asks.
+    /// With auto-approve off, the card waits for the owner.
     #[tokio::test]
-    async fn a_chat_in_a_providers_own_mode_still_waits_for_the_owner() {
+    async fn a_chat_without_auto_approve_still_waits_for_the_owner() {
         let root = tempfile::tempdir().unwrap();
         let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
         let session = test_session("working");
         database.create_session(session.clone()).await.unwrap();
         let broker = Arc::new(PermissionBroker::default());
-        broker.set_mode("default");
+        broker.set_auto_approve(false);
 
         let _answering = permission(
             asking_to_run_a_tool(),
@@ -4955,7 +4975,7 @@ mod tests {
         let session = test_session("working");
         database.create_session(session.clone()).await.unwrap();
         let broker = Arc::new(PermissionBroker::default());
-        broker.set_mode(crate::workbench::answering::ATELIER_AUTO);
+        broker.set_auto_approve(true);
 
         let request = serde_json::from_value(json!({
             "sessionId":"remote-1",
@@ -5170,6 +5190,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         };
         database.create_session(session.clone()).await.unwrap();
         for (agent_id, tool_id) in [("stop-me", "tool-1"), ("park-me", "tool-2")] {
@@ -5263,6 +5284,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         };
         database.create_session(session.clone()).await.unwrap();
         let (controls, _) = mpsc::unbounded_channel();
@@ -5346,11 +5368,9 @@ mod tests {
         );
         let menu = menu_event("local", menu).unwrap();
         let menu = serde_json::to_value(menu).unwrap();
-        // The agent's own three, then the app's, which the agent never
-        // listed because it belongs to the app (`workbench::answering`).
         assert_eq!(
             menu["permissionModes"],
-            json!(["untrusted", "on-request", "never", "atelierAuto"])
+            json!(["untrusted", "on-request", "never"])
         );
         assert_eq!(menu["models"][0]["value"], "gpt-5.6-sol");
         assert_eq!(menu["efforts"][0]["value"], "high");

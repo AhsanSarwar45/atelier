@@ -1,26 +1,38 @@
 /**
- * The permission mode in which the app answers the cards.
+ * Auto-approve: the app answering the cards itself.
  *
  * Some accounts cannot use the provider's own automatic modes: the setting is
  * refused, or the organisation removed it, and every tool call then waits on a
- * person pressing Yes. "Atelier automatic" leaves the provider asking exactly
- * as it would when asking first, and this app presses the allow-once button.
+ * person pressing Yes. With auto-approve on, the provider keeps asking as its
+ * mode says and this app presses the allow-once button.
  *
- * What is proved here is the half the reader sees: the mode is offered, and a
- * card the app answered never reads as one he answered. The server half — that
- * the provider is left in a mode that still asks, and that the once-only
- * option is the one pressed — is in `server/src/workbench/answering.rs` and in
- * the permission handler's own tests (bw-0z25.1).
+ * It used to be a permission mode of its own, so turning it on took the chat
+ * out of plan mode. It is now a setting beside the mode (bw-q8ehk.1).
+ *
+ * What is proved here is the half the reader sees: the setting is its own
+ * switch, and a card the app answered never reads as one he answered. The
+ * server half — that the once-only option is the one pressed — is in
+ * `server/src/workbench/answering.rs` and in the permission handler's own
+ * tests (bw-0z25.1).
  */
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { AutoApprovePicker } from '@/workbench/chat-tab';
 import { asView, foldAll, reduce, EMPTY, type TranscriptAsk } from '@/workbench/fold';
 import { PERMISSION_MODE } from '@/workbench/machine-words';
-import { ATELIER_AUTO, type AskOption, type WbpEvent } from '@/workbench/protocol';
+import { type AskOption, type WbpEvent } from '@/workbench/protocol';
 import { PermissionCard } from '@/workbench/transcript-rows';
 
-vi.mock('@/workbench/commands', () => ({ sendCommand: vi.fn(async () => ({})) }));
+const sendCommand = vi.hoisted(() => vi.fn(async () => ({})));
+vi.mock('@/workbench/use-session', async (real) => ({
+  ...(await real<typeof import('@/workbench/use-session')>()),
+  sendCommand,
+}));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 /** Copied from what claude-acp sends on a live turn (bw-t26l.20). */
 const AS_CLAUDE_SENDS_THEM: AskOption[] = [
@@ -49,11 +61,45 @@ const answeredByTheApp: WbpEvent = {
 const onlyAsk = (view: { items: readonly { kind: string }[] }) =>
   view.items.find((item) => item.kind === 'ask') as TranscriptAsk;
 
-describe('the mode is offered wherever the provider’s modes are', () => {
-  it('names it in words, not in its wire spelling', () => {
-    // The picker is where a chat's owner finds out whether it will stop to ask
-    // him. `atelierAuto` is not a sentence anyone should have to read (§8.2.4).
-    expect(PERMISSION_MODE[ATELIER_AUTO].label).toBe('Atelier automatic');
+describe('auto-approve is its own setting, beside the permission mode', () => {
+  const started = {
+    type: 'session.started', sessionId: 'chat-1', seq: 1, at: '2026-10-27T00:00:00Z',
+    brand: 'claude', externalId: null, model: null, cwd: '/p', permissionMode: 'plan', autoApprove: true,
+  } as WbpEvent;
+  const turnedOff = {
+    type: 'session.pinned', sessionId: 'chat-1', seq: 2, at: '2026-10-27T00:00:01Z',
+    permissionMode: null, model: null, autoApprove: false,
+  } as WbpEvent;
+  const modeOnly = {
+    type: 'session.pinned', sessionId: 'chat-1', seq: 3, at: '2026-10-27T00:00:02Z',
+    permissionMode: 'default', model: null,
+  } as WbpEvent;
+
+  it('is no longer one of the modes', () => {
+    expect(PERMISSION_MODE.atelierAuto).toBeUndefined();
+  });
+
+  it('is on in plan mode, and changing one leaves the other alone, down both paths', () => {
+    for (const fold of [(events: WbpEvent[]) => events.reduce(reduce, EMPTY), foldAll]) {
+      const planned = fold([started]);
+      expect(planned.permissionMode).toBe('plan');
+      expect(planned.autoApprove).toBe(true);
+      const moved = fold([started, modeOnly]);
+      expect(moved.permissionMode).toBe('default');
+      expect(moved.autoApprove).toBe(true);
+      const off = fold([started, turnedOff]);
+      expect(off.permissionMode).toBe('plan');
+      expect(off.autoApprove).toBe(false);
+    }
+  });
+
+  it('is sent as its own command, never as a mode', () => {
+    render(<AutoApprovePicker sessionId="chat-1" on={false} asleep={false} defaultOn={false} onError={() => {}} />);
+    const trigger = screen.getByTestId('auto-approve-picker');
+    expect(trigger).toHaveAttribute('data-current', 'off');
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByText('Auto-approve on'));
+    expect(sendCommand).toHaveBeenCalledWith({ type: 'session.auto-approve', sessionId: 'chat-1', on: true });
   });
 });
 

@@ -2587,6 +2587,7 @@ async fn restore(
                     .filter(|who| *who == "person" || *who == "agent")
                     .map(str::to_string),
                 named_by_owner: false,
+                auto_approve: false,
             };
             // The rows above are only the ones this request's own listing
             // drew. A row cached by a request already in flight — the sidebar
@@ -3192,6 +3193,16 @@ pub(crate) async fn snapshot(state: &WorkbenchState, session_id: &str) -> Result
     // folded out of the history, so a chat whose oldest events have scrolled
     // out of the loaded window still opens on every waiting message.
     view["held"] = json!(database.held_messages(session_id.to_string()).await?);
+    // Auto-approve is read from the saved chat. A chat that was in the old
+    // `atelierAuto` mode was switched on when the column was added, and no
+    // event says so, so its history alone would show the switch off while
+    // the app answers its cards (bw-q8ehk.1).
+    if let Some(session) = database.get_session(session_id.to_string()).await? {
+        view["autoApprove"] = json!(session.auto_approve);
+        if view["permissionMode"] == crate::workbench::answering::ATELIER_AUTO {
+            view["permissionMode"] = json!(session.permission_mode);
+        }
+    }
     Ok(view)
 }
 
@@ -3391,7 +3402,7 @@ mod command_asks_tests {
             model: None, permission_mode: "default".into(), effort: None,
             collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
             origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
-            last_spoke_at: None, begun_by: None, named_by_owner: false,
+            last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
         };
         assert_eq!(super::ask_key(&chat("/repo")), super::ask_key(&chat("/repo")));
         assert_ne!(super::ask_key(&chat("/repo")), super::ask_key(&chat("/repo/worktrees/a")));
@@ -4196,6 +4207,7 @@ mod tests {
             last_spoke_at: Some("2026-08-30T00:00:30.000Z".into()),
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         }
     }
 
@@ -4714,6 +4726,48 @@ mod tests {
         assert_eq!(view["collaborationMode"], "plan");
     }
 
+    /// A chat moved off the old `atelierAuto` mode keeps approving, and its
+    /// switch says so, though its history still reads the old mode and holds
+    /// no event that turned auto-approve on (bw-q8ehk.1).
+    #[tokio::test]
+    async fn a_chat_from_the_old_automatic_mode_shows_auto_approve_on() {
+        let (_directory, state) = fixture();
+        let mut session = saved_session();
+        session.permission_mode = "on-request".into();
+        session.auto_approve = true;
+        state
+            .database()
+            .create_session(session.clone())
+            .await
+            .unwrap();
+        let started: Event = serde_json::from_value(json!({
+            "type":"session.started","sessionId":session.id,"seq":0,"at":session.created_at,
+            "brand":session.brand,"externalId":session.external_id,"model":session.model,
+            "cwd":session.cwd,"permissionMode":"atelierAuto"
+        }))
+        .unwrap();
+        state.database().append(started).await.unwrap();
+        // What the column's migration leaves behind: the row is rewritten,
+        // the history is not.
+        state
+            .database()
+            .update_session(
+                session.id.clone(),
+                crate::workbench::store::SessionPatch {
+                    permission_mode: Some("on-request".into()),
+                    auto_approve: Some(true),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let view = snapshot(&state, &session.id).await.unwrap();
+        assert_eq!(view["autoApprove"], true);
+        assert_eq!(view["permissionMode"], "on-request");
+    }
+
     #[tokio::test]
     async fn native_workbench_local_restore_returns_durable_rows_without_discovery() {
         let (_directory, state) = fixture();
@@ -4812,6 +4866,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: Some("person".into()),
             named_by_owner: false,
+            auto_approve: false,
         };
         state.database().create_session(session).await.unwrap();
         let archives = directory.path().join("chat-archive");

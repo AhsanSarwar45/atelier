@@ -91,18 +91,6 @@ export interface AskOption {
 export const NOBODY_ANSWERED = 'provider_stopped';
 
 /**
- * The permission mode in which this app answers the cards itself.
- *
- * The only mode in the picker that is not a word the provider understands.
- * The provider is left in the mode that asks, and the app presses its
- * allow-once button. It exists for accounts whose organisation has taken the
- * provider's own automatic modes away: without it, every tool call waits on a
- * person pressing Yes. Kept in step with `ATELIER_AUTO` in
- * `server/src/workbench/answering.rs`.
- */
-export const ATELIER_AUTO = 'atelierAuto';
-
-/**
  * What a card answered by the app is marked with.
  *
  * Kept in step with `ANSWERED_BY_APP` in `server/src/workbench/answering.rs`.
@@ -439,7 +427,7 @@ export interface TerminalRun {
 
 export type WbpEvent = EventBase &
   (
-    | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string; effort?: string | null; collaborationMode?: string | null; profile?: string | null }
+    | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string; autoApprove?: boolean; effort?: string | null; collaborationMode?: string | null; profile?: string | null }
     | {
         type: 'session.state';
         state: SessionState;
@@ -505,7 +493,7 @@ export type WbpEvent = EventBase &
      * ends plan mode). A field that is `null` is one this message says nothing
      * about, and the reader keeps what it had (bw-1u1.43).
      */
-    | { type: 'session.pinned'; permissionMode: string | null; model: string | null; effort?: string | null; collaborationMode?: string | null; title?: string | null; titleSource?: 'user'; configOptions?: Array<{ id: string; currentValue: boolean | string }> }
+    | { type: 'session.pinned'; permissionMode: string | null; autoApprove?: boolean; model: string | null; effort?: string | null; collaborationMode?: string | null; title?: string | null; titleSource?: 'user'; configOptions?: Array<{ id: string; currentValue: boolean | string }> }
     | { type: 'session.ended'; reason: string }
     /**
      * `parentToolCallId` is set when a SENT-OFF agent said this, and names the
@@ -1207,7 +1195,7 @@ export type WbpCommand =
   | {
       type: 'provider-defaults.write';
       brand: Brand;
-      kind: 'model' | 'effort' | 'permission';
+      kind: 'model' | 'effort' | 'permission' | 'autoApprove';
       value: string;
       profileId?: string;
     }
@@ -1287,6 +1275,11 @@ export type WbpCommand =
   | { type: 'agent.say'; sessionId: string; agentId: string; text: string }
   /** Both act on the session that is open, not on the next one (§8.2.3). */
   | { type: 'session.mode'; sessionId: string; mode: string }
+  /**
+   * The app approves the chat's tool requests itself. A setting of its own,
+   * so it holds in any permission mode, plan mode included (bw-q8ehk.1).
+   */
+  | { type: 'session.auto-approve'; sessionId: string; on: boolean }
   | { type: 'session.model'; sessionId: string; model: string }
   | { type: 'session.effort'; sessionId: string; effort: string }
   /** A `brand` other than the chat's own moves the chat to that provider. */

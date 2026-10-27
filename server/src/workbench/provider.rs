@@ -337,6 +337,7 @@ pub(super) fn new_session(
         };
         files.read("codex").ok().map(|defaults| super::provider_defaults::OwnerSettings {
             model: defaults.model, permission_mode: defaults.permission_mode, effort: defaults.effort,
+            auto_approve: defaults.auto_approve,
         })
     } else { None };
     Ok(Session {
@@ -405,6 +406,11 @@ pub(super) fn new_session(
         // is placed by its own record on the next listing (bw-p61.17).
         begun_by: (command.kind == CommandKind::SessionStart).then(|| "person".to_string()),
         named_by_owner: false,
+        auto_approve: command
+            .fields
+            .get("autoApprove")
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| owner.as_ref().is_some_and(|settings| settings.auto_approve)),
     })
 }
 
@@ -465,7 +471,7 @@ pub(super) async fn append_started(
         "brand":session.brand,"externalId":session.external_id,"model":session.model,
         "cwd":session.cwd,"permissionMode":session.permission_mode,"effort":session.effort,
         "collaborationMode":session.collaboration_mode,"profile":session.profile,
-        "readOnly":read_only
+        "autoApprove":session.auto_approve,"readOnly":read_only
     }))
     .map_err(|error| error.to_string())?;
     database.append(event).await?;
@@ -545,8 +551,7 @@ fn claude_import_menu(_session: &Session) -> Value {
         "commands":[],
         "skills":[],
         "models":[],
-        "permissionModes":["default","acceptEdits","bypassPermissions","plan","dontAsk","auto",
-            super::answering::ATELIER_AUTO],
+        "permissionModes":["default","acceptEdits","bypassPermissions","plan","dontAsk","auto"],
         "efforts":[],
         "agentDefinitions":[],
         "agentControls":["stop","park","say"]
@@ -1063,6 +1068,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         };
         database.create_session(session.clone()).await.unwrap();
         record_user_for_transport(
@@ -1337,6 +1343,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         }
     }
 

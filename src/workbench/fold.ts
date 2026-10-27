@@ -425,6 +425,11 @@ export interface SessionView {
   held: HeldMessage[];
   /** What the session is actually pinned to, as the agent reported it. */
   permissionMode: string | null;
+  /**
+   * Whether the app approves this chat's tool requests itself. Separate from
+   * the permission mode, so it can be on in plan mode (bw-q8ehk.1).
+   */
+  autoApprove: boolean;
   model: string | null;
   effort?: string | null;
   collaborationMode: string | null;
@@ -480,6 +485,7 @@ export const EMPTY: SessionView = {
   beads: [],
   held: [],
   permissionMode: null,
+  autoApprove: false,
   model: null,
   effort: null,
   collaborationMode: null,
@@ -589,6 +595,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       if (view.brand !== null && e.brand !== view.brand) next.menu = NO_MENU;
       next.brand = e.brand;
       next.permissionMode = e.permissionMode || null;
+      next.autoApprove = e.autoApprove === true;
       next.collaborationMode = e.collaborationMode ?? null;
       next.model = e.model;
       next.effort = e.effort ?? null;
@@ -1037,6 +1044,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       // The tool changing the mode by itself reports only the mode, and it must
       // not blank the model on its way past (bw-1u1.43).
       if (e.permissionMode !== null) next.permissionMode = e.permissionMode;
+      if (typeof e.autoApprove === 'boolean') next.autoApprove = e.autoApprove;
       if (e.model !== null) next.model = e.model;
       if (e.effort != null) next.effort = e.effort;
       if (e.collaborationMode != null) next.collaborationMode = e.collaborationMode;
@@ -1163,6 +1171,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         if (view.brand !== null && e.brand !== view.brand) view.menu = NO_MENU;
         view.brand = e.brand;
         view.permissionMode = e.permissionMode || null;
+        view.autoApprove = e.autoApprove === true;
         view.model = e.model;
         view.effort = e.effort ?? null;
         view.collaborationMode = e.collaborationMode ?? null;
@@ -1571,6 +1580,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
 
       case 'session.pinned':
         if (e.permissionMode !== null) view.permissionMode = e.permissionMode;
+        if (typeof e.autoApprove === 'boolean') view.autoApprove = e.autoApprove;
         if (e.model !== null) view.model = e.model;
         if (e.effort != null) view.effort = e.effort;
         if (e.collaborationMode != null) view.collaborationMode = e.collaborationMode;

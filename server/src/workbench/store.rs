@@ -359,6 +359,11 @@ pub struct Session {
     /// (workbench::chat_name).
     #[serde(default)]
     pub named_by_owner: bool,
+    /// Whether the app approves this chat's tool requests for the owner.
+    /// Kept apart from the permission mode so it holds in any mode, plan
+    /// included (`workbench::answering`).
+    #[serde(default)]
+    pub auto_approve: bool,
 }
 
 /// `Some(None)` clears a nullable setting; `None` leaves it untouched.
@@ -376,6 +381,7 @@ pub struct SessionPatch {
     pub collaboration_mode: Option<Option<String>>,
     pub profile: Option<Option<String>>,
     pub named_by_owner: Option<bool>,
+    pub auto_approve: Option<bool>,
 }
 
 /// One match, as the panel draws it: the sentence it fell in, the words that
@@ -627,8 +633,8 @@ impl Store {
             r#"INSERT INTO session
                  (id, brand, external_id, project_id, project_path, cwd, model,
                   permission_mode, effort, collaboration_mode, profile, title, state,
-                  origin, created_at, last_active_at, last_spoke_at, begun_by)
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"#,
+                  origin, created_at, last_active_at, last_spoke_at, begun_by, auto_approve)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"#,
             params![
                 session.id,
                 session.brand,
@@ -648,6 +654,7 @@ impl Store {
                 session.last_active_at,
                 session.last_spoke_at,
                 session.begun_by,
+                session.auto_approve,
             ],
         )?;
         Ok(())
@@ -775,6 +782,10 @@ impl Store {
         if let Some(named) = patch.named_by_owner {
             sets.push("named_by_owner = ?".to_string());
             values.push(SqlValue::Integer(named.into()));
+        }
+        if let Some(on) = patch.auto_approve {
+            sets.push("auto_approve = ?".to_string());
+            values.push(SqlValue::Integer(on.into()));
         }
         if let Some(at) = touch_at {
             // Forwards only. A chat's activity clock answers "when did anything
@@ -3584,6 +3595,7 @@ fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
         last_spoke_at: row.get("last_spoke_at")?,
         begun_by: row.get("begun_by")?,
         named_by_owner: row.get::<_, Option<i64>>("named_by_owner")?.unwrap_or(0) != 0,
+        auto_approve: row.get::<_, Option<i64>>("auto_approve")?.unwrap_or(0) != 0,
     })
 }
 
@@ -3860,6 +3872,22 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
                      )
                    )
                );"#,
+        )?;
+    }
+    // Whether the app approves the chat's tool requests. It used to be a
+    // permission mode of its own, `atelierAuto`, which could not be on while
+    // the chat was in plan mode. A chat that was in it keeps approving, in
+    // the asking mode the provider was actually left in.
+    if !columns(transaction, "session")?
+        .iter()
+        .any(|name| name == "auto_approve")
+    {
+        transaction.execute_batch(
+            r#"ALTER TABLE session ADD COLUMN auto_approve INTEGER NOT NULL DEFAULT 0;
+               UPDATE session
+               SET auto_approve = 1,
+                   permission_mode = CASE brand WHEN 'claude' THEN 'default' ELSE 'on-request' END
+               WHERE permission_mode = 'atelierAuto';"#,
         )?;
     }
     /*
@@ -4534,6 +4562,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         }
     }
 
@@ -4567,6 +4596,49 @@ mod tests {
             None,
             "no profile means the directory the server booted with"
         );
+    }
+
+    /// A chat that was in the old "Atelier automatic" mode keeps approving
+    /// after auto-approve became its own setting, and is left in the asking
+    /// mode its provider was really in (bw-q8ehk.1).
+    #[test]
+    fn a_chat_in_the_old_automatic_mode_keeps_approving() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        for (id, brand) in [("claude-auto", "claude"), ("codex-auto", "codex"), ("plain", "claude")] {
+            store
+                .create_session(&session(id, brand, None, "2026-09-11T00:00:00Z"))
+                .unwrap();
+        }
+        store
+            .connection
+            .execute_batch(
+                "UPDATE session SET permission_mode = 'atelierAuto' WHERE id != 'plain';
+                 ALTER TABLE session DROP COLUMN auto_approve;",
+            )
+            .unwrap();
+        drop(store);
+
+        let reopened = Store::open(&path).unwrap();
+        let claude = reopened.get_session("claude-auto").unwrap().unwrap();
+        assert!(claude.auto_approve);
+        assert_eq!(claude.permission_mode, "default");
+        let codex = reopened.get_session("codex-auto").unwrap().unwrap();
+        assert!(codex.auto_approve);
+        assert_eq!(codex.permission_mode, "on-request");
+        let plain = reopened.get_session("plain").unwrap().unwrap();
+        assert!(!plain.auto_approve);
+        assert_eq!(plain.permission_mode, "default");
+
+        reopened
+            .update_session(
+                "plain",
+                SessionPatch { auto_approve: Some(true), ..Default::default() },
+                None,
+            )
+            .unwrap();
+        assert!(reopened.get_session("plain").unwrap().unwrap().auto_approve);
     }
 
     /// A name the owner typed is known to be theirs without reading the

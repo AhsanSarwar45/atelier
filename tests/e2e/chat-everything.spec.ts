@@ -322,8 +322,8 @@ test.describe('the chat draws everything the agent does', () => {
   });
 
   /**
-   * The mode this app carries out itself, for an account that cannot use the
-   * provider's own automatic ones.
+   * Auto-approve, which this app carries out itself, for an account that
+   * cannot use the provider's own automatic modes.
    *
    * Built on the same prompt as the safe-mode case above, and for the same
    * reason: `echo` is waved through by the asking mode, so a case built on one
@@ -358,19 +358,35 @@ test.describe('the chat draws everything the agent does', () => {
       timeout: 60_000,
     });
 
-    const picker = page.getByTestId('mode-picker');
-    await picker.click();
-    const ours = page.locator('[data-testid="mode-picker-option"][data-value="atelierAuto"]');
-    await ours.waitFor({ timeout: 30_000 });
-    await ours.click();
-    await expect.poll(async () => picker.getAttribute('data-current'), { timeout: 60_000 }).toBe('atelierAuto');
-    await expect(page.getByTestId('steer-error')).toBeHidden();
-    // The mode sitting among the provider's own, which is the whole of how
-    // anyone finds it.
-    await picker.click();
-    await page.locator('[data-testid="mode-picker-option"]').first().waitFor({ timeout: 30_000 });
-    await page.screenshot({ path: 'tests/results/atelier-automatic-in-the-picker.png' });
+    // Auto-approve is its own setting, beside the mode. Turned on while the
+    // chat is in plan mode, it leaves the chat in plan mode — the reason it
+    // stopped being a mode of its own (bw-q8ehk.1).
+    const modes = page.getByTestId('mode-picker');
+    await modes.click();
+    await page.locator('[data-testid="mode-picker-option"][data-value="plan"]').click();
+    await expect.poll(async () => modes.getAttribute('data-current'), { timeout: 60_000 }).toBe('plan');
+    await modes.click();
+    await expect(page.locator('[data-testid="mode-picker-option"][data-value="atelierAuto"]')).toHaveCount(0);
     await page.keyboard.press('Escape');
+
+    const picker = page.getByTestId('auto-approve-picker');
+    await expect(picker).toHaveAttribute('data-current', 'off');
+    await picker.click();
+    await page.locator('[data-testid="auto-approve-picker-option"][data-value="on"]').click();
+    await expect.poll(async () => picker.getAttribute('data-current'), { timeout: 60_000 }).toBe('on');
+    await expect(modes).toHaveAttribute('data-current', 'plan');
+    await expect(page.getByTestId('steer-error')).toBeHidden();
+    await picker.click();
+    await page.locator('[data-testid="auto-approve-picker-option"]').first().waitFor({ timeout: 30_000 });
+    await page.screenshot({ path: 'tests/results/auto-approve-in-plan-mode.png' });
+    await page.keyboard.press('Escape');
+
+    // Back to the asking mode for the write, which plan mode would not make.
+    // Auto-approve stays on across the change.
+    await modes.click();
+    await page.locator('[data-testid="mode-picker-option"][data-value="default"]').click();
+    await expect.poll(async () => modes.getAttribute('data-current'), { timeout: 60_000 }).toBe('default');
+    await expect(picker).toHaveAttribute('data-current', 'on');
 
     await say(page, `Create a file called ${written} here holding the word hello. Say nothing else.`);
 
@@ -380,7 +396,7 @@ test.describe('the chat draws everything the agent does', () => {
     const answered = page.locator('[data-testid="permission-card"][data-answered-by="atelier"]').first();
     await answered.waitFor({ timeout: TURN_MS });
     await expect(answered).toContainText('Approved automatically');
-    await answered.screenshot({ path: 'tests/results/atelier-automatic-card-answered.png' });
+    await answered.screenshot({ path: 'tests/results/auto-approve-card-answered.png' });
     // And nothing was ever put to him.
     await expect(page.locator('[data-testid="permission-card"][data-ask-state="open"]')).toHaveCount(0);
 
@@ -398,6 +414,7 @@ test.describe('the chat draws everything the agent does', () => {
     const reopened = page.locator('[data-testid="permission-card"][data-answered-by="atelier"]').first();
     await reopened.waitFor({ timeout: 60_000 });
     await expect(reopened).toContainText('Approved automatically');
+    await expect(page.getByTestId('auto-approve-picker')).toHaveAttribute('data-current', 'on');
 
     // It was written into the project the chat is working in, so it is taken
     // away again. A case that leaves files in the tree it ran against is a

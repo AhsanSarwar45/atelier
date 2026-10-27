@@ -47,6 +47,7 @@ pub(crate) fn empty_view() -> Map<String, Value> {
     view.insert("agents".into(), json!([]));
     view.insert("beads".into(), json!([]));
     view.insert("permissionMode".into(), Value::Null);
+    view.insert("autoApprove".into(), json!(false));
     view.insert("model".into(), Value::Null);
     view.insert("effort".into(), Value::Null);
     view.insert("collaborationMode".into(), Value::Null);
@@ -255,6 +256,10 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 view.insert(
                     "permissionMode".into(),
                     truthy_string(event, "permissionMode"),
+                );
+                view.insert(
+                    "autoApprove".into(),
+                    json!(event.fields.get("autoApprove").and_then(Value::as_bool) == Some(true)),
                 );
                 view.insert("model".into(), value(event, "model"));
                 view.insert("effort".into(), value(event, "effort"));
@@ -740,6 +745,9 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 if event.fields.get("clearModel").and_then(Value::as_bool) == Some(true) {
                     view.insert("model".into(), Value::Null);
                 }
+                if let Some(on) = event.fields.get("autoApprove").and_then(Value::as_bool) {
+                    view.insert("autoApprove".into(), json!(on));
+                }
                 if let Some(selected) = event.fields.get("configOptions").and_then(Value::as_array)
                 {
                     if let Some(options) = view
@@ -1123,7 +1131,7 @@ mod tests {
     /// A card the app answered still says so when the chat is reopened.
     ///
     /// This projection is what a chat is redrawn from on every reload. It kept
-    /// only which option was chosen, so a card "Atelier automatic" pressed
+    /// only which option was chosen, so a card auto-approve pressed
     /// came back reading "Allowed" — the same words as one the owner pressed
     /// himself. A record of approvals he cannot tell apart from his own is the
     /// thing that would make the mode untrustworthy (bw-0z25.1).

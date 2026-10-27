@@ -110,7 +110,7 @@ pub fn archived_session(dir: &Path, id: &str) -> Result<super::Session, String> 
             })
             .collect();
         let value = row.get(at).cloned().unwrap_or(Value::Null);
-        fields.insert(camel, if name == "named_by_owner" { json!(value.as_i64() == Some(1)) } else { value });
+        fields.insert(camel, if matches!(name, "named_by_owner" | "auto_approve") { json!(value.as_i64() == Some(1)) } else { value });
     }
     serde_json::from_value(Value::Object(fields)).map_err(|e| e.to_string())
 }
@@ -585,6 +585,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         }
     }
 

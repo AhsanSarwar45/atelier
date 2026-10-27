@@ -200,7 +200,6 @@ const MODE_ICON: Record<string, typeof Shield> = {
   acceptEdits: ShieldHalf,
   dontAsk: ShieldAlert,
   auto: ShieldAlert,
-  atelierAuto: ShieldAlert,
   bypassPermissions: ShieldOff,
 };
 

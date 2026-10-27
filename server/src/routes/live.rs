@@ -202,7 +202,7 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
                             "name":name,
                             "id":session.id,"brand":session.brand,"externalId":session.external_id,
                             "projectId":session.project_id,"projectPath":session.project_path,"cwd":session.cwd,
-                            "model":session.model,"permissionMode":session.permission_mode,"effort":session.effort,
+                            "model":session.model,"permissionMode":session.permission_mode,"autoApprove":session.auto_approve,"effort":session.effort,
                             "collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,
                             "origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,
                             "lastSpokeAt":session.last_spoke_at,"activity":"","busySince":serde_json::Value::Null,"beads":beads
@@ -889,6 +889,7 @@ mod tests {
             last_spoke_at: Some("2026-08-30T00:00:30.000Z".into()),
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         }
     }
 
@@ -1156,6 +1157,7 @@ mod tests {
                 last_spoke_at: None,
                 begun_by: None,
                 named_by_owner: false,
+                auto_approve: false,
             })
             .await
             .unwrap();
@@ -1301,6 +1303,7 @@ mod tests {
                 last_spoke_at: None,
                 begun_by: None,
                 named_by_owner: false,
+                auto_approve: false,
             })
             .await
             .unwrap();
@@ -1648,6 +1651,7 @@ mod tests {
                 last_spoke_at: None,
                 begun_by: None,
                 named_by_owner: false,
+                auto_approve: false,
             })
             .await
             .unwrap();

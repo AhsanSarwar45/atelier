@@ -1528,6 +1528,21 @@ impl WorkbenchRegistry {
             .await?
             .ok_or_else(|| format!("session {session_id} does not exist"))?;
         match command.kind {
+            CommandKind::SessionAutoApprove => {
+                let on = command
+                    .at("on")
+                    .as_bool()
+                    .ok_or_else(|| "on must be true or false".to_string())?;
+                let event: crate::workbench::protocol::Event = serde_json::from_value(json!({
+                    "type":"session.pinned", "sessionId":session.id, "seq":0,
+                    "at":chrono::Utc::now().to_rfc3339(), "autoApprove":on,
+                    "permissionMode":Value::Null, "model":Value::Null,
+                    "effort":Value::Null, "collaborationMode":Value::Null
+                }))
+                .map_err(|error| error.to_string())?;
+                self.database.append(event).await?;
+                return Ok(json!({"ok":true}));
+            }
             CommandKind::SessionMode => {
                 session.permission_mode = Self::field(command, "mode")?.to_string();
             }
@@ -2591,7 +2606,16 @@ impl WorkbenchRegistry {
                 self.launch(command).await?;
                 self.driver_command(command).await
             }
+            // A window opened before auto-approve became its own setting can
+            // still offer the old mode. Pinning it would leave the chat in a
+            // mode no provider has and nothing answering (bw-q8ehk.1).
             CommandKind::SessionMode
+                if command.at("mode") == &json!(super::answering::ATELIER_AUTO) =>
+            {
+                Err("Auto-approve is now its own setting. Reload the page to use it.".into())
+            }
+            CommandKind::SessionMode
+            | CommandKind::SessionAutoApprove
             | CommandKind::SessionModel
             | CommandKind::SessionEffort
             | CommandKind::SessionCollaborationMode
@@ -2898,6 +2922,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: Some("person".into()),
             named_by_owner: false,
+            auto_approve: false,
         }
     }
 
@@ -3730,6 +3755,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: Some("person".into()),
             named_by_owner: false,
+            auto_approve: false,
         }).await.unwrap();
         for value in [
             json!({"type":"message.started","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","role":"user"}),
@@ -3793,6 +3819,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: Some("person".into()),
             named_by_owner: false,
+            auto_approve: false,
         }).await.unwrap();
         for value in [
             json!({"type":"message.started","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","role":"user"}),
@@ -4050,6 +4077,7 @@ mod tests {
                 last_spoke_at: None,
                 begun_by: None,
                 named_by_owner: false,
+                auto_approve: false,
             })
             .await
             .unwrap();
@@ -4125,6 +4153,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         };
         database.create_session(session.clone()).await.unwrap();
         let registry = WorkbenchRegistry::new(
@@ -4190,6 +4219,7 @@ mod tests {
                 last_spoke_at: None,
                 begun_by: None,
                 named_by_owner: false,
+                auto_approve: false,
             })
             .await
             .unwrap();
@@ -4261,6 +4291,7 @@ mod tests {
             last_spoke_at: None,
             begun_by: None,
             named_by_owner: false,
+            auto_approve: false,
         };
         database
             .create_session(chat("working", "running_tool"))
@@ -4357,6 +4388,7 @@ mod tests {
                 last_spoke_at: None,
                 begun_by: None,
                 named_by_owner: false,
+                auto_approve: false,
             })
             .await
             .unwrap();
@@ -4387,21 +4419,35 @@ mod tests {
                 CommandKind::SessionModel,
                 json!({"sessionId":"saved","model":"default"}),
             ),
+            // Auto-approve beside plan mode, not instead of it (bw-q8ehk.1).
+            (
+                CommandKind::SessionAutoApprove,
+                json!({"sessionId":"saved","on":true}),
+            ),
         ] {
             assert_eq!(
                 registry.execute(&command(kind, fields)).await.unwrap(),
                 json!({"ok":true})
             );
         }
+        assert!(registry
+            .execute(&command(
+                CommandKind::SessionMode,
+                json!({"sessionId":"saved","mode":"atelierAuto"})
+            ))
+            .await
+            .is_err());
         assert!(!registry.has_driver("saved").await);
         let saved = database.get_session("saved".into()).await.unwrap().unwrap();
         assert_eq!(saved.permission_mode, "plan");
+        assert!(saved.auto_approve);
         assert_eq!(saved.effort.as_deref(), Some("xhigh"));
         assert_eq!(saved.model, None);
         let view = crate::workbench::projection::fold_all(
             &database.view_events("saved".into()).await.unwrap(),
         );
         assert_eq!(view.view["permissionMode"], "plan");
+        assert_eq!(view.view["autoApprove"], true);
         assert_eq!(view.view["effort"], "xhigh");
         assert!(view.view["model"].is_null());
     }
@@ -4512,6 +4558,7 @@ mod tests {
                 last_spoke_at: None,
                 begun_by: None,
                 named_by_owner: false,
+                auto_approve: false,
             })
             .await
             .unwrap();
@@ -4628,6 +4675,7 @@ mod tests {
                 last_spoke_at: None,
                 begun_by: None,
                 named_by_owner: false,
+                auto_approve: false,
             })
             .await
             .unwrap();
