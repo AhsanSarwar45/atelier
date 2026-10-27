@@ -112,6 +112,22 @@ prepare_publishing_key() {
   ssh-add -q "$key" \
     || die "could not load the publishing key into the agent"
 
+  # Git signs the tag, and the tap commit in scripts/tap.sh, with the
+  # configured signing key. When that is a different key, every signature
+  # asks for its passphrase again. Sign with the key just unlocked instead:
+  # given its public half, ssh-keygen signs through the agent and asks nothing.
+  # The environment reaches every git this run starts, tap.sh's included.
+  if [ -f "$key.pub" ]; then
+    export GIT_CONFIG_COUNT=2
+    export GIT_CONFIG_KEY_0=gpg.format GIT_CONFIG_VALUE_0=ssh
+    export GIT_CONFIG_KEY_1=user.signingkey GIT_CONFIG_VALUE_1="$key.pub"
+  else
+    export GIT_CONFIG_COUNT=2
+    export GIT_CONFIG_KEY_0=tag.gpgsign GIT_CONFIG_VALUE_0=false
+    export GIT_CONFIG_KEY_1=commit.gpgsign GIT_CONFIG_VALUE_1=false
+    say "no $key.pub beside the publishing key, so the tag and tap commit go out unsigned"
+  fi
+
   greeting=$(ssh -o BatchMode=yes -T "git@$host" 2>&1 || true)
   case "$greeting" in
     *"Hi $OWNER!"*) ;;
