@@ -12,7 +12,8 @@
 #
 # So it is one command with no number in it. The number is read out of the work
 # itself: a breaking change raises the first, a feature raises the second,
-# anything else raises the third.
+# anything else raises the third. A feature is a `feat:` subject or a card of
+# kind feature named in a subject (scripts/release-bump.sh).
 #
 #   bash scripts/release.sh              # cut and publish the next version
 #   bash scripts/release.sh --dry-run    # print every step and write nothing
@@ -206,7 +207,6 @@ LAST=$(git tag -l 'v*' | sed 's/^v//' | grep -E "$PLAIN" | sort -V | tail -1)
 [ -n "$LAST" ] || die "there is no earlier release to count from — no tag here is a plain v0.0.0"
 
 SUBJECTS=$(git log "v$LAST..HEAD" --format='%s')
-BODIES=$(git log "v$LAST..HEAD" --format='%b')
 COUNT=$(printf '%s\n' "$SUBJECTS" | grep -c . )
 if [ "$COUNT" -gt 0 ]; then
   say "$COUNT change(s) since $LAST:"
@@ -215,15 +215,11 @@ else
   stop "nothing has changed since $LAST, so there is nothing to release"
 fi
 
-# A breaking marker is `feat!:` or `feat(scope)!:`, or the words in a body —
-# the same two spellings every tool that reads these messages understands.
-BUMP=patch
-if printf '%s\n' "$SUBJECTS" | grep -qE '^[a-z]+(\([^)]*\))?!:' \
-   || printf '%s\n' "$BODIES" | grep -q 'BREAKING CHANGE'; then
-  BUMP=major
-elif printf '%s\n' "$SUBJECTS" | grep -qE '^feat(\([^)]*\))?:'; then
-  BUMP=minor
-fi
+# A breaking marker raises the first number and a feature the second. A
+# feature is known by its card as well as by `feat:`, since commits here are
+# named after the card they finish (bw-4c76n.1).
+BUMP=$(bash scripts/release-bump.sh "v$LAST") \
+  || die "could not work out how big a step this release is"
 
 printf '%s' "$LAST" | grep -qE "$PLAIN" \
   || die "the newest release is v$LAST, which is not a plain number, so the next one cannot be worked out from it"
