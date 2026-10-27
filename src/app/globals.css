@@ -269,11 +269,16 @@
  * Every pane in this app scrolls inside itself — the shell clips and the window
  * never moves — so these rails are on screen all day, beside the work. The
  * browser's own is 15px of grey column with a track behind it, in a colour no
- * theme chose. This is 6px, no track, and a thumb at a quarter strength: the
+ * theme chose. This draws a 6px thumb, no track, at a quarter strength: the
  * manager asked for thinner and fainter than `thin`, which is a fixed 10px and
  * as narrow as the modern properties can be asked to go.
  *
- * Getting 6px means using the rail parts, and the two mechanisms are exclusive:
+ * The rail itself is 10px, though, and the thumb is inset by a transparent
+ * border, so it still looks like the hairline. A 6px rail was too narrow to
+ * grab, which made the chat's own scrollbar impossible to drag (bw-f9z9l). The
+ * whole 10px is the grab area, and the thumb fills it under the pointer.
+ *
+ * Getting under 10px means using the rail parts, and the two mechanisms are exclusive:
  * measured in a real Chrome, it ignores every `::-webkit-scrollbar…` rule for
  * any element whose `scrollbar-width` or `scrollbar-color` is set to anything
  * but its initial value — set them and the rail parts draw nothing, name them
@@ -290,8 +295,8 @@
  * the one scroller this app never uses.
  */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track,
@@ -304,11 +309,15 @@
    percent, which is nothing, so the light skins name their own in themes.css. */
 ::-webkit-scrollbar-thumb {
   background-color: hsl(var(--text-muted) / var(--rail-strength, 0.25));
+  background-clip: padding-box;
+  border: 2px solid transparent;
   border-radius: 9999px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
   background-color: hsl(var(--text-muted) / var(--rail-strength-hover, 0.5));
+  border-width: 1px;
 }
 
 /* Firefox, and only Firefox: `-moz-orient` is answered by nothing else. Driven

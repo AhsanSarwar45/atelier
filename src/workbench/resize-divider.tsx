@@ -69,7 +69,11 @@ export function ResizeDivider({
       aria-valuenow={Math.round(value)}
       tabIndex={0}
       data-testid={testId}
-      className="group relative z-40 -mx-1 hidden w-2 shrink-0 cursor-col-resize touch-none md:block"
+      // The grab area reaches only rightwards, over the start of the pane after
+      // it. Scrollbars sit on a pane's right edge, so the pane before the
+      // handle keeps its whole rail; reaching left as well covered the chat's
+      // scrollbar and took its drags (bw-f9z9l).
+      className="group relative z-40 -mr-2 hidden w-2 shrink-0 cursor-col-resize touch-none md:block"
       onPointerDown={(event) => {
         drag.current = { x: event.clientX, width: value };
         onDragging?.(true);
@@ -89,7 +93,7 @@ export function ResizeDivider({
         resize(value + direction * (side === 'left' ? 16 : -16));
       }}
     >
-      <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/60 transition-colors group-hover:bg-primary group-focus:bg-primary" />
+      <div className="absolute inset-y-0 left-0 w-px bg-border/60 transition-colors group-hover:bg-primary group-focus:bg-primary" />
     </div>
   );
 }

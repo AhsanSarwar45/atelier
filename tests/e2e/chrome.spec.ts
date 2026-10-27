@@ -6,7 +6,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * Two things are asserted here. The way out to settings is a control ON the
  * first bar — a child of it, centred on its row, inside its padding — and not a
  * button floated over the corner of the window, which is what it used to be.
- * And the scrollbars are the app's own: a 6px hairline, no track, a thumb at a
+ * And the scrollbars are the app's own: a 10px rail drawing a 6px thumb, no track, at a
  * quarter of the theme's muted ink.
  *
  * ⚠ The rail's WIDTH IN PIXELS is only there to read in a browser with a real
@@ -419,14 +419,14 @@ test.describe('chrome', () => {
     // inferred. Overlay rails report 0 and are simply not evidence.
     const measured = rails.panes.filter((r) => r.across > 0 || r.down > 0);
     for (const r of measured) {
-      expect(Math.max(r.across, r.down), `${r.what} draws a rail wider than a hairline`).toBeLessThanOrEqual(6);
+      expect(Math.max(r.across, r.down), `${r.what} draws a rail wider than a hairline`).toBeLessThanOrEqual(10);
     }
 
     // And the rules themselves, which is all a windowless run can see.
     const css = await styleText(page);
     const rail = /::-webkit-scrollbar\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
-    expect(rail, 'the rail parts do not ask for a hairline').toMatch(/width:\s*6px/);
-    expect(rail, 'the sideways rail is not the same hairline').toMatch(/height:\s*6px/);
+    expect(rail, 'the rail parts do not ask for a hairline').toMatch(/width:\s*10px/);
+    expect(rail, 'the sideways rail is not the same hairline').toMatch(/height:\s*10px/);
     const track = /::-webkit-scrollbar-track[^{]*\{([^}]*)\}/.exec(css)?.[1] ?? '';
     expect(track, 'the rail draws a track behind the thumb').toMatch(/transparent|rgba\(0,\s*0,\s*0,\s*0\)/);
     const thumb = /::-webkit-scrollbar-thumb\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
