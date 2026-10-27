@@ -1179,6 +1179,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/links/bead/:id", get(chats_for_bead))
         .route("/links/session/:id", get(beads_for_chat))
         .route("/history", get(history))
+        .route("/agents", get(agents))
         .route("/chat-text", get(chat_text))
         .route("/mention", get(mention))
         .route("/events", get(events))
@@ -2825,6 +2826,16 @@ async fn session(
 }
 
 #[derive(Deserialize)]
+struct AgentsQuery {
+    session: String,
+    after: Option<i64>,
+}
+
+async fn agents(State(state): State<WorkbenchState>, Query(query): Query<AgentsQuery>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(state.database().finished_agents(query.session, query.after).await?))
+}
+
+#[derive(Deserialize)]
 struct HistoryQuery {
     session: String,
     before: Option<i64>,
@@ -3186,6 +3197,7 @@ pub(crate) async fn snapshot(state: &WorkbenchState, session_id: &str) -> Result
     with_atelier_commands(state.database(), state.registry(), session_id, &mut view["menu"]).await?;
     view["items"] = json!(snapshot.page.items);
     view["agents"] = json!(snapshot.agents);
+    view["finishedAgentCount"] = json!(snapshot.finished_agent_count);
     view["lastSeq"] = json!(snapshot.page.newest_seq);
     view["historyCursor"] = json!(snapshot.page.cursor);
     view["hasOlder"] = json!(snapshot.page.has_older);

@@ -205,6 +205,7 @@ export interface ChatRightRailProps {
   cards?: string[];
   /** Everything it handed to something else, oldest first (§8.2.7). */
   agents?: SentAway[];
+  finishedAgentCount?: number;
   /** The conversation's own rows; a helper's card reads its live line from them. */
   items?: readonly TranscriptItem[];
   /** Whose chat these belong to; the steering on a row acts on it. */
@@ -212,7 +213,7 @@ export interface ChatRightRailProps {
   /** Which steering controls this chat's brand has for them. None is a real answer. */
   agentControls?: AgentControl[];
   /** Opening one of them onto its own conversation. */
-  onOpenAgent?: (id: string) => void;
+  onOpenAgent?: (id: string, row?: SentAway) => void;
   open: boolean;
   /** Which view is drawn. What this chat has touched, unless Git was asked for. */
   view?: RailView;
@@ -278,6 +279,7 @@ export function ChatRightRail({
   projectId,
   cards = NOTHING,
   agents = NOTHING,
+  finishedAgentCount,
   items = NOTHING,
   sessionId = '',
   agentControls = NOTHING,
@@ -456,10 +458,11 @@ export function ChatRightRail({
             </Section>
           )}
 
-          {agents.length > 0 && (
+          {(agents.length > 0 || (finishedAgentCount ?? 0) > 0) && (
             <Section title="Subagents">
               <SentAwayPanel
                 agents={agents}
+                finishedAgentCount={finishedAgentCount}
                 items={items}
                 sessionId={sessionId}
                 controls={agentControls}

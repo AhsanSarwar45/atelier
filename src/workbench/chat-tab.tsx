@@ -63,6 +63,7 @@ import { imageIds, imageMarker, pictureId, promptFromDraft, promptParts, whyNot 
 import type { DraftPicture } from '@/workbench/composer-attachments';
 import { MessageRepliesContext, quoted, type MessageReplies } from '@/workbench/message-menu';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
+import type { SentAway } from '@/workbench/fold';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
 import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
@@ -1287,7 +1288,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [looking, setLookingAt] = useState<{ image: LookableImage; set?: readonly ImagePayload[] } | null>(null);
   const setLooking = useCallback<OnLook>((image, set) => setLookingAt({ image, set }), []);
   /** Which sent-off agent's own conversation is open, by the call that sent it. */
-  const [openAgent, setOpenAgent] = useState<string | null>(null);
+  const [openAgent, setOpenAgent] = useState<{ sessionId: string | null; id: string; row?: SentAway } | null>(null);
+  const selectAgent = useCallback((id: string, row?: SentAway) => setOpenAgent({ sessionId, id, row }), [sessionId]);
   /**
    * That agent as it stands now, or nothing.
    *
@@ -1296,8 +1298,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * conversation this chat no longer has.
    */
   const agentOpen = useMemo(
-    () => (openAgent ? (view.agents.find((a) => a.id === openAgent) ?? null) : null),
-    [openAgent, view.agents],
+    () => openAgent?.sessionId === sessionId
+      ? (view.agents.find(a => a.id === openAgent.id) ?? (view.finishedAgentCount ? openAgent.row : null) ?? null)
+      : null,
+    [openAgent, sessionId, view.agents, view.finishedAgentCount],
   );
   /** The sheet a narrow screen opens the chat list in. */
   const [railOpen, setRailOpen] = useState(false);
@@ -2581,10 +2585,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             projectId={projectId}
             cards={cards}
             agents={view.agents}
+            finishedAgentCount={view.finishedAgentCount}
             items={railItems}
             sessionId={sessionId}
             agentControls={view.menu.agentControls}
-            onOpenAgent={setOpenAgent}
+            onOpenAgent={selectAgent}
             open={rightOpen}
             view={gitOpen ? 'git' : 'chat'}
             projectPath={projectPath}
@@ -2607,7 +2612,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </>
       )}
     </>
-  ), [cards, changeRightWidth, detailsId, diffOpen, facts, flipRight, gitOpen, leftOpen, leftWidth, openCommit, pickView, projectId, projectPath, resizingRight, rightOpen, rightWidth, sessionId, showCommitInDiff, showFileInDiff, showTheDiff, showWorkingTreeInDiff, view.agents, railItems, view.menu.agentControls]);
+  ), [cards, changeRightWidth, detailsId, diffOpen, facts, flipRight, gitOpen, leftOpen, leftWidth, openCommit, pickView, projectId, projectPath, resizingRight, rightOpen, rightWidth, sessionId, showCommitInDiff, showFileInDiff, showTheDiff, showWorkingTreeInDiff, view.agents, view.finishedAgentCount, railItems, view.menu.agentControls, selectAgent]);
 
   const statusLine = useMemo(() => (
     <>

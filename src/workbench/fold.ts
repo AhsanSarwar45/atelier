@@ -415,6 +415,8 @@ export interface SessionView {
   todos: TodoItem[];
   /** Everything this chat sent away, oldest first (docs/agent-workbench.md §8.2.7). */
   agents: SentAway[];
+  /** Finished rows omitted from the opening snapshot; fetched only on expansion. */
+  finishedAgentCount?: number;
   /** Cards this chat has touched, as the machine recorded them. */
   beads: string[];
   /**
@@ -1089,6 +1091,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.items = [];
       next.beads = [];
       next.agents = [];
+      if (view.finishedAgentCount !== undefined) next.finishedAgentCount = 0;
       return next;
 
     default:

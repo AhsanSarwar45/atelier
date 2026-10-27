@@ -2906,6 +2906,84 @@ fn held_in_its_project(
         })
     }
 
+    /// Initial chat reads need the live helpers and a count, never old reports.
+    /// Read only lifecycle identity/state into Rust, then hydrate selected ids.
+    fn agent_states(&self, session_id: &str) -> rusqlite::Result<Vec<(i64, Value)>> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT seq,json_object('type',type,'agentId',json_extract(json,'$.agentId'),
+                    'state',json_extract(json,'$.state'))
+               FROM event WHERE session_id=?1
+                 AND type IN ('agent.started','agent.progress','agent.finished')
+                 AND seq>COALESCE((SELECT MAX(seq) FROM event WHERE session_id=?1 AND type='transcript.reset'),0)
+               ORDER BY seq"#,
+        )?;
+        let events = statement.query_map([session_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?.map(|row| {
+            let (seq, json) = row?;
+            Ok((seq, serde_json::from_str::<Event>(&json).map_err(json_error)?))
+        }).collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut starts = HashMap::new();
+        for (seq, event) in &events {
+            if event.kind == EventKind::AgentStarted {
+                if let Some(id) = event.fields.get("agentId").and_then(Value::as_str) {
+                    starts.entry(id.to_string()).or_insert(*seq);
+                }
+            }
+        }
+        let projection = fold_all(&events.into_iter().map(|(_, event)| event).collect::<Vec<_>>());
+        Ok(projection.agents().iter().filter_map(|agent| {
+            Some((*starts.get(agent["id"].as_str()?)?, agent.clone()))
+        }).collect())
+    }
+
+    fn agents_by_ids(&self, session_id: &str, ids: &[String]) -> rusqlite::Result<Vec<Value>> {
+        if ids.is_empty() { return Ok(Vec::new()); }
+        self.ensure_event_refs(session_id)?;
+        let refs = ids.iter().map(|id| format!("a:{id}")).collect::<Vec<_>>();
+        let mut statement = self.connection.prepare(
+            r#"WITH picked(seq) AS (
+                 SELECT seq FROM event_ref WHERE session_id=?1
+                   AND ref IN (SELECT value FROM json_each(?2))
+                   AND seq>COALESCE((SELECT MAX(seq) FROM event WHERE session_id=?1 AND type='transcript.reset'),0)
+               ) SELECT event.json FROM picked CROSS JOIN event
+                 ON event.session_id=?1 AND event.seq=picked.seq
+                 WHERE event.type IN ('agent.started','agent.finished','agent.identified','agent.relayed','agent.progress')
+                 ORDER BY event.seq"#,
+        )?;
+        let events = statement.query_map(params![session_id, serde_json::to_string(&refs).map_err(json_error)?], |row| row.get::<_, String>(0))?
+            .map(|row| serde_json::from_str::<Event>(&row?).map_err(json_error))
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(fold_all(&events).agents().to_vec())
+    }
+
+    pub fn snapshot_agents(&self, session_id: &str) -> rusqlite::Result<(Vec<Value>, usize)> {
+        let rows = self.agent_states(session_id)?;
+        let ids = rows.iter().filter(|(_, row)| !agent_is_finished(row))
+            .filter_map(|(_, row)| row["id"].as_str().map(str::to_string)).collect::<Vec<_>>();
+        let finished = rows.len() - ids.len();
+        Ok((self.agents_by_ids(session_id, &ids)?, finished))
+    }
+
+    /// The cursor is the agent's first start sequence, stable across new events.
+    pub fn finished_agents(&self, session_id: &str, after: Option<i64>, limit: usize) -> rusqlite::Result<Value> {
+        self.ensure_event_refs(session_id)?;
+        self.begin_read()?;
+        let result = (|| {
+            let rows = self.agent_states(session_id)?;
+            let selected = rows.iter().filter(|(seq, row)| *seq > after.unwrap_or(0) && agent_is_finished(row))
+                .take(limit.saturating_add(1)).collect::<Vec<_>>();
+            let has_more = selected.len() > limit;
+            let page = &selected[..selected.len().min(limit)];
+            let ids = page.iter().filter_map(|(_, row)| row["id"].as_str().map(str::to_string)).collect::<Vec<_>>();
+            let agents = self.agents_by_ids(session_id, &ids)?;
+            let cursor = if has_more { page.last().map(|(seq, _)| *seq) } else { None };
+            Ok(serde_json::json!({"agents":agents,"cursor":cursor,"hasMore":has_more}))
+        })();
+        let _ = self.end_read();
+        result
+    }
+
     pub fn projected_agents(&self, session_id: &str) -> rusqlite::Result<Vec<serde_json::Value>> {
         // The side panel is not transcript history. Rebuild it from durable
         // lifecycle edges plus only the newest progress report per agent, the
@@ -3399,6 +3477,10 @@ fn held_in_its_project(
     pub(crate) fn connection(&self) -> &Connection {
         &self.connection
     }
+}
+
+fn agent_is_finished(agent: &Value) -> bool {
+    matches!(agent["state"].as_str(), Some("done" | "failed" | "stopped"))
 }
 
 fn item_key(item: &Value) -> Option<String> {
@@ -6399,6 +6481,57 @@ mod tests {
         // After the reset only what came after it is the chat's newest generation.
         store.append_event(&event(4, json!({"type":"transcript.reset"}))).unwrap();
         assert!(store.kept_across_reset("chat").unwrap().is_empty());
+    }
+
+    #[test]
+    fn snapshot_agents_leave_finished_reports_for_stable_history_pages() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let mut seq = 0;
+        let mut append = |mut value: Value| {
+            seq += 1;
+            value["sessionId"] = json!("chat");
+            value["seq"] = json!(seq);
+            value["at"] = json!("2026-09-23T00:00:00Z");
+            store.append_event(&serde_json::from_value(value).unwrap()).unwrap();
+        };
+        for id in 0..43 {
+            append(json!({"type":"agent.started","agentId":format!("a{id}"),"kind":"helper","what":"Inspect"}));
+            append(json!({"type":"agent.relayed","agentId":format!("a{id}"),"text":"Keep this relay"}));
+            if id < 42 {
+                append(json!({"type":"agent.finished","agentId":format!("a{id}"),"state":"done","result":"Full old report"}));
+            }
+        }
+        // Terminal tombstones survive a late progress signal.
+        append(json!({"type":"agent.progress","agentId":"a0","state":"running"}));
+        let (active, finished) = store.snapshot_agents("chat").unwrap();
+        assert_eq!(finished, 42);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0]["id"], "a42");
+        assert_eq!(active[0]["relayed"][0], "Keep this relay");
+        let first = store.finished_agents("chat", None, 40).unwrap();
+        assert_eq!(first["agents"].as_array().unwrap().len(), 40);
+        assert_eq!(first["agents"][0]["id"], "a0");
+        assert_eq!(first["agents"][0]["result"], "Full old report");
+        assert_eq!(first["agents"][0]["relayed"][0], "Keep this relay");
+        assert_eq!(first["hasMore"], true);
+        let cursor = first["cursor"].as_i64().unwrap();
+        append(json!({"type":"agent.started","agentId":"new","kind":"helper","what":"New"}));
+        append(json!({"type":"agent.finished","agentId":"new","state":"failed","result":"Failure report"}));
+        let next = store.finished_agents("chat", Some(cursor), 40).unwrap();
+        assert_eq!(next["agents"].as_array().unwrap().len(), 3);
+        assert_eq!(next["agents"][0]["id"], "a40");
+        assert_eq!(next["agents"][2]["result"], "Failure report");
+        assert_eq!(next["hasMore"], false);
+        assert!(next["cursor"].is_null());
+        append(json!({"type":"transcript.reset"}));
+        append(json!({"type":"agent.started","agentId":"a0","kind":"helper","what":"New generation"}));
+        let (active, finished) = store.snapshot_agents("chat").unwrap();
+        assert_eq!(finished, 0);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0]["what"], "New generation");
+        assert!(active[0]["result"].is_null());
+        assert!(store.finished_agents("chat", Some(cursor), 40).unwrap()["agents"].as_array().unwrap().is_empty());
     }
 
     #[test]

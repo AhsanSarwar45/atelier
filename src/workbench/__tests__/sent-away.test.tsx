@@ -208,6 +208,7 @@ describe('the panel', () => {
   function drawn() {
     const agents = foldAll(sentAway()).agents;
     render(<SentAwayPanel items={[]} agents={agents} sessionId="chat-1" controls={[]} />);
+    act(() => screen.getByTestId('toggle-stopped-agents').click());
     return Object.fromEntries(
       screen.getAllByTestId('sent-away-row').map((el) => [el.getAttribute('data-agent')!, el]),
     );
@@ -307,6 +308,7 @@ describe('the panel', () => {
 
     render(<SentAwayPanel items={[]} agents={agents} sessionId="chat-1" controls={[]} />);
 
+    act(() => screen.getByTestId('toggle-stopped-agents').click());
     const mark = screen.getByTestId('sent-away-state');
     expect(mark).toHaveAttribute('data-word', 'Done');
     expect(mark).not.toHaveTextContent('Working');
@@ -375,9 +377,9 @@ describe('the running ones on top, the finished ones behind a control', () => {
     draw(ended('done', 'failed', 'stopped'));
 
     expect(inside('sent-away-running')).toEqual(['live-1']);
-    expect(inside('sent-away-stopped')).toEqual(['over-0', 'over-1', 'over-2']);
-    // Shut on arrival, and shut by the class rather than by unmounting: the
-    // rows keep their answers and their stopped clocks behind it.
+    expect(inside('sent-away-stopped')).toEqual([]);
+    expect(screen.getAllByTestId('sent-away-row')).toHaveLength(1);
+    // Closed history mounts no rows or result text.
     expect(screen.getByTestId('sent-away-stopped')).toHaveClass('hidden');
     expect(control()).toHaveAttribute('aria-expanded', 'false');
   });
@@ -410,9 +412,11 @@ describe('the running ones on top, the finished ones behind a control', () => {
     expect(screen.getByTestId('sent-away-stopped')).not.toHaveClass('hidden');
     expect(control()).toHaveAttribute('aria-expanded', 'true');
     expect(control()).toHaveTextContent('Hide 2 completed');
+    expect(inside('sent-away-stopped')).toEqual(['over-0', 'over-1']);
 
     act(() => control().click());
     expect(screen.getByTestId('sent-away-stopped')).toHaveClass('hidden');
+    expect(inside('sent-away-stopped')).toEqual([]);
     expect(control()).toHaveAttribute('aria-expanded', 'false');
   });
 

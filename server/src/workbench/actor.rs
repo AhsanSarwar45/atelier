@@ -53,6 +53,7 @@ pub struct SnapshotParts {
     pub history: Vec<Event>,
     pub page: TranscriptItemPage,
     pub agents: Vec<serde_json::Value>,
+    pub finished_agent_count: usize,
 }
 
 /// Upkeep the writer runs as one command: archiving, trimming, reclaiming.
@@ -716,6 +717,10 @@ impl ChatDb {
             store.agent_transcript_items(&session_id, &parent_id, before, limit)
         })
         .await
+    }
+
+    pub async fn finished_agents(&self, session_id: String, after: Option<i64>) -> Result<serde_json::Value, String> {
+        self.read(move |store, _| store.finished_agents(&session_id, after, 40)).await
     }
 
     pub async fn projected_agents(
@@ -1680,7 +1685,7 @@ fn snapshot(store: &Store, menus: &LiveMenus, session_id: &str) -> rusqlite::Res
         let after_history = started.elapsed();
         let page = store.transcript_items(session_id, None, 40)?;
         let after_page = started.elapsed();
-        let agents = store.projected_agents(session_id)?;
+        let (agents, finished_agent_count) = store.snapshot_agents(session_id)?;
         tracing::info!(
             session_id,
             history_ms = after_history.as_millis(),
@@ -1692,6 +1697,7 @@ fn snapshot(store: &Store, menus: &LiveMenus, session_id: &str) -> rusqlite::Res
             history,
             page,
             agents,
+            finished_agent_count,
         })
     })();
     let _ = store.end_read();

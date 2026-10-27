@@ -28,7 +28,8 @@
  */
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 import { Bot, ChevronDown, ChevronRight, Clock, Coins, Eye, Gauge, SendToBack, Square, Terminal, Workflow } from 'lucide-react';
 
@@ -37,6 +38,7 @@ import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { request } from '@/lib/api';
 import { helperState } from '@/workbench/chat-state';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
 import { forHowLong } from '@/workbench/elapsed';
@@ -279,7 +281,7 @@ function AgentRow({
   now: number;
   sessionId: string;
   controls: AgentControl[];
-  onOpen?: (id: string) => void;
+  onOpen?: (id: string, row?: SentAway) => void;
 }) {
   const { label: kind, Icon } = KINDS[row.kind];
   const model = modelName(row.model);
@@ -312,7 +314,7 @@ function AgentRow({
         <Row
           inset="sm"
           data-testid="sent-away-open"
-          onClick={onOpen ? () => onOpen(row.id) : undefined}
+          onClick={onOpen ? () => onOpen(row.id, row) : undefined}
           className="flex flex-col gap-1"
         >
         <div className="flex items-center gap-1.5">
@@ -430,6 +432,7 @@ function AgentRow({
 
 export interface SentAwayPanelProps {
   agents: SentAway[];
+  finishedAgentCount?: number;
   /**
    * The conversation's own rows, which is where a helper's live line is read
    * from: its rows carry the call that sent it, and they arrive as they happen
@@ -441,7 +444,7 @@ export interface SentAwayPanelProps {
   /** Which steering controls this chat's brand has. None is a real answer. */
   controls: AgentControl[];
   /** Opening one: its own conversation, which is the row's whole point. */
-  onOpen?: (id: string) => void;
+  onOpen?: (id: string, row?: SentAway) => void;
 }
 
 /**
@@ -458,20 +461,115 @@ export function finishedLabel(showing: boolean, count: number): string {
   return `${verb} ${count} completed`;
 }
 
-export function SentAwayPanel({ agents, items, sessionId, controls, onOpen }: SentAwayPanelProps) {
+export function SentAwayPanel(props: SentAwayPanelProps) {
+  // A new chat starts collapsed and cannot receive an older chat's pending page.
+  return <SentAwayContents key={props.sessionId} {...props} />;
+}
+
+/** Share the rail's scrollbar; only visible agent cards need to mount. */
+function AgentList({ rows, draw }: { rows: SentAway[]; draw: (row: SentAway) => ReactNode }) {
+  // Small lists also work outside the rail (for example in an agent detail pane).
+  return rows.length <= 12
+    ? <>{rows.map(draw)}</>
+    : <VirtualAgentList rows={rows} draw={draw} />;
+}
+
+function VirtualAgentList({ rows, draw }: { rows: SentAway[]; draw: (row: SentAway) => ReactNode }) {
+  const list = useRef<HTMLDivElement>(null);
+  const [margin, setMargin] = useState(0);
+  const host = () => list.current?.closest<HTMLElement>('[data-testid="chat-right-rail-body"]') ?? null;
+  const virtual = useVirtualizer({
+    count: rows.length,
+    getScrollElement: host,
+    estimateSize: () => 130,
+    getItemKey: index => rows[index].id,
+    overscan: 3,
+    scrollMargin: margin,
+  });
+  useLayoutEffect(() => {
+    const scroll = host();
+    const element = list.current;
+    if (!scroll || !element) return;
+    const measure = () => setMargin(element.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop - scroll.clientTop);
+    measure();
+    // Content above this list can change height independently of its rows.
+    const observer = new ResizeObserver(measure);
+    for (let node: HTMLElement | null = element.parentElement; node; node = node.parentElement) {
+      observer.observe(node);
+      if (node === scroll) break;
+    }
+    return () => observer.disconnect();
+  }, []);
+  return <div ref={list} data-testid="virtual-agent-list" data-count={rows.length}
+    className="relative w-full" style={{ height: virtual.getTotalSize() }}>
+    {virtual.getVirtualItems().map(item => <div key={item.key} data-index={item.index}
+      ref={virtual.measureElement} className="absolute left-0 top-0 w-full pb-1.5"
+      style={{ transform: `translateY(${item.start - margin}px)` }}>
+      {draw(rows[item.index])}
+    </div>)}
+  </div>;
+}
+
+function SentAwayContents({ agents, finishedAgentCount, items, sessionId, controls, onOpen }: SentAwayPanelProps) {
   const now = useNow(agents.some((a) => !isOver(a.state)));
-  // Shut on every mount, and deliberately not remembered: what the reader wants
-  // on opening a chat is what is still moving in it, and a rail that comes back
-  // with forty finished helpers in it is the rail this split was cut to fix.
   const [showingFinished, setShowingFinished] = useState(false);
+  const [pages, setPages] = useState<SentAway[]>([]);
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const generation = useRef(0);
   const finishedId = useId();
+  useEffect(() => () => { generation.current += 1; }, []);
+  useEffect(() => {
+    // Reconnect snapshots can move live completions into historical storage.
+    // Discard pages from the previous snapshot, even if neither count is zero.
+    generation.current += 1;
+    inFlight.current = false;
+    setPages([]);
+    setCursor(null);
+    setHasMore(true);
+    setLoaded(false);
+    setLoading(false);
+    setError(null);
+  }, [finishedAgentCount]);
 
-  if (agents.length === 0) return null;
-
-  // Oldest-first within each group, which is the order they were sent in
-  // (fold.ts appends). The split groups them; it does not sort them.
-  const running = agents.filter((a) => !isOver(a.state));
-  const finished = agents.filter((a) => isOver(a.state));
+  const load = useCallback(async () => {
+    if (inFlight.current) return;
+    const current = generation.current;
+    inFlight.current = true;
+    setLoading(true);
+    setError(null);
+    try {
+      const after = cursor === null ? '' : `&after=${cursor}`;
+      const res = await request(`/api/workbench/agents?session=${encodeURIComponent(sessionId)}${after}`);
+      if (!res.ok) throw new Error('Couldn’t load completed agents. Try again.');
+      const page = await res.json() as { agents: SentAway[]; cursor: number | null; hasMore: boolean };
+      if (generation.current !== current) return;
+      setPages(was => [...new Map([...was, ...page.agents].map(row => [row.id, row])).values()]);
+      setCursor(page.cursor);
+      setHasMore(page.hasMore && page.cursor !== null && page.cursor !== cursor);
+      setLoaded(true);
+    } catch {
+      if (generation.current === current) setError('Couldn’t load completed agents. Try again.');
+    } finally {
+      if (generation.current === current) { inFlight.current = false; setLoading(false); }
+    }
+  }, [cursor, sessionId]);
+  useEffect(() => {
+    if (showingFinished && !loaded && !loading && !error && (finishedAgentCount ?? 0) > 0) void load();
+  }, [showingFinished, loaded, loading, error, finishedAgentCount, load]);
+  const running = agents.filter(a => !isOver(a.state));
+  const liveFinished = agents.filter(a => isOver(a.state));
+  const finishedCount = (finishedAgentCount ?? 0) + liveFinished.length;
+  // A live completion wins over a historical page, including when they race.
+  const finished = [...new Map([...pages, ...agents].map(row => [row.id, row])).values()].filter(a => isOver(a.state));
+  const expand = () => {
+    setShowingFinished(was => !was);
+  };
+  if (running.length === 0 && finishedCount === 0) return null;
 
   const draw = (row: SentAway) => (
     <AgentRow
@@ -488,18 +586,18 @@ export function SentAwayPanel({ agents, items, sessionId, controls, onOpen }: Se
   return (
     <div
       data-testid="sent-away-panel"
-      data-rows={agents.length}
+      data-rows={running.length + finishedCount}
       data-running={running.length}
-      data-finished={finished.length}
+      data-finished={finishedCount}
       className="flex flex-col gap-1.5"
     >
       {/* Always drawn, even with nothing in it: an empty list under a control
           reading "show the 3 that have finished" says where they will land. */}
       <div role="list" data-testid="sent-away-running" className="flex flex-col gap-1.5">
-        {running.map(draw)}
+        <AgentList rows={running} draw={draw} />
       </div>
 
-      {finished.length > 0 && (
+      {finishedCount > 0 && (
         <>
           <Row
             gap="sm"
@@ -509,7 +607,7 @@ export function SentAwayPanel({ agents, items, sessionId, controls, onOpen }: Se
             aria-controls={finishedId}
             data-testid="toggle-stopped-agents"
             data-showing={showingFinished}
-            onClick={() => setShowingFinished((was) => !was)}
+            onClick={expand}
             className="text-[11px] text-muted-foreground"
           >
             {showingFinished ? (
@@ -517,19 +615,25 @@ export function SentAwayPanel({ agents, items, sessionId, controls, onOpen }: Se
             ) : (
               <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             )}
-            <span className="min-w-0 truncate">{finishedLabel(showingFinished, finished.length)}</span>
+            <span className="min-w-0 truncate">{finishedLabel(showingFinished, finishedCount)}</span>
           </Row>
-          {/* Kept mounted so its rows keep their result and their stopped clock,
-              and hidden with the utility rather than the `hidden` attribute:
-              `display:flex` from the class beside it wins over preflight's
-              `[hidden]` rule, so the attribute alone would hide nothing. */}
+          {/* Closed history mounts no rows, tooltips or result text. */}
           <div
             role="list"
             id={finishedId}
             data-testid="sent-away-stopped"
             className={cn('flex-col gap-1.5', showingFinished ? 'flex' : 'hidden')}
           >
-            {finished.map(draw)}
+            {showingFinished && <>
+              <AgentList rows={finished} draw={draw} />
+              {loading && <p role="status">Loading…</p>}
+              {error && <p role="alert">{error}</p>}
+              {!loading && (error || (loaded && hasMore)) && (
+                <Button size="sm" variant="ghost" data-testid="load-more-agents" onClick={() => void load()}>
+                  {error ? 'Retry' : 'Load more'}
+                </Button>
+              )}
+            </>}
           </div>
         </>
       )}
