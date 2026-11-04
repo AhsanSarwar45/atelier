@@ -237,10 +237,18 @@ async fn send_chat_snapshot(
     session_id: &str,
     tx: &mpsc::Sender<Tagged>,
 ) -> Result<i64, String> {
+    let started = std::time::Instant::now();
     state.reconcile_status(session_id).await?;
+    let reconciled = started.elapsed();
     let snapshot = workbench::snapshot(state, session_id)
         .await
         .map_err(|error| format!("Could not load this conversation: {error}"))?;
+    tracing::info!(
+        session_id,
+        status_ms = reconciled.as_millis(),
+        snapshot_ms = (started.elapsed() - reconciled).as_millis(),
+        "chat snapshot built"
+    );
     let watermark = snapshot["lastSeq"].as_i64().unwrap_or_default();
     tx.send(Tagged::scoped(
         "chat.snapshot",
@@ -346,8 +354,18 @@ pub(crate) async fn follow_native_record(
         tail
     });
     let mut claude_lines: VecDeque<String> = VecDeque::new();
-    let mut claude_helpers = (session.brand == "claude")
-        .then(|| crate::workbench::claude::history::HelperFollower::after_import(&record));
+    // Starting one reads through the whole record once, which is hundreds of
+    // megabytes on a long chat; that is file work, kept off the async workers.
+    let mut claude_helpers = if session.brand == "claude" {
+        let record = record.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::workbench::claude::history::HelperFollower::after_import(&record)
+        })
+        .await
+        .ok()
+    } else {
+        None
+    };
     let mut codex_tail = (session.brand == "codex").then(|| {
         let mut tail = crate::workbench::external::LineTail::new(&record);
         if let Some(at) = followed_to {

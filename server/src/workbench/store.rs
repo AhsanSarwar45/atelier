@@ -486,6 +486,13 @@ const VIEW_EVENTS_SQL: &str = r#"SELECT seq, json FROM event
      ) GROUP BY type
    ) ORDER BY seq"#;
 
+const AGENT_STATES_SQL: &str = r#"SELECT seq,json_object('type',type,'agentId',json_extract(json,'$.agentId'),
+          'state',json_extract(json,'$.state'))
+     FROM event INDEXED BY event_by_type WHERE session_id=?1
+       AND type IN ('agent.started','agent.progress','agent.finished')
+       AND seq>COALESCE((SELECT MAX(seq) FROM event WHERE session_id=?1 AND type='transcript.reset'),0)
+     ORDER BY seq"#;
+
 /// What a sweep's calls answered. The calls' rows are found by id, so a sweep
 /// reads those rows alone rather than every tool row the chat ever wrote.
 const BACKGROUND_OUTPUTS_SQL: &str = r#"SELECT json_extract(json,'$.toolCallId'),
@@ -1174,7 +1181,7 @@ fn held_in_its_project(
     /// one. A notice the replay itself carried is left to the replay.
     pub fn kept_across_reset(&self, session_id: &str) -> rusqlite::Result<Vec<Event>> {
         let mut statement = self.connection.prepare(
-            r#"SELECT json FROM event
+            r#"SELECT json FROM event INDEXED BY event_by_type
                 WHERE session_id=?1 AND type IN ('provider.message','notice')
                   AND seq > COALESCE((SELECT MAX(seq) FROM event
                     WHERE session_id=?1 AND type='transcript.reset'),0)
@@ -2908,15 +2915,12 @@ fn held_in_its_project(
 
     /// Initial chat reads need the live helpers and a count, never old reports.
     /// Read only lifecycle identity/state into Rust, then hydrate selected ids.
+    ///
+    /// The rows come off the type index. Left to itself, the planner walked
+    /// every row of the chat in order to test its type: 600,000 rows and 8 s
+    /// from disk to find 2,000, before the first page of a long chat was sent.
     fn agent_states(&self, session_id: &str) -> rusqlite::Result<Vec<(i64, Value)>> {
-        let mut statement = self.connection.prepare(
-            r#"SELECT seq,json_object('type',type,'agentId',json_extract(json,'$.agentId'),
-                    'state',json_extract(json,'$.state'))
-               FROM event WHERE session_id=?1
-                 AND type IN ('agent.started','agent.progress','agent.finished')
-                 AND seq>COALESCE((SELECT MAX(seq) FROM event WHERE session_id=?1 AND type='transcript.reset'),0)
-               ORDER BY seq"#,
-        )?;
+        let mut statement = self.connection.prepare(AGENT_STATES_SQL)?;
         let events = statement.query_map([session_id], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?.map(|row| {
@@ -6926,6 +6930,29 @@ mod tests {
                 .filter(|step| step.contains("SEARCH event ") && !step.contains("event_by_type"))
                 .all(|step| step.contains("seq=?")),
             "the chat's rows are fetched by seq, not visited one by one: {plan:?}"
+        );
+    }
+
+    /// Which helpers a chat ran, and which are still open, is read off the
+    /// type index before a chat's first page is sent. Walking the chat to test
+    /// each row's type took 5 to 40 s on long chats from a cold disk.
+    #[test]
+    fn workbench_core_a_chats_helpers_are_read_from_their_own_rows() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let plan: Vec<String> = store
+            .connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {AGENT_STATES_SQL}"))
+            .unwrap()
+            .query_map(["chat"], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .filter(|step| step.contains("event"))
+                .all(|step| step.contains("event_by_type") || !step.contains("SEARCH event ")),
+            "the helpers' rows come off the type index: {plan:?}"
         );
     }
 

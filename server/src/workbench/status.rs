@@ -197,11 +197,10 @@ pub async fn settle_background(
     record: Option<&Path>,
     now: DateTime<Utc>,
 ) -> Result<bool, String> {
-    let agents = database.projected_agents(session.id.clone()).await?;
-    let open: Vec<&Value> = agents
-        .iter()
-        .filter(|agent| !matches!(agent["state"].as_str(), Some("done" | "failed" | "stopped")))
-        .collect();
+    // Only what is still open: folding every helper the chat ever ran, reports
+    // and all, held the first page of a chat with hundreds of them.
+    let agents = database.open_agents(session.id.clone()).await?;
+    let open: Vec<&Value> = agents.iter().collect();
     if open.is_empty() {
         return Ok(false);
     }

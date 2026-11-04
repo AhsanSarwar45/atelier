@@ -43,11 +43,27 @@ impl NativeProviderFactory {
             session_id,
             tokio::spawn(async move {
                 if matches!(session.brand.as_str(), "claude" | "codex") {
-                    if delegated_claude_chat(&claude_config, &session) {
+                    let delegated = {
+                        let (config, session) = (claude_config.clone(), session.clone());
+                        tokio::task::spawn_blocking(move || delegated_claude_chat(&config, &session))
+                            .await
+                            .unwrap_or(false)
+                    };
+                    if delegated {
                         // The adapter's replay drops helpers entirely; see
                         // `claude::history::delegates_work`.
                         let _ = import_claude_history(&database, &claude_config, &session).await;
                     } else {
+                        // A chat already read in is not asked for again, and
+                        // the call times below parse its whole record.
+                        if super::provider_reconciliation::complete_history_choice(
+                            &database, &session.id,
+                        )
+                        .await
+                            == Ok(super::provider_reconciliation::HistoryChoice::Leave)
+                        {
+                            return;
+                        }
                         let asked = std::time::Instant::now();
                         let times = claude_call_times(&claude_config, &session);
                         let held = held_elsewhere(&claude_config, &session);

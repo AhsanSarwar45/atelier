@@ -730,6 +730,13 @@ impl ChatDb {
         self.read(move |store, _| store.projected_agents(&session_id)).await
     }
 
+    /// The helpers not yet finished, folded in full; finished ones' reports
+    /// are never read.
+    pub async fn open_agents(&self, session_id: String) -> Result<Vec<serde_json::Value>, String> {
+        self.read(move |store, _| store.snapshot_agents(&session_id).map(|(open, _)| open))
+            .await
+    }
+
     pub fn subscribe_all(&self) -> broadcast::Receiver<StoreUpdate> {
         self.global.subscribe()
     }

@@ -1654,7 +1654,6 @@ fn transcript_events(rows: &[Value], parent: Option<&str>) -> Vec<Value> {
 
 #[derive(Clone)]
 struct HelperFacts {
-    agent_id: String,
     tool_call_id: Option<String>,
     first_at: String,
     events: Vec<Value>,
@@ -1674,19 +1673,82 @@ fn helper_id(path: &Path) -> Option<String> {
 /// where a tail picks up. A final line without its newline counts when it is
 /// a whole row; one still being written is left for the tail.
 fn helper_rows(path: &Path) -> Option<(Vec<Value>, u64)> {
-    let text = fs::read_to_string(path).ok()?;
+    Some(whole_rows(&fs::read_to_string(path).ok()?))
+}
+
+fn whole_rows(text: &str) -> (Vec<Value>, u64) {
     let mut through = text.rfind('\n').map_or(0, |newline| newline + 1);
     let last = text[through..].trim();
     if !last.is_empty() && serde_json::from_str::<serde::de::IgnoredAny>(last).is_ok() {
         through = text.len();
     }
-    Some((jsonl_rows(&text[..through]), through as u64))
+    (jsonl_rows(&text[..through]), through as u64)
 }
 
 fn helper_facts(path: &Path) -> Option<HelperFacts> {
     let agent_id = helper_id(path)?;
     let (rows, size) = helper_rows(path)?;
     Some(helper_facts_from(path, agent_id, &rows, size))
+}
+
+/// The whole rows in only the first `size` bytes of a helper's file, and the
+/// byte just past them.
+fn helper_rows_up_to(path: &Path, size: u64) -> Option<(Vec<Value>, u64)> {
+    let mut bytes = Vec::new();
+    fs::File::open(path).ok()?.take(size).read_to_end(&mut bytes).ok()?;
+    Some(whole_rows(&String::from_utf8_lossy(&bytes)))
+}
+
+/// Whether each of `calls` succeeded, from the tool results in a record.
+///
+/// The record is read a line at a time and only a line naming one of these
+/// calls is parsed, so a record of hundreds of megabytes costs one pass over
+/// its bytes and none of its memory.
+fn call_outcomes(record: &Path, calls: &HashSet<String>) -> HashMap<String, bool> {
+    let mut outcomes = HashMap::new();
+    if calls.is_empty() {
+        return outcomes;
+    }
+    let Ok(file) = fs::File::open(record) else {
+        return outcomes;
+    };
+    let mut reader = std::io::BufReader::new(file);
+    let mut line = Vec::new();
+    while matches!(std::io::BufRead::read_until(&mut reader, b'\n', &mut line), Ok(read) if read > 0) {
+        if names_a_result_for(&line, calls) {
+            if let Ok(row) = serde_json::from_slice::<Value>(&line) {
+                outcomes.extend(
+                    tool_outcomes(std::slice::from_ref(&row))
+                        .into_iter()
+                        .filter(|(call, _)| calls.contains(call)),
+                );
+            }
+        }
+        line.clear();
+    }
+    outcomes
+}
+
+/// Whether a raw record line holds a tool result for one of `calls`, judged
+/// from the bytes of each `"tool_use_id"` value without parsing the line.
+fn names_a_result_for(line: &[u8], calls: &HashSet<String>) -> bool {
+    const KEY: &[u8] = b"\"tool_use_id\"";
+    let mut rest = line;
+    while let Some(at) = rest.windows(KEY.len()).position(|window| window == KEY) {
+        rest = &rest[at + KEY.len()..];
+        let value = rest
+            .iter()
+            .position(|byte| *byte == b'"')
+            .map(|open| &rest[open + 1..])
+            .and_then(|value| {
+                let close = value.iter().position(|byte| *byte == b'"')?;
+                std::str::from_utf8(&value[..close]).ok()
+            });
+        if value.is_some_and(|id| calls.contains(id)) {
+            return true;
+        }
+    }
+    false
 }
 
 fn helper_facts_from(path: &Path, agent_id: String, rows: &[Value], size: u64) -> HelperFacts {
@@ -1743,7 +1805,6 @@ fn helper_facts_from(path: &Path, agent_id: String, rows: &[Value], size: u64) -
         "model":model, "effort":effort, "result":result
     });
     HelperFacts {
-        agent_id,
         tool_call_id: tool,
         first_at: first.unwrap_or_default(),
         events,
@@ -1877,16 +1938,33 @@ pub fn delegates_work(record: &Path) -> bool {
             return true;
         }
     }
-    jsonl(record).iter().any(|row| {
-        row["message"]["content"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|block| {
-                block["type"] == "tool_use"
-                    && matches!(block["name"].as_str(), Some("Task") | Some("Agent"))
-            })
-    })
+    // Every open of a chat asks this. Parse only a line that could hold such a
+    // call, rather than the whole record into memory.
+    let Ok(file) = fs::File::open(record) else {
+        return false;
+    };
+    let mut reader = std::io::BufReader::new(file);
+    let mut line = Vec::new();
+    let has = |line: &[u8], text: &[u8]| line.windows(text.len()).any(|window| window == text);
+    while matches!(std::io::BufRead::read_until(&mut reader, b'\n', &mut line), Ok(read) if read > 0) {
+        let could = has(&line, b"\"tool_use\"") && (has(&line, b"\"Task\"") || has(&line, b"\"Agent\""));
+        let delegated = could
+            && serde_json::from_slice::<Value>(&line).is_ok_and(|row| {
+                row["message"]["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|block| {
+                        block["type"] == "tool_use"
+                            && matches!(block["name"].as_str(), Some("Task") | Some("Agent"))
+                    })
+            });
+        if delegated {
+            return true;
+        }
+        line.clear();
+    }
+    false
 }
 
 /// Read every helper record beside one chat, several at a time.
@@ -1985,6 +2063,10 @@ pub struct HelperFollower {
     unnamed: HashSet<String>,
     /// Each helper's latest summary, so settling one never reopens its file.
     finishes: HashMap<String, Value>,
+    /// Helpers known only by their size when following began. The rows they
+    /// held then were imported already; they are read, to be told apart from
+    /// new ones, only if the file ever grows. An old chat's helpers never do.
+    unread: HashMap<String, u64>,
     #[cfg_attr(not(test), allow(dead_code))]
     bytes_read: u64,
 }
@@ -2016,49 +2098,84 @@ impl HelperFollower {
             tails: HashMap::new(),
             unnamed: HashSet::new(),
             finishes: HashMap::new(),
+            unread: HashMap::new(),
             bytes_read: 0,
         }
     }
 
+    /// Follow a chat whose record and helpers were imported already.
+    ///
+    /// Every open of a chat starts one of these, so it reads no helper file
+    /// and does not parse the chat's own record: one chat here has a 758 MB
+    /// record and 218 helpers, and parsing them all took ten seconds and
+    /// three gigabytes on each open. A helper is known by its size and the
+    /// call its `meta.json` names; the outcomes of those calls are found by
+    /// scanning the record for their ids.
     pub fn after_import(record: &Path) -> Self {
-        let mut follower = Self::new(record, tool_outcomes(&jsonl(record)));
-        // `read_history` has already normalized every current helper file.
-        // Seed the incremental cursor and identities from that exact view so
-        // the first follower tick cannot replay the imported prefix.
-        for mut helper in helper_records(record) {
-            follower.sizes.insert(helper.agent_id.clone(), helper.size);
-            follower
-                .finishes
-                .insert(helper.agent_id.clone(), helper.finish.clone());
-            if let Some(call) = &helper.tool_call_id {
-                follower.calls.insert(call.clone(), helper.agent_id.clone());
-            } else {
-                follower.unnamed.insert(helper.agent_id.clone());
+        let mut follower = Self::new(record, HashMap::new());
+        for path in follower.paths() {
+            let Some(agent) = helper_id(&path) else {
+                continue;
+            };
+            let Ok(size) = fs::metadata(&path).map(|meta| meta.len()) else {
+                continue;
+            };
+            follower.sizes.insert(agent.clone(), size);
+            follower.unread.insert(agent.clone(), size);
+            match helper_call(&path, &agent) {
+                Some(call) => {
+                    follower.calls.insert(call, agent);
+                }
+                None => {
+                    follower.unnamed.insert(agent);
+                }
             }
-            for event in &helper.events {
-                follower
-                    .seen
-                    .insert(crate::workbench::protocol::record_event_id_at(
-                        event,
-                        crate::workbench::store::CLAUDE_IMPORT_RECIPE,
-                    ));
-            }
-            if let Some(ok) = helper
-                .tool_call_id
-                .as_ref()
-                .and_then(|call| follower.outcomes.get(call))
-            {
-                helper.finish["state"] = json!(if *ok { "done" } else { "failed" });
-                follower
-                    .seen
-                    .insert(crate::workbench::protocol::record_event_id_at(
-                        &helper.finish,
-                        crate::workbench::store::CLAUDE_IMPORT_RECIPE,
-                    ));
-                follower.ended.insert(helper.agent_id);
+        }
+        let wanted = follower.calls.keys().cloned().collect();
+        follower.outcomes = call_outcomes(record, &wanted);
+        for (call, agent) in &follower.calls {
+            if follower.outcomes.contains_key(call) {
+                follower.ended.insert(agent.clone());
             }
         }
         follower
+    }
+
+    /// The events a helper held when following began, marked seen so that a
+    /// file growing later gives only what is new. The file's rows up to that
+    /// size are the ones the import already stored.
+    ///
+    /// Those rows are then held as the helper's tail, so its growth is read
+    /// from where they end rather than the file being read again.
+    fn seen_up_to(&mut self, path: &Path, agent: &str, size: u64) {
+        let Some((rows, through)) = helper_rows_up_to(path, size) else {
+            return;
+        };
+        self.bytes_read += through;
+        let mut helper = helper_facts_from(path, agent.to_string(), &rows, through);
+        let mut tail = crate::workbench::external::LineTail::new(path);
+        tail.seek(through);
+        self.tails.insert(
+            agent.to_string(),
+            HelperTail { tail, rows, grew_at: std::time::Instant::now() },
+        );
+        for event in &helper.events {
+            self.seen.insert(crate::workbench::protocol::record_event_id_at(
+                event,
+                crate::workbench::store::CLAUDE_IMPORT_RECIPE,
+            ));
+        }
+        if let Some(ok) = helper
+            .tool_call_id
+            .as_ref()
+            .and_then(|call| self.outcomes.get(call))
+        {
+            helper.finish["state"] = json!(if *ok { "done" } else { "failed" });
+            self.seen.insert(crate::workbench::protocol::record_event_id_at(
+                &helper.finish,
+                crate::workbench::store::CLAUDE_IMPORT_RECIPE,
+            ));
+        }
     }
 
     /// A provider rewrite follows a transcript reset, so all current helper
@@ -2169,6 +2286,9 @@ impl HelperFollower {
                     }
                 }
                 continue;
+            }
+            if let Some(seeded) = self.unread.remove(&agent) {
+                self.seen_up_to(&path, &agent, seeded);
             }
             let Some(helper) = self.grown(&path, &agent) else {
                 continue;
@@ -3358,6 +3478,84 @@ mod tests {
         // Its own halves stay its own, so the two readings can be told apart.
         assert_eq!(cost["cost"]["input"], json!(100));
         assert_eq!(cost["cost"]["output"], json!(20));
+    }
+
+    #[test]
+    fn a_chat_delegated_only_if_its_record_calls_a_helper() {
+        let home = tempdir().unwrap();
+        let record = home.path().join(format!("{CHAT}.jsonl"));
+        let call = |name: &str| {
+            json!({"type":"assistant","message":{"content":[
+                {"type":"tool_use","id":"c","name":name,"input":{}}
+            ]}})
+            .to_string()
+        };
+        let said = json!({"type":"user","message":{"content":[
+            {"type":"text","text":"a \"Task\" for an \"Agent\", no \"tool_use\" here"}
+        ]}})
+        .to_string();
+        write(&record, format!("{said}\n{}\n", call("Read"))).unwrap();
+        assert!(!delegates_work(&record));
+        write(&record, format!("{said}\n{}\n{}", call("Read"), call("Agent"))).unwrap();
+        assert!(delegates_work(&record), "a last line without its newline still counts");
+        write(&record, format!("{}\n", call("Task"))).unwrap();
+        assert!(delegates_work(&record));
+    }
+
+    #[test]
+    fn following_an_imported_chat_reads_no_helper_until_one_grows() {
+        let home = tempdir().unwrap();
+        let record = home.path().join(format!("{CHAT}.jsonl"));
+        write(&record, [
+            json!({"type":"assistant","message":{"content":[
+                {"type":"tool_use","id":"call-done","name":"Agent","input":{}},
+                {"type":"tool_use","id":"call-open","name":"Agent","input":{}}
+            ]}}),
+            json!({"type":"user","message":{"content":[
+                {"type":"tool_result","tool_use_id":"call-done","content":"finished"},
+                {"type":"tool_result","tool_use_id":"call-other","is_error":true,"content":"x"}
+            ]}})
+        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n")+"\n").unwrap();
+        let helper_dir = record.with_file_name(CHAT).join("subagents");
+        create_dir_all(&helper_dir).unwrap();
+        let row = |uuid: &str, text: &str| {
+            json!({
+                "type":"assistant","uuid":uuid,"timestamp":"2026-08-30T00:00:01Z",
+                "message":{"content":[{"type":"text","text":text}]}
+            })
+            .to_string()
+                + "\n"
+        };
+        for (agent, call) in [("done", "call-done"), ("open", "call-open")] {
+            write(
+                helper_dir.join(format!("agent-{agent}.meta.json")),
+                json!({"toolUseId":call}).to_string(),
+            )
+            .unwrap();
+            write(helper_dir.join(format!("agent-{agent}.jsonl")), row(&format!("{agent}-1"), "Before")).unwrap();
+        }
+
+        let mut follower = HelperFollower::after_import(&record);
+        assert_eq!(
+            follower.outcomes,
+            HashMap::from([("call-done".to_string(), true)]),
+            "only the outcomes of helper calls are kept"
+        );
+        assert_eq!(follower.poll(&[]), (vec![], vec![]), "the finished helper is not finished again");
+        assert_eq!(follower.bytes_read, 0, "no helper file was read to begin following");
+
+        let open = helper_dir.join("agent-open.jsonl");
+        let mut file = OpenOptions::new().append(true).open(&open).unwrap();
+        file.write_all(row("open-2", "After").as_bytes()).unwrap();
+        let (growth, _) = follower.poll(&[]);
+        assert!(growth.iter().any(|event| event["text"] == "After"));
+        assert!(!growth.iter().any(|event| event["text"] == "Before"), "the imported rows are not replayed");
+        assert_eq!(follower.bytes_read, fs::metadata(&open).unwrap().len(), "the grown file is read once");
+
+        let (_, finished) = follower.poll(&[json!({"type":"tool.completed","toolCallId":"call-open","ok":true})]);
+        assert_eq!(finished.len(), 1);
+        assert_eq!(finished[0]["agentId"], "open");
+        assert_eq!(finished[0]["state"], "done");
     }
 
     #[test]
