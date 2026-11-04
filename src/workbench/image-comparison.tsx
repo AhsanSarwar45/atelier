@@ -92,7 +92,7 @@ export function ImageComparisonView({ comparison, onLook }: {
       tabIndex={0}
       className="relative block max-w-full select-none overflow-hidden"
       style={{ touchAction: 'none' }}
-      onPointerDown={(event) => { dragging.current = true; frame.current?.setPointerCapture?.(event.pointerId); place(event); }}
+      onPointerDown={(event) => { if (event.button !== 0) return; dragging.current = true; frame.current?.setPointerCapture?.(event.pointerId); place(event); }}
       onPointerMove={(event) => { if (dragging.current) place(event); }}
       onPointerUp={() => { dragging.current = false; }}
       onPointerLeave={() => { dragging.current = false; }}

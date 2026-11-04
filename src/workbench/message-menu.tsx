@@ -6,8 +6,9 @@
  *
  * It hangs off the point that was pressed, the way the path chips' menu does
  * (`path-menu.tsx`), and stays out of the way of what already has a menu of its
- * own: a file chip keeps the chip's menu, and a link keeps the browser's, which
- * is where "Open in new tab" lives.
+ * own: a file chip keeps the chip's menu, a link keeps the browser's, which
+ * is where "Open in new tab" lives, and so does a picture, which is where
+ * "Copy image" and "Save image as" live.
  *
  * What it offers is decided when it opens rather than when it is drawn: text
  * the reader had selected inside this message is read at the press, because
@@ -104,7 +105,7 @@ function selectedIn(box: HTMLElement): string {
 /** A press that something inside the message answers for itself. */
 function hasItsOwnMenu(target: EventTarget | null): boolean {
   if (chipUnder(target)) return true;
-  return Boolean((target as HTMLElement | null)?.closest?.('a[href]'));
+  return Boolean((target as HTMLElement | null)?.closest?.('a[href], img'));
 }
 
 /** What a message puts on itself, and the menu it draws inside itself. */

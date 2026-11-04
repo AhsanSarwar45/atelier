@@ -358,3 +358,45 @@ test('the line between the two pictures can be found on a white one and a black 
     await dividerReadsOnBothHalves(dialog.getByTestId('comparison-divider'), expanded, 'expanded');
   } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
 });
+
+/** Right-clicks `target` and says whether the page kept the browser's own menu from opening. */
+async function rightClickTaken(target: Locator, position?: { x: number; y: number }): Promise<boolean> {
+  const taken = target.evaluate((element) => new Promise<boolean>((resolve) => {
+    element.ownerDocument.addEventListener('contextmenu', (event) => resolve(event.defaultPrevented), { once: true });
+  }));
+  await target.click({ button: 'right', position });
+  return taken;
+}
+
+test('a right-click on a compared picture opens the browser’s image menu, not the message menu', async ({ page, request, browser }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const run = process.env.WORKBENCH_E2E_RUN!;
+  const before = await bands(browser, join(run, 'menu-before.png'), '#888');
+  const after = await bands(browser, join(run, 'menu-after.png'), '#555');
+
+  for (const mode of ['side_by_side', 'wipe'] as const) {
+    const comparison = comparisonOf(before, after, PALE_ALT, DARK_ALT, mode);
+    let project: { id: string } | null = null;
+    try {
+      project = await chatShowing(page, request, comparison, `right-click-${mode}`, `Right-click ${mode}`);
+      const frame = page.locator('[data-widget="image_compare"]');
+      for (const alt of [PALE_ALT, DARK_ALT]) {
+        const picture = frame.getByRole('img', { name: alt });
+        await painted(picture);
+        // A wipe shows the before picture left of the line and the after
+        // picture right of it; both centres sit under the line itself.
+        const box = (await picture.boundingBox())!;
+        const position = mode === 'wipe' ? { x: box.width * (alt === PALE_ALT ? 0.25 : 0.75), y: box.height / 2 } : undefined;
+        expect(await rightClickTaken(picture, position), `${mode}: the page took the right-click on "${alt}"`).toBe(false);
+        await expect(page.getByTestId('message-menu')).toHaveCount(0);
+      }
+      // A right-click is not a drag: the wipe's line stays where it was.
+      if (mode === 'wipe') await expect(frame.getByRole('slider', { name: 'Before and after' })).toHaveAttribute('aria-valuenow', '50');
+      // The message itself, off the picture, still has its menu.
+      const caption = mode === 'wipe' ? frame.getByTestId('comparison-before-label') : frame.locator('figcaption').first();
+      expect(await rightClickTaken(caption), `${mode}: the message lost its menu`).toBe(true);
+      await expect(page.getByTestId('message-menu')).toBeVisible();
+      await page.keyboard.press('Escape');
+    } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
+  }
+});

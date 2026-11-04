@@ -2,7 +2,7 @@
  * A right-click on a message, or a long press on a phone, opens a menu of what
  * can be done with it (bw-yszdw). Asked here: that "Copy message" copies the
  * words as they were written, that text selected inside the message is offered
- * as well, and that a link keeps the browser's own menu. In the open chat it
+ * as well, and that a link or a picture keeps the browser's own menu. In the open chat it
  * also offers Resend and Edit and resend on his own messages, Quote in reply,
  * and a link to the message (bw-drvtr.2).
  */
@@ -77,6 +77,13 @@ it('leaves a right-click on a link to the browser', () => {
   draw('See [the docs](https://example.com).');
   const link = screen.getByRole('link');
   const shown = fireEvent.contextMenu(link, { clientX: 20, clientY: 20 });
+  expect(shown).toBe(true);
+  expect(screen.queryByTestId('message-menu')).toBeNull();
+});
+
+it('leaves a right-click on a picture to the browser', () => {
+  draw('![the shot](https://example.com/shot.png)');
+  const shown = fireEvent.contextMenu(screen.getByRole('img'), { clientX: 20, clientY: 20 });
   expect(shown).toBe(true);
   expect(screen.queryByTestId('message-menu')).toBeNull();
 });
