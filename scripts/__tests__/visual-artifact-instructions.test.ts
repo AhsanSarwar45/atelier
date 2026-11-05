@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { visualArtifact } from '../../src/workbench/visual-artifacts';
 
 // Wrapping is layout, not policy: match with whitespace collapsed.
-const skill = readFileSync('machinery/skills/atelier/SKILL.md', 'utf8').replace(/\s+/g, ' ');
-const reference = readFileSync('machinery/skills/atelier/references/visual-artifacts.md', 'utf8');
+const skill = readFileSync('machinery/skills/atelier-reference/SKILL.md', 'utf8').replace(/\s+/g, ' ');
+const reference = readFileSync('machinery/skills/atelier-reference/references/visual-artifacts.md', 'utf8');
 
 describe('visual artifact agent guidance', () => {
   it('routes agents among every rich visual mode', () => {

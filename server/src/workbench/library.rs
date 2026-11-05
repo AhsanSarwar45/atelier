@@ -741,6 +741,25 @@ mod tests {
     }
 
     #[test]
+    fn the_atelier_detail_is_advertised_and_read_on_demand_instead_of_carried() {
+        let (data, root) = fixture();
+        let snap = resolve(data.path(), Some(root.path())).unwrap();
+        let guidance = snap.guidance();
+        assert!(guidance.contains("Available skill atelier-reference: Atelier reference."));
+        // The schemas and recipes stay out of what every session carries.
+        assert!(!guidance.contains("### Explainers"));
+        assert!(!guidance.contains("### Browser recipes"));
+        assert!(snap.read_skill("atelier-reference", None).unwrap().contains("## Widgets"));
+        assert!(snap.commands().is_empty());
+        for (resource, want) in [
+            ("references/screen-check.md", "## Browser recipes"),
+            ("references/visual-artifacts.md", "```json"),
+        ] {
+            assert!(snap.read_skill("atelier-reference", Some(resource)).unwrap().contains(want), "{resource}");
+        }
+    }
+
+    #[test]
     fn manual_skills_are_invocable_but_not_advertised_and_substitution_is_literal() {
         let (data, root) = fixture();
         let mut manual = item("manual", Kind::Skill, "{{one}} {{unknown}}");
@@ -1130,7 +1149,7 @@ fn builtins() -> Vec<Item> {
         name: name.into(),
         kind: Kind::Instruction,
         description: "Application guidance; maintained by Atelier".into(),
-        content: text.splitn(3, "---").nth(2).unwrap_or(text).trim().into(),
+        content: body(text),
         when,
         requires,
         automatic: true,
@@ -1138,7 +1157,32 @@ fn builtins() -> Vec<Item> {
         resources: BTreeMap::new(),
         bundle: "Atelier".into(),
     })
+    // The detail behind the short instructions, read only when a session
+    // needs it, so every session does not carry it.
+    .chain([Item {
+        id: "atelier-reference".into(),
+        name: "Atelier reference".into(),
+        kind: Kind::Skill,
+        description: "Read before writing widget, explainer or artifact JSON, saving a memory, editing agent guidance, running screen-check (references/screen-check.md) or managing Chrome without the chrome server".into(),
+        content: body(include_str!("../../../machinery/skills/atelier-reference/SKILL.md")),
+        when: Condition::Always,
+        requires: vec![],
+        automatic: true,
+        parameters: BTreeMap::new(),
+        resources: [
+            ("references/screen-check.md", include_str!("../../../machinery/skills/atelier-reference/references/screen-check.md")),
+            ("references/visual-artifacts.md", include_str!("../../../machinery/skills/atelier-reference/references/visual-artifacts.md")),
+        ]
+        .into_iter()
+        .map(|(name, text)| (name.into(), text.into()))
+        .collect(),
+        bundle: "Atelier".into(),
+    }])
     .collect()
+}
+/// A carried skill file without its front matter.
+fn body(text: &str) -> String {
+    text.splitn(3, "---").nth(2).unwrap_or(text).trim().into()
 }
 pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
     let _guard = WRITES.lock().map_err(|e| e.to_string())?;
@@ -1321,7 +1365,8 @@ impl Snapshot {
         Ok(())
     }
     pub fn commands(&self) -> Vec<Value> {
-        self.items.iter().filter(|r| r.state == "available" && r.item.kind == Kind::Skill).map(|r| json!({
+        // Atelier's own reference is read by agents, never typed as a command.
+        self.items.iter().filter(|r| r.state == "available" && r.item.kind == Kind::Skill && r.source != "built-in").map(|r| json!({
             "name":format!("skill:{}", r.item.id), "title":r.item.name, "description":r.item.description, "kind":"skill", "execution":"shared"
         })).collect()
     }

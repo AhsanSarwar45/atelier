@@ -54,6 +54,7 @@ const RETIRED_RULE_FILES: &[&str] = &[
     ".claude/skills/spec/SKILL.md",
     "machinery/skills/external-review/SKILL.md",
     "machinery/skills/external-review/references/practices.md",
+    "machinery/skills/atelier/references/visual-artifacts.md",
     "machinery/hooks/picture-gate.py",
     "machinery/hooks/agent-fence.py",
     "machinery/hooks/session-context.py",
@@ -80,6 +81,7 @@ fn remove_retired_rule_files(dir: &Path) -> Result<(), String> {
         ".claude",
         "machinery/skills/external-review/references",
         "machinery/skills/external-review",
+        "machinery/skills/atelier/references",
     ] {
         let _ = std::fs::remove_dir(dir.join(relative));
     }
@@ -603,6 +605,8 @@ mod tests {
         for want in [
             "machinery/skills/atelier/SKILL.md",
             "machinery/skills/beads/SKILL.md",
+            "machinery/skills/atelier-reference/SKILL.md",
+            "machinery/skills/atelier-reference/references/screen-check.md",
             "machinery/workers/external-review.md",
             "machinery/workers/screen-check.md",
         ] {

@@ -632,22 +632,27 @@ mod tests {
     /// when screen-check's own throwaway Chrome applies instead.
     #[test]
     fn the_built_in_guidance_names_this_one_route() {
-        let text = include_str!("../../../machinery/skills/atelier/SKILL.md");
+        // Wrapping is layout, not policy: compare with whitespace collapsed.
+        let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let text = flat(include_str!("../../../machinery/skills/atelier/SKILL.md"));
         for want in [
             "All Chrome work goes through Atelier's `chrome` MCP server",
-            "atelier tool chrome up --headless",
-            "atelier tool chrome down --wipe",
             "isolatedContext",
             "connectOverCDP",
             "Do not point it at `atelier tool chrome`",
-            "reuse it for every\n  page that user opens",
+            "reuse it for every page that user opens",
             "`background: true`",
             "Close each page with `close_page`",
             "Chrome starts headless on the first browser tool call",
-            "When the person asks to watch, run\n`atelier tool chrome up` first",
-            "run `atelier tool chrome down` when the browser work is\n  finished",
+            "When the person asks to watch, run `atelier tool chrome up` first",
+            "run `atelier tool chrome down` when the browser work is finished",
         ] {
             assert!(text.contains(want), "guidance lacks {want:?}");
+        }
+        // Managing Chrome by hand is read only when the server is missing.
+        let reference = flat(include_str!("../../../machinery/skills/atelier-reference/SKILL.md"));
+        for want in ["atelier tool chrome up --headless", "atelier tool chrome down --wipe"] {
+            assert!(reference.contains(want), "reference lacks {want:?}");
         }
     }
 
