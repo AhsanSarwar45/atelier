@@ -56,6 +56,10 @@ describe('agent chat widget instructions', () => {
     expect(body(readFileSync('docs/board-lifecycle.md', 'utf8')).startsWith(skill.trimEnd())).toBe(true);
   });
 
+  it('keeps how to save a memory where the short text sends agents', () => {
+    for (const want of ['atelier tool memory add', '--scope', 'One fact per memory']) expect(reference).toContain(want);
+  });
+
   it('keeps the checklist rules out of the skill every session gets', () => {
     for (const text of [instructions[0], reference]) {
       expect(text).not.toMatch(/checklist/i);

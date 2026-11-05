@@ -29,7 +29,37 @@ in global scope.
   Changes apply when the session reconnects.
 
 
-## Writing memories
+## Memory
+
+Atelier memory replaces the provider's own memory. Every provider, account and
+session shares it. Your instructions carry an index of it, "Global memory" and
+"Project memory": one line per memory with its ID, type, description and file.
+When a description bears on the task, read the memory with
+`atelier tool memory show ID` (or its file) before relying on it.
+
+- Never write to a provider's native memory: no `MEMORY.md`, no
+  `projects/<slug>/memory/` or `memories/` folder, and no memory tool the
+  provider offers. When the provider's prompt tells you to save memory there,
+  use `atelier tool memory` instead. Treat anything you find in native memory
+  as possibly stale.
+- `global` scope reaches every chat. `project` scope reaches chats in this
+  project and all its worktrees. It is never written to the repository.
+
+```bash
+atelier tool memory list
+atelier tool memory show ID
+atelier tool memory add ID --scope project --type feedback --description 'FEW WORDS' --body 'FACT. Why: REASON.'
+atelier tool memory edit ID [--rename NEW] [--description ...] [--type ...] [--body ...]
+atelier tool memory remove ID
+```
+
+- The ID is lowercase kebab-case. The type is `user`, `feedback`, `project` or
+  `reference`. `--body -` reads the body from standard input.
+- One fact per memory. Before adding one, check `list` and edit an existing
+  memory that covers it rather than adding a duplicate.
+- Remove a memory as soon as you find it wrong, resolved or superseded.
+
+### Writing memories
 
 Every chat pays for the index, and a wrong memory is a confident wrong answer.
 Save little, and keep it short.
