@@ -2733,11 +2733,25 @@ impl WorkbenchRegistry {
         if !helpers {
             return false;
         }
+        // A question the agent is waiting on is only cleared by the cancel; a
+        // message steered past it would wait for the answer.
+        let Ok(Some(session)) = self.database.get_session(session_id.to_string()).await else {
+            return false;
+        };
+        if session.state == "waiting_permission" {
+            return false;
+        }
         let stop = Command {
             kind: CommandKind::SessionStopMain,
             fields: serde_json::Map::from_iter([("sessionId".into(), json!(session_id))]),
         };
-        if self.driver_command(&stop).await.is_err() {
+        let Ok(stopped) = self.driver_command(&stop).await else {
+            return false;
+        };
+        // A tool that cannot be sent to the background is still running, and
+        // the message would wait behind it: only the cancel ends that.
+        let moved = stopped["stopped"].as_u64().unwrap_or(0) + stopped["kept"].as_u64().unwrap_or(0);
+        if session.state == "running_tool" && moved == 0 {
             return false;
         }
         let Ok(Some(held)) = self
@@ -3397,6 +3411,8 @@ mod tests {
         seen: Arc<std::sync::Mutex<Vec<String>>>,
         /// A kind this driver answers with a refusal, as a provider without it does.
         refuses: Option<&'static str>,
+        /// How many of the main agent's tools a main stop says it moved.
+        moves: u64,
     }
     impl ProviderDriver for KindsDriver {
         fn brand(&self) -> &'static str {
@@ -3410,11 +3426,16 @@ mod tests {
                     .to_string(),
             );
             let refused = self.refuses == json!(command.kind).as_str();
+            let answer = if command.kind == CommandKind::SessionStopMain {
+                json!({"ok":true,"stopped":self.moves,"kept":0})
+            } else {
+                json!({"ok":true,"messageId":"message-1"})
+            };
             Box::pin(async move {
                 if refused {
                     return Err("Method not found".to_string());
                 }
-                Ok(json!({"ok":true,"messageId":"message-1"}))
+                Ok(answer)
             })
         }
         fn close<'a>(&'a mut self) -> DriverFuture<'a> {
@@ -3426,13 +3447,14 @@ mod tests {
         root: &std::path::Path,
         state: &str,
     ) -> (WorkbenchRegistry, ChatDb, Arc<std::sync::Mutex<Vec<String>>>) {
-        refusing_kinds_registry(root, state, None).await
+        refusing_kinds_registry(root, state, None, 1).await
     }
 
     async fn refusing_kinds_registry(
         root: &std::path::Path,
         state: &str,
         refuses: Option<&'static str>,
+        moves: u64,
     ) -> (WorkbenchRegistry, ChatDb, Arc<std::sync::Mutex<Vec<String>>>) {
         let database = ChatDb::open(&root.join("workbench.db")).unwrap();
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -3440,7 +3462,7 @@ mod tests {
             database.clone(),
             paths(root),
             Arc::new(OneDriverFactory {
-                driver: std::sync::Mutex::new(Some(Box::new(KindsDriver { seen: seen.clone(), refuses }))),
+                driver: std::sync::Mutex::new(Some(Box::new(KindsDriver { seen: seen.clone(), refuses, moves }))),
             }),
         );
         database.create_session(a_chat(state)).await.unwrap();
@@ -3687,7 +3709,7 @@ mod tests {
     async fn without_the_main_stop_a_message_sent_now_ends_the_turn() {
         let root = tempfile::tempdir().unwrap();
         let (registry, database, seen) =
-            refusing_kinds_registry(root.path(), "running_tool", Some("session.stop-main")).await;
+            refusing_kinds_registry(root.path(), "running_tool", Some("session.stop-main"), 1).await;
         open_helper(&database).await;
         say_state(&database, "running_tool").await;
 
@@ -3702,6 +3724,30 @@ mod tests {
         let waiting = database.held_messages("session-1".into()).await.unwrap();
         assert_eq!(waiting_texts(&waiting), vec!["stop and read this"]);
         assert_eq!(waiting[0]["pushed"], json!(true), "drawn as sent, not as waiting");
+    }
+
+    /// bw-pnhyd.1: a tool the main stop could not move is still running, and
+    /// a question is only cleared by the cancel. Either way the message would
+    /// wait behind it, so the turn is ended as before.
+    #[tokio::test]
+    async fn a_main_agent_the_stop_cannot_reach_still_gets_the_cancel() {
+        for (state, expected) in [
+            ("running_tool", vec!["session.stop-main", "session.interrupt"]),
+            ("waiting_permission", vec!["session.interrupt"]),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let (registry, database, seen) = refusing_kinds_registry(root.path(), state, None, 0).await;
+            open_helper(&database).await;
+            say_state(&database, state).await;
+
+            registry
+                .execute(&command(CommandKind::PromptSend, json!({"sessionId":"session-1","text":"stop and read this"})))
+                .await
+                .unwrap();
+            assert_eq!(*seen.lock().unwrap(), expected, "in {state}");
+            let waiting = database.held_messages("session-1".into()).await.unwrap();
+            assert_eq!(waiting_texts(&waiting), vec!["stop and read this"], "in {state}");
+        }
     }
 
     /// bw-fhyi: a chat whose reply is over, waiting only on a task it sent
