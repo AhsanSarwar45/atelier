@@ -2693,6 +2693,9 @@ impl WorkbenchRegistry {
             .await?
             .ok_or_else(|| "that message is no longer waiting".to_string())?;
         note_held(&self.database, session_id, &held, true).await?;
+        if self.send_past_helpers(session_id, held_id).await {
+            return Ok(held);
+        }
         let interrupt = Command {
             kind: CommandKind::SessionInterrupt,
             fields: serde_json::Map::from_iter([("sessionId".into(), json!(session_id))]),
@@ -2706,6 +2709,57 @@ impl WorkbenchRegistry {
             return Err(error);
         }
         Ok(held)
+    }
+
+    /**
+     * Send a waiting message into a turn without ending the helpers it started.
+     *
+     * The cancel `send_now` ends a turn with also ends, in Claude, every helper
+     * the chat sent away, so a reader who only wanted to redirect the main
+     * agent lost all of its helpers' work. With helpers open, the main agent's
+     * running tools are stopped instead, and the message is steered into the
+     * turn it is still in, where it is read next (bw-pnhyd.1).
+     *
+     * False, with the message still waiting, when there are no helpers to keep
+     * or the provider has no such stop: the caller then ends the turn as
+     * before.
+     */
+    async fn send_past_helpers(&self, session_id: &str, held_id: &str) -> bool {
+        let helpers = self
+            .database
+            .open_agents(session_id.to_string())
+            .await
+            .is_ok_and(|open| !open.is_empty());
+        if !helpers {
+            return false;
+        }
+        let stop = Command {
+            kind: CommandKind::SessionStopMain,
+            fields: serde_json::Map::from_iter([("sessionId".into(), json!(session_id))]),
+        };
+        if self.driver_command(&stop).await.is_err() {
+            return false;
+        }
+        let Ok(Some(held)) = self
+            .database
+            .take_held(session_id.to_string(), Some(held_id.to_string()))
+            .await
+        else {
+            return false;
+        };
+        if send_held(&self.database, &self.drivers, session_id, &held).await.is_ok() {
+            return true;
+        }
+        // A refused send puts the message back as waiting. It is still the one
+        // being sent now, by the cancel the caller falls back to.
+        if let Ok(Some(again)) = self
+            .database
+            .put_first(session_id.to_string(), held_id.to_string())
+            .await
+        {
+            let _ = note_held(&self.database, session_id, &again, true).await;
+        }
+        false
     }
 
     /// Put a deleted project's chats to sleep, and forget what was said about
@@ -3341,6 +3395,8 @@ mod tests {
     /// A driver that writes down every command it was handed, by kind and text.
     struct KindsDriver {
         seen: Arc<std::sync::Mutex<Vec<String>>>,
+        /// A kind this driver answers with a refusal, as a provider without it does.
+        refuses: Option<&'static str>,
     }
     impl ProviderDriver for KindsDriver {
         fn brand(&self) -> &'static str {
@@ -3353,7 +3409,13 @@ mod tests {
                     .trim_end()
                     .to_string(),
             );
-            Box::pin(async { Ok(json!({"ok":true,"messageId":"message-1"})) })
+            let refused = self.refuses == json!(command.kind).as_str();
+            Box::pin(async move {
+                if refused {
+                    return Err("Method not found".to_string());
+                }
+                Ok(json!({"ok":true,"messageId":"message-1"}))
+            })
         }
         fn close<'a>(&'a mut self) -> DriverFuture<'a> {
             Box::pin(async { Ok(json!({"ok":true})) })
@@ -3364,13 +3426,21 @@ mod tests {
         root: &std::path::Path,
         state: &str,
     ) -> (WorkbenchRegistry, ChatDb, Arc<std::sync::Mutex<Vec<String>>>) {
+        refusing_kinds_registry(root, state, None).await
+    }
+
+    async fn refusing_kinds_registry(
+        root: &std::path::Path,
+        state: &str,
+        refuses: Option<&'static str>,
+    ) -> (WorkbenchRegistry, ChatDb, Arc<std::sync::Mutex<Vec<String>>>) {
         let database = ChatDb::open(&root.join("workbench.db")).unwrap();
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let registry = WorkbenchRegistry::new(
             database.clone(),
             paths(root),
             Arc::new(OneDriverFactory {
-                driver: std::sync::Mutex::new(Some(Box::new(KindsDriver { seen: seen.clone() }))),
+                driver: std::sync::Mutex::new(Some(Box::new(KindsDriver { seen: seen.clone(), refuses }))),
             }),
         );
         database.create_session(a_chat(state)).await.unwrap();
@@ -3574,6 +3644,64 @@ mod tests {
         assert_eq!(*seen.lock().unwrap(), vec!["session.interrupt".to_string()]);
         let waiting = database.held_messages("session-1".into()).await.unwrap();
         assert_eq!(waiting_texts(&waiting), vec!["pushed now", "first written"]);
+    }
+
+    async fn open_helper(database: &ChatDb) {
+        database
+            .append(
+                serde_json::from_value(json!({
+                    "type":"agent.started","sessionId":"session-1","seq":0,
+                    "at":"2026-09-19T00:00:01Z","agentId":"helper-1","toolCallId":"call-1",
+                    "kind":"helper","what":"a long search","agentType":null,"model":null
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    /// bw-pnhyd.1: with a helper running, sending now stops only the main
+    /// agent's tools and steers the message into the turn. No cancel is sent,
+    /// so the helper is not ended with the turn.
+    #[tokio::test]
+    async fn a_message_sent_now_past_a_running_helper_keeps_the_helper() {
+        let root = tempfile::tempdir().unwrap();
+        let (registry, database, seen) = kinds_registry(root.path(), "running_tool").await;
+        open_helper(&database).await;
+        say_state(&database, "running_tool").await;
+
+        registry
+            .execute(&command(CommandKind::PromptSend, json!({"sessionId":"session-1","text":"stop and read this"})))
+            .await
+            .unwrap();
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec!["session.stop-main".to_string(), "prompt.send stop and read this".to_string()],
+        );
+        assert!(database.held_messages("session-1".into()).await.unwrap().is_empty(), "the agent has it");
+    }
+
+    /// bw-pnhyd.1: a provider without the main-agent stop gets the cancel, as
+    /// before, and the message waits first in line for the turn's end.
+    #[tokio::test]
+    async fn without_the_main_stop_a_message_sent_now_ends_the_turn() {
+        let root = tempfile::tempdir().unwrap();
+        let (registry, database, seen) =
+            refusing_kinds_registry(root.path(), "running_tool", Some("session.stop-main")).await;
+        open_helper(&database).await;
+        say_state(&database, "running_tool").await;
+
+        registry
+            .execute(&command(CommandKind::PromptSend, json!({"sessionId":"session-1","text":"stop and read this"})))
+            .await
+            .unwrap();
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec!["session.stop-main".to_string(), "session.interrupt".to_string()],
+        );
+        let waiting = database.held_messages("session-1".into()).await.unwrap();
+        assert_eq!(waiting_texts(&waiting), vec!["stop and read this"]);
+        assert_eq!(waiting[0]["pushed"], json!(true), "drawn as sent, not as waiting");
     }
 
     /// bw-fhyi: a chat whose reply is over, waiting only on a task it sent

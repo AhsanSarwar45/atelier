@@ -88,6 +88,7 @@ wire_kinds!(CommandKind {
     PlanRespond => "plan.respond",
     SessionStop => "session.stop",
     SessionInterrupt => "session.interrupt",
+    SessionStopMain => "session.stop-main",
     SessionClose => "session.close",
     SessionRename => "session.rename",
     SessionDelete => "session.delete",

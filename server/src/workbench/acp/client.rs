@@ -754,6 +754,12 @@ enum Control {
     Interrupt {
         reply: Reply,
     },
+    /// Stop the tools the main agent is running and nothing it sent away:
+    /// Atelier's own `_atelier/session/stop-main`, which only the Claude kit
+    /// answers (bw-pnhyd.1).
+    StopMain {
+        reply: Reply,
+    },
     Mode {
         /// The mode the agent is told to enter, in its own word.
         value: String,
@@ -3184,6 +3190,17 @@ impl AcpDriver {
                                         .map_err(|error| error.to_string());
                                     let _ = reply.send(result);
                                 }
+                                Control::StopMain { reply } => {
+                                    let result = connection
+                                        .send_request(UntypedMessage::new(
+                                            "_atelier/session/stop-main",
+                                            json!({"sessionId":remote_id}),
+                                        )?)
+                                        .block_task()
+                                        .await
+                                        .map_err(|error| error.to_string());
+                                    let _ = reply.send(result);
+                                }
                                 Control::Subagent { action, agent_id, reply } => {
                                     let result = connection
                                         .send_request(UntypedMessage::new(
@@ -3637,6 +3654,7 @@ impl AcpDriver {
                 self.elicitations.cancel_all().await;
                 self.control(|reply| Control::Interrupt { reply }).await
             }
+            CommandKind::SessionStopMain => self.control(|reply| Control::StopMain { reply }).await,
             CommandKind::SessionStop => {
                 self.permissions.cancel_all().await;
                 self.elicitations.cancel_all().await;

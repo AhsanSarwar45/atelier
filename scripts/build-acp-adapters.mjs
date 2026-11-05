@@ -3,6 +3,7 @@
 import { patchCodexModelCatalog } from './codex-model-catalog.mjs';
 import { patchClaudeTurnPhase } from './claude-turn-phase.mjs';
 import { patchClaudeLiveWindow } from './claude-live-window.mjs';
+import { patchClaudeStopMain } from './claude-stop-main.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -713,6 +714,7 @@ const builderFingerprint = createHash('sha256')
   .update(readFileSync(fileURLToPath(import.meta.url)))
   .update(readFileSync(new URL('./claude-turn-phase.mjs', import.meta.url)))
   .update(readFileSync(new URL('./claude-live-window.mjs', import.meta.url)))
+  .update(readFileSync(new URL('./claude-stop-main.mjs', import.meta.url)))
   .update(readFileSync(new URL('./codex-model-catalog.mjs', import.meta.url)))
   .digest('hex');
 const gooseTarget = join(cacheRoot(), 'goose', target, GOOSE.commit);
@@ -766,7 +768,7 @@ try {
   writeFileSync(modelFile, catalog.model);
   writeFileSync(serverFile, catalog.server);
   const claudeAgentFile = join(claudeSource, 'src', 'acp-agent.ts');
-  writeFileSync(claudeAgentFile, patchClaudeLiveWindow(patchClaudeTurnPhase(readFileSync(claudeAgentFile, 'utf8'))));
+  writeFileSync(claudeAgentFile, patchClaudeStopMain(patchClaudeLiveWindow(patchClaudeTurnPhase(readFileSync(claudeAgentFile, 'utf8')))));
   patchClaudeWindowNow(claudeSource);
   patchClaudeAccounting(claudeSource);
   patchNativeQuestionNotes(claudeSource, codexSource);
@@ -813,7 +815,7 @@ try {
     adapters: {
       claude: {
         version: CLAUDE.version, commit: CLAUDE.commit, wireProtocol: 1,
-        compatibilityPatches: ['atelier-context-window', 'atelier-live-window', 'atelier-native-subagent-control', 'atelier-child-accounting', 'atelier-native-question-notes'],
+        compatibilityPatches: ['atelier-context-window', 'atelier-live-window', 'atelier-stop-main', 'atelier-native-subagent-control', 'atelier-child-accounting', 'atelier-native-question-notes'],
         verifiedCapabilities: ['native-mcp-config', 'session-resume'],
       },
       codex: {
