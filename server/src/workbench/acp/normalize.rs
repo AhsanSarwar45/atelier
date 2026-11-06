@@ -913,6 +913,13 @@ impl AcpNormalizer {
     }
 
     fn session_info(&mut self, session_id: &str, provider: &str, raw: &Value) -> Vec<Event> {
+        // Metadata has the same ownership as messages and tools. A helper's
+        // status, cycle or settings cannot change its parent's turn, even if
+        // the helper has finished and this notification arrived late. Helper
+        // lifecycle is carried by the shared subagent updates instead.
+        if self.parent_tool_call(raw).is_some() {
+            return Vec::new();
+        }
         let update = &raw["update"];
         let mut events = Vec::new();
         if !self.turn_finished
@@ -5078,6 +5085,93 @@ mod tests {
         // next turn's first identical reading silent.
         normalizer.finish_turn("local", "claude", &json!({"stopReason":"end_turn"}));
         assert!(normalizer.said_standing.is_none());
+    }
+
+    #[test]
+    fn child_session_metadata_cannot_change_the_parent_turn() {
+        for provider in ["codex", "claude", "goose"] {
+            let mut normalizer = AcpNormalizer::default();
+            let prompt = normalizer.begin_prompt();
+            normalizer.update("local", provider, &json!({"sessionId":"root","update":{
+                "sessionUpdate":"tool_call","toolCallId":"parent-call","title":"Parent working",
+                "kind":"execute","rawInput":{"command":"cargo test"}
+            }}));
+            normalizer.update("local", provider, &json!({"sessionId":"root","update":{
+                "sessionUpdate":"subagent_spawned","subagentSessionId":"child",
+                "name":"Researcher","task":"Check the protocol"
+            }}));
+            let child = normalizer.update("local", provider, &json!({"sessionId":"child","update":{
+                "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Checked it."}
+            }}));
+            assert!(child.iter().any(|event| event.kind == EventKind::TextDelta));
+            normalizer.update("local", provider, &json!({"sessionId":"root","update":{
+                "sessionUpdate":"subagent_state_update","subagentSessionId":"child","state":"completed"
+            }}));
+
+            // A finished helper can still send queued metadata. Its identity
+            // remains scoped even after it leaves the running helper list.
+            for meta in [
+                json!({"codex":{"threadStatus":{"type":"idle"}}}),
+                json!({"codex":{"threadStatus":{"type":"systemError"}}}),
+                json!({"codex":{"threadStatus":{"type":"notLoaded"}}}),
+                json!({"codex":{"threadStatus":{"type":"active","activeFlags":["waitingOnApproval"]}}}),
+                json!({"codex":{"closed":true}}),
+                json!({"codex":{"archived":true}}),
+                json!({"atelier":{"turnPhase":"waiting_for_agents"}}),
+                json!({"atelier":{"cycle":"running"}}),
+                json!({"atelier":{"cycle":"idle"}}),
+                json!({"jetbrains":{"air":{"sessionFailure":{
+                    "id":"child-error","category":"connection","severity":"error","title":"Connection lost"
+                }}}}),
+            ] {
+                let events = normalizer.update("local", provider, &json!({"sessionId":"child","update":{
+                    "sessionUpdate":"session_info_update","title":"Child title",
+                    "updatedAt":"2026-10-29T18:41:55Z","_meta":meta
+                }}));
+                assert!(events.iter().all(|event| !matches!(event.kind,
+                    EventKind::SessionState | EventKind::SessionPinned | EventKind::ProviderMessage
+                    | EventKind::MessageCompleted | EventKind::ToolCompleted
+                )), "child metadata escaped its scope: {provider} {meta}");
+                assert!(normalizer.owns_prompt(prompt), "{provider} {meta}");
+                assert!(!normalizer.waiting_for_agents, "{provider} {meta}");
+                assert_eq!(normalizer.running_calls, ["parent-call"], "{provider} {meta}");
+            }
+            let finished = normalizer.finish_turn("local", provider, &json!({"stopReason":"end_turn"}));
+            assert!(!normalizer.owns_prompt(prompt));
+            assert!(finished.iter().any(|event| event.kind == EventKind::SessionState && event.fields["state"] == "idle"));
+        }
+    }
+
+    #[test]
+    fn child_cycle_metadata_cannot_end_an_unprompted_parent_turn() {
+        for child_session in [true, false] {
+            let mut normalizer = AcpNormalizer::default();
+            normalizer.update("local", "claude", &json!({"sessionId":"root","update":{
+                "sessionUpdate":"subagent_spawned","subagentSessionId":"child","name":"Researcher"
+            }}));
+            normalizer.update("local", "claude", &json!({"sessionId":"root","update":{
+                "sessionUpdate":"session_info_update","_meta":{"atelier":{"cycle":"running"}}
+            }}));
+            normalizer.update("local", "claude", &json!({"sessionId":"root","update":{
+                "sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"The parent is still working."}
+            }}));
+            let mut child = json!({"sessionId":"child","update":{
+                "sessionUpdate":"session_info_update","_meta":{"atelier":{"cycle":"idle"}}
+            }});
+            if !child_session {
+                // Some adapters identify helper work through a parent call
+                // on the root session instead of a separate session ID.
+                child["sessionId"] = json!("root");
+                child["update"]["_meta"]["claudeCode"] = json!({"parentToolUseId":"child"});
+            }
+            normalizer.update("local", "claude", &child);
+            assert!(normalizer.unprompted);
+            assert!(normalizer.turn_is_open());
+            normalizer.update("local", "claude", &json!({"sessionId":"root","update":{
+                "sessionUpdate":"session_info_update","_meta":{"atelier":{"cycle":"idle"}}
+            }}));
+            assert!(!normalizer.turn_is_open());
+        }
     }
 
     /// The card the call draws in the transcript says "Running Python: import

@@ -108,6 +108,16 @@ activity again.
 A rendered tool call can name the status only while the chat is running a tool;
 stopped, failed and sleeping states have no activity detail or clock.
 
+Session metadata belongs to the session that sent it. The shared normalizer
+uses the same helper ownership lookup as messages and tools before interpreting
+status, cycle, phase, failure, title or timestamp metadata. A helper's idle
+notification cannot finish its parent's turn, including when the helper has
+already completed and its last metadata arrives late. Helper lifecycle updates
+still populate the helper panel; the parent's own terminal signals still settle
+its turn. `a-child-finishing-does-not-idle-its-parent.spec.ts` reproduces this
+boundary through the ACP fixture for both provider labels, across a status
+sweep and reload, then checks the parent's actual completion.
+
 Stop terminates the current attachment. The driver sends ACP cancellation,
 closes its connection and owned process group, then persists the stopped
 outcome after the connection's pending tasks are gone. It does not wait for the
