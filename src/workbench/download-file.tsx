@@ -3,14 +3,13 @@
 import { Download } from 'lucide-react';
 
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { fs } from '@/lib/api';
+import { fs, request } from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
-import { mediaUrl } from '@/workbench/attachment-store';
 
 /** Read the original bytes, including binary files and text beyond the preview limit. */
 async function downloadFile(path: string): Promise<void> {
   try {
-    const response = await fetch(mediaUrl(path));
+    const response = await request(`/api/fs/media?path=${encodeURIComponent(path)}`, { deadlineMs: 5 * 60_000 });
     // The range-based media endpoint returns 416 for an empty file. Confirm
     // its size through the reader before treating that refusal as empty bytes.
     const empty = response.status === 416 && (await fs.read(path)).size === 0;
