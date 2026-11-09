@@ -38,6 +38,7 @@ import { cn } from '@/lib/utils';
 import { paintLines } from '@/workbench/colouring';
 import { under } from '@/workbench/git-view';
 import type { DiffRow } from '@/workbench/line-diff';
+import { DownloadFileItem } from '@/workbench/download-file';
 import { PointerAnchor } from '@/workbench/menu-anchor';
 import { useOpenPath } from '@/workbench/open-path';
 import { formatDiffReference, formatReference } from '@/workbench/references';
@@ -681,6 +682,7 @@ function DiffMenu({
             <DropdownMenuItem data-testid="diff-menu-open" onSelect={() => onOpen(newLine)}>
               <Files aria-hidden="true" /> Open in Files
             </DropdownMenuItem>
+            <DownloadFileItem path={under(root, path)} testId="diff-menu-download" />
             <DropdownMenuItem data-testid="diff-menu-editor" onSelect={() => onOpenInEditor(newLine)}>
               <ExternalLink aria-hidden="true" /> Open in editor
             </DropdownMenuItem>

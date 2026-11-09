@@ -40,6 +40,7 @@ const CHAT = 'one-menu-vocabulary-fixture';
  */
 const VOCABULARY = [
   'path-menu-files',
+  'path-menu-download',
   'path-menu-editor',
   'path-menu-reveal',
   'path-menu-terminal',

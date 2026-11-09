@@ -67,6 +67,7 @@ import {
   type FileActions,
   type PathMoved,
 } from '@/workbench/file-actions';
+import { DownloadFileItem } from '@/workbench/download-file';
 import { PointerAnchor } from '@/workbench/menu-anchor';
 import { checkoutOf, useCheckouts, useOpenPath } from '@/workbench/open-path';
 import { chipUnder, openPathClicked, targetOf, type PathTarget } from '@/workbench/path-chip';
@@ -104,6 +105,7 @@ export interface MenuPath {
  */
 export const PATH_MENU_ITEMS = [
   'path-menu-files',
+  'path-menu-download',
   'path-menu-editor',
   'path-menu-reveal',
   'path-menu-terminal',
@@ -167,6 +169,7 @@ export function usePathMenuItems(onMoved?: PathMoved, onMade?: (path: string) =>
           >
             <Files aria-hidden="true" /> Open in Files
           </DropdownMenuItem>
+          <DownloadFileItem path={path.absolute} disabled={path.kind === 'dir'} testId="path-menu-download" />
           <DropdownMenuItem
             data-testid="path-menu-editor"
             className="text-xs"

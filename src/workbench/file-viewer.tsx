@@ -35,6 +35,7 @@ import { copyAndSay } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { CodeEditor, type CopiedSelection, type EditorMenuAsk } from '@/workbench/code-editor';
 import { MarkdownPane, SourceSwitch } from '@/workbench/file-preview';
+import { DownloadFileItem } from '@/workbench/download-file';
 import { PointerAnchor } from '@/workbench/menu-anchor';
 import { openLocalPath } from '@/workbench/open-local-path';
 import { referenceUnder, relativeToRoot } from '@/workbench/references';
@@ -486,6 +487,7 @@ function ViewerMenu({
             <FileDiff aria-hidden="true" /> Show changes
           </DropdownMenuItem>
         )}
+        <DownloadFileItem path={path} testId="file-viewer-menu-download" />
         <DropdownMenuItem data-testid="file-viewer-menu-editor" onSelect={() => openLocalPath(path, 'vscode', line)}>
           <ExternalLink aria-hidden="true" /> Open in editor
         </DropdownMenuItem>
