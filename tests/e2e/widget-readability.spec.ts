@@ -94,6 +94,8 @@ test('charts and explanations remain readable while paused and during playback',
       await flow.getByRole('button', { name: 'Pause explanation' }).click();
       for (const width of [390, 768, 1024, 1280, 1920]) {
         await page.setViewportSize({ width, height: 1000 });
+        await page.keyboard.press('Escape');
+        await page.clock.runFor(500);
         await chart.scrollIntoViewIfNeeded();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await chart.screenshot({ path: `/tmp/bw-9rdk8-chart-${width}.png` });
@@ -101,6 +103,8 @@ test('charts and explanations remain readable while paused and during playback',
       await chart.getByText('View data').focus();
       await page.keyboard.press('Enter');
       await expect(chart.getByRole('button', { name: 'View data' })).toHaveAttribute('aria-expanded', 'false');
+      await page.reload();
+      await expect(page.locator('[data-widget="chart"]')).toBeVisible();
       expect(errors).toEqual([]);
     }
   } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
