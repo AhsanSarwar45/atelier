@@ -29,6 +29,11 @@ The chat can show widgets, images, diagrams and video. Use them when they make
 a relationship, change or comparison faster to understand. Do not use one for
 one fact or a short list.
 
+Before choosing a widget, state the reader's question and the takeaway. Read
+`atelier-reference` → `references/choosing-visuals.md` for the selection table,
+worked examples and limits. Pick by the comparison or relationship, not by
+which widget animates. Keep the answer understandable while paused.
+
 Never hand-author an `atelier-widget` or `atelier-image-compare` fence. Run the
 Atelier presenter; the chat shows the result where the command ran.
 Do not copy its stdout into your reply.

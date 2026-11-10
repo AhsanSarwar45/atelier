@@ -106,12 +106,18 @@ request provider-specific filesystem permission.
 
 ## Widgets
 
+Before composing a visual, read [choosing visuals](references/choosing-visuals.md).
+It maps reader questions to widgets, explains when to avoid animation, and
+provides worked examples. The contract below defines valid input, not good
+visual design. Inspect the rendered result as well as validating the JSON.
+
 Every widget needs `type`; `title` is optional. Displayed strings must be 1–200
 characters. Unknown fields are rejected.
 
-- `metrics`: 2–6 headline values.
+- `metrics`: 1–6 values accepted; use 2–4 related headline values in practice.
 - `chart`: `bar` for categories, `line` for trends. Set series colors only when
-  a stable domain color matters.
+  a stable domain color matters. Include units in series names or the title.
+  Line observations are equally spaced; irregular dates need a table or plot.
 - `progress`: 1–12 bounded values.
 - `timeline`: 1–20 ordered events that need no playback.
 - `table`: exact side-by-side facts; 1–8 columns, at most 30 rows.
@@ -163,7 +169,7 @@ drawn relationship. Never include HTML, JavaScript, remote code, executable
 instructions or data URLs.
 
 ```json
-{"type":"explainer","layout":"sequence","title":"Session recovery","summary":"Only missed events are replayed.","nodes":[{"id":"drop","label":"Connection drops"},{"id":"replay","label":"Replay"},{"id":"live","label":"Live again"}],"edges":[{"from":"drop","to":"replay","label":"reconnect"},{"from":"replay","to":"live","label":"caught up"}],"steps":[{"label":"Browser disconnects","active":["drop"]},{"label":"Missed events replay","active":["replay"]},{"label":"Streaming resumes","active":["live"]}]}
+{"type":"explainer","layout":"flow","title":"Session recovery","summary":"Only missed events are replayed.","nodes":[{"id":"drop","label":"Connection drops"},{"id":"replay","label":"Replay"},{"id":"live","label":"Live again"}],"edges":[{"from":"drop","to":"replay","label":"reconnect"},{"from":"replay","to":"live","label":"caught up"}],"steps":[{"label":"Browser disconnects","active":["drop"]},{"label":"Missed events replay","active":["replay"]},{"label":"Streaming resumes","active":["live"]}]}
 ```
 
 ## Visual artifacts

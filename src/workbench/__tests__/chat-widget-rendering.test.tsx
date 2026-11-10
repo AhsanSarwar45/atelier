@@ -23,7 +23,7 @@ describe('chat widget rendering', () => {
     const frame = screen.getByTestId('chat-widget');
     expect(frame).toHaveAttribute('data-widget', widget.type);
     expect(frame).toHaveClass('my-4', 'px-3', 'py-3', 'border-border/60');
-    if (widget.title) expect(screen.getByText(widget.title)).toBeVisible();
+    if (widget.title) expect(screen.getByRole('heading', { name: widget.title })).toBeVisible();
   });
 
   it('gives charts an accessible image label and progress an accessible value', () => {
@@ -98,5 +98,33 @@ describe('chat widget rendering', () => {
       expect(screen.getByTestId('picture-viewer-comparison')).toBeVisible();
       fireEvent.click(screen.getByRole('button', { name: 'Close the picture' }));
     }
+  });
+});
+
+
+describe('readable chart values and relationships', () => {
+  it('draws signed bars from zero and keeps exact values available', () => {
+    render(<ChatWidgetView widget={{ type: 'chart', chart: 'bar', series: [{ name: 'Change (ms)' }], data: [{ label: 'Negative', values: [-40] }, { label: 'Positive', values: [20] }, { label: 'Zero', values: [0] }] }} />);
+    const bars = [...document.querySelectorAll('rect[data-value]')];
+    expect(Number(bars[0]!.getAttribute('height'))).toBeCloseTo(120);
+    expect(Number(bars[1]!.getAttribute('height'))).toBeCloseTo(60);
+    expect(Number(bars[0]!.getAttribute('y'))).toBeCloseTo(Number(bars[1]!.getAttribute('y')) + 60);
+    expect(bars[2]).toHaveAttribute('height', '0');
+    fireEvent.click(screen.getByText('View data'));
+    expect(document.querySelector('table')!.textContent).toContain('-40');
+  });
+
+  it('shows a single observation and finite geometry for extreme values', () => {
+    const { rerender } = render(<ChatWidgetView widget={{ type: 'chart', chart: 'line', series: [{ name: 'Time' }], data: [{ label: 'Today', values: [5] }] }} />);
+    expect(document.querySelectorAll('circle')).toHaveLength(1);
+    rerender(<ChatWidgetView widget={{ type: 'chart', chart: 'bar', series: [{ name: 'Value' }], data: [{ label: 'Low', values: [-1e308] }, { label: 'High', values: [1e308] }] }} />);
+    for (const rect of document.querySelectorAll('rect')) expect(Number.isFinite(Number(rect.getAttribute('height')))).toBe(true);
+  });
+
+  it.each(['flow', 'cycle', 'layers'] as const)('keeps both ends and the condition of each %s relationship', (layout) => {
+    render(<ChatWidgetView widget={{ type: 'explainer', layout, nodes: [{ id: 'a', label: 'Request' }, { id: 'b', label: 'Retry' }], edges: [{ from: 'a', to: 'b', label: 'Temporary failure' }, { from: 'b', to: 'a', label: 'Delay expires' }], steps: [{ label: 'Retry failed requests', active: ['a', 'b'] }] }} />);
+    const rows = document.querySelectorAll('[data-relationship]');
+    expect(rows[0]!.textContent).toBe('RequestRetryTemporary failure');
+    expect(rows[1]!.textContent).toBe('RetryRequestDelay expires');
   });
 });

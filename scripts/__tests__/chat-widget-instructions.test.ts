@@ -67,3 +67,13 @@ describe('agent chat widget instructions', () => {
     }
   });
 });
+
+
+describe('question-based visual recipes', () => {
+  const guide = readFileSync('machinery/skills/atelier-reference/references/choosing-visuals.md', 'utf8');
+  it('offers only presenter-valid worked examples', () => {
+    const recipes = [...guide.matchAll(/```json\n([^\n]+)\n```/g)];
+    expect(recipes.length).toBeGreaterThanOrEqual(3);
+    for (const recipe of recipes) expect(presentableWidget(JSON.parse(recipe[1]!))).not.toBeNull();
+  });
+});

@@ -3,10 +3,11 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState, type ReactNode } from 'react';
 
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle, Clock, FileCode2, Pause, Play, ZoomIn } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, Circle, Clock, FileCode2, Pause, Play, ZoomIn } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -24,7 +25,7 @@ const VisualArtifactView = dynamic(() => import('@/workbench/visual-artifact-vie
 import { useOpenPath } from '@/workbench/open-path';
 import { presentationAssetUrl } from '@/workbench/attachment-store';
 
-const COLORS = ['var(--color-primary)', 'var(--color-info)', 'var(--color-success)', 'var(--color-warning)'];
+const COLORS = ['var(--color-primary-accent)', 'var(--color-info-accent)', 'var(--color-success-accent)', 'var(--color-warning-accent)'];
 const EXPLAINER_ACCENTS = ['var(--color-info-accent)', 'var(--color-warning-accent)', 'var(--color-success-accent)', 'var(--color-primary-accent)', 'var(--color-destructive-accent)'];
 
 function explainerAccent(index: number): string {
@@ -74,29 +75,61 @@ function Chart({ widget }: { widget: ChartWidget }) {
   const values = widget.data.flatMap((point) => point.values);
   const high = Math.max(...values, 0);
   const low = Math.min(...values, 0);
-  const range = high - low || 1;
-  const x = (index: number) => widget.data.length === 1 ? 150 : 16 + index * (268 / (widget.data.length - 1));
-  const y = (value: number) => 12 + ((high - value) / range) * 116;
-  return (
-    <div>
-      <svg viewBox="0 0 300 160" role="img" aria-label={`${widget.chart} chart`} className="h-auto max-h-64 w-full overflow-visible">
-        <line x1="16" y1="128" x2="284" y2="128" stroke="currentColor" opacity=".2" />
-        {widget.chart === 'line' ? widget.series.map((series, seriesIndex) => (
-          <polyline key={series.name} fill="none" stroke={series.color || COLORS[seriesIndex]} strokeWidth="3" strokeLinejoin="round"
+  // Normalize before subtracting: finite input can still overflow high - low.
+  const magnitude = Math.max(Math.abs(high), Math.abs(low)) || 1;
+  const upper = high / magnitude;
+  const lower = low / magnitude;
+  const range = upper - lower || 1;
+  const width = Math.max(600, widget.data.length * 100);
+  const plot = width - 100;
+  const group = plot / widget.data.length;
+  const x = (index: number) => 70 + group * (index + 0.5);
+  const y = (value: number) => 24 + ((upper - value / magnitude) / range) * 180;
+  const zero = y(0);
+  const ticks = [...new Set([low, 0, high])];
+  const format = (value: number) => new Intl.NumberFormat('en', { maximumSignificantDigits: 4, notation: Math.abs(value) >= 1e9 || (value !== 0 && Math.abs(value) < .001) ? 'scientific' : 'standard' }).format(value);
+  return <div>
+    <div className="overflow-x-auto">
+      <svg viewBox={`0 0 ${width} 260`} role="img" aria-label={`${widget.chart} chart`} style={{ minWidth: width }} className="h-auto w-full">
+        <title>{widget.title ?? `${widget.chart} chart`}</title>
+        {ticks.map((value) => <g key={value}>
+          <line x1="70" y1={y(value)} x2={width - 30} y2={y(value)} stroke="currentColor" opacity={value === 0 ? .5 : .15} />
+          <text x="62" y={y(value) + 4} textAnchor="end" fontSize="11" fill="currentColor">{format(value)}</text>
+        </g>)}
+        {widget.chart === 'line' ? widget.series.map((series, seriesIndex) => <g key={series.name}>
+          <polyline fill="none" stroke={series.color || COLORS[seriesIndex]} strokeWidth="3" strokeLinejoin="round"
+            strokeDasharray={['', '8 4', '2 4', '8 3 2 3'][seriesIndex]}
             points={widget.data.map((point, index) => `${x(index)},${y(point.values[seriesIndex]!)}`).join(' ')} />
-        )) : widget.data.flatMap((point, pointIndex) => point.values.map((value, seriesIndex) => {
-          const group = 230 / widget.data.length;
-          const width = Math.max(4, group / widget.series.length - 3);
-          const left = 20 + pointIndex * (264 / widget.data.length) + seriesIndex * (width + 3);
-          return <rect key={`${point.label}-${seriesIndex}`} x={left} y={y(value)} width={width} height={128 - y(value)} rx="2" fill={widget.series[seriesIndex]?.color || COLORS[seriesIndex]} />;
+          {widget.data.map((point, index) => <circle key={index} cx={x(index)} cy={y(point.values[seriesIndex]!)} r="4" fill={series.color || COLORS[seriesIndex]}>
+            <title>{`${point.label}: ${series.name} ${point.values[seriesIndex]}`}</title>
+          </circle>)}
+        </g>) : widget.data.flatMap((point, pointIndex) => point.values.map((value, seriesIndex) => {
+          const barWidth = group * .7 / widget.series.length;
+          return <rect key={`${pointIndex}-${seriesIndex}`} data-value={value}
+            x={x(pointIndex) - group * .35 + seriesIndex * barWidth} y={Math.min(y(value), zero)}
+            width={barWidth - 2} height={Math.abs(y(value) - zero)} rx="2" fill={widget.series[seriesIndex]?.color || COLORS[seriesIndex]}>
+            <title>{`${point.label}: ${widget.series[seriesIndex]!.name} ${value}`}</title>
+          </rect>;
         }))}
-        {widget.data.map((point, index) => <text key={point.label} x={x(index)} y="150" textAnchor="middle" fontSize="9" fill="currentColor" opacity=".7">{point.label}</text>)}
+        {widget.data.map((point, index) => <text key={index} x={x(index)} y="230" textAnchor="middle" fontSize="11" fill="currentColor">
+          <title>{point.label}</title>{point.label.length > 13 ? `${point.label.slice(0, 12)}…` : point.label}
+        </text>)}
       </svg>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {widget.series.map((series, index) => <span key={series.name} className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full" style={{ background: series.color || COLORS[index] }} />{series.name}</span>)}
-      </div>
     </div>
-  );
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      {widget.series.map((series, index) => <span key={series.name} className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full" style={{ background: series.color || COLORS[index] }} />{series.name}</span>)}
+    </div>
+    <Collapsible className="mt-3 text-xs">
+      <CollapsibleTriggerRow size="sm">View data</CollapsibleTriggerRow>
+      <CollapsibleContent>
+      <div className="mt-2 overflow-x-auto"><table className="w-full text-left">
+        <caption className="sr-only">{widget.title ?? 'Chart data'}</caption>
+        <thead><tr><th scope="col" className="p-2">Category</th>{widget.series.map((series) => <th scope="col" className="p-2" key={series.name}>{series.name}</th>)}</tr></thead>
+        <tbody>{widget.data.map((point, index) => <tr key={index}><th scope="row" className="p-2 font-normal">{point.label}</th>{point.values.map((value, i) => <td className="p-2 tabular-nums" key={i}>{value}</td>)}</tr>)}</tbody>
+      </table></div>
+      </CollapsibleContent>
+    </Collapsible>
+  </div>;
 }
 
 function NodeCard({ node, lit, accent, className = '' }: { node: ExplainerWidget['nodes'][number]; lit: boolean; accent: string; className?: string }) {
@@ -115,31 +148,40 @@ function NodeCard({ node, lit, accent, className = '' }: { node: ExplainerWidget
   </Panel>;
 }
 
-function FlowDiagram({ widget, active, playing }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
-  return <div className="grid grid-cols-3 gap-2">
-    {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} accent={explainerAccent(index)} className={active.has(node.id) && playing ? 'animate-pulse motion-reduce:animate-none' : ''} />)}
-    <div className="col-span-3 flex flex-wrap gap-1.5 pt-1">
-      {widget.edges.map((edge) => { const accent = explainerAccent(Math.max(0, widget.nodes.findIndex((node) => node.id === edge.from))); const lit = active.has(edge.from) || active.has(edge.to); return <Badge key={`${edge.from}-${edge.to}`} data-accent={accent} color={accent} colorFill={lit ? 'tint' : 'faint'} size="sm" shape="circle"
-        className={cn('transition-all duration-500 motion-reduce:transition-none', !lit && 'opacity-50')}>
-        {edge.from}<ChevronRight />{edge.label ?? edge.to}
-      </Badge>; })}
+function Relationships({ widget, active }: { widget: ExplainerWidget; active: Set<string> }) {
+  const name = (id: string) => widget.nodes.find((node) => node.id === id)!.label;
+  return <ol aria-label="Relationships" className="mt-3 space-y-2 text-xs">
+    {widget.edges.map((edge, index) => <Panel asChild key={index} tone="frame" inset="sm" className="flex flex-wrap items-center gap-2"
+      style={{ background: active.has(edge.from) && active.has(edge.to) ? 'var(--color-surface-base)' : undefined }}><li data-relationship>
+      <span className="font-medium">{name(edge.from)}</span><ArrowRight aria-hidden className="size-3 shrink-0" />
+      <span className="font-medium">{name(edge.to)}</span>
+      {edge.label && <span className="text-muted-foreground">{edge.label}</span>}
+    </li></Panel>)}
+  </ol>;
+}
+
+function FlowDiagram({ widget, active }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
+  return <div>
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} accent={explainerAccent(index)} />)}
     </div>
+    <Relationships widget={widget} active={active} />
   </div>;
 }
 
-function SequenceDiagram({ widget, active, playing }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
+function SequenceDiagram({ widget, active }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
   const at = (id: string) => Math.max(0, widget.nodes.findIndex((node) => node.id === id));
   return <div className="min-w-[28rem]">
-    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${widget.nodes.length}, minmax(5rem, 1fr))` }}>
+    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${widget.nodes.length}, minmax(10rem, 1fr))` }}>
       {widget.nodes.map((node, index) => <div key={node.id} className="text-center"><NodeCard node={node} lit={active.has(node.id)} accent={explainerAccent(index)} /><div className="mx-auto h-5 w-px border-l border-dashed" style={{ borderColor: `color-mix(in srgb, ${explainerAccent(index)} 45%, transparent)` }} /></div>)}
     </div>
     <div className="space-y-2">
       {widget.edges.map((edge) => {
         const from = at(edge.from); const to = at(edge.to); const lit = active.has(edge.from) || active.has(edge.to); const accent = explainerAccent(from);
-        return <div key={`${edge.from}-${edge.to}`} className="grid h-7 items-center" style={{ gridTemplateColumns: `repeat(${widget.nodes.length}, minmax(5rem, 1fr))` }}>
-          <div data-accent={accent} className="relative border-t-2 transition-all duration-500 motion-reduce:transition-none" style={{ gridColumn: `${Math.min(from, to) + 1} / ${Math.max(from, to) + 2}`, borderColor: `color-mix(in srgb, ${accent} ${lit ? 90 : 28}%, transparent)` }}>
-            <span className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap bg-background px-1 text-[9px] text-muted-foreground">{edge.label ?? `${edge.from} → ${edge.to}`}</span>
-            <span className={`absolute -top-1.5 size-3 rounded-full transition-[left] duration-700 motion-reduce:transition-none ${lit && playing ? 'animate-ping motion-reduce:animate-none' : ''}`} style={{ left: lit ? (from <= to ? '100%' : '0%') : (from <= to ? '0%' : '100%'), background: accent, boxShadow: `0 0 12px ${accent}` }} />
+        return <div key={`${edge.from}-${edge.to}`} className="grid min-h-10 items-end" style={{ gridTemplateColumns: `repeat(${widget.nodes.length}, minmax(10rem, 1fr))` }}>
+          <div data-accent={accent} className="relative border-b-2 pb-1 transition-colors duration-500 motion-reduce:transition-none" style={{ gridColumn: `${Math.min(from, to) + 1} / ${Math.max(from, to) + 2}`, borderColor: `color-mix(in srgb, ${accent} ${lit ? 90 : 28}%, transparent)` }}>
+            <span className="block whitespace-normal px-2 text-center text-xs text-muted-foreground">{edge.label ?? `${widget.nodes[from]!.label} → ${widget.nodes[to]!.label}`}</span>
+            <ArrowRight aria-hidden className={`absolute -bottom-2 size-4 ${from <= to ? '-right-1' : '-left-1 rotate-180'}`} style={{ color: accent }} />
           </div>
         </div>;
       })}
@@ -147,25 +189,27 @@ function SequenceDiagram({ widget, active, playing }: { widget: ExplainerWidget;
   </div>;
 }
 
-function CycleDiagram({ widget, active, playing }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
-  return <div className="relative mx-auto h-64 max-w-md">
-    <div className={`absolute left-1/2 top-1/2 size-24 -translate-x-1/2 -translate-y-1/2 rounded-full p-[2px] ${playing ? 'animate-spin motion-reduce:animate-none' : ''}`}
-      style={{ background: `conic-gradient(${EXPLAINER_ACCENTS.slice(0, 4).join(', ')}, ${EXPLAINER_ACCENTS[0]})`, opacity: playing ? 1 : .65 }}>
-      <div className="size-full rounded-full bg-background" />
-    </div>
-    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Repeat</div>
-    {widget.nodes.map((node, index) => {
-      const angle = (index / widget.nodes.length) * Math.PI * 2 - Math.PI / 2;
-      return <div key={node.id} className="absolute w-28 -translate-x-1/2 -translate-y-1/2" style={{ left: `${50 + Math.cos(angle) * 38}%`, top: `${50 + Math.sin(angle) * 38}%` }}>
-        <NodeCard node={node} lit={active.has(node.id)} accent={explainerAccent(index)} className={active.has(node.id) && playing ? 'animate-pulse motion-reduce:animate-none' : ''} />
-      </div>;
-    })}
+function CycleDiagram({ widget, active }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
+  // Dense cycles use cards instead of overlapping fixed-position labels.
+  return <div>
+    {widget.nodes.length <= 4 && widget.nodes.every((node) => node.label.length <= 40 && (node.detail?.length ?? 0) <= 80) ? <div className="relative mx-auto h-72 min-w-[22rem] max-w-md">
+      {widget.nodes.map((node, index) => {
+        const angle = (index / widget.nodes.length) * Math.PI * 2 - Math.PI / 2;
+        return <div key={node.id} className="absolute w-28 -translate-x-1/2 -translate-y-1/2" style={{ left: `${50 + Math.cos(angle) * 32}%`, top: `${50 + Math.sin(angle) * 32}%` }}>
+          <NodeCard node={node} lit={active.has(node.id)} accent={explainerAccent(index)} />
+        </div>;
+      })}
+    </div> : <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} accent={explainerAccent(index)} />)}
+    </div>}
+    <Relationships widget={widget} active={active} />
   </div>;
 }
 
 function LayersDiagram({ widget, active }: { widget: ExplainerWidget; active: Set<string> }) {
   return <div className="mx-auto flex max-w-md flex-col gap-1.5 py-2">
-    {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} accent={explainerAccent(index)} className={`${active.has(node.id) ? 'translate-x-3' : ''}`} />)}
+    {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} accent={explainerAccent(index)} />)}
+    <Relationships widget={widget} active={active} />
   </div>;
 }
 
@@ -187,9 +231,12 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
 
   useEffect(() => {
     if (!playing || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const timer = window.setInterval(() => setStep((value) => (value + 1) % widget.steps.length), 1800);
-    return () => window.clearInterval(timer);
-  }, [playing, widget.steps.length]);
+    const timer = window.setTimeout(() => {
+      if (step === widget.steps.length - 1) setPlaying(false);
+      else setStep(step + 1);
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [playing, step, widget.steps.length]);
 
   return (
     <WidgetFrame kind="explainer" title={widget.title} className="overflow-hidden">
@@ -198,7 +245,7 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
           {widget.summary && <p className="mb-3 text-xs leading-relaxed text-muted-foreground">{widget.summary}</p>}
         </div>
         {widget.steps.length > 1 && <Button type="button" variant="outline" size="icon" radius="full" aria-label={playing ? 'Pause explanation' : 'Play explanation'} aria-pressed={playing}
-          onClick={() => setPlaying((value) => !value)} className="size-8">
+          onClick={() => { if (!playing && step === widget.steps.length - 1) setStep(0); setPlaying((value) => !value); }} className="size-8">
           {playing ? <Pause className="size-3.5" /> : <Play className="ml-0.5 size-3.5" />}
         </Button>}
       </div>

@@ -753,6 +753,7 @@ mod tests {
         assert!(snap.commands().is_empty());
         for (resource, want) in [
             ("references/screen-check.md", "## Browser recipes"),
+            ("references/choosing-visuals.md", "## Selection"),
             ("references/visual-artifacts.md", "```json"),
         ] {
             assert!(snap.read_skill("atelier-reference", Some(resource)).unwrap().contains(want), "{resource}");
@@ -1171,6 +1172,7 @@ fn builtins() -> Vec<Item> {
         parameters: BTreeMap::new(),
         resources: [
             ("references/screen-check.md", include_str!("../../../machinery/skills/atelier-reference/references/screen-check.md")),
+            ("references/choosing-visuals.md", include_str!("../../../machinery/skills/atelier-reference/references/choosing-visuals.md")),
             ("references/visual-artifacts.md", include_str!("../../../machinery/skills/atelier-reference/references/visual-artifacts.md")),
         ]
         .into_iter()
