@@ -476,6 +476,44 @@ async function fold(id, params, inWords) {
   endTurn(id, sessionId, 'end_turn');
 }
 
+/**
+ * A turn that speaks, works, and then runs into its limit, the way the shipped
+ * Claude adapter tells it: the kit's limit sentence arrives as an answer of its
+ * own, under a message ID of its own, and the turn ends as any other does. Read
+ * whole, the turn passed for an answer and no resume was planned (bw-b8t8n).
+ */
+const LIMIT_AFTER_ANSWER = process.env.BEADS_E2E_ACP_LIMIT_AFTER_ANSWER === '1';
+
+/** A wall clock three hours ahead, as the kit writes one: `3:20pm`. */
+function resetsLater() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Karachi', hour: 'numeric', minute: '2-digit', hour12: true,
+  }).formatToParts(new Date(Date.now() + 3 * 3600_000));
+  const part = (type) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${part('hour')}:${part('minute')}${part('dayPeriod').toLowerCase()}`;
+}
+
+async function limitAfterAnswer(id, params) {
+  const sessionId = params?.sessionId;
+  const send = (update) => say({ method: 'session/update', params: { sessionId, update } });
+  const toolCallId = `finding-${id}`;
+  send({
+    sessionUpdate: 'agent_message_chunk', messageId: `finding-${id}-${process.pid}`,
+    content: { type: 'text', text: 'Finding it.' },
+  });
+  send({
+    sessionUpdate: 'tool_call', toolCallId, title: 'rg limit', kind: 'search',
+    status: 'in_progress', rawInput: { pattern: 'limit' },
+  });
+  await new Promise((settle) => setTimeout(settle, 500));
+  send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' });
+  send({
+    sessionUpdate: 'agent_message_chunk', messageId: `limit-${id}-${process.pid}`,
+    content: { type: 'text', text: `You've hit your session limit · resets ${resetsLater()} (Asia/Karachi)` },
+  });
+  endTurn(id, sessionId, 'end_turn');
+}
+
 async function turn(id, params) {
   // A fold, asked for by name. Every other prompt takes the question turn
   // below, so no case written before this one changes.
@@ -504,6 +542,10 @@ async function turn(id, params) {
       },
     });
     endTurn(id, params?.sessionId, 'end_turn');
+    return;
+  }
+  if (LIMIT_AFTER_ANSWER) {
+    await limitAfterAnswer(id, params);
     return;
   }
   if (MISSING_CODEX_ROLLOUT) {

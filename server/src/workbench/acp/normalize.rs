@@ -2830,9 +2830,12 @@ impl AcpNormalizer {
         }
         self.started_messages.clear();
         events.extend(self.prompt_usage(session_id, provider, raw));
-        // A turn that said nothing but that its limit is hit was refused, not
-        // answered: the limit still stands (`kit_words::limit_refusal`).
-        let said = std::mem::take(&mut self.turn_said).join("\n");
+        // A turn that ends on the kit saying its limit is hit was refused, not
+        // answered: the limit still stands (`kit_words::limit_refusal`). Its
+        // last answer is read, not the whole turn: a turn that spoke, worked,
+        // and then ran into the limit ends the same way, and read whole it
+        // passed for an answer, so no resume was planned (bw-b8t8n).
+        let said = std::mem::take(&mut self.turn_said).pop().unwrap_or_default();
         let failure = match failure {
             None if !errored => crate::workbench::kit_words::limit_refusal(provider, &said),
             failure => failure,
@@ -3073,6 +3076,24 @@ mod tests {
         // A real answer after the reset is the limit going away.
         n.update("local", "claude", &cycle("running"));
         n.update("local", "claude", &said("Picked up where I left off."));
+        let ended = n.update("local", "claude", &cycle("idle"));
+        assert_eq!(signals(&ended), vec![(json!("usage_limit"), json!("resolved"))]);
+
+        // A turn that answered, worked, and then ran into its limit ends on
+        // the limit sentence too, and the limit stands (bw-b8t8n).
+        let answer = |id: &str, text: &str| json!({"sessionId":"remote","update":{
+            "sessionUpdate":"agent_message_chunk","messageId":id,"content":{"type":"text","text":text}
+        }});
+        n.update("local", "claude", &cycle("running"));
+        n.update("local", "claude", &answer("m1", "Finding it."));
+        n.update("local", "claude", &answer("m2", "You've hit your session limit · resets 3:20pm (Asia/Karachi)"));
+        let ended = n.update("local", "claude", &cycle("idle"));
+        assert_eq!(signals(&ended), vec![(json!("usage_limit"), json!("active"))]);
+
+        // The limit sentence followed by a real answer is an answer.
+        n.update("local", "claude", &cycle("running"));
+        n.update("local", "claude", &answer("m3", "You've hit your session limit · resets 3:20pm (Asia/Karachi)"));
+        n.update("local", "claude", &answer("m4", "Picked up where I left off."));
         let ended = n.update("local", "claude", &cycle("idle"));
         assert_eq!(signals(&ended), vec![(json!("usage_limit"), json!("resolved"))]);
     }
