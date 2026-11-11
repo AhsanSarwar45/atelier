@@ -813,7 +813,8 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
         />
         {header}
       </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-3 pt-3">{body}</CollapsibleContent>
+      {/* Indented past the chevron, so the body lines up with the header. */}
+      <CollapsibleContent className="space-y-3 pl-[1.375rem] pt-3">{body}</CollapsibleContent>
     </Collapsible>
   );
 }
