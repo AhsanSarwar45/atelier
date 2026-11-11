@@ -27,7 +27,8 @@ describe('the live checklist', () => {
   ];
 
   it("lists this chat's tasks in number order with their statuses", () => {
-    expect(checklistForTasks(tasks, 's1', 'idle')).toEqual([
+    // Read at the moment the tasks were made, so none of them is stale yet.
+    expect(checklistForTasks(tasks, 's1', 'idle', 1)).toEqual([
       { id: '1', text: '#1 Finished piece', status: 'completed' },
       { id: '2', text: '#2 Current piece', status: 'in_progress' },
       { id: '3', text: '#3 Later piece', status: 'pending' },
@@ -46,6 +47,13 @@ describe('the live checklist', () => {
   it('has no checklist without a chat or without tasks', () => {
     expect(checklistForTasks(tasks, null)).toEqual([]);
     expect(checklistForTasks(tasks, 's9')).toEqual([]);
+  });
+
+  it('marks a stale task', () => {
+    render(<TodoPanel items={[{ id: '3', text: '#3 Forgotten', status: 'pending', stale: true }, { id: '4', text: '#4 Fresh', status: 'pending' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: /tasks/i }));
+    expect(screen.getAllByTestId('todo-stale')).toHaveLength(1);
+    expect(screen.getByText('#3 Forgotten').parentElement).toContainElement(screen.getByTestId('todo-stale'));
   });
 
   it('counts cancelled as finished and strikes it through', () => {

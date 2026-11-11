@@ -7,22 +7,26 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { AlertTriangle, ListTodo, X } from 'lucide-react';
+import { AlertTriangle, ListTodo, MessageSquarePlus, Plus, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
 import { Panel } from '@/components/ui/panel';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Row } from '@/components/ui/row';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 import { tasks as tasksApi } from '@/lib/api';
 import { copyText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { useLiveSessions, type LiveSession } from '@/workbench/live';
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
+import { startTaskIn } from '@/workbench/tasks/new-task';
+import { isStale, STALE_REASON } from '@/workbench/tasks/stale';
 import { TaskCard, TaskOwnerActions, TaskStatusChip, shownStatus } from '@/workbench/tasks/task-card';
 import { STATUS_LABEL, typeLabel, type Task, type TaskEvent, type TaskStatus } from '@/workbench/tasks/types';
 import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
@@ -152,16 +156,143 @@ function TaskDetail({ task, onClose, onOpenChat }: {
   );
 }
 
-export default function TasksTab({ projectId, onOpenChat }: {
+/**
+ * The New task button: pick one of this project's chats, or a new one, and it
+ * opens with `@task ` waiting in its composer. The agent makes the task from
+ * what the owner writes after it (docs/tasks.md, "Principles").
+ */
+function NewTaskButton({ projectId, onOpenChat, onNewChat }: {
   projectId: string;
+  onOpenChat: (sessionId: string) => void;
+  onNewChat?: () => void;
+}) {
+  const live = useLiveSessions();
+  const chats = useMemo(
+    () => live
+      .filter((s) => s.projectId === projectId)
+      .map((s) => ({ id: s.id, name: s.name || s.title || 'Untitled chat' }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [live, projectId],
+  );
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" size="sm" variant="outline" data-testid="new-task">
+          <Plus aria-hidden />
+          New task
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-1" data-testid="new-task-chats">
+        <p className="px-2 py-1.5 text-xs text-muted-foreground">Start the task in</p>
+        {onNewChat && (
+          <Row gap="md" inset="sm" radius="md" data-testid="new-task-new-chat" onClick={() => { setOpen(false); onNewChat(); }}>
+            <MessageSquarePlus className="size-4 shrink-0" aria-hidden />
+            <span className="text-sm">New chat</span>
+          </Row>
+        )}
+        <div className="max-h-64 overflow-y-auto">
+          {chats.map((chat) => (
+            <Row
+              key={chat.id}
+              gap="md"
+              inset="sm"
+              radius="md"
+              data-testid="new-task-chat"
+              data-session={chat.id}
+              onClick={() => {
+                setOpen(false);
+                startTaskIn(chat.id);
+                onOpenChat(chat.id);
+              }}
+            >
+              <span className="min-w-0 truncate text-sm">{chat.name}</span>
+            </Row>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * Cancel for a stale row: one click opens the reason, already written, and one
+ * more sends the owner's cancel.
+ */
+function StaleCancel({ task }: { task: Task }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState(STALE_REASON);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await tasksApi.act(task.projectId, task.number, 'cancel', { reason: reason.trim() });
+      setOpen(false);
+    } catch (e) {
+      setError((e instanceof Error ? e.message : String(e)).replace(/^API error: \d+\s*/, ''));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) { setReason(STALE_REASON); setError(null); }
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button type="button" size="xs" variant="ghost" className="mx-2 shrink-0" data-testid="task-row-cancel" aria-label={`Cancel task #${task.number}`}>
+          Cancel
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="space-y-2">
+        <form
+          className="space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (reason.trim()) void send();
+          }}
+        >
+          <Textarea autoFocus rows={2} aria-label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" variant="destructive" disabled={!reason.trim()} loading={busy}>Cancel task</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Back</Button>
+          </div>
+          {error && <div role="alert" className="text-xs text-destructive">{`Couldn't cancel task. ${error}`}</div>}
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+export default function TasksTab({ projectId, selected: shown, onSelect, onOpenChat, onNewChat }: {
+  projectId: string;
+  /**
+   * The task whose detail is open, when the screen holds it (the address's
+   * `task`). Left out, the tab keeps its own.
+   */
+  selected?: number | null;
+  /** Asks for another task to be shown, or none. */
+  onSelect?: (task: number | null) => void;
   /** Opens a chat in the Chat tab. */
   onOpenChat?: (sessionId: string) => void;
+  /** Opens the New chat dialog, whose chat starts with `@task ` in it. */
+  onNewChat?: () => void;
 }) {
   const { tasks, loaded, error, refetch } = useTasks(projectId);
   const live = useLiveSessions();
   const sessions = useMemo(() => new Map(live.map((s) => [s.id, s])), [live]);
   const [filter, setFilter] = useState<SessionFilter>('all');
-  const [selected, setSelected] = useState<number | null>(null);
+  const [own, setOwn] = useState<number | null>(null);
+  const selected = shown === undefined ? own : shown;
+  const setSelected = useCallback((task: number | null) => {
+    if (shown === undefined) setOwn(task);
+    onSelect?.(task);
+  }, [shown, onSelect]);
   const [open, setOpen] = useState<Partial<Record<TaskStatus, boolean>>>({});
 
   const holders = useMemo(() => {
@@ -172,6 +303,12 @@ export default function TasksTab({ projectId, onOpenChat }: {
   const groups = useMemo(() => groupTasks(filterTasks(tasks, filter)), [tasks, filter]);
   const liveTasks = useMemo(() => byNumber(tasks), [tasks]);
   const chosen = selected === null ? null : liveTasks.get(selected) ?? null;
+  // Read once per list: a row turning stale while the tab sits open can wait
+  // for the next change.
+  const stale = useMemo(() => {
+    const now = Date.now();
+    return new Set(tasks.filter((task) => isStale(task, now)).map((task) => task.number));
+  }, [tasks]);
 
   return (
     <LiveTasksContext.Provider value={liveTasks}>
@@ -189,6 +326,7 @@ export default function TasksTab({ projectId, onOpenChat }: {
               </SelectContent>
             </Select>
             <span className="ml-auto text-xs tabular-nums text-muted-foreground">{`${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`}</span>
+            {onOpenChat && <NewTaskButton projectId={projectId} onOpenChat={onOpenChat} onNewChat={onNewChat} />}
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -214,32 +352,42 @@ export default function TasksTab({ projectId, onOpenChat }: {
                     <CollapsibleTriggerRow size="sm" className="mb-1 font-medium">
                       {group.label}
                       <span className="tabular-nums text-muted-foreground">{group.tasks.length}</span>
+                      {group.status === 'todo' && group.tasks.some((task) => stale.has(task.number)) && (
+                        <span data-testid="task-group-stale" className="text-xs font-normal tabular-nums text-[var(--color-warning-accent)]">
+                          {`${group.tasks.filter((task) => stale.has(task.number)).length} stale`}
+                        </span>
+                      )}
                     </CollapsibleTriggerRow>
                     <CollapsibleContent>
                       <Panel inset="none" className="overflow-hidden">
                         {group.tasks.map((task) => (
-                          <Row
-                            key={task.number}
-                            gap="md"
-                            ruled
-                            selected={task.number === selected}
-                            data-testid="task-row"
-                            data-number={task.number}
-                            onClick={() => setSelected(task.number)}
-                            className="min-h-10"
-                          >
-                            <span className="w-10 shrink-0 font-mono text-xs text-muted-foreground">#{task.number}</span>
-                            <Badge variant="secondary" size="sm" className="shrink-0"><span>{typeLabel(task.type)}</span></Badge>
-                            <span className={cn('min-w-0 flex-1 truncate text-sm', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</span>
-                            <span className="hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground sm:inline">{sessionName(task, sessions)}</span>
-                            {task.pendingAmend && (
-                              <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-amend" className="shrink-0"><span>Plan change</span></Badge>
-                            )}
-                            {task.shortfalls && (
-                              <AlertTriangle role="img" aria-label="Finished with shortfalls" data-testid="task-row-shortfalls" className="size-3.5 shrink-0 text-[var(--color-warning-accent)]" />
-                            )}
-                            <TaskStatusChip status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} className="shrink-0" />
-                          </Row>
+                          // The row is a button, so a stale row's Cancel sits beside it, not in it.
+                          <div key={task.number} className="flex items-center border-b border-border/40 last:border-b-0">
+                            <Row
+                              gap="md"
+                              selected={task.number === selected}
+                              data-testid="task-row"
+                              data-number={task.number}
+                              onClick={() => setSelected(task.number)}
+                              className="min-h-10 min-w-0 flex-1"
+                            >
+                              <span className="w-10 shrink-0 font-mono text-xs text-muted-foreground">#{task.number}</span>
+                              <Badge variant="secondary" size="sm" className="shrink-0"><span>{typeLabel(task.type)}</span></Badge>
+                              <span className={cn('min-w-0 flex-1 truncate text-sm', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</span>
+                              <span className="hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground sm:inline">{sessionName(task, sessions)}</span>
+                              {stale.has(task.number) && (
+                                <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-stale" className="shrink-0"><span>Stale</span></Badge>
+                              )}
+                              {task.pendingAmend && (
+                                <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-amend" className="shrink-0"><span>Plan change</span></Badge>
+                              )}
+                              {task.shortfalls && (
+                                <AlertTriangle role="img" aria-label="Finished with shortfalls" data-testid="task-row-shortfalls" className="size-3.5 shrink-0 text-[var(--color-warning-accent)]" />
+                              )}
+                              <TaskStatusChip status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} className="shrink-0" />
+                            </Row>
+                            {stale.has(task.number) && <StaleCancel task={task} />}
+                          </div>
                         ))}
                       </Panel>
                     </CollapsibleContent>

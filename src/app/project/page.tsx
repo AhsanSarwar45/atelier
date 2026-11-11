@@ -17,7 +17,7 @@ import { ReadFailed } from '@/components/ui/read-failed';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProject } from '@/hooks/use-project';
 import { useTheme } from '@/hooks/use-theme';
-import { addressWith, stepsOut, whereFrom } from '@/lib/address';
+import { addressWith, showTask, stepsOut, whereFrom } from '@/lib/address';
 import { cn, projectDir } from '@/lib/utils';
 import { SearchOpener } from '@/search/opener';
 // Each tab's code is fetched when that tab is first shown, so the task list
@@ -69,7 +69,7 @@ function ProjectTabs() {
   // The address decides which tab is showing and which chat is drawn in it, so
   // both survive a link, a fresh tab and the Back button
   // (docs/designs/app-shell.md §1.7).
-  const { id: projectId, tab: shownTab, chat: openChat, file: openFile, line: openLine, settings: openSettings, ptab, pitem, retired } = whereFrom(params);
+  const { id: projectId, tab: shownTab, chat: openChat, file: openFile, line: openLine, task: openTask, settings: openSettings, ptab, pitem, retired } = whereFrom(params);
   const { project, error: projectError, refetch } = useProject(projectId);
   // The folder this screen is showing, which is where a shell opened from
   // its bar starts.
@@ -266,7 +266,15 @@ function ProjectTabs() {
       )}
 
       {shownTab === 'tasks' && !projectError && projectId && (
-        <TasksTab projectId={projectId} onOpenChat={(chat) => go({ tab: 'chat', chat })} />
+        <TasksTab
+          projectId={projectId}
+          // The open task is the address's, so a link, a reload and Back all
+          // show the same one; picking another rewrites the address in place.
+          selected={openTask}
+          onSelect={(task) => showTask(params, task)}
+          onOpenChat={(chat) => go({ tab: 'chat', chat })}
+          onNewChat={() => go({ tab: 'chat', newchat: 'task' })}
+        />
       )}
 
       {/* Only the tab in front is mounted here too: a tree left alive behind the

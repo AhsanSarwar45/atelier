@@ -8,6 +8,8 @@
  *   …&file=<absolute path>&line=<1-based line>
  *   …&message=<id>                            a search's jump into the chat, dropped once made
  *   …&diff=<@diff id>                          a diff to show, dropped once shown
+ *   …&task=<number>                            the task open in the Tasks tab's detail panel
+ *   …&newchat=task                             open the New chat dialog; the chat it starts gets `@task `
  *   …&settings=<section>&ptab=<provider tab>   the project's settings, over the top
  *   …&pitem=<plugin or server>                 the page of one item on that tab
  *
@@ -39,6 +41,13 @@ export interface Where {
    * opens it and drops it from the address, the way `message` is dropped.
    */
   diff: string | null;
+  /** The task whose detail the Tasks tab shows, by its number. */
+  task: number | null;
+  /**
+   * `task` asks the chat tab to open its New chat dialog and put `@task ` in
+   * the chat it starts (the Tasks tab's New task button). Dropped once read.
+   */
+  newchat: string | null;
   /** The project settings section drawn over the screen, or nothing. */
   settings: string | null;
   /** The provider tab inside a settings section. */
@@ -97,6 +106,8 @@ export function whereFrom(params: URLSearchParams): Where {
     line: lineFrom(params.get('line')),
     message: params.get('message'),
     diff: params.get('diff'),
+    task: lineFrom(params.get('task')),
+    newchat: params.get('newchat'),
     settings: params.get('settings'),
     ptab: params.get('ptab'),
     pitem: params.get('pitem'),
@@ -171,4 +182,14 @@ export function stepsOut(leaves: (url: URL) => boolean, counted: number): number
     if (leaves(parsed)) return nav.currentEntry.index - i;
   }
   return 0;
+}
+
+/**
+ * Shows a task's detail, or closes it, in place: the address is rewritten
+ * rather than pushed, so picking through the list does not fill the history,
+ * and Back leaves the Tasks tab the way it leaves any other. Next follows the
+ * native history, so the screen reads the new address like any other.
+ */
+export function showTask(params: URLSearchParams, task: number | null): void {
+  window.history.replaceState(window.history.state, '', addressWith(params, { tab: 'tasks', task }));
 }

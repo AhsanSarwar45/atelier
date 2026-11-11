@@ -27,7 +27,7 @@ import { FileDiff, ListChecks, ListPlus, MessageSquare, Sparkles } from 'lucide-
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
-import { addressWith } from '@/lib/address';
+import { addressWith, lineFrom } from '@/lib/address';
 import { classesFor, type Tone } from '@/lib/state-styles';
 import { cn } from '@/lib/utils';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
@@ -239,7 +239,7 @@ export function ReferenceBadge({
       router.push(addressWith(params, { id: projectId, tab, diff: reference.id }));
     } else if (reference.kind === 'task') {
       // A bare `@task` names no task yet; there is nothing to open.
-      if (reference.id) router.push(addressWith(params, { id: projectId, tab: 'tasks' }));
+      if (reference.id) router.push(addressWith(params, { id: projectId, tab: 'tasks', task: lineFrom(reference.id) }));
     } else if (reference.kind === 'chat') {
       router.push(addressWith(params, { id: reference.projectId ?? projectId, tab: 'chat', chat: reference.id }));
     } else {

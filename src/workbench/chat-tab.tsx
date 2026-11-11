@@ -112,6 +112,7 @@ import { workingLine } from '@/workbench/working-line';
 import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { checklistForTasks, finished, type ChecklistItem } from '@/workbench/tasks/checklist';
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
+import { startTaskIn, takeComposerFocus } from '@/workbench/tasks/new-task';
 import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
 import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
@@ -702,6 +703,9 @@ export function TodoPanel({ items }: { items: ChecklistItem[] }) {
             >
               {t.text}
             </span>
+            {t.stale && (
+              <Badge variant="warning" appearance="light" size="sm" data-testid="todo-stale" className="shrink-0"><span>Stale</span></Badge>
+            )}
             {CHECKLIST_NOTE[t.status] && (
               <span
                 data-testid="todo-note"
@@ -1129,6 +1133,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [heldWorking, setHeldWorking] = useState<string | null>(null);
   /** Lines sent and drawn, standing until the server sends its own copy back. */
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
+  /** The New chat dialog was opened by the Tasks tab's New task button. */
+  const taskInNewChat = useRef(false);
   // `where` is the place the person picked. A worktree that does not exist yet
   // is made first and the chat is started in what git says it made, so the
   // chat and the directory can never disagree about where the work is
@@ -1150,6 +1156,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // list shows within a frame of the click, sat there unlit for the whole of
     // the launch (bw-akk9.1). The server takes the name it is given.
     const id = newId();
+    // Asked for from the Tasks tab's New task button: the new chat opens with
+    // `@task ` waiting in its composer.
+    if (taskInNewChat.current) {
+      taskInNewChat.current = false;
+      startTaskIn(id);
+    }
     setStarting({ brand, id });
     setStartError(null);
     // Where to put him back if the launch never happens. A chat that was never
@@ -1507,6 +1519,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setNewBrand(providerIsAvailable(providers, wanted) ? wanted : availableBrand ?? wanted);
     setShowing('new-chat');
   }, [availableBrand, newBrand, newChatDefault, providers]);
+  // `newchat=task` is the Tasks tab asking for a new chat to start a task in:
+  // the dialog opens, and the address lets go of the ask so Back and a reload
+  // do not open it again. Closing the dialog without starting drops the ask.
+  const askedNewChat = params.get('newchat');
+  useEffect(() => {
+    if (showing === null) taskInNewChat.current = false;
+  }, [showing]);
+  useEffect(() => {
+    if (askedNewChat !== 'task') return;
+    taskInNewChat.current = true;
+    newChat();
+    window.history.replaceState(window.history.state, '', addressWith(params, { newchat: null }));
+  }, [askedNewChat, newChat, params]);
   /** Open the dialog on the first other agent a chat can move to. */
   const switchProvider = useCallback((chat: { sessionId: string; brand: Brand }) => {
     const other = providers.find(
@@ -1615,6 +1640,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** The pane the conversation scrolls in, which the window keeps the place of. */
   const pane = useRef<HTMLDivElement>(null);
   const typing = useRef<ComposerHandle>(null);
+  // A chat opened with `@task ` waiting in it (new-task.ts) is opened to type
+  // into. Checked after every render: the box is drawn only once the chat is.
+  useEffect(() => {
+    if (typing.current && takeComposerFocus(sessionId)) typing.current.focus();
+  });
   const picker = useRef<HTMLInputElement>(null);
   /** The POST being accepted; Escape waits for it before sending Stop. */
   const sending = useRef<Promise<{ messageId?: string; held?: HeldMessage }> | null>(null);
