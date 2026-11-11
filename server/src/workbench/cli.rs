@@ -120,7 +120,7 @@ fn screen_check_request(rest: &[String]) -> Result<UploadedRequest<'_>, String> 
     Ok(request)
 }
 
-fn server_url(path: &str) -> String {
+pub(crate) fn server_url(path: &str) -> String {
     let port = std::env::var("ATELIER_PORT")
         .or_else(|_| std::env::var("BEADS_WEB_PORT"))
         .ok()

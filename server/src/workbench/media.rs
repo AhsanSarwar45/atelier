@@ -607,9 +607,10 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
         "explainer" => &[
             "type", "layout", "title", "summary", "nodes", "edges", "steps", "evidence",
         ][..],
+        "task" => &["type", "event", "task"][..],
         other => {
             return Err(format!(
-                "{other} is not a widget type: use metrics, chart, progress, timeline, table, video, image, image_compare, artifact or explainer"
+                "{other} is not a widget type: use metrics, chart, progress, timeline, table, video, image, image_compare, artifact, explainer or task"
             ))
         }
     };
@@ -803,6 +804,30 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
                     }
                 }
             }
+        }
+        "task" => {
+            // The card `atelier task` prints: the action that produced it and
+            // the task as it stood after (workbench/tasks).
+            let events = [
+                crate::workbench::tasks::AGENT_ACTIONS,
+                crate::workbench::tasks::OWNER_ACTIONS,
+            ]
+            .concat();
+            one_of(object, "event", &events, true)?;
+            let task = object
+                .get("task")
+                .and_then(Value::as_object)
+                .ok_or("task is required and is an object")?;
+            required_string(task, "projectId", 400)?;
+            if !task.get("number").and_then(Value::as_i64).is_some_and(|n| n >= 1) {
+                return Err("task.number is a whole number from 1 upwards".into());
+            }
+            let kind = required_string(task, "type", 40)?;
+            if crate::workbench::tasks::types::find(kind).is_none() {
+                return Err(format!("task.type {kind} is not a task type"));
+            }
+            required_string(task, "title", 480)?;
+            one_of(task, "status", crate::workbench::tasks::STATUSES, true)?;
         }
         _ => unreachable!("the type was matched against the field allowlist above"),
     }

@@ -677,6 +677,8 @@ impl Store {
         transaction.execute("DELETE FROM session_handoff WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_notice WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM session_external_alias WHERE session_id = ?1", [id])?;
+        // Its open tasks stay, unassigned, for any other chat to take.
+        super::tasks::release_session(&transaction, id, chrono::Utc::now().timestamp_millis())?;
         // Everything else kept by chat. `turn` stays: it is what was spent,
         // and the spend totals still count it.
         for table in ["message", "held_message", "transcript_item", "transcript_projection", "transcript_agent"] {
@@ -3477,7 +3479,8 @@ fn held_in_its_project(
         found
     }
 
-    #[cfg(test)]
+    /// The connection, for modules that keep their own tables in this
+    /// database (workbench/tasks) and run on the writer or a reader.
     pub(crate) fn connection(&self) -> &Connection {
         &self.connection
     }
@@ -4149,6 +4152,10 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     {
         transaction.execute_batch("ALTER TABLE session ADD COLUMN driven_from INTEGER;")?;
     }
+
+    // Tasks (docs/tasks.md): the app's own record of work, keyed by project
+    // and number, with one event row per change.
+    transaction.execute_batch(super::tasks::SCHEMA)?;
 
     one_row_per_external_chat(transaction)
 }

@@ -123,6 +123,9 @@ enum Command {
     UnpushHeld(String, Reply<Vec<serde_json::Value>>),
     DropHeld(String, String, Reply<Option<serde_json::Value>>),
     ForgetHeld(String, Reply<()>),
+    /// A task change (workbench/tasks), run on the writer; it answers through
+    /// its own channel because its refusals are not database errors.
+    Tasks(Box<dyn FnOnce(&Store) + Send>, Reply<()>),
     Shutdown,
 }
 
@@ -272,6 +275,34 @@ impl ChatDb {
 
     pub async fn get_session(&self, id: String) -> Result<Option<Session>, String> {
         self.request(|reply| Command::GetSession(id, reply)).await
+    }
+
+    /// Change tasks on the writer, between appends (workbench/tasks).
+    pub async fn write_tasks<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&Store) -> T + Send + 'static,
+    ) -> Result<T, String> {
+        let (sender, receiver) = oneshot::channel();
+        self.request(|reply| {
+            Command::Tasks(
+                Box::new(move |store| {
+                    let _ = sender.send(work(store));
+                }),
+                reply,
+            )
+        })
+        .await?;
+        receiver
+            .await
+            .map_err(|_| "the task write stopped before replying".to_string())
+    }
+
+    /// Read tasks on the reader pool.
+    pub async fn read_tasks<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&Store) -> rusqlite::Result<T> + Send + 'static,
+    ) -> Result<T, String> {
+        self.read(move |store, _| work(store)).await
     }
 
     /// What has already been said about each chat, and to whom.
@@ -1349,6 +1380,10 @@ fn run(
                     live_menus.remove(&id);
                 }
                 respond(reply, result)
+            }
+            Command::Tasks(work, reply) => {
+                work(&store);
+                let _ = reply.send(Ok(()));
             }
             Command::Upkeep(work, reply) => {
                 let _ = reply.send(work(&mut store));

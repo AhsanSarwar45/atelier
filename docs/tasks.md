@@ -36,7 +36,7 @@ Stored in `workbench.db`.
 | `session_id` | text, null | the session that holds it; null = unassigned |
 | `created_by` | text, null | session that created it |
 | `plan` | json | the type's plan |
-| `result` | json, null | the type's result plus shared done fields |
+| `result` | json, null | the type's result plus shared done fields, flat: `{summary, commits, followups, ...result}` |
 | `shortfalls` | integer | 1 when done but some plan item was not met |
 | `blocked` | json, null | `{cause, needed_to_resume}` |
 | `cancel_reason` | text, null | |
@@ -68,7 +68,8 @@ todo ──start──▶ in_progress ──done──▶ done
 - The front end shows an `in_progress` task whose session is not running as
   **paused**. This is a display state, not stored.
 - Review types (`plan`, `ui_change`) go to `review` on `done`. The owner
-  approves (→ `done`) or reopens with a note (→ `in_progress`).
+  approves (→ `done`) or reopens with a note (→ `in_progress`; → `todo` if
+  the task is unassigned or its session already has another task in progress).
 - `amend` stores `pending_amend`. The owner approves (plan replaced) or
   rejects. `done` is validated against the approved plan.
 - Done with an unmet plan item is allowed only with a reason for that item.
@@ -105,7 +106,8 @@ Shared done fields:
 
 Evidence fields hold text, `file:line`, a test name, or a path to an image or
 video. Paths to images and videos are uploaded like the presenter does and
-shown inline.
+shown inline: in the stored result the path is replaced by its served
+address, `/api/presentation-assets/<sha256>.<ext>`.
 
 ## HTTP
 
@@ -121,19 +123,22 @@ JSON is camelCase. A task:
 }
 ```
 
-- `GET /api/workbench/tasks?project=ID[&session=ID]` → `{tasks: Task[]}`
+- `GET /api/workbench/tasks?project=ID[&session=ID]` → `{projectId, tasks: Task[]}`.
+  `session` alone gives that session's tasks; `session` with `all=1` gives
+  its whole project's (the CLI's `list` and `list --all`).
 - `GET /api/workbench/tasks/:project/:number` → `{task, events: TaskEvent[]}`
   (`TaskEvent = {seq, at, kind, sessionId, actor, payload}`)
 - `GET /api/workbench/task-types` → `{types: [{name, code, review, plan, result}]}`
   where `plan` and `result` are short field descriptions for `atelier task types`.
 - `POST /api/workbench/task` with `{action, actor, session?, project?, number?, payload?}`
-  → `{task, widget}` or `400 {error}`. `actor` is `agent` (the CLI; `session`
+  → `{task, widget, summary}` or `400 {error}`. `actor` is `agent` (the CLI; `session`
   required, project comes from the session) or `owner` (the UI; `project`
   required). Agent actions: `create start block unblock amend done cancel take`.
   Owner actions: `approve reopen approve_amend reject_amend cancel release`.
   `widget` is the fenced `atelier-widget` text the CLI prints.
 - Every change sends `{type: "tasks.changed", projectId, number}` on the live
-  `workbench` feed. Clients refetch.
+  `workbench` feed (the frame also carries `kind: "tasks.changed"`, like the
+  feed's other frames). Clients refetch.
 
 The `task` widget is `{type: "task", event, task}`, where `event` is the
 action that produced it and `task` is the snapshot after it.
@@ -173,7 +178,7 @@ must have exactly one entry per plan id.
 
 ### `tests` (code)
 - plan: `behaviors[] {id, text}`
-- result: `behaviors[] {id, test_path, test_name, fails_without_code}`
+- result: `behaviors[] {id, test_path, test_name, fails_without_code, reason?}` (`reason` required when `fails_without_code` is false)
 
 ### `review`
 - plan: `target` (diff, branch or commit range), `focus[]`
@@ -181,7 +186,7 @@ must have exactly one entry per plan id.
 
 ### `qa`
 - plan: `scenarios[] {id, steps[], expected}`
-- result: `scenarios[] {id, passed, evidence, notes?}`
+- result: `scenarios[] {id, passed, evidence, notes?}` (`notes` required when not passed)
 
 ### `docs` (code)
 - plan: `audience`, `pages[] {id, path, change}`

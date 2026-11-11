@@ -26,6 +26,7 @@ use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 
 mod ai_search;
+mod tasks;
 
 use crate::workbench::{
     actor::ChatDb,
@@ -1187,6 +1188,10 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/screen-check", post(screen_check))
         .route("/command", post(command))
         .route("/attachment", post(attachment))
+        .route("/tasks", get(tasks::list))
+        .route("/tasks/:project/:number", get(tasks::detail))
+        .route("/task-types", get(tasks::kinds))
+        .route("/task", post(tasks::act))
         // A prompt carries its pictures inline, as base64 inside the JSON, and
         // there is no ceiling on how many a person may attach to one message.
         // Axum otherwise buffers every body under a 2 MiB default nobody here

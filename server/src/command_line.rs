@@ -117,6 +117,12 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
             },
             None => Ask::Unknown("tool".to_string()),
         },
+        // The agent's task commands (docs/tasks.md). The same as
+        // `atelier tool task …`, which is kept as an alias.
+        "task" => Ask::Tool {
+            name: "task".to_string(),
+            rest: args[1..].to_vec(),
+        },
         // Installing Tailscale needs a password, and a settings screen has
         // nowhere to type one. That one step is this command; everything
         // after it is the switch on the screen (bw-hdor).
@@ -153,6 +159,7 @@ Usage:
   atelier project beads [folder]
                               Print whether Beads is enabled for this folder
   atelier tool <name> [...]   Run an Atelier tool
+  atelier task <command>      Create and finish tasks from a chat session
   atelier where               Show app addresses
   atelier tools               Show dependencies
   atelier remote install      Install private remote access
@@ -338,6 +345,17 @@ mod tests {
             Ask::Tool {
                 name: "board/job".to_string(),
                 rest: vec!["under".to_string(), "bw-one".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn task_is_a_top_level_word_for_the_task_tool() {
+        assert_eq!(
+            ask(&["task", "start", "3"]),
+            Ask::Tool {
+                name: "task".to_string(),
+                rest: vec!["start".to_string(), "3".to_string()]
             }
         );
     }
