@@ -3023,6 +3023,17 @@
         "kind": "render",
         "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.artifact.json"
       }
+    },
+    {
+      "name": "mesh artifact envelope",
+      "verdict": "accept",
+      "why": "Mesh artifact has a content-addressed asset",
+      "payload": {
+        "type": "artifact",
+        "title": "Indexed mesh",
+        "kind": "mesh",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.artifact.json"
+      }
     }
   ],
   "artifacts": [
@@ -11365,6 +11376,1879 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "name": "mesh indexed triangle",
+      "verdict": "accept",
+      "why": "Bounded indexed triangles with an orbit camera",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh integral float indices",
+      "verdict": "accept",
+      "why": "JSON integral floating values are integer indices",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0.0,
+              1.0,
+              2.0
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects executable top field",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15,
+        "script": "alert(1)"
+      }
+    },
+    {
+      "name": "mesh rejects unknown camera field",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100,
+          "projection": "custom"
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects unknown meshlet field",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ],
+            "normal": [
+              0,
+              0,
+              1
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects null description",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15,
+        "description": null
+      }
+    },
+    {
+      "name": "mesh rejects blank title",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "  ",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects vertex dimension",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects vertex magnitude",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            1001,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects fractional index",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              1.5
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects negative index",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              -1
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects out of bounds index",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              3
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects incomplete triangle",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects degenerate triangle",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              1
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects collinear triangle",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            2,
+            0,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects missing geometry",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects zero distance",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 0,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects zero near plane",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects reversed planes",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 0.05
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects far limit",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 2001
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects vertical pole",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 90,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects FOV limit",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 101,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects azimuth limit",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 721,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects fast caption timing",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 1
+      }
+    },
+    {
+      "name": "mesh rejects long duration",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 121
+      }
+    },
+    {
+      "name": "mesh rejects nonnumeric camera",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": "50",
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects excessive meshlet triangles",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2,
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
+      }
+    },
+    {
+      "name": "mesh rejects duplicate meshlet ids",
+      "verdict": "refuse",
+      "why": "Mesh geometry and camera values must satisfy the bounded schema",
+      "payload": {
+        "version": 1,
+        "kind": "mesh",
+        "title": "Indexed mesh",
+        "vertices": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "meshlets": [
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          },
+          {
+            "id": "front",
+            "label": "Front",
+            "triangles": [
+              0,
+              1,
+              2
+            ]
+          }
+        ],
+        "camera": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "distance": 5,
+          "elevation": 20,
+          "startAzimuth": 0,
+          "endAzimuth": 360,
+          "fov": 50,
+          "near": 0.1,
+          "far": 100
+        },
+        "duration": 15
       }
     }
   ]

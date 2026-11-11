@@ -35,6 +35,7 @@ pub mod mcp_catalogue;
 pub mod mcp_servers;
 pub mod media;
 mod render_model;
+mod mesh_model;
 pub mod leftover_tree;
 pub mod memory;
 pub mod limit_resume;

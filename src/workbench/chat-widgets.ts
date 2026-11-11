@@ -30,7 +30,7 @@ export type ImageCompareWidget = {
   type: 'image_compare'; title?: string; mode: 'side_by_side' | 'wipe';
   before: { asset: string; alt: string }; after: { asset: string; alt: string };
 };
-export type ArtifactWidget = { type: 'artifact'; title: string; kind: 'mermaid' | 'flow' | 'scene' | 'mockup' | 'render'; asset: string };
+export type ArtifactWidget = { type: 'artifact'; title: string; kind: 'mermaid' | 'flow' | 'scene' | 'mockup' | 'render' | 'mesh'; asset: string };
 export type ExplainerWidget = {
   type: 'explainer';
   layout?: 'flow' | 'sequence' | 'cycle' | 'layers';
@@ -89,7 +89,7 @@ export function widget(value: unknown): ChatWidget | null {
   if (value.type === 'image_compare' && (value.mode === 'side_by_side' || value.mode === 'wipe')
     && object(value.before) && asset(value.before.asset) && text(value.before.alt)
     && object(value.after) && asset(value.after.asset) && text(value.after.alt)) return value as ImageCompareWidget;
-  if (value.type === 'artifact' && artifactAsset(value.asset) && ['mermaid', 'flow', 'scene', 'mockup', 'render'].includes(String(value.kind))) return value as ArtifactWidget;
+  if (value.type === 'artifact' && artifactAsset(value.asset) && ['mermaid', 'flow', 'scene', 'mockup', 'render', 'mesh'].includes(String(value.kind))) return value as ArtifactWidget;
   if (value.type === 'explainer' && (value.layout === undefined || ['flow', 'sequence', 'cycle', 'layers'].includes(String(value.layout)))
     && (value.summary === undefined || text(value.summary))
     && Array.isArray(nodes) && nodes.length >= 2 && nodes.length <= 12

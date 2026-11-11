@@ -23,6 +23,7 @@ one visual. A valid payload is not proof of a useful explanation.
 | What does the whole dependency graph look like? | Mermaid for a compact graph; `flow` artifact for a larger graph | Twelve tiny cards and twenty crossings squeezed into a chat |
 | Where does a particular object move or change state? | `scene` artifact with stable object IDs and named states | Decorative pulses, spins or particles without meaning |
 | How does a numeric parameter change computed pixels or buffers? | `render` artifact; compare outputs at the same frame and pixel | Painted approximations presented as computed output; read `references/rendering-models.md` |
+| Which triangle clusters can this camera reject, and why? | `mesh` artifact with real geometry, linked camera views and selectable bounds; read `references/mesh-models.md` | Caption-only steps or painted visibility decisions; do not claim occlusion or GPU timings |
 | Would this interaction work? | `mockup` artifact | Using a mockup for a production implementation |
 | What did the running UI do? | Image, compare, or video proof | A synthetic diagram presented as observed evidence |
 

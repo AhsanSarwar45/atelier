@@ -13,6 +13,9 @@ import { Input } from '@/components/ui/input';
 import { Overlay } from '@/components/ui/overlay';
 import { Panel } from '@/components/ui/panel';
 import { Separator } from '@/components/ui/separator';
+import dynamic from 'next/dynamic';
+const MeshView = dynamic(() => import('./mesh-view').then(m => m.MeshView), { ssr: false });
+
 import { SceneView } from './scene-player';
 import { RenderView } from './render-view';
 import { request } from '@/lib/api';
@@ -102,6 +105,7 @@ function MockupView({ artifact }: { artifact: MockupArtifact }) {
 export function VisualArtifactContent({ artifact }: { artifact: VisualArtifact }) {
   if (artifact.kind === 'mermaid') return <MermaidView artifact={artifact} />;
   if (artifact.kind === 'flow') return <FlowView artifact={artifact} />;
+  if (artifact.kind === 'mesh') return <MeshView artifact={artifact} />;
   if (artifact.kind === 'render') return <RenderView artifact={artifact} />;
   if (artifact.kind === 'scene') return <SceneView artifact={artifact} />;
   return <MockupView artifact={artifact} />;

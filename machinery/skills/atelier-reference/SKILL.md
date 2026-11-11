@@ -189,6 +189,10 @@ Use an artifact when no widget can carry the idea. Pick the smallest kind:
   controls, shared pixel inspection, and a frame timeline. Use for numerical
   rendering explanations; read [rendering models](references/rendering-models.md)
   and its complete examples. It evaluates bounded expressions, not code.
+- `mesh`: indexed 3D geometry with selectable meshlets, an orbitable overview,
+  a synchronized camera view, and computed frustum/normal-cone culling. Use when
+  actual geometry and viewpoint explain rejection; read [mesh models](references/mesh-models.md)
+  and its torus and folded-facade examples.
 - `mockup`: a clickable product idea with real inputs, buttons, cards, screens
   and toggles. It works inline and opens full-screen. Use it only when trying
   the interaction answers a real design or workflow question.

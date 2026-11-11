@@ -107,3 +107,11 @@ color/depth/motion/history buffers, and a shared pixel inspector. Read
 [the rendering model contract](rendering-models.md) and its complete TAA and
 image-filter examples before authoring one. `scene` remains the choice for
 narrated geometric illustrations that do not require computed pixel values.
+
+## Meshlet geometry
+
+Use `kind: "mesh"` for actual indexed geometry, a moving rendering camera,
+selectable meshlets and conservative frustum/normal-cone culling. Read
+[the mesh model contract](mesh-models.md) and its torus and folded-facade
+examples. The overview and camera view share the same culling decisions;
+this is not an occlusion test or a GPU performance measurement.
