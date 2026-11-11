@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import cases from '@/workbench/atelier-references.cases.json';
 import { findAtelierReferences, findReferences, formatAtelierReference, formatDiffReference, parseDiffId } from '@/workbench/references';
 
-describe('a reference to a card, a chat or a skill', () => {
+describe('a reference to a chat or a skill', () => {
   for (const c of cases) {
     it(`reads ${JSON.stringify(c.text)}`, () => {
       expect(findAtelierReferences(c.text)).toEqual(c.found);
@@ -11,7 +11,7 @@ describe('a reference to a card, a chat or a skill', () => {
   }
 
   it('is never read as a file as well', () => {
-    expect(findReferences('see @bead:bw-1 and @src/a.ts')).toEqual([
+    expect(findReferences('see @chat:bw-1 and @src/a.ts')).toEqual([
       expect.objectContaining({ path: 'src/a.ts' }),
     ]);
   });

@@ -59,10 +59,10 @@ describe('a chat read again', () => {
     expect(view.items.map((it) => it.id)).toEqual(['m-second', 't-second']);
   });
 
-  it('counts the cards once, since they are read out of the same record', () => {
+  it('reads an older record that links a card of the retired board, and draws nothing for it', () => {
     const view = fold([...aPastChat('first'), at({ type: 'transcript.reset' }), ...aPastChat('second')]);
 
-    expect(view.beads).toEqual(['bw-1u1']);
+    expect(view.items.map((it) => it.id)).toEqual(['m-second', 't-second']);
   });
 
   it('costs a chat that was never read twice nothing at all', () => {

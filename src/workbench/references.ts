@@ -287,8 +287,8 @@ export function findReferences(text: string): FoundReference[] {
     if (at < from) continue;
     if (at > 0 && !BEFORE.test(text[at - 1]!)) continue;
     if (code.some(([start, end]) => at >= start && at < end)) continue;
-    // `@bead:bw-1`, `@chat:…` and `@skill:…` name one of Atelier's own things,
-    // never a file called `bead:bw-1` (`findAtelierReferences`).
+    // `@chat:…`, `@skill:…` and `@task:…` name one of Atelier's own things,
+    // never a file called `chat:…` (`findAtelierReferences`).
     const atelier = atelierAt(text, at);
     if (atelier) {
       from = atelier.end;
@@ -323,12 +323,12 @@ export function resolveReference(ref: Reference, root: string | Rooted): string 
  * ------------------------------------------------------------------ */
 
 /**
- * What else a reference can name besides a file: a card on the board, another
- * chat, or a skill in the agent guidance library (bw-mi3s).
+ * What else a reference can name besides a file: another chat, a skill in the
+ * agent guidance library, a diff or a task (bw-mi3s).
  *
- * Written `@bead:bw-zldt.2`, `@chat:<id>` and `@skill:standup`. The kind is
- * spelled out because a card id alone has the shape of a file name — `my-file.ts`
- * passes the card id test — and a reference has to mean one thing to the
+ * Written `@chat:<id>` and `@skill:standup`. The kind is spelled out because an
+ * id alone can have the shape of a file name, and a reference has to mean one
+ * thing to the
  * composer, the transcript and the server alike. The server reads the same
  * shapes (`server/src/workbench/references.rs`), and both sides are held to one
  * list of cases (`atelier-references.cases.json`).
@@ -345,10 +345,13 @@ export function resolveReference(ref: Reference, root: string | Rooted): string 
  * bare `@task`, a word of its own, is the owner asking the agent to make a new
  * task of the message (docs/tasks.md). It is found with an empty id, so it is
  * drawn as a badge and written back as `@task`.
+ *
+ * `@bead:…` named a card on the retired Beads board. It is no longer a kind, so
+ * an old transcript that wrote one shows it as the words it was.
  */
-export type AtelierKind = 'bead' | 'chat' | 'skill' | 'diff' | 'task';
+export type AtelierKind = 'chat' | 'skill' | 'diff' | 'task';
 
-export const ATELIER_KINDS: readonly AtelierKind[] = ['bead', 'chat', 'skill', 'diff', 'task'];
+export const ATELIER_KINDS: readonly AtelierKind[] = ['chat', 'skill', 'diff', 'task'];
 
 /** An Atelier reference found inside a larger text, and where in it it sits. */
 export interface FoundAtelierReference {
@@ -432,9 +435,8 @@ export const NEW_TASK = '@task ';
 /**
  * The reference a pasted address of this app stands for (bw-mi3s.5).
  *
- * A card or a chat copied out of the address bar — `/project?id=…&card=bw-1`
- * or `…&tab=chat&chat=<id>` — is written as `@bead:bw-1` or `@chat:<id>`, the
- * reference it names, rather than as a long address the agent cannot open. An
+ * A chat copied out of the address bar — `…&tab=chat&chat=<id>` — is written
+ * as `@chat:<id>`, the reference it names, rather than as a long address the agent cannot open. An
  * address of anywhere else, or of anything else here, is left as pasted.
  * `origin` is the app's own, so only this app's addresses are read this way.
  */
@@ -450,8 +452,6 @@ export function referenceForAddress(pasted: string, origin: string): string | nu
   if (address.origin !== origin || address.pathname !== '/project') return null;
   if (!text.startsWith(origin) && !text.startsWith('/project')) return null;
   const whole = new RegExp('^' + ATELIER_ID + '$');
-  const card = address.searchParams.get('card');
-  if (card && whole.test(card)) return formatAtelierReference('bead', card);
   const chat = address.searchParams.get('chat');
   if (chat && whole.test(chat)) return formatAtelierReference('chat', chat);
   return null;

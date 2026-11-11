@@ -1,8 +1,7 @@
 /**
  * The project screen when the project itself could not be read.
  *
- * Everything under the tabs — the board and card panel — is
- * mounted only once the project is in hand, so a failed read left the reader
+ * Everything under the tabs is mounted only once the project is in hand, so a failed read left the reader
  * looking at a row of tabs over an empty body: no word about what happened, and
  * nothing to press (bw-zkh4). The tabs are still there; what fills the body now
  * is the failure and a way to ask again.
@@ -17,12 +16,7 @@ vi.mock('@/hooks/use-project', () => ({ useProject: () => useProjectMock() }));
 // being asked here is what the screen puts in front of the reader when there is
 // no project for any of them to draw.
 vi.mock('@/workbench/chat-tab', () => ({ default: () => <div data-testid="chat-tab" /> }));
-vi.mock('@/app/project/kanban-board', () => ({ default: () => <div data-testid="board" /> }));
-vi.mock('@/app/project/board-cards', () => ({
-  BoardCards: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useBoardCards: () => ({ beads: [], ticketNumbers: new Map(), isLoading: false, error: null, refresh: vi.fn() }),
-}));
-vi.mock('@/components/card-panel', () => ({ CardPanel: () => null }));
+vi.mock('@/workbench/tasks/tasks-tab', () => ({ default: () => <div data-testid="tasks-tab" /> }));
 vi.mock('@/components/project-settings-screen', () => ({ ProjectSettingsScreen: () => null }));
 vi.mock('@/workbench/globals', () => ({ WorkbenchStatus: () => null }));
 vi.mock('@/components/shell', () => ({
@@ -38,7 +32,7 @@ vi.mock('@/components/shell', () => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams('id=p1&tab=board'),
+  useSearchParams: () => new URLSearchParams('id=p1&tab=tasks'),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 
@@ -65,7 +59,7 @@ describe('the project screen', () => {
     expect(screen.getByText(/couldn’t load/i)).toBeInTheDocument();
     expect(screen.getByText(/the server did not answer/)).toBeInTheDocument();
     // The body used to hold nothing at all, and still does not hold a tab.
-    expect(screen.queryByTestId('board')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('tasks-tab')).not.toBeInTheDocument();
     expect(screen.queryByTestId('chat-tab')).not.toBeInTheDocument();
     expect(document.querySelectorAll('.animate-spin')).toHaveLength(0);
 
@@ -73,7 +67,7 @@ describe('the project screen', () => {
     expect(refetch).toHaveBeenCalled();
   });
 
-  it('draws the tab as usual once the project reads', () => {
+  it('draws the tab as usual once the project reads', async () => {
     useProjectMock.mockReturnValue({
       project: { id: 'p1', name: 'Atelier', path: '/work/atelier', localPath: null, tags: [] },
       isLoading: false,
@@ -83,7 +77,7 @@ describe('the project screen', () => {
 
     render(<ProjectPage />);
 
-    expect(screen.getByTestId('board')).toBeInTheDocument();
+    expect(await screen.findByTestId('tasks-tab')).toBeInTheDocument();
     expect(screen.queryByTestId('project-error')).not.toBeInTheDocument();
   });
 });

@@ -35,12 +35,11 @@ function answers(...entries: MentionOffer[]) {
   search.mockResolvedValue({ items: entries });
 }
 
-const NO_STATUSES = new Map();
 const NO_COMMANDS: never[] = [];
 
 /** The composer as the chat draws it: the `@` menu, and badges named the way the chat names them. */
 function Composer({ value, extra }: { value: string; extra: ReturnType<typeof mentionCompletions> }) {
-  const describe = useDescribeReference(NO_STATUSES, NO_COMMANDS);
+  const describe = useDescribeReference(NO_COMMANDS);
   return <ComposerEditor value={value} onChange={() => {}} onKey={() => false} onFiles={() => {}} extra={extra} describe={describe} />;
 }
 
@@ -191,7 +190,7 @@ describe('@task in a sent message', () => {
   });
 
   it('is split out as a badge piece and labelled', () => {
-    const pieces = openableIn('@task make it faster', { card: () => false }, { cwd: CHECKOUT, home: '' }, { real: () => false });
+    const pieces = openableIn('@task make it faster', { cwd: CHECKOUT, home: '' }, { real: () => false });
     expect(pieces[0]).toEqual<Piece>({ kind: 'reference', ref: 'task', id: '' });
     expect(referenceLabel({ kind: 'task', id: '' })).toBe('New task');
     expect(referenceLabel({ kind: 'task', id: '4', title: null })).toBe('#4');
@@ -201,8 +200,7 @@ describe('@task in a sent message', () => {
     render(
       <MarkdownBody
         mentions={{
-          split: (text) => openableIn(text, { card: () => false }, { cwd: CHECKOUT, home: '' }, { real: () => false }),
-          card: () => null,
+          split: (text) => openableIn(text, { cwd: CHECKOUT, home: '' }, { real: () => false }),
           reference: (kind, id) => <span data-testid={`drawn-${kind}`}>{referenceLabel(kind === 'task' ? { kind, id } : { kind: 'skill', id, name: null })}</span>,
         }}
       >

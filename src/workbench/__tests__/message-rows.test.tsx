@@ -17,7 +17,7 @@ import type { LookableImage } from '@/workbench/protocol';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 import type { TranscriptItem } from '@/workbench/use-session';
 
-const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id };
+const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }] };
 const LOOK = (_image: LookableImage) => {};
 
 /** One message, said by whoever, from wherever. */

@@ -1,10 +1,10 @@
 /**
- * One of Atelier's own things — a card, a chat, a skill, a diff — as the one
+ * One of Atelier's own things — a chat, a skill, a diff, a task — as the one
  * badge it is drawn as wherever it is named.
  *
  * A reference is written into the composer, sent, and read back in the
- * transcript, and the reader must see the same badge at every step: the card's
- * id with its status colour, the chat's name beside its provider's mark, the
+ * transcript, and the reader must see the same badge at every step: the task's
+ * number with its status colour, the chat's name beside its provider's mark, the
  * skill's name beside the skill mark (bw-mi3s.1). So there is one face here,
  * `ReferenceFace`, and two ways of wearing it:
  *
@@ -22,22 +22,20 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { CircleDot, FileDiff, ListChecks, ListPlus, MessageSquare, Sparkles } from 'lucide-react';
+import { FileDiff, ListChecks, ListPlus, MessageSquare, Sparkles } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
-import { addressWith, cardWasPushed } from '@/lib/address';
-import { classesFor } from '@/lib/state-styles';
+import { addressWith } from '@/lib/address';
+import { classesFor, type Tone } from '@/lib/state-styles';
 import { cn } from '@/lib/utils';
-import { FINISHED, UNTOUCHED, WORKING, type BeadStatus } from '@/types';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import type { Brand } from '@/workbench/protocol';
 import { parseDiffId, type DiffReference } from '@/workbench/references';
 
 /** What a badge needs to know to draw one reference. */
 export type Reference =
-  | { kind: 'bead'; id: string; status?: BeadStatus }
   | {
       kind: 'chat';
       id: string;
@@ -74,14 +72,14 @@ export type Reference =
     };
 
 /**
- * A task's status, in the colour of the board state most like it. A blocked
+ * A task's status, in the colour of the state most like it. A blocked
  * task has no such state and is drawn muted.
  */
-const TASK_TONE: Record<string, BeadStatus> = {
-  todo: UNTOUCHED,
-  in_progress: WORKING,
-  done: FINISHED,
-  review: 'inreview',
+const TASK_TONE: Record<string, Tone> = {
+  todo: 'open',
+  in_progress: 'progress',
+  done: 'closed',
+  review: 'review',
   cancelled: 'cancelled',
 };
 
@@ -110,7 +108,6 @@ const SKILL_COLOR = 'border-[#e0a526]/40 bg-[#e0a526]/10 text-[#c98f10] dark:tex
 
 /** The words a badge shows. */
 export function referenceLabel(ref: Reference): string {
-  if (ref.kind === 'bead') return ref.id;
   if (ref.kind === 'chat') return ref.name || 'Chat';
   if (ref.kind === 'diff') {
     if (!ref.diff) return ref.id;
@@ -123,7 +120,6 @@ export function referenceLabel(ref: Reference): string {
 
 /** What the pointer says over it. */
 export function referenceTitle(ref: Reference): string {
-  if (ref.kind === 'bead') return `Open ${ref.id}`;
   if (ref.kind === 'chat') return `Open chat${ref.brand ? ` · ${brandName(ref.brand)}` : ''}`;
   if (ref.kind === 'diff') {
     const what = ref.diff?.commit ? `Commit ${ref.diff.commit.slice(0, 7)}` : 'Uncommitted changes';
@@ -144,7 +140,6 @@ export function referenceTitle(ref: Reference): string {
 const ONE_LINE = 'min-w-0 max-w-full';
 
 function referenceClass(ref: Reference): string {
-  if (ref.kind === 'bead') return cn(ONE_LINE, classesFor(ref.status).badge);
   if (ref.kind === 'chat') return cn(ONE_LINE, ref.brand ? BRAND_COLOR[ref.brand] : classesFor(undefined).badge);
   if (ref.kind === 'diff') return cn(ONE_LINE, DIFF_COLOR);
   if (ref.kind === 'task') return cn(ONE_LINE, classesFor(ref.status ? TASK_TONE[ref.status] : undefined).badge);
@@ -156,7 +151,6 @@ function referenceMarks(ref: Reference): Record<string, string> {
   return {
     'data-reference-kind': ref.kind,
     'data-reference-id': ref.id,
-    ...(ref.kind === 'bead' ? { 'data-bead-id': ref.id, ...(ref.status ? { 'data-bead-status': ref.status } : {}) } : {}),
     ...(ref.kind === 'chat' && ref.brand ? { 'data-brand': ref.brand } : {}),
     ...(ref.kind === 'task' && ref.status ? { 'data-task-status': ref.status } : {}),
   };
@@ -165,9 +159,7 @@ function referenceMarks(ref: Reference): Record<string, string> {
 /** The icon and the words — the inside of every badge. */
 export function ReferenceFace({ reference }: { reference: Reference }) {
   const icon =
-    reference.kind === 'bead' ? (
-      <CircleDot className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-    ) : reference.kind === 'diff' ? (
+    reference.kind === 'diff' ? (
       <FileDiff className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
     ) : reference.kind === 'task' ? (
       reference.id ? (
@@ -229,7 +221,7 @@ export function ReferenceBadge({
   className,
 }: {
   reference: Reference;
-  /** The project the reader is in, which a card is opened in. */
+  /** The project the reader is in, which a diff or a task is opened in. */
   projectId: string | null;
   size?: 'sm' | 'xs';
   testId?: string;
@@ -240,22 +232,16 @@ export function ReferenceBadge({
   const router = useRouter();
   const params = useSearchParams();
   const open = () => {
-    if (reference.kind === 'bead') {
-      // Pushed, and the rest of the address kept: the card opens over what the
-      // reader was reading, and Back closes it again.
-      cardWasPushed();
-      router.push(addressWith(params, { id: projectId, card: reference.id }));
-    } else if (reference.kind === 'diff') {
+    if (reference.kind === 'diff') {
       // Shown beside the chat, or as a tab in Files, by whichever tab is
-      // reading the address (bw-v79ny.1). A card's panel is shut on the way:
-      // the diff is what was asked for.
+      // reading the address (bw-v79ny.1).
       const tab = params.get('tab') === 'files' ? 'files' : 'chat';
-      router.push(addressWith(params, { id: projectId, tab, diff: reference.id, card: null }));
+      router.push(addressWith(params, { id: projectId, tab, diff: reference.id }));
     } else if (reference.kind === 'task') {
       // A bare `@task` names no task yet; there is nothing to open.
-      if (reference.id) router.push(addressWith(params, { id: projectId, tab: 'tasks', card: null }));
+      if (reference.id) router.push(addressWith(params, { id: projectId, tab: 'tasks' }));
     } else if (reference.kind === 'chat') {
-      router.push(addressWith(params, { id: reference.projectId ?? projectId, tab: 'chat', chat: reference.id, card: null }));
+      router.push(addressWith(params, { id: reference.projectId ?? projectId, tab: 'chat', chat: reference.id }));
     } else {
       router.push('/settings?section=library');
     }

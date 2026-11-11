@@ -42,7 +42,6 @@ import { peelLines, type AtelierKind } from "@/workbench/references";
 export interface Mentions {
   /** The text, split into plain words and the things in it that open. */
   split: (text: string) => Piece[];
-  card: (id: string) => ReactNode;
   /**
    * A file named in the words, drawn as the reader wrote it (bw-khe.13).
    *
@@ -60,19 +59,13 @@ export interface Mentions {
     inCode: boolean,
   ) => ReactNode;
   /**
-   * A whole address, when it names a card or a report of this app's own — drawn
-   * as that chip rather than as raw blue text. Nothing, and the address is left
-   * the link it already was (bw-8fh2.2).
-   */
-  link?: (href: string) => ReactNode | null;
-  /**
    * The nth file attached to this message, drawn as the chip the writing box
    * gave it, in the place it was attached. Nothing, and the marker the sender
    * wrote is simply not there to be seen (bw-oamr.4).
    */
   attachment?: (index: number) => ReactNode;
   /**
-   * A card, a chat or a skill named as a reference — `@bead:…`, `@chat:…`,
+   * A chat, a skill, a diff or a task named as a reference — `@chat:…`,
    * `@skill:…` — drawn as the one reference badge (bw-mi3s.1).
    */
   reference?: (kind: AtelierKind, id: string) => ReactNode;
@@ -104,14 +97,11 @@ export function copyWritten(event: ClipboardEvent<HTMLElement>): void {
 
 /** The chip a span the rewriting step marked stands for, or null for an ordinary span. */
 function chipFor(marks: Record<string, string | undefined>, children: ReactNode, mentions: Mentions | undefined): ReactNode | null {
-  const card = marks['data-card-mention'];
-  if (card && mentions) return mentions.card(card);
   const referenced = marks['data-reference-mention'];
   const referencedId = marks['data-reference-id'];
   // A bare `@task` is a reference with an empty id.
   if (referenced && referencedId !== undefined) {
     if (mentions?.reference) return mentions.reference(referenced as AtelierKind, referencedId);
-    if (referenced === 'bead' && mentions) return mentions.card(referencedId);
   }
   const attached = marks['data-attachment-mention'];
   if (attached !== undefined && mentions?.attachment) {
@@ -135,7 +125,7 @@ function chipFor(marks: Record<string, string | undefined>, children: ReactNode,
 const PROSE_CLASSES =
   "prose prose-sm dark:prose-invert max-w-none " +
   // Tighten vertical rhythm: prose-sm defaults are tuned for long-form docs,
-  // not the terse bead fields rendered here.
+  // not the terse fields rendered here.
   "prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 " +
   "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 " +
   "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0 " +
@@ -651,18 +641,9 @@ export function MarkdownBody({
         />
       );
     },
-    // A link leaves for its own tab and cannot reach back into this one —
-    // unless it names something of ours, in which case it is a chip, and
-    // opens where every other chip opens: inside this window.
-    //
-    // Only when the writer gave it no words of their own. A bare address
-    // is machinery the reader never wanted to see; `[read it](…)` is a
-    // sentence somebody wrote, and swapping it for the report's title
-    // threw those words away (bw-8fh2.5).
+    // A link leaves for its own tab and cannot reach back into this one.
     a: ({ node, ...props }) => {
       const href = String(props.href ?? '');
-      const ours = wroteItOut(href, textOf(props.children)) ? mentions?.link?.(href) : null;
-      if (ours) return <>{ours}</>;
       const local = localTarget(href, base);
       if (local) return (
         <FileLinkBadge href={href} target={local}>

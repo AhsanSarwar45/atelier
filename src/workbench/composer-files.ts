@@ -1,11 +1,11 @@
 /**
  * Typing `@` in the composer offers the files of the checkout (bw-gr8y.7), and
- * beside them Atelier's own things: cards, chats and skills (bw-mi3s.4).
+ * beside them Atelier's own things: tasks, chats and skills (bw-mi3s.4).
  *
  * One question per keystroke, `/api/workbench/mention`, answers all four kinds
  * at once from what the server already holds, grouped by kind with the best
- * group first. Typing `@bead:`, `@chat:` or `@skill:` narrows the menu to that
- * kind. Picking a card, chat or skill writes `@kind:id`, which the composer
+ * group first. Typing `@task:`, `@chat:` or `@skill:` narrows the menu to that
+ * kind. Picking a task, chat or skill writes `@kind:id`, which the composer
  * draws at once as the badge the sent message will draw.
  *
  * This is the seam `composer-editor.tsx` left open: a CodeMirror completion
@@ -54,7 +54,7 @@ import {
 import { Prec, StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, keymap, tooltips, type ViewUpdate } from '@codemirror/view';
 import { formatDistanceToNow } from 'date-fns';
-import { AtSign, CircleDot, File, FileDiff, ListChecks, MessageSquare, Sparkles, type LucideIcon } from 'lucide-react';
+import { AtSign, File, FileDiff, ListChecks, MessageSquare, Sparkles, type LucideIcon } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { iconForFile, iconForFolder } from '@/components/file-icon';
@@ -63,7 +63,6 @@ import { diffBadge, referenceBadgeElement, type Reference } from '@/components/r
 import { tabsListVariants, tabsTriggerVariants } from '@/components/ui/tabs';
 import { mention, type FsFoundPath, type MentionOffer, type MentionPlace } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import type { BeadStatus } from '@/types';
 import type { Brand, CommandInfo } from '@/workbench/protocol';
 import { resolvePath } from '@/workbench/paths';
 import { knownReal } from '@/workbench/paths-on-disk';
@@ -119,7 +118,6 @@ function picture(found: FsFoundPath): Node {
 const HEADINGS: Record<MentionOffer['kind'], string> = {
   file: 'Files',
   diff: 'Changes',
-  bead: 'Cards',
   task: 'Tasks',
   chat: 'Chats',
   skill: 'Skills',
@@ -134,9 +132,9 @@ const HEADINGS: Record<MentionOffer['kind'], string> = {
  * and narrows the menu by asking the server for that kind (bw-mydas.1).
  */
 type Scope = 'all' | MentionOffer['kind'];
-const SCOPES: readonly Scope[] = ['all', 'file', 'diff', 'bead', 'task', 'chat', 'skill'];
+const SCOPES: readonly Scope[] = ['all', 'file', 'diff', 'task', 'chat', 'skill'];
 const SCOPE_NAMES: Record<Scope, string> = { all: 'All', ...HEADINGS };
-const TYPED_KIND = /^@(bead|task|chat|skill|diff):/;
+const TYPED_KIND = /^@(task|chat|skill|diff):/;
 
 const setScope = StateEffect.define<Scope>();
 
@@ -199,7 +197,6 @@ const SCOPE_ICONS: Record<Scope, LucideIcon> = {
   all: AtSign,
   file: File,
   diff: FileDiff,
-  bead: CircleDot,
   task: ListChecks,
   chat: MessageSquare,
   skill: Sparkles,
@@ -231,7 +228,7 @@ function hint(keys: string[], says: string): HTMLElement {
  * CodeMirror redraws is appended to the menu, so the foot is moved back under
  * it each time.
  *
- * The head is the app's segmented tabs, the look of the Chat, Board and Files
+ * The head is the app's segmented tabs, the look of the Chat, Tasks and Files
  * switch, one per kind with the picture that kind's badge carries. The foot
  * names the keys, since Tab switching tabs is not something anyone would guess.
  * The menu is marked with the lit tab, so the list's own heading, which only
@@ -330,7 +327,7 @@ function offer(found: FsFoundPath, rank = 0, cwd = ''): Completion {
     type: folderish ? 'folder' : 'file',
     section: { name: HEADINGS.file, rank },
     apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
-      // A file is finished like a card, a chat or a skill: a space after it,
+      // A file is finished like a task, a chat or a skill: a space after it,
       // so what is typed next is not glued to its name (bw-mydas.1). A folder
       // is not finished; see below.
       const insert =
@@ -355,10 +352,9 @@ function offer(found: FsFoundPath, rank = 0, cwd = ''): Completion {
   };
 }
 
-/** What the badge for an offered card, chat or skill draws. */
+/** What the badge for an offered task, chat or skill draws. */
 function referenceOf(found: MentionOffer): Reference {
   const kind = found.kind as AtelierKind;
-  if (kind === 'bead') return { kind, id: found.id, status: found.status as BeadStatus | undefined };
   if (kind === 'diff') return diffBadge(found.id, found.status);
   if (kind === 'task') return { kind, id: found.id, title: found.label, status: found.status };
   if (kind === 'chat') {
@@ -390,17 +386,16 @@ function chatDetail(found: MentionOffer): string {
 }
 
 /**
- * A card, a chat or a skill as a line of the menu: its badge — the very badge
- * picking it writes — and, for a card, its title after it.
+ * A task, a chat or a skill as a line of the menu: its badge — the very badge
+ * picking it writes — and what tells it apart after it.
  */
 function atelierOffer(found: MentionOffer, rank: number): Completion {
   const kind = found.kind as AtelierKind;
   const insert = formatAtelierReference(kind, found.id);
   return {
     label: insert,
-    // A card's badge says only its id, so its title is the line's words. A
-    // chat's and a skill's badge already say their name.
-    displayLabel: kind === 'bead' ? found.label : ' ',
+    // Every badge already says its name.
+    displayLabel: ' ',
     detail: kind === 'skill' || kind === 'diff' || kind === 'task' ? found.detail : kind === 'chat' ? chatDetail(found) : '',
     type: kind,
     section: { name: HEADINGS[kind], rank },
@@ -927,18 +922,9 @@ const menuTheme = EditorView.theme({
     borderTop: '1px solid hsl(var(--border))',
   },
   '.cm-completionLabel': { flexShrink: '0' },
-  // A card's title and a skill's description are sentences, read from their
-  // start: cut at the end, unlike a folder, whose end is the part that tells.
-  '.cm-completion-bead .cm-completionLabel': {
-    flexShrink: '1',
-    minWidth: '0',
-    opacity: '0.7',
-    paddingLeft: '0.25rem',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  '.cm-completion-bead .cm-completionDetail, .cm-completion-chat .cm-completionDetail, .cm-completion-skill .cm-completionDetail, .cm-completion-task .cm-completionDetail, .cm-completion-new-task .cm-completionDetail': {
+  // A skill's description is a sentence, read from its start: cut at the
+  // end, unlike a folder, whose end is the part that tells.
+  '.cm-completion-chat .cm-completionDetail, .cm-completion-skill .cm-completionDetail, .cm-completion-task .cm-completionDetail, .cm-completion-new-task .cm-completionDetail': {
     direction: 'ltr',
     textAlign: 'left',
     marginLeft: '0',

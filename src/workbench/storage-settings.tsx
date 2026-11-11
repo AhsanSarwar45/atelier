@@ -276,7 +276,6 @@ function ChatAges({ usage }: { usage: StorageUsage }) {
 function RulesSection({ projects, onRan }: { projects: Project[]; onRan: () => void }) {
   const [held, setHeld] = useState<StorageRules | null>(null);
   const [draft, setDraft] = useState<StorageRule[]>([]);
-  const [keepLinked, setKeepLinked] = useState(true);
   const [unread, setUnread] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -295,7 +294,6 @@ function RulesSection({ projects, onRan }: { projects: Project[]; onRan: () => v
         if (gone) return;
         setHeld(it);
         setDraft(it.rules);
-        setKeepLinked(it.keepLinked);
       })
       .catch((e) => !gone && setUnread(message(e)));
     return () => {
@@ -303,7 +301,7 @@ function RulesSection({ projects, onRan }: { projects: Project[]; onRan: () => v
     };
   }, [attempt]);
 
-  const dirty = held !== null && (JSON.stringify(held.rules) !== JSON.stringify(draft) || held.keepLinked !== keepLinked);
+  const dirty = held !== null && (JSON.stringify(held.rules) !== JSON.stringify(draft));
   const allValid = draft.every(valid);
   const found = useMemo(() => conflicts(draft), [draft]);
 
@@ -315,13 +313,13 @@ function RulesSection({ projects, onRan }: { projects: Project[]; onRan: () => v
     setCounting(true);
     const timer = window.setTimeout(() => {
       storage
-        .preview(draft, keepLinked)
+        .preview(draft)
         .then((list) => ask === asked.current && setEffects(new Map(list.map((e) => [e.id, e]))))
         .catch(() => ask === asked.current && setEffects(null))
         .finally(() => ask === asked.current && setCounting(false));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [draft, keepLinked, held, allValid]);
+  }, [draft, held, allValid]);
 
   const change = (id: string, patch: Partial<StorageRule>) =>
     setDraft((rules) => rules.map((rule) => (rule.id === id ? { ...rule, ...patch } : rule)));
@@ -333,10 +331,9 @@ function RulesSection({ projects, onRan }: { projects: Project[]; onRan: () => v
     setRefused(null);
     setSaving(true);
     try {
-      const saved = await storage.saveRules(draft, keepLinked);
+      const saved = await storage.saveRules(draft);
       setHeld(saved);
       setDraft(saved.rules);
-      setKeepLinked(saved.keepLinked);
     } catch (e) {
       setRefused(message(e));
     } finally {
@@ -422,13 +419,6 @@ function RulesSection({ projects, onRan }: { projects: Project[]; onRan: () => v
       actions={actions}
       data-testid="storage-rules"
     >
-      <SettingRow
-        label="Keep chats linked to open cards"
-        description="Rules skip a chat while a card it’s linked to is open."
-        htmlFor="storage-keep-linked"
-      >
-        <Switch id="storage-keep-linked" checked={keepLinked} onCheckedChange={setKeepLinked} data-testid="storage-keep-linked" />
-      </SettingRow>
       {draft.length === 0 && (
         <div className="px-4 py-8 text-center" data-testid="storage-rules-empty">
           <div className="text-sm font-medium text-t-secondary">No rules yet</div>
@@ -464,10 +454,7 @@ function RulesSection({ projects, onRan }: { projects: Project[]; onRan: () => v
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => {
-                setDraft(held.rules);
-                setKeepLinked(held.keepLinked);
-              }}
+              onClick={() => setDraft(held.rules)}
               disabled={saving}
             >
               Cancel
@@ -930,11 +917,6 @@ function LargestChats({ ran, projects, onChanged }: { ran: number; projects: Pro
                     </Link>
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="truncate text-xs text-t-muted">{projectName(projects, chat.projectId)}</span>
-                      {chat.kept && (
-                        <Badge variant="info" appearance="light" size="sm" className="shrink-0">
-                          Open card
-                        </Badge>
-                      )}
                       {chat.active && (
                         <Badge variant="success" appearance="light" size="sm" className="shrink-0">
                           Running

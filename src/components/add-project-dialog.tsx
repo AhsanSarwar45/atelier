@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
-import { Folder, FolderSearch, Database } from "lucide-react";
+import { Folder, FolderSearch } from "lucide-react";
 
 import { FolderBrowser } from "@/components/folder-browser";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -16,14 +15,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Picker } from "@/components/ui/picker";
 import { Panel } from "@/components/ui/panel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
-import type { DoltDatabase, ManifestStorage, ProjectManifest } from "@/lib/api";
+import type { ManifestStorage, ProjectManifest } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 
@@ -43,14 +41,12 @@ interface AddProjectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onInitialized?: () => Promise<void> | void;
-  existingProjectNames?: string[];
 }
 
 export function AddProjectDialog({
   open: isOpen,
   onOpenChange,
   onInitialized,
-  existingProjectNames = [],
 }: AddProjectDialogProps) {
   const [projectPath, setProjectPath] = useState<string>("");
   const [projectName, setProjectName] = useState<string>("");
@@ -60,36 +56,12 @@ export function AddProjectDialog({
   const [showNameInput, setShowNameInput] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   const [browserPath, setBrowserPath] = useState("");
-  const [doltDatabases, setDoltDatabases] = useState<DoltDatabase[]>([]);
-  const [doltLoading, setDoltLoading] = useState(false);
   const [manifest, setManifest] = useState<ProjectManifest | null>(null);
   // The project's own instructions, carried from the probe so a folder that
   // already had them keeps them when it is added (bw-a9ln.4).
   const [instructions, setInstructions] = useState('');
-  // Whether this computer has bd. A board it cannot open is not offered
-  // (bw-3tkl.2).
-  const [beadsAvailable, setBeadsAvailable] = useState(true);
   const [storage, setStorage] = useState<ManifestStorage>('personal');
-  const [branches, setBranches] = useState<string[]>([]);
   const { toast } = useToast();
-
-  // Fetch the boards this computer already holds when the dialog opens
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-    setDoltLoading(true);
-    api.dolt.databases()
-      .then((res) => {
-        if (!cancelled) setDoltDatabases(res.databases || []);
-      })
-      .catch(() => {
-        if (!cancelled) setDoltDatabases([]);
-      })
-      .finally(() => {
-        if (!cancelled) setDoltLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [isOpen]);
 
   const resetState = () => {
     setProjectPath("");
@@ -101,7 +73,6 @@ export function AddProjectDialog({
     setIsValidating(false);
     setManifest(null);
     setStorage('personal');
-    setBranches([]);
   };
 
   const handleOpenChange = (open: boolean) => {
@@ -123,20 +94,13 @@ export function AddProjectDialog({
 
     try {
       const cleanPath = path.trim().replace(/[/\\]+$/, "");
-      const [probe, gitBranches] = await Promise.all([
-        api.projects.probe(cleanPath),
-        api.git.branches(cleanPath).catch(() => ({ current: '', branches: [] })),
-      ]);
+      const probe = await api.projects.probe(cleanPath);
 
       setProjectPath(cleanPath);
       setProjectName(probe.manifest.project.display_name);
-      setBeadsAvailable(probe.beadsAvailable !== false);
-      setManifest(probe.beadsAvailable === false
-        ? { ...probe.manifest, project: { ...probe.manifest.project, use_beads: false } }
-        : probe.manifest);
+      setManifest(probe.manifest);
       setStorage(probe.storage ?? 'personal');
       setInstructions(probe.instructions || '');
-      setBranches(gitBranches.branches.map((branch) => branch.name));
       setShowNameInput(true);
       setBrowsing(false);
     } catch (err) {
@@ -150,19 +114,7 @@ export function AddProjectDialog({
     }
   };
 
-  // Filter out databases that are already added as projects
-  const existingNamesLower = existingProjectNames.map((n) => n.toLowerCase());
-  const newDoltDatabases = doltDatabases.filter(
-    (db) => !existingNamesLower.includes(db.project_name.toLowerCase())
-  );
-
-  const handleDoltQuickAdd = (db: DoltDatabase) => {
-    const source = `dolt://${db.name}`;
-    setProjectPath(source);
-    void validateAndProceed(source);
-  };
-
-  const handleBrowseSelect = (path: string, _hasBeads: boolean) => {
+  const handleBrowseSelect = (path: string) => {
     setProjectPath(path);
     setBrowsing(false);
     validateAndProceed(path);
@@ -203,7 +155,7 @@ export function AddProjectDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent shape="sheet" className={cn(browsing || newDoltDatabases.length > 0 ? "sm:max-w-lg" : "sm:max-w-md")}>
+      <DialogContent shape="sheet" className={cn(browsing ? "sm:max-w-lg" : "sm:max-w-md")}>
         <DialogHeader>
           <DialogTitle>Add Project</DialogTitle>
           <DialogDescription>
@@ -215,31 +167,6 @@ export function AddProjectDialog({
 
         {!showNameInput ? (
           <div className="flex flex-col gap-4 py-4">
-            {/* Dolt central server databases */}
-            {!browsing && !doltLoading && newDoltDatabases.length > 0 && (
-              <div className="space-y-2">
-                <label className="flex items-center gap-1.5 text-sm font-medium text-t-secondary">
-                  <Database className="size-3.5" />
-                  Local boards
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {newDoltDatabases.map((db) => (
-                    <Button
-                      key={db.name}
-                      type="button"
-                      variant="outline"
-                      onClick={() => handleDoltQuickAdd(db)}
-                      disabled={isSubmitting}
-                    >
-                      {db.project_name}
-                    </Button>
-                  ))}
-                </div>
-                <p className="text-xs text-t-muted">
-                  Select a board to add.
-                </p>
-              </div>
-            )}
             {browsing ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -337,16 +264,6 @@ export function AddProjectDialog({
                 />
               </div>
               {manifest && (
-                <>
-                  {beadsAvailable && (
-                    <label className="flex items-center gap-2 text-sm text-t-secondary">
-                      <Checkbox
-                        checked={manifest.project.use_beads}
-                        onCheckedChange={(checked) => setManifest({ ...manifest, project: { ...manifest.project, use_beads: checked === true } })}
-                      />
-                      Use task tracking for project work
-                    </label>
-                  )}
                   <div className="space-y-2">
                     <label htmlFor="manifest-storage" className="text-sm font-medium text-t-secondary">Store project settings</label>
                     <Select
@@ -360,41 +277,6 @@ export function AddProjectDialog({
                       </SelectContent>
                     </Select>
                   </div>
-                  {manifest.project.use_beads && (
-                    <>
-                      <div className="space-y-2">
-                        <label htmlFor="issue-prefix" className="text-sm font-medium text-t-secondary">Card ID prefix</label>
-                        <Input id="issue-prefix" value={manifest.beads.issue_id_prefix} onChange={(event) => setManifest({ ...manifest, beads: { ...manifest.beads, issue_id_prefix: event.target.value } })} />
-                      </div>
-                      <div className="space-y-2">
-                        <label htmlFor="completed-branch" className="text-sm font-medium text-t-secondary">Finished work lands on</label>
-                        {/*
-                          A folder with branches picks one of them; a folder
-                          with none (a repository not made yet) has nothing to
-                          pick from, so the name is typed. It was one input
-                          with a browser `<datalist>` under it, which drew the
-                          browser's own list rather than the app's.
-                        */}
-                        {branches.length > 0 ? (
-                          <Picker
-                            label="Finished work lands on"
-                            data-testid="completed-branch"
-                            searchPlaceholder="Find a branch"
-                            value={manifest.git.completed_work_branch}
-                            onChange={(branch) => setManifest({ ...manifest, git: { ...manifest.git, completed_work_branch: branch } })}
-                            choices={[...new Set([...branches, manifest.git.completed_work_branch].filter(Boolean))].map((branch) => ({ value: branch, label: branch }))}
-                          />
-                        ) : (
-                          <Input id="completed-branch" value={manifest.git.completed_work_branch} onChange={(event) => setManifest({ ...manifest, git: { ...manifest.git, completed_work_branch: event.target.value } })} />
-                        )}
-                      </div>
-                      <label className="flex items-center gap-2 text-sm text-t-secondary">
-                        <Checkbox checked={manifest.git.agents_may_merge_completed_work} onCheckedChange={(checked) => setManifest({ ...manifest, git: { ...manifest.git, agents_may_merge_completed_work: checked === true } })} />
-                        Allow agents to merge completed work
-                      </label>
-                    </>
-                  )}
-                </>
               )}
             </div>
             <DialogFooter className="gap-2">

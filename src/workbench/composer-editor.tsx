@@ -229,7 +229,7 @@ class AtelierBadge extends WidgetType {
 /**
  * Where a reference to one of Atelier's things is drawn as a badge: everywhere
  * but at the very end of the line with the caret after it, which is where it is
- * still being typed. `@bead:bw-z` on its way to `@bead:bw-zldt.2` is words until
+ * still being typed. `@chat:ab` on its way to `@chat:abc123` is words until
  * the writer moves on; anywhere else it is one atomic badge, and Backspace takes
  * all of it, the same as a file's.
  */

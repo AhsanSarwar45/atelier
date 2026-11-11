@@ -166,9 +166,8 @@ describe('building a conversation out of its log', () => {
 
   it('keeps nothing from before the record was read again', () => {
     const view = foldAll(aWholeChat(2));
-    // The turn published before the reset is gone, and its card with it.
+    // The turn published before the reset is gone.
     expect(view.items.filter((it) => it.kind === 'note')).toHaveLength(0);
-    expect(view.beads).toEqual(['bw-2uh1']);
   });
 
   it('costs one look over the conversation, not one per event', () => {

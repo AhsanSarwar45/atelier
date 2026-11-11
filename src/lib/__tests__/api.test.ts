@@ -26,119 +26,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('api.beads', () => {
-  describe('create', () => {
-    it('calls POST /api/beads/create with correct body', async () => {
-      const input: api.CreateBeadInput = {
-        path: '/my/project',
-        title: 'Test bead',
-        description: 'A description',
-        issue_type: 'task',
-        priority: 2,
-      };
-
-      mockFetch.mockResolvedValue(mockResponse({ id: 'abc-123' }));
-
-      const result = await api.beads.create(input);
-
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      const [url, options] = mockFetch.mock.calls[0];
-      expect(url).toContain('/api/beads/create');
-      expect(options.method).toBe('POST');
-      expect(JSON.parse(options.body)).toEqual(input);
-      expect(result).toEqual({ id: 'abc-123' });
-    });
-
-    it('includes parent_id when creating a subtask', async () => {
-      const input: api.CreateBeadInput = {
-        path: '/my/project',
-        title: 'Subtask',
-        parent_id: 'parent-456',
-      };
-
-      mockFetch.mockResolvedValue(mockResponse({ id: 'sub-789' }));
-
-      await api.beads.create(input);
-
-      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.parent_id).toBe('parent-456');
-    });
-  });
-
-  describe('update', () => {
-    it('calls PATCH /api/beads/update with correct body', async () => {
-      const updateData = {
-        path: '/my/project',
-        id: 'bead-123',
-        status: 'in_progress',
-      };
-
-      mockFetch.mockResolvedValue(mockResponse({ success: true }));
-
-      const result = await api.beads.update(updateData);
-
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      const [url, options] = mockFetch.mock.calls[0];
-      expect(url).toContain('/api/beads/update');
-      expect(options.method).toBe('PATCH');
-      expect(JSON.parse(options.body)).toEqual(updateData);
-      expect(result).toEqual({ success: true });
-    });
-  });
-
-  describe('read', () => {
-    it('calls GET /api/beads with path query param', async () => {
-      mockFetch.mockResolvedValue(mockResponse({ beads: [] }));
-
-      await api.beads.read('/test/path');
-
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain('/api/beads?path=');
-      expect(url).toContain(encodeURIComponent('/test/path'));
-      expect(url).not.toContain('brief');
-    });
-
-    it('asks for the board brief when told to', async () => {
-      mockFetch.mockResolvedValue(mockResponse({ beads: [{ id: 'a', title: 'A', status: 'open', comment_count: 3 }] }));
-
-      const data = await api.beads.read('/test/path', '2026-09-01T00:00:00Z', { brief: true });
-
-      const url = new URL(mockFetch.mock.calls[0][0], 'http://x');
-      expect(url.searchParams.get('brief')).toBe('1');
-      expect(url.searchParams.get('updated_after')).toBe('2026-09-01T00:00:00Z');
-      expect(data.beads[0].comment_count).toBe(3);
-    });
-  });
-
-  describe('statuses', () => {
-    it('asks for ids and statuses only', async () => {
-      mockFetch.mockResolvedValue(mockResponse({ beads: [{ id: 'a', status: 'open', updated_at: null }], source: 'cli' }));
-
-      const data = await api.beads.statuses('/test/path', '2026-09-01T00:00:00Z');
-
-      const url = new URL(mockFetch.mock.calls[0][0], 'http://x');
-      expect(url.pathname).toBe('/api/beads');
-      expect(url.searchParams.get('ids')).toBe('1');
-      expect(url.searchParams.get('updated_after')).toBe('2026-09-01T00:00:00Z');
-      expect(data.beads).toEqual([{ id: 'a', status: 'open', updated_at: null }]);
-    });
-  });
-
-  describe('card', () => {
-    it('asks for one card whole', async () => {
-      mockFetch.mockResolvedValue(mockResponse({ bead: { id: 'a', title: 'A', status: 'open', notes: 'n' }, source: 'cli' }));
-
-      const data = await api.beads.card('/test/path', 'a');
-
-      const url = new URL(mockFetch.mock.calls[0][0], 'http://x');
-      expect(url.pathname).toBe('/api/beads/card');
-      expect(url.searchParams.get('path')).toBe('/test/path');
-      expect(url.searchParams.get('id')).toBe('a');
-      expect(data.bead.notes).toBe('n');
-    });
-  });
-});
-
 describe('api.version', () => {
   it('calls GET /api/version/check', async () => {
     const versionData: api.VersionCheckResponse = {
@@ -162,24 +49,13 @@ describe('api.version', () => {
 });
 
 describe('nothing about the work is kept by the browser', () => {
-  // The screens are checked with the server on every visit, and that was only
-  // ever half of it: the answers underneath them said nothing, so a browser was
-  // free to draw a board out of a copy it already had, with cards that had
-  // since moved. A board has no name a stale copy could be asked about by — its
-  // address is the same after a card moves as before (bw-8um.3.18).
-  it('asks for a board without keeping it', async () => {
-    mockFetch.mockResolvedValue(mockResponse({ beads: [] }));
+  // The screens are checked with the server on every visit, and the answers
+  // underneath them say so too, so a browser never draws work out of a copy it
+  // already had (bw-8um.3.18).
+  it('asks for the tasks without keeping them', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ projectId: 'p1', tasks: [] }));
 
-    await api.beads.read('/test/path');
-
-    const [, options] = mockFetch.mock.calls[0];
-    expect(options.cache).toBe('no-store');
-  });
-
-  it('says the same on a write as on a read', async () => {
-    mockFetch.mockResolvedValue(mockResponse({ success: true }));
-
-    await api.beads.update({ path: '/test/path', id: 'bead-1', status: 'closed' });
+    await api.tasks.list('p1');
 
     const [, options] = mockFetch.mock.calls[0];
     expect(options.cache).toBe('no-store');
@@ -192,10 +68,7 @@ describe('fetchApi error handling', () => {
       mockResponse({ error: 'Not found' }, 404)
     );
 
-    await expect(api.beads.create({
-      path: '/test',
-      title: 'fail',
-    })).rejects.toThrow('API error: 404 Not found');
+    await expect(api.version.check()).rejects.toThrow('API error: 404 Not found');
   });
 
   it('throws with statusText when no JSON error body', async () => {
@@ -206,9 +79,6 @@ describe('fetchApi error handling', () => {
       json: () => Promise.reject(new Error('no json')),
     } as unknown as Response);
 
-    await expect(api.beads.create({
-      path: '/test',
-      title: 'fail',
-    })).rejects.toThrow('API error: 500 Internal Server Error');
+    await expect(api.version.check()).rejects.toThrow('API error: 500 Internal Server Error');
   });
 });

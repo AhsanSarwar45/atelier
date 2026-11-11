@@ -1,42 +1,21 @@
 /**
- * A card or a report NAMED in a message, turned into something you can click.
+ * What a message names, turned into something you can click: files, and
+ * Atelier's own references (`@chat:…`, `@skill:…`, `@task:…`, `@diff:…`).
  *
- * An agent writes ids and report names into its prose all day — "landed
- * bw-4wcd.2", "the page is chat-interface-work" — and every one of them was
- * dead text: the reader had to copy it, leave the chat, and find it by hand
- * (bw-4wcd.3).
+ * ## Files inside code
  *
- * ## Only things that exist
- *
- * English is full of hyphenated words that have the shape of a card id —
- * `follow-up`, `fast-forward`, `read-only`, `claude-opus` all match it — so
- * shape alone cannot decide. Nothing here becomes a chip unless the caller says
- * that exact id is on the board, or that exact name is a report this project
- * has. A lookup that knows nothing yields no chips and the text is left alone,
- * which is the right thing to draw while the board is still loading.
- *
- * This is a different question from the one `link-rules.ts` answers. That one
- * asks which cards a chat WORKED ON, and deliberately ignores mentions; this
- * one asks what a reader should be able to click, and mentions are the whole of
- * it. A chip here never puts a card on the chat's line.
- *
- * ## Files are the exception to the fenced block
- *
- * A card id inside a command must stay dead text — chipping it would break the
- * command as something to copy. A file named inside a command is the opposite:
- * `cd /home/dev/dev/… && grep …` is exactly where addresses live, and it is
- * the one the reader most wants to open (bw-khe.13). So code and fenced blocks
- * suppress cards and reports, and let files through; what the chip draws is
- * still the reader's own words, so the command still copies as it was written.
+ * A file named inside a command is where addresses live — `cd /home/dev/… &&
+ * grep …` — and it is the one the reader most wants to open (bw-khe.13). So
+ * code and fenced blocks let files through and suppress references; what the
+ * chip draws is still the reader's own words, so the command still copies as
+ * it was written.
  */
-import { OLD_CARD } from '@/lib/address';
 import { askableIn, pathsIn, resolveEach, resolveReal, type OnDisk, type PathPiece, type Rooted } from '@/workbench/paths';
 import { findAtelierReferences, findReferences, formatAtelierReference, formatReference, referenceLabel, type AtelierKind } from '@/workbench/references';
 
 /** One stretch of a message: plain words, or something that opens. */
 export type Piece =
   | { kind: 'text'; text: string }
-  | { kind: 'card'; id: string }
   | { kind: 'reference'; ref: AtelierKind; id: string }
   | { kind: 'attachment'; index: number }
   | PathPiece;
@@ -47,7 +26,7 @@ export type Piece =
  * The writing box shows an attachment as a chip standing in the words; this is
  * how that chip survives sending. The sender writes one of these markers into
  * the message text at the offset the attachment was dropped at, and the same
- * rewriting step that turns a card id into a chip turns this into the same
+ * rewriting step that turns a reference into a chip turns this into the same
  * chip — so it flows with the words instead of breaking the line, and every
  * provider gets it from the one path (bw-oamr.4).
  */
@@ -75,73 +54,26 @@ export function attachmentsIn(text: string, split: (text: string) => Piece[]): P
 }
 
 /**
- * A word made of parts joined by dashes or dots — the shape both a card id and
- * a report's name have. Greedy on purpose: `notes-about-bw-7ks` is one token
- * and not a card, which is what stops a longer word being chipped in the middle.
+ * Everything in a run of text a reader can open: the Atelier references it
+ * writes, and the files it names.
  */
-const TOKEN = /[a-z0-9]+(?:[-.][a-z0-9]+)+/g;
-
-/** A matching token beside one of these is part of a path or a larger name. */
-const EMBEDDING = /[A-Za-z0-9_./\\:@]/;
-
-/** What the caller knows to exist. Either may say no to everything. */
-export interface Existing {
-  card(id: string): boolean;
-}
-
-/**
- * One run of text, split into what it names.
- *
- * Always at least one piece, and a text with nothing in it comes back as
- * itself, so a caller can tell "nothing to do" by the length.
- */
-export function mentionsIn(text: string, existing: Existing): Piece[] {
-  const pieces: Piece[] = [];
-  const scan = new RegExp(TOKEN.source, TOKEN.flags);
-  let from = 0;
-  let m: RegExpExecArray | null;
-
-  while ((m = scan.exec(text)) !== null) {
-    const token = m[0];
-    const before = text[m.index - 1] ?? '';
-    const after = text[m.index + token.length] ?? '';
-    if (EMBEDDING.test(before) || EMBEDDING.test(after)) continue;
-    if (!existing.card(token)) continue;
-    if (m.index > from) pieces.push({ kind: 'text', text: text.slice(from, m.index) });
-    pieces.push({ kind: 'card', id: token });
-    from = m.index + token.length;
-  }
-
-  if (from < text.length || pieces.length === 0) pieces.push({ kind: 'text', text: text.slice(from) });
-  return pieces;
-}
-
-/**
- * Everything in a run of text a reader can open: the cards and reports it
- * names, and the files it names.
- *
- * Cards go first and files fill the gaps, so a token that is both an id on the
- * board and a name on disk opens the card — the board is the thing this app is
- * for, and a card is the rarer coincidence.
- */
-export function openableIn(text: string, existing: Existing, where: Rooted, disk: OnDisk): Piece[] {
-  // An Atelier reference is named on purpose — `@bead:…`, `@chat:…`,
-  // `@skill:…` — so it is a badge whether or not the board has answered yet,
-  // and the rest of the words are read around it (bw-mi3s.1).
+export function openableIn(text: string, where: Rooted, disk: OnDisk): Piece[] {
+  // An Atelier reference is named on purpose — `@chat:…`, `@skill:…` — so it
+  // is a badge, and the rest of the words are read around it (bw-mi3s.1).
   const atelier = findAtelierReferences(text);
-  if (atelier.length === 0) return filesAndCards(text, existing, where, disk);
+  if (atelier.length === 0) return files(text, where, disk);
   const out: Piece[] = [];
   let from = 0;
   for (const ref of atelier) {
-    if (ref.start > from) out.push(...filesAndCards(text.slice(from, ref.start), existing, where, disk));
+    if (ref.start > from) out.push(...files(text.slice(from, ref.start), where, disk));
     out.push({ kind: 'reference', ref: ref.kind, id: ref.id });
     from = ref.end;
   }
-  if (from < text.length) out.push(...filesAndCards(text.slice(from), existing, where, disk));
+  if (from < text.length) out.push(...files(text.slice(from), where, disk));
   return out;
 }
 
-function filesAndCards(text: string, existing: Existing, where: Rooted, disk: OnDisk): Piece[] {
+function files(text: string, where: Rooted, disk: OnDisk): Piece[] {
   const out: Piece[] = [];
   let from = 0;
 
@@ -152,7 +84,7 @@ function filesAndCards(text: string, existing: Existing, where: Rooted, disk: On
   for (const found of findReferences(text)) {
     const absolute = resolveReal(found.path, where, disk);
     if (!absolute) continue;
-    if (found.start > from) pushAll(out, text.slice(from, found.start), existing, where, disk);
+    if (found.start > from) pushAll(out, text.slice(from, found.start), where, disk);
     out.push({
       kind: 'path',
       // Drawn in our own form, without the `@`: whatever shape it was written
@@ -165,22 +97,16 @@ function filesAndCards(text: string, existing: Existing, where: Rooted, disk: On
     });
     from = found.end;
   }
-  if (from < text.length) pushAll(out, text.slice(from), existing, where, disk);
+  if (from < text.length) pushAll(out, text.slice(from), where, disk);
 
   return out.length > 0 ? out : [{ kind: 'text', text }];
 }
 
-/** The cards and the bare paths of one run of words, added to what is there. */
-function pushAll(out: Piece[], text: string, existing: Existing, where: Rooted, disk: OnDisk): void {
-  for (const piece of mentionsIn(text, existing)) {
-    if (piece.kind !== 'text') {
-      out.push(piece);
-      continue;
-    }
-    for (const part of pathsIn(piece.text, where, disk)) {
-      if (part.kind === 'text' && part.text === '') continue;
-      out.push(part);
-    }
+/** The bare paths of one run of words, added to what is there. */
+function pushAll(out: Piece[], text: string, where: Rooted, disk: OnDisk): void {
+  for (const part of pathsIn(text, where, disk)) {
+    if (part.kind === 'text' && part.text === '') continue;
+    out.push(part);
   }
 }
 
@@ -195,76 +121,6 @@ export function openableAsks(text: string, where: Rooted): string[] {
     for (const absolute of resolveEach(found.path, where)) out.add(absolute);
   }
   return Array.from(out);
-}
-
-/* ------------------------------------------------------------------ *
- * A name written out as a whole address.
- * ------------------------------------------------------------------ */
-
-/**
- * What an address of this app's own names.
- *
- * `project` is the project the address itself asks for, which is not always the
- * one the reader is standing in: an agent hands over a card by its whole
- * address, and card ids repeat across boards. Null when the address names no
- * project — one written inside the app, which can only mean this one.
- */
-export type Addressed = { project: string | null; kind: 'card'; id: string };
-
-/**
- * The machine an address has to be on to be one of ours.
- *
- * This app is served from the reader's own computer and nowhere else, so an
- * address on any other machine is somebody else's however much its shape
- * matches. Without this, `https://example.com/project?card=bw-1u1` was drawn as
- * a chip and clicking it navigated INSIDE this window to a card that merely
- * shares an id — an outbound link silently swallowed (bw-8fh2.4).
- *
- * The port is deliberately not part of it: a report is written by an agent
- * against one copy of the app and read against another — the installed one on
- * 3008, a preview on some other port — and both are the same reader's own
- * machine. What the address names is then checked against the project the
- * reader is actually in, so two copies on one machine cannot trade an id
- * either (bw-8fh2.8).
- *
- * An IPv6 address is spelled bracketed and only bracketed: `hostname` hands
- * back `[::1]`, never the bare form, so there is no second spelling to list.
- */
-const HERE = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
-
-/** The base for an address written relative: a link made inside the app is `/project?…`. */
-const NO_HOST = 'http://localhost';
-
-/**
- * The card or report an address names, or nothing.
- *
- * An agent that has just written a report hands it over the way it would hand it
- * to somebody outside the app: the whole address, port and all. In prose that
- * becomes a link before anything here sees it, and a link is the one place a
- * mention is never looked for — so the thing in a message the reader most wants
- * to open was the one thing drawn as raw blue text (bw-8fh2.2).
- *
- * Three things have to hold: the address is on this machine, its screen is
- * `/project`, and it carries a `report` or a `card`. Whether the thing it names
- * exists — and whether the project it asks for is the one the reader is in —
- * is the caller's question, the same as it is for a bare name.
- */
-export function addressedBy(href: string): Addressed | null {
-  let url: URL;
-  try {
-    url = new URL(href, NO_HOST);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-  if (!HERE.has(url.hostname)) return null;
-  if (!/(^|\/)project\/?$/.test(url.pathname)) return null;
-  // A card wins a tie: its panel is drawn OVER whichever tab the address asks
-  // for, so it is what the reader would land on.
-  const project = url.searchParams.get('id');
-  const card = url.searchParams.get('card') ?? url.searchParams.get(OLD_CARD);
-  if (card) return { kind: 'card', id: card, project };
-  return null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -285,8 +141,8 @@ interface HastNode {
 const NOT_PROSE = new Set(['a']);
 
 /**
- * Where a card id is not a mention but a file still is: inside code, fenced or
- * inline. Chipping a card id inside a command would break the command as
+ * Where a reference is not a mention but a file still is: inside code, fenced
+ * or inline. Chipping a reference inside a command would break the command as
  * something to copy, and a badge of any kind inside code breaks the code as
  * something to read across — the owner's rule is that nothing inside code is
  * turned into a badge, anywhere (bw-lolf.1).
@@ -402,26 +258,17 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>, inCode: boolean): HastN
       children: [{ type: 'text', value: piece.raw }],
     };
   }
-  if (piece.kind === 'reference') {
-    return {
-      type: 'element',
-      tagName: 'span',
-      properties: { 'data-reference-mention': piece.ref, 'data-reference-id': piece.id, 'data-copy': formatAtelierReference(piece.ref, piece.id) },
-      // A bare `@task` has no id to stand in for it.
-      children: [{ type: 'text', value: piece.id || formatAtelierReference(piece.ref, piece.id) }],
-    };
-  }
-  const name = piece.id;
   return {
     type: 'element',
     tagName: 'span',
-    properties: { 'data-card-mention': name, 'data-copy': name },
-    children: [{ type: 'text', value: name }],
+    properties: { 'data-reference-mention': piece.ref, 'data-reference-id': piece.id, 'data-copy': formatAtelierReference(piece.ref, piece.id) },
+    // A bare `@task` has no id to stand in for it.
+    children: [{ type: 'text', value: piece.id || formatAtelierReference(piece.ref, piece.id) }],
   };
 }
 
 /**
- * The same split with the cards and reports put back into the words they came
+ * The same split with the references put back into the words they came
  * from, for the inside of a command, where only a file opens.
  */
 function filesFrom(pieces: Piece[]): Piece[] {
@@ -431,7 +278,7 @@ function filesFrom(pieces: Piece[]): Piece[] {
       out.push(piece);
       continue;
     }
-    const text = piece.kind === 'text' ? piece.text : piece.kind === 'reference' ? `@${piece.ref}:${piece.id}` : piece.id;
+    const text = piece.kind === 'text' ? piece.text : formatAtelierReference(piece.ref, piece.id);
     const last = out[out.length - 1];
     if (last && last.kind === 'text') out[out.length - 1] = { kind: 'text', text: last.text + text };
     else out.push({ kind: 'text', text });

@@ -22,8 +22,7 @@ const ALL: OnDisk = { real: () => true };
 const NONE: OnDisk = { real: () => false };
 
 const mentions = (disk: OnDisk): Mentions => ({
-  split: (text) => openableIn(text, { card: () => false }, WHERE, disk),
-  card: (id) => <span>{id}</span>,
+  split: (text) => openableIn(text, WHERE, disk),
   path: (absolute, raw, line, endLine) => (
     <PathChip absolute={absolute} raw={raw} line={line} endLine={endLine} look="badge" />
   ),

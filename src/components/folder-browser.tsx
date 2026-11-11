@@ -20,12 +20,8 @@ import { cn } from "@/lib/utils";
 interface FolderBrowserProps {
   currentPath: string;
   onPathChange: (path: string) => void;
-  onSelectPath: (path: string, hasBeads: boolean) => void;
+  onSelectPath: (path: string) => void;
   className?: string;
-}
-
-interface DirectoryEntry extends FsEntry {
-  hasBeads: boolean;
 }
 
 /** Check if a path looks like a Windows drive root (e.g. "C:\") */
@@ -84,13 +80,12 @@ export function FolderBrowser({
   onSelectPath,
   className,
 }: FolderBrowserProps) {
-  const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
+  const [directories, setDirectories] = useState<FsEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Bumped by Try again, which is all a re-read of the same folder needs. */
   const [attempt, setAttempt] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
-  const [currentPathHasBeads, setCurrentPathHasBeads] = useState(false);
   const [homeDir, setHomeDir] = useState<string>("");
   const [driveRoots, setDriveRoots] = useState<string[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
@@ -130,39 +125,10 @@ export function FolderBrowser({
       setSelectedIndex(-1);
 
       try {
-        const cleanPath = currentPath.replace(/[/\\]+$/, "") || currentPath;
-        // Fetch directory contents and check if current path has beads in parallel
-        const [listResult, currentBeadsResult] = await Promise.all([
-          api.fs.list(currentPath),
-          api.fs.exists(`${cleanPath}/.beads`),
-        ]);
-
-        // Filter to only directories
+        const listResult = await api.fs.list(currentPath);
         const dirs = listResult.entries.filter((entry) => entry.isDirectory);
-
-        // Check which directories have .beads folders in parallel
-        // Some system dirs (e.g. "System Volume Information") may return 403 — ignore those
-        const dirsWithBeadsStatus = await Promise.all(
-          dirs.map(async (dir) => {
-            try {
-              const beadsPath = `${dir.path}/.beads`;
-              const result = await api.fs.exists(beadsPath);
-              return { ...dir, hasBeads: result.exists };
-            } catch {
-              return { ...dir, hasBeads: false };
-            }
-          })
-        );
-
-        // Sort: directories with .beads first, then alphabetically
-        dirsWithBeadsStatus.sort((a, b) => {
-          if (a.hasBeads && !b.hasBeads) return -1;
-          if (!a.hasBeads && b.hasBeads) return 1;
-          return a.name.localeCompare(b.name);
-        });
-
-        setDirectories(dirsWithBeadsStatus);
-        setCurrentPathHasBeads(currentBeadsResult.exists);
+        dirs.sort((a, b) => a.name.localeCompare(b.name));
+        setDirectories(dirs);
       } catch (err) {
         console.error("Error loading directories:", err);
         setError(err instanceof Error ? err.message : "Failed to load directories");
@@ -226,8 +192,8 @@ export function FolderBrowser({
   );
 
   const handleSelect = useCallback(() => {
-    onSelectPath(currentPath, currentPathHasBeads);
-  }, [currentPath, currentPathHasBeads, onSelectPath]);
+    onSelectPath(currentPath);
+  }, [currentPath, onSelectPath]);
 
   return (
     <div
@@ -309,18 +275,6 @@ export function FolderBrowser({
         })}
       </Panel>
 
-      {/* Current path beads indicator */}
-      {currentPathHasBeads && (
-        <Panel tone="info" className="flex items-center gap-2">
-          <Badge variant="info" size="sm">
-            .beads found
-          </Badge>
-          <span className="text-xs text-t-tertiary">
-            This folder holds a tracked project
-          </span>
-        </Panel>
-      )}
-
       {/* Directory list */}
       <ScrollArea className={cn(panelVariants({ inset: 'none' }), "h-[300px]")}>
         <div ref={listRef} className="p-2" role="listbox" aria-label="Directories">
@@ -353,24 +307,14 @@ export function FolderBrowser({
                 aria-selected={selectedIndex === index}
                 onClick={() => setSelectedIndex(index)}
                 onDoubleClick={() => navigateToDirectory(dir.path)}
-                className={cn("text-sm", dir.hasBeads && "border-l-2 border-info")}
+                className="text-sm"
               >
                 {selectedIndex === index ? (
                   <FolderOpen className="size-4 shrink-0 text-t-tertiary" />
                 ) : (
-                  <Folder
-                    className={cn(
-                      "size-4 shrink-0",
-                      dir.hasBeads ? "text-info" : "text-t-tertiary"
-                    )}
-                  />
+                  <Folder className="size-4 shrink-0 text-t-tertiary" />
                 )}
                 <span className="truncate">{dir.name}</span>
-                {dir.hasBeads && (
-                  <Badge variant="info" size="xs" className="ml-auto shrink-0">
-                    .beads
-                  </Badge>
-                )}
               </Row>
             ))
           )}

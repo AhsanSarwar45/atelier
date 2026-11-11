@@ -49,7 +49,6 @@ function rail(over: { view?: RailView; views?: readonly RailView[]; onPickView?:
   return render(
     <ChatRightRail
       projectId="a-project"
-      cards={[]}
       agents={[]}
       items={[]}
       sessionId="chat-1"

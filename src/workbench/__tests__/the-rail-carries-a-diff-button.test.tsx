@@ -52,7 +52,6 @@ function railOnGit(over: { diffOpen?: boolean; onFlipDiff?: () => void } = {}) {
   return render(
     <ChatRightRail
       projectId="a-project"
-      cards={[]}
       agents={[]}
       items={[]}
       sessionId="chat-1"

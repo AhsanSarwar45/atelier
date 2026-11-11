@@ -83,7 +83,6 @@ async function panel(status: Partial<GitStatus> = {}) {
   render(
     <ChatRightRail
       projectId="a-project"
-      cards={[]}
       agents={[]}
       items={[]}
       sessionId="chat-1"

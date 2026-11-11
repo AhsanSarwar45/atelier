@@ -28,7 +28,6 @@ const chat: RestoreRow = {
   cwdHint: '/project',
   folder: 'project',
   branch: 'main',
-  beads: [],
 };
 
 let commands: Record<string, unknown>[];

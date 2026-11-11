@@ -14,7 +14,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { ArrowDown, ArrowUp, CheckCheck, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
 
-import { BeadChip } from '@/components/bead-chip-row';
 import { ReferenceBadge } from '@/components/reference-badge';
 import { type Mentions } from '@/components/markdown-body';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
@@ -41,7 +40,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { useShutOnNavigation } from '@/hooks/use-shut-on-navigation';
 import { addressWith } from '@/lib/address';
-import { hueFor } from '@/lib/bead-labels';
+import { hueFor } from '@/lib/hue';
 import { cn } from '@/lib/utils';
 import { isPhoneScreen, usePhoneScreen } from '@/lib/screen-width';
 import { ChatRightRail, useGitDiff, useGitPanel, useLeftRail, useRightRail, type RailView } from '@/workbench/chat-right-rail';
@@ -66,11 +65,10 @@ import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import type { SentAway } from '@/workbench/fold';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { GitDiffView, type DiffFocus } from '@/workbench/git-diff-view';
-import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { currentProviderMessages } from '@/workbench/provider-messages';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
-import { addressedBy, openableAsks, openableIn } from '@/workbench/mentions';
+import { openableAsks, openableIn } from '@/workbench/mentions';
 import { loadNewChatDefaults, NO_DEFAULTS, saveNewChatProfile, saveNewChatProvider, type NewChatDefaults } from '@/workbench/new-chat-defaults';
 import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
@@ -1206,18 +1204,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   );
   // A follow-up's "Create task" writes into this chat's composer.
   const prefillComposer = useCallback((line: string) => { if (sessionId) prefillChat(sessionId, line); }, [sessionId]);
-  // What the board knows plus what this chat has been seen doing since.
-  const cards = useMemo(
-    () => Array.from(new Set([...(facts?.beads ?? []), ...view.beads])),
-    [facts?.beads, view.beads],
-  );
-  // A card the agent NAMED in its own words opens from where it is
-  // written. Only ones that exist: English is full of hyphenated words shaped
-  // like a card id, so the board's own list and the reports this project has
-  // is what decides (bw-4wcd.3, src/workbench/mentions.ts).
-  const knownCards = useKnownCards(projectPath);
-  const knownCardStatuses = useKnownCardStatuses(projectPath);
-
   // A file the agent named opens from where it is written, the same way. Only
   // ones that are really there: `and/or` and `24/7` are shaped like addresses
   // too, so disk is what decides (bw-khe.13, src/workbench/paths.ts). What a
@@ -1237,7 +1223,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // the facts that say where the chat is arrive after that, so the menu is
   // handed a way to ask rather than an answer.
   //
-  // The same menu offers the project's cards, every chat and the library's
+  // The same menu offers the project's tasks, every chat and the library's
   // skills beside the files (bw-mi3s.4), so it is told the project and the chat
   // asking as well.
   const searchIn = useRef<MentionPlace>({ cwd: where.cwd, project: projectPath, projectId, session: sessionId });
@@ -1270,46 +1256,24 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     if (asking.size > 0) askDisk(Array.from(asking));
   }, [view.items, where, askDisk]);
 
-  // A card, a chat or a skill named as a reference is the one reference badge,
-  // here and in the box it was written in (bw-mi3s.1).
-  const describe = useDescribeReference(knownCardStatuses, view.menu.commands);
+  // A chat, a skill, a diff or a task named as a reference is the one
+  // reference badge, here and in the box it was written in (bw-mi3s.1).
+  const describe = useDescribeReference(view.menu.commands);
   const mentions = useMemo<Mentions>(() => {
-    const card = (id: string) => (
-      <BeadChip id={id} projectId={projectId} status={knownCardStatuses.get(id)} size="sm" testId="mention-card" className="mx-0.5" />
+    const reference = (kind: AtelierKind, id: string) => (
+      <ReferenceBadge reference={describe(kind, id)} projectId={projectId} testId={`mention-${kind}`} className="mx-0.5" />
     );
-    const reference = (kind: AtelierKind, id: string) =>
-      kind === 'bead' ? card(id) : (
-        <ReferenceBadge reference={describe(kind, id)} projectId={projectId} testId={`mention-${kind}`} className="mx-0.5" />
-      );
     return {
-      split: (text) =>
-        openableIn(
-          text,
-          { card: (id) => knownCards.has(id) },
-          where,
-          disk,
-        ),
+      split: (text) => openableIn(text, where, disk),
       // A badge in the words, the plain link inside code (bw-lolf.1).
       path: (absolute, raw, line, endLine, inCode) => (
         <PathChip absolute={absolute} raw={raw} line={line} endLine={endLine} look={inCode ? 'link' : 'badge'} />
       ),
-      card,
       reference,
-      //
-      // An address that asks for a DIFFERENT project stays a link too, however
-      // familiar its id looks: card ids repeat across boards, and a chip drawn
-      // here would open this project's card of the same id and say nothing
-      // about having gone somewhere else (bw-8fh2.8).
-      link: (href) => {
-        const named = addressedBy(href);
-        if (!named) return null;
-        if (named.project && named.project !== projectId) return null;
-        return knownCards.has(named.id) ? card(named.id) : null;
-      },
     };
-  }, [knownCards, knownCardStatuses, projectId, where, disk, describe]);
+  }, [projectId, where, disk, describe]);
   // Both are held against THIS chat's id, out where the tab bar cannot reach
-  // them: leaving the chat for the board takes this whole screen down, and
+  // them: leaving the chat for another tab takes this whole screen down, and
   // switching chats does not take it down at all (src/workbench/drafts.ts).
   const chatId = sessionId ?? '';
   /**
@@ -1786,7 +1750,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const elsewhere = useRunningElsewhere();
   const elsewhereAt = useRunningSaidAt();
   // The stream first: it is already connected when a chat is opened, while the
-  // chat's own facts are a board query away and the box must refuse from the
+  // chat's own facts are a query away and the box must refuse from the
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessionWhere((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
@@ -2622,7 +2586,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           )}
           <ChatRightRail
             projectId={projectId}
-            cards={cards}
             agents={view.agents}
             finishedAgentCount={view.finishedAgentCount}
             items={railItems}
@@ -2651,7 +2614,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </>
       )}
     </>
-  ), [cards, changeRightWidth, detailsId, diffOpen, facts, flipRight, gitOpen, leftOpen, leftWidth, openCommit, pickView, projectId, projectPath, resizingRight, rightOpen, rightWidth, sessionId, showCommitInDiff, showFileInDiff, showTheDiff, showWorkingTreeInDiff, view.agents, view.finishedAgentCount, railItems, view.menu.agentControls, selectAgent]);
+  ), [changeRightWidth, detailsId, diffOpen, facts, flipRight, gitOpen, leftOpen, leftWidth, openCommit, pickView, projectId, projectPath, resizingRight, rightOpen, rightWidth, sessionId, showCommitInDiff, showFileInDiff, showTheDiff, showWorkingTreeInDiff, view.agents, view.finishedAgentCount, railItems, view.menu.agentControls, selectAgent]);
 
   const statusLine = useMemo(() => (
     <>

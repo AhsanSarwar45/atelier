@@ -12,13 +12,12 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 
 import { useRouter } from 'next/navigation';
 
-import { Archive, ArchiveRestore, FolderSearch, GitBranch, NotebookPen, Save, ScrollText, Settings2, ShieldCheck, Tag, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, FolderSearch, NotebookPen, Save, ScrollText, Settings2, Tag, Trash2 } from 'lucide-react';
 
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
 import { SharedLibrary } from '@/components/settings/shared-library';
 import { DetailHeader, StateDot } from '@/components/settings/library-list';
 import { FolderBrowser } from '@/components/folder-browser';
-import { BranchSelect, BranchesPicker } from '@/components/settings/branch-picker';
 import { ChatNameEditor } from '@/components/settings/chat-name-editor';
 import { ExtensionsPanel } from '@/components/settings/extensions-panel';
 import { AccountPicker, useProfiles } from '@/components/settings/account-picker';
@@ -39,7 +38,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -53,22 +51,12 @@ import { readNewChatDefaults } from '@/workbench/new-chat-defaults';
 
 export const PROJECT_SETTINGS_SECTIONS: SettingsSectionDef[] = [
   { id: 'project', label: 'Project', hint: 'Name, folder', icon: <Settings2 /> },
-  { id: 'workflow', label: 'Workflow', hint: 'Cards, branches', icon: <GitBranch /> },
-  { id: 'review', label: 'Review', hint: 'Checks', icon: <ShieldCheck /> },
   { id: 'library', label: 'Agent guidance', hint: 'Instructions, skills, commands', icon: <NotebookPen /> },
   { id: 'chat-names', label: 'Chat names', hint: 'Template', icon: <Tag /> },
   { id: 'claude', label: 'Claude Code', hint: 'Project settings', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Project settings', icon: <BrandIcon brand="codex" /> },
   { id: 'files', label: 'Agent files', hint: 'Project settings', icon: <ScrollText /> },
 ];
-
-const commaList = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
-
-const verificationLines = (value: string): ProjectManifest['verification']['commands'] =>
-  value.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [name = '', command = '', paths = ''] = line.split('|').map((part) => part.trim());
-    return { name, command, paths: commaList(paths) };
-  });
 
 export interface ProjectSettingsScreenProps {
   projectId: string;
@@ -164,8 +152,7 @@ export function ProjectSettingsScreen({
   const { toast } = useToast();
   const [name, setName] = useState(projectName);
   const [path, setPath] = useState(projectPath);
-  const [localPath, setLocalPath] = useState(projectLocalPath || '');
-  const [browsing, setBrowsing] = useState<'path' | 'localPath' | null>(null);
+  const [browsing, setBrowsing] = useState<'path' | null>(null);
   const [browserPath, setBrowserPath] = useState('');
   const [saving, setSaving] = useState(false);
   const [askingDelete, setAskingDelete] = useState(false);
@@ -173,22 +160,17 @@ export function ProjectSettingsScreen({
   const [instructions, setInstructions] = useState('');
   const [savedInstructions, setSavedInstructions] = useState('');
   const [saved, setSaved] = useState<string>('');
-  const [beadsAvailable, setBeadsAvailable] = useState(true);
   const [storage, setStorage] = useState<ManifestStorage>('personal');
   const [storedAs, setStoredAs] = useState<ManifestStorage>('personal');
-  const [branches, setBranches] = useState<string[]>([]);
   const [claudeLayer, setClaudeLayer] = useState<Layer>('project');
-  const isDolt = projectPath.startsWith('dolt://');
   const folder = projectLocalPath || projectPath;
 
   useEffect(() => {
     setName(projectName);
     setPath(projectPath);
-    setLocalPath(projectLocalPath || '');
     api.projects
       .settings(projectId)
       .then((answer) => {
-        setBeadsAvailable(answer.beadsAvailable !== false);
         setManifest(answer.manifest);
         setSaved(JSON.stringify(answer.manifest));
         setInstructions(answer.instructions || '');
@@ -197,15 +179,11 @@ export function ProjectSettingsScreen({
         setStoredAs(answer.storage);
       })
       .catch(() => setManifest(null));
-    if (!folder.startsWith('dolt://')) {
-      api.git.branches(folder).then((answer) => setBranches(answer.branches.map((b) => b.name))).catch(() => setBranches([]));
-    }
-  }, [projectId, projectName, projectPath, projectLocalPath, folder]);
+  }, [projectId, projectName, projectPath]);
 
   const dirty =
     name.trim() !== projectName ||
     path.trim() !== projectPath ||
-    localPath.trim() !== (projectLocalPath || '') ||
     storage !== storedAs ||
     instructions !== savedInstructions ||
     (manifest !== null && JSON.stringify(manifest) !== saved);
@@ -213,7 +191,6 @@ export function ProjectSettingsScreen({
   const save = useCallback(async () => {
     const trimmedName = name.trim();
     const trimmedPath = path.trim().replace(/\\/g, '/');
-    const trimmedLocalPath = localPath.trim().replace(/\\/g, '/');
     if (!trimmedName) {
       toast({ title: 'Enter a project name', variant: 'destructive' });
       return;
@@ -234,7 +211,6 @@ export function ProjectSettingsScreen({
         id: projectId,
         ...(trimmedName !== projectName && { name: trimmedName }),
         ...(trimmedPath !== projectPath && { path: trimmedPath }),
-        ...(trimmedLocalPath !== (projectLocalPath || '') && { localPath: trimmedLocalPath || undefined }),
       });
       toast({ title: 'Saved' });
       onUpdated();
@@ -243,7 +219,7 @@ export function ProjectSettingsScreen({
     } finally {
       setSaving(false);
     }
-  }, [name, path, localPath, manifest, instructions, storage, projectId, projectName, projectPath, projectLocalPath, toast, onUpdated]);
+  }, [name, path, manifest, instructions, storage, projectId, projectName, projectPath, toast, onUpdated]);
 
   const leave = useCallback(
     async (act: () => Promise<void>, done: string) => {
@@ -271,10 +247,13 @@ export function ProjectSettingsScreen({
       return parts.length ? { ...rest, chat_name: { parts } } : rest;
     });
 
-  const open = section === 'instructions' ? 'library' : section ?? 'project';
+  // `workflow` and `review` held the retired board's settings; an old link to
+  // either opens the project section, where the summary they shared now lives.
+  const shown = section === 'instructions' ? 'library' : section === 'workflow' || section === 'review' ? 'project' : section;
+  const open = shown ?? 'project';
   const projectScope: Scope = useMemo(() => ({ kind: 'project', projectPath: folder }), [folder]);
 
-  const pathField = (label: string, id: string, value: string, onChange: (v: string) => void, key: 'path' | 'localPath') => (
+  const pathField = (label: string, id: string, value: string, onChange: (v: string) => void, key: 'path') => (
     <SettingRow label={label} htmlFor={id} stack>
       {browsing === key ? (
         <div className="w-full space-y-2">
@@ -362,7 +341,7 @@ export function ProjectSettingsScreen({
       backHref={backHref}
       backSteps={backSteps}
       sections={PROJECT_SETTINGS_SECTIONS}
-      section={section === 'instructions' ? 'library' : section}
+      section={shown}
       onOpen={onOpen}
       wide={open === 'library'}
       fill={open === 'files'}
@@ -374,15 +353,11 @@ export function ProjectSettingsScreen({
             <SettingRow label="Name" htmlFor="settings-name">
               <Input id="settings-name" value={name} onChange={(e) => setName(e.target.value)} className="w-full sm:w-72" />
             </SettingRow>
-            {isDolt ? (
-              <>
-                <SettingRow label="Dolt source" htmlFor="settings-dolt-source">
-                  <Input id="settings-dolt-source" value={path} onChange={(e) => setPath(e.target.value)} className="w-full font-mono text-xs sm:w-72" />
-                </SettingRow>
-                {pathField('Local folder', 'settings-local-path', localPath, setLocalPath, 'localPath')}
-              </>
-            ) : (
-              pathField('Folder', 'settings-path', path, setPath, 'path')
+            {pathField('Folder', 'settings-path', path, setPath, 'path')}
+            {manifest && (
+              <SettingRow label="Summary" htmlFor="settings-summary" stack>
+                <Input id="settings-summary" aria-label="Project summary" value={manifest.project.summary} onChange={(e) => patch('project', { summary: e.target.value })} />
+              </SettingRow>
             )}
             {manifest && (
               <SettingRow label="Settings kept" htmlFor="settings-storage">
@@ -392,9 +367,7 @@ export function ProjectSettingsScreen({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="personal">On this computer</SelectItem>
-                    <SelectItem value="repository" disabled={isDolt && !localPath}>
-                      In the repository
-                    </SelectItem>
+                    <SelectItem value="repository">In the repository</SelectItem>
                   </SelectContent>
                 </Select>
               </SettingRow>
@@ -412,7 +385,7 @@ export function ProjectSettingsScreen({
                 </Button>
               )}
             </SettingRow>
-            <SettingRow label="Delete" description="From the list only; files and cards stay">
+            <SettingRow label="Delete" description="From the list only; files stay">
               <Button
                 variant="destructive"
                 size="sm"
@@ -423,7 +396,7 @@ export function ProjectSettingsScreen({
               <AlertDialog open={askingDelete} onOpenChange={setAskingDelete}>
                 <AlertDialogContent>
                   <AlertDialogTitle>Remove this project from the list?</AlertDialogTitle>
-                  <AlertDialogDescription>Its cards and files are not touched.</AlertDialogDescription>
+                  <AlertDialogDescription>Its files are not touched.</AlertDialogDescription>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
                     <AlertDialogAction onClick={() => void leave(() => api.projects.delete(projectId), 'Removed')}>
@@ -437,62 +410,6 @@ export function ProjectSettingsScreen({
         </>
       )}
 
-      {open === 'workflow' && manifest && (
-        <SettingsGroup>
-          <SettingRow label="Summary" htmlFor="settings-summary" stack>
-            <Input id="settings-summary" aria-label="Project summary" value={manifest.project.summary} onChange={(e) => patch('project', { summary: e.target.value })} />
-          </SettingRow>
-          {beadsAvailable && (
-            <SettingRow label="Track work as cards" htmlFor="settings-use-beads">
-              <Checkbox id="settings-use-beads" aria-label="Use task tracking for project work" checked={manifest.project.use_beads} onCheckedChange={(c) => patch('project', { use_beads: c === true })} />
-            </SettingRow>
-          )}
-          {beadsAvailable && manifest.project.use_beads && (
-            <>
-              <SettingRow label="Card prefix" htmlFor="settings-prefix">
-                <Input id="settings-prefix" value={manifest.beads.issue_id_prefix} onChange={(e) => patch('beads', { issue_id_prefix: e.target.value })} className="w-40 font-mono text-xs" />
-              </SettingRow>
-              <SettingRow label="Work areas" htmlFor="settings-areas" description="Comma separated">
-                <Input id="settings-areas" value={manifest.beads.work_areas.join(', ')} onChange={(e) => patch('beads', { work_areas: commaList(e.target.value) })} className="w-full sm:w-72" />
-              </SettingRow>
-              <SettingRow label="Merge into" htmlFor="settings-branch">
-                <BranchSelect id="settings-branch" value={manifest.git.completed_work_branch} branches={branches} onChange={(name) => patch('git', { completed_work_branch: name })} testid="settings-branch" />
-              </SettingRow>
-              <SettingRow label="Agents may merge" htmlFor="settings-merge">
-                <Checkbox id="settings-merge" checked={manifest.git.agents_may_merge_completed_work} onCheckedChange={(c) => patch('git', { agents_may_merge_completed_work: c === true })} />
-              </SettingRow>
-              <SettingRow label="Protected branches" htmlFor="settings-protected">
-                <BranchesPicker id="settings-protected" value={manifest.git.protected_branches} branches={branches} onChange={(names) => patch('git', { protected_branches: names })} testid="settings-protected" />
-              </SettingRow>
-            </>
-          )}
-          <SettingRow label="Delivery projects" htmlFor="settings-delivery" description="Comma separated">
-            <Input id="settings-delivery" value={manifest.cross_project.delivery_projects.join(', ')} onChange={(e) => patch('cross_project', { delivery_projects: commaList(e.target.value) })} className="w-full sm:w-72" />
-          </SettingRow>
-        </SettingsGroup>
-      )}
-
-      {open === 'review' && manifest && (
-        <SettingsGroup>
-          <SettingRow label="External review" htmlFor="settings-review">
-            <Select value={manifest.review.external_review} onValueChange={(v) => patch('review', { external_review: v as ProjectManifest['review']['external_review'] })}>
-              <SelectTrigger id="settings-review" aria-label="External review" className="w-full sm:w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="agent_decides">Agent decides</SelectItem>
-                <SelectItem value="always">Always</SelectItem>
-                <SelectItem value="never">Never</SelectItem>
-              </SelectContent>
-            </Select>
-          </SettingRow>
-          <SettingRow label="Checks" htmlFor="settings-checks" description="name | command | paths" stack>
-            <Textarea id="settings-checks" className="min-h-24 font-mono text-xs" value={manifest.verification.commands.map((c) => `${c.name} | ${c.command} | ${(c.paths || []).join(',')}`).join('\n')} onChange={(e) => patch('verification', { commands: verificationLines(e.target.value) })} />
-          </SettingRow>
-        </SettingsGroup>
-      )}
-
-
       {open === 'chat-names' && manifest && (
         <SettingsGroup data-testid="project-chat-names">
           <SettingRow label="Name template" stack>
@@ -500,18 +417,17 @@ export function ProjectSettingsScreen({
               projectId={projectId}
               parts={manifest.chat_name?.parts ?? []}
               onChange={setChatName}
-              prefix={manifest.project.use_beads ? manifest.beads.issue_id_prefix : ''}
             />
           </SettingRow>
         </SettingsGroup>
       )}
 
-      {(open === 'workflow' || open === 'review' || open === 'instructions' || open === 'chat-names') && !manifest && (
+      {open === 'chat-names' && !manifest && (
         <p className="text-sm text-t-tertiary">No project settings file.</p>
       )}
 
       {open === 'claude' && provider('claude')}
-      {open === 'library' && (folder.startsWith('dolt://') ? <p className="text-sm">Choose a local project folder to configure agent guidance.</p> : manifest ? <SharedLibrary projectPath={folder} projectInstructions={<section aria-label="Project instructions" className="min-w-0"><DetailHeader title="Project instructions" meta={<><span className="inline-flex items-center gap-1.5"><StateDot tone="good" />Always active</span><span>Shared by all chats in this project</span></>} actions={<Button size="sm" disabled={!dirty || saving} onClick={() => void save()}><Save className="size-3.5" /><span aria-hidden="true" className="max-sm:hidden">Save</span><span className="sr-only">Save project instructions</span></Button>} /><label className="mt-4 block"><span className="sr-only">Project instructions</span><Textarea id="settings-instructions" className="min-h-[max(24rem,calc(100dvh-22rem))] font-mono text-sm leading-relaxed" value={instructions} onChange={e => setInstructions(e.target.value)} /></label></section>} /> : <p className="text-sm">Loading project settings…</p>)}
+      {open === 'library' && (manifest ? <SharedLibrary projectPath={folder} projectInstructions={<section aria-label="Project instructions" className="min-w-0"><DetailHeader title="Project instructions" meta={<><span className="inline-flex items-center gap-1.5"><StateDot tone="good" />Always active</span><span>Shared by all chats in this project</span></>} actions={<Button size="sm" disabled={!dirty || saving} onClick={() => void save()}><Save className="size-3.5" /><span aria-hidden="true" className="max-sm:hidden">Save</span><span className="sr-only">Save project instructions</span></Button>} /><label className="mt-4 block"><span className="sr-only">Project instructions</span><Textarea id="settings-instructions" className="min-h-[max(24rem,calc(100dvh-22rem))] font-mono text-sm leading-relaxed" value={instructions} onChange={e => setInstructions(e.target.value)} /></label></section>} /> : <p className="text-sm">Loading project settings…</p>)}
       {open === 'codex' && provider('codex')}
       {open === 'files' && (
         <div className="flex h-full flex-col">

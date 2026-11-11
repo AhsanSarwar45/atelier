@@ -34,16 +34,6 @@ vi.mock('@/lib/api', async (whatItReallyIs) => ({
   git: calls,
 }));
 
-const cardsAskedFor = vi.hoisted(() => vi.fn());
-
-vi.mock('@/workbench/known-cards', () => ({
-  useKnownCards: () => new Set<string>(),
-  useKnownCardStatuses: (path: string | null) => {
-    cardsAskedFor(path);
-    return new Map<string, string>();
-  },
-}));
-
 const PROJECT = '/home/me/beads-web';
 const WORKTREE = '/home/me/beads-web/worktrees/bw-rx1y.1';
 
@@ -66,7 +56,6 @@ function rail(workingIn: string | null) {
   return render(
     <ChatRightRail
       projectId="beads-web"
-      cards={[]}
       agents={[]}
       items={[]}
       sessionId="chat-1"
@@ -119,7 +108,6 @@ describe('the Git rail reads the chat’s own worktree', () => {
     drawn.rerender(
       <ChatRightRail
         projectId="beads-web"
-        cards={[]}
         agents={[]}
         items={[]}
         sessionId="chat-1"
@@ -141,12 +129,5 @@ describe('the Git rail reads the chat’s own worktree', () => {
     expect(screen.getByTestId('git-branch-name')).not.toHaveTextContent('main');
 
     await waitFor(() => expect(screen.getByTestId('git-branch-name')).toHaveTextContent('bw-rx1y.1'));
-  });
-
-  it('still reads the project’s cards, which belong to the board and not to a worktree', () => {
-    rail(WORKTREE);
-
-    expect(cardsAskedFor).toHaveBeenCalledWith(PROJECT);
-    expect(cardsAskedFor).not.toHaveBeenCalledWith(WORKTREE);
   });
 });

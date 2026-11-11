@@ -225,23 +225,22 @@ describe('typing @ offers Atelier’s own things beside the files', () => {
   it('groups them by kind under a heading each, in the order the server sent', async () => {
     answers(
       { kind: 'skill', id: 'standup', label: 'Standup', detail: 'Write the standup' },
-      { kind: 'bead', id: 'bw-1', label: 'Fix the login page', detail: 'bw-1', status: 'open' },
       { path: 'src/standup.ts', kind: 'file' },
       { kind: 'chat', id: CHAT, label: 'Standup notes', brand: 'claude', projectId: 'p2' },
     );
     const { editor } = await aComposer('@stand');
 
-    const menu = await menuOf(editor, 4);
+    const menu = await menuOf(editor, 3);
 
-    expect(menu.map((option) => option.label)).toEqual(['@skill:standup', '@bead:bw-1', '@src/standup.ts', `@chat:${CHAT}`]);
+    expect(menu.map((option) => option.label)).toEqual(['@skill:standup', '@src/standup.ts', `@chat:${CHAT}`]);
     const sections = menu.map((option) => option.section as { name: string; rank: number });
-    expect(sections.map((section) => section.name)).toEqual(['Skills', 'Cards', 'Files', 'Chats']);
-    expect(sections.map((section) => section.rank)).toEqual([0, 1, 2, 3]);
+    expect(sections.map((section) => section.name)).toEqual(['Skills', 'Files', 'Chats']);
+    expect(sections.map((section) => section.rank)).toEqual([0, 1, 2]);
     // Each line wears the badge picking it will write.
-    await waitFor(() => expect(document.querySelectorAll('[data-testid="mention-option-badge"]').length).toBe(3));
+    await waitFor(() => expect(document.querySelectorAll('[data-testid="mention-option-badge"]').length).toBe(2));
     const badges = [...document.querySelectorAll('[data-testid="mention-option-badge"]')];
-    expect(badges.map((badge) => badge.getAttribute('data-reference-kind'))).toEqual(['skill', 'bead', 'chat']);
-    expect(badges[2]!.textContent).toBe('Standup notes');
+    expect(badges.map((badge) => badge.getAttribute('data-reference-kind'))).toEqual(['skill', 'chat']);
+    expect(badges[1]!.textContent).toBe('Standup notes');
   });
 
   it('asks for only one kind when the kind is typed before a colon', async () => {

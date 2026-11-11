@@ -120,18 +120,18 @@ describe('a pasted address of this app', () => {
   const HERE = 'http://127.0.0.1:3100';
   const CHAT = '0b8f6c1e-2d3a-4f5b-9c7d-1e2f3a4b5c6d';
 
-  it('is the reference to the card or the chat it opens', () => {
-    expect(referenceForAddress(`${HERE}/project?id=p1&card=bw-mi3s.5`, HERE)).toBe('@bead:bw-mi3s.5');
+  it('is the reference to the chat it opens', () => {
     expect(referenceForAddress(`${HERE}/project?id=p1&tab=chat&chat=${CHAT}`, HERE)).toBe(`@chat:${CHAT}`);
-    expect(referenceForAddress(`/project?id=p1&card=bw-1`, HERE)).toBe('@bead:bw-1');
+    // A card of the retired board is no reference any more.
+    expect(referenceForAddress(`${HERE}/project?id=p1&card=bw-mi3s.5`, HERE)).toBeNull();
   });
 
   it('pasted whole as a reference, such as the sidebar copies, is that reference', () => {
     expect(referenceForPaste(`@chat:${CHAT}`, HERE)).toBe(`@chat:${CHAT}`);
-    expect(referenceForPaste(`  @bead:bw-mi3s.5\n`, HERE)).toBe('@bead:bw-mi3s.5');
+    expect(referenceForPaste(`  @skill:standup\n`, HERE)).toBe('@skill:standup');
     expect(referenceForPaste(`${HERE}/project?id=p1&tab=chat&chat=${CHAT}`, HERE)).toBe(`@chat:${CHAT}`);
     expect(referenceForPaste(`see @chat:${CHAT}`, HERE)).toBeNull();
-    expect(referenceForPaste(`@chat:${CHAT} @bead:bw-1`, HERE)).toBeNull();
+    expect(referenceForPaste(`@chat:${CHAT} @skill:standup`, HERE)).toBeNull();
     expect(referenceForPaste('hello', HERE)).toBeNull();
     // A command to run a skill is not a reference to read it.
     expect(referenceForPaste('/skill:review', HERE)).toBeNull();
@@ -149,12 +149,12 @@ describe('a pasted address of this app', () => {
     act(() => editor.dispatch({ selection: { anchor: editor.state.doc.length } }));
     const pasted = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown };
     pasted.clipboardData = {
-      getData: () => `${window.location.origin}/project?id=p1&card=bw-7`,
+      getData: () => `${window.location.origin}/project?id=p1&tab=chat&chat=${CHAT}`,
       files: [],
     };
     act(() => {
       editor.contentDOM.dispatchEvent(pasted);
     });
-    expect(editor.state.doc.toString()).toBe('Look at @bead:bw-7 ');
+    expect(editor.state.doc.toString()).toBe(`Look at @chat:${CHAT} `);
   });
 });

@@ -29,7 +29,7 @@ function said(e: Said<WbpEvent>): WbpEvent {
 }
 
 /** Words, drawn as they are: the pane is not what makes a card a link. */
-const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
+const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }] };
 
 beforeEach(() => {
   // Most cases exercise the already-streamed tail. Leave the independent

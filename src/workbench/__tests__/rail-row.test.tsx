@@ -83,7 +83,6 @@ function row(over: Partial<RestoreRow> = {}): RestoreRow {
     cwdHint: PATH,
     folder: 'project',
     branch: 'main',
-    beads: [],
     ...over,
     // Every row the server sends is named (protocol.ts, RestoreRow.name).
     name: over.name ?? over.title ?? 'A chat',

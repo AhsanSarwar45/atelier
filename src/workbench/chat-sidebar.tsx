@@ -6,11 +6,11 @@
  * owner clicks (decision 8) — see docs/agent-workbench.md §6.3.
  *
  * A row says two things and no more: what the conversation is called, with the
- * time beside it, and how it is doing. The folder it ran in and the cards it
- * worked on ride along as `data-folder` and `data-beads` for anything that
- * needs to know, and neither is drawn: the chat's own bar names the folder and
- * its branch the moment the row is clicked, and a rail this narrow reads better
- * without a second copy of it or a wall of ids (the manager, 2026-08-23).
+ * time beside it, and how it is doing. The folder it ran in rides along as
+ * `data-folder` for anything that needs to know, and is not drawn: the chat's
+ * own bar names the folder and its branch the moment the row is clicked, and a
+ * rail this narrow reads better without a second copy of it (the manager,
+ * 2026-08-23).
  *
  * A row is also where a chat is closed, because closing one is tidying and
  * tidying is done over a list rather than one chat at a time (the manager,
@@ -309,7 +309,6 @@ export function withLive(
       // carry a time read out of the chat's own record, which is the only
       // place a message he typed in a terminal is written down.
       lastSpokeAt: laterSpoke(known.lastSpokeAt, session.lastSpokeAt),
-      beads: session.beads.length ? session.beads : known.beads,
       // The mark's own two halves, so the row says what the bar above it says
       // (protocol.ts, RestoreRow.activity; bw-96is.31).
       activity: session.activity,
@@ -434,9 +433,6 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
       // terminal or under another host. Not the same fact as
       // `state`, which is what our own driver knows (protocol.ts).
       data-running={row.runningElsewhere ? 'yes' : 'no'}
-      // The cards this chat worked on. Carried, not drawn — the ids
-      // are what a chat is looked up by, and the row has no room.
-      data-beads={row.beads.join(' ')}
       // Where it ran, the same way: the chat's own bar draws this
       // and its branch, so drawing it here too spent a line of a
       // two-line row saying what the next screen says anyway.

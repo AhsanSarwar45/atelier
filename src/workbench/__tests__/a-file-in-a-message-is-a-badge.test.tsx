@@ -22,8 +22,7 @@ const ALL: OnDisk = { real: () => true };
 const NONE: OnDisk = { real: () => false };
 
 const mentions = (disk: OnDisk): Mentions => ({
-  split: (text) => openableIn(text, { card: () => false }, WHERE, disk),
-  card: (id) => <span>{id}</span>,
+  split: (text) => openableIn(text, WHERE, disk),
   path: (absolute, raw, line, _endLine, inCode) => (
     <PathChip absolute={absolute} raw={raw} line={line} look={inCode ? 'link' : 'badge'} />
   ),
@@ -62,7 +61,7 @@ describe('a file named in a message', () => {
     const there: OnDisk = { real: (path) => path === '/home/someone/project/services/api/scripts/fix.js' || path === '/home/someone/project/services/api/src/const.js' };
     render(
       <MarkdownBody
-        mentions={{ ...mentions(there), split: (text) => openableIn(text, { card: () => false }, moved, there) }}
+        mentions={{ ...mentions(there), split: (text) => openableIn(text, moved, there) }}
       >
         {'Wrote `services/api/scripts/fix.js`, using `src/const.js`.'}
       </MarkdownBody>,

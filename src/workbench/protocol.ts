@@ -744,6 +744,7 @@ export type WbpEvent = EventBase &
      * thing that loses a session's own memory of what it was doing (bw-4wcd.4).
      */
     | { type: 'context'; used: number; window: number }
+    /** Written by the retired board into older transcripts; read and ignored. */
     | { type: 'link.bead'; beadId: string; via: 'tool' | 'brief' | 'manual' }
     | { type: 'error'; message: string; fatal: boolean }
     /** A provider/service condition, already translated out of vendor vocabulary. */
@@ -893,18 +894,6 @@ export type Audience = 'you' | 'machine';
 export type WbpEventType = WbpEvent['type'];
 
 /** Commands the browser POSTs to /api/workbench/command. */
-/**
- * A card handed to a chat at birth. The link is recorded before the agent has
- * done anything, because the owner starting a chat *from* a card is itself the
- * statement that the two belong together — it is not waiting to be inferred
- * from a tool call (docs/agent-workbench.md §8.3).
- */
-export interface Brief {
-  beadId: string;
-  /** The opening prompt: the card's title, its body and what "done" means. */
-  text: string;
-}
-
 /**
  * One signed-in provider account.
  *
@@ -1240,7 +1229,6 @@ export type WbpCommand =
       model?: string;
       permissionMode?: string;
       effort?: string;
-      brief?: Brief;
     }
   /** `messageId` names the line for its whole life: the held row and the recorded message both keep it. */
   | { type: 'prompt.send'; sessionId: string; messageId?: string; text: string; images?: ImagePayload[]; parts?: PromptPart[]; takeover?: boolean }
@@ -1368,8 +1356,6 @@ export interface RestoreRow {
   /** The directory it ran in, by its own name — a worktree's is the worktree. */
   folder: string | null;
   branch: string | null;
-  /** Cards this chat is known to have worked on. */
-  beads: string[];
   /**
    * A live Claude Code process is holding this conversation right now —
    * somebody is working in it, in a terminal or under another host.
@@ -1463,7 +1449,6 @@ export interface SessionFacts {
   cwd: string | null;
   folder: string | null;
   branch: string | null;
-  beads: string[];
 }
 
 /**
@@ -1475,9 +1460,9 @@ export interface SessionFacts {
  * handler (docs/agent-workbench.md §8.6).
  */
 export type WatchFrame =
-  | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string; activityDetail?: string; activityCall?: RanCall | null; beads: string[] })[] }
+  | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string; activityDetail?: string; activityCall?: RanCall | null })[] }
   /** A chat that has just come into existence, before it has said anything. */
-  | { kind: 'opened'; session: SessionSummary & { activity: string; activityDetail?: string; activityCall?: RanCall | null; beads: string[] } }
+  | { kind: 'opened'; session: SessionSummary & { activity: string; activityDetail?: string; activityCall?: RanCall | null } }
   /**
    * Every conversation a live process is holding right now, by the tool's own
    * id for it, each with what that process says it is doing — sent once when

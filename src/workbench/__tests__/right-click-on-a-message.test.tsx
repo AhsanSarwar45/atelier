@@ -16,7 +16,7 @@ import { MessageRepliesContext, messageAsDraft, quoted, type MessageReplies } fr
 import { TranscriptRow } from '@/workbench/transcript-rows';
 
 /** Words drawn as words: nothing in these messages is a path or a card. */
-const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
+const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }] };
 
 const said = (text: string): TranscriptItem => ({
   kind: 'message',

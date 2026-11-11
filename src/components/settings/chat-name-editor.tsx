@@ -57,7 +57,7 @@ const SOURCES: { value: ChatNameSource; label: string; icon: typeof Folder }[] =
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** The ticket key a worktree is named after: `bw-a9ln` for a project whose cards are `bw-`. */
+/** The ticket key a worktree is named after: `ABC-123`, or `bw-a9ln` given the prefix `bw`. */
 export function ticketKeyPattern(prefix: string): string {
   const trimmed = prefix.trim();
   return trimmed ? `${escaped(trimmed)}-[a-z0-9]+` : '[A-Za-z]+-[0-9]+';
@@ -84,11 +84,11 @@ export interface ChatNameEditorProps {
   projectId: string;
   parts: ChatNamePart[];
   onChange: (parts: ChatNamePart[]) => void;
-  /** The project's card prefix, for the ticket key preset. */
-  prefix: string;
+  /** A ticket prefix for the ticket key preset; any `ABC-123` key without one. */
+  prefix?: string;
 }
 
-export function ChatNameEditor({ projectId, parts, onChange, prefix }: ChatNameEditorProps) {
+export function ChatNameEditor({ projectId, parts, onChange, prefix = '' }: ChatNameEditorProps) {
   const [items, setItems] = useState<Item[]>(() => itemsOf(parts));
   const [opened, setOpened] = useState<string | null>(null);
   const [preview, setPreview] = useState<ChatNamePreview | null>(null);

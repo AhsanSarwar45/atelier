@@ -10,19 +10,12 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace, back: vi.fn() }),
 }));
 vi.mock('@/hooks/use-project', () => ({ useProject: () => ({
-  project: {
-    id: 'keystone', name: 'Keystone', path: '/dev/keystone', localPath: null,
-    tags: [], usesBeads: false,
-  },
+  project: { id: 'keystone', name: 'Keystone', path: '/dev/keystone', tags: [] },
   error: null,
   refetch: vi.fn(),
 }) }));
 vi.mock('@/workbench/chat-tab', () => ({ default: () => <div data-testid="chat-tab" /> }));
-vi.mock('@/app/project/kanban-board', () => ({ default: () => <div data-testid="board" /> }));
-vi.mock('@/app/project/board-cards', () => ({
-  BoardCards: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-vi.mock('@/components/card-panel', () => ({ CardPanel: () => <div data-testid="card-panel" /> }));
+vi.mock('@/workbench/tasks/tasks-tab', () => ({ default: () => <div data-testid="tasks-tab" /> }));
 vi.mock('@/components/project-settings-screen', () => ({ ProjectSettingsScreen: () => null }));
 vi.mock('@/workbench/globals', () => ({ WorkbenchStatus: () => null }));
 vi.mock('@/components/shell', () => ({
@@ -31,23 +24,18 @@ vi.mock('@/components/shell', () => ({
   ),
 }));
 
-describe('a chat-only project', () => {
-  it('shows chat only and repairs a stale board address without mounting board readers', async () => {
+describe('an address saved while the board was here', () => {
+  it('opens on the tasks and is rewritten without the board', async () => {
     render(<ProjectPage />);
 
-    expect(await screen.findByTestId('chat-tab')).toBeVisible();
+    expect(await screen.findByTestId('tasks-tab')).toBeVisible();
     expect(screen.queryByRole('tab', { name: 'Board' })).not.toBeInTheDocument();
-    expect(screen.queryByTestId('board')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('card-panel')).not.toBeInTheDocument();
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/project?id=keystone&tab=chat'));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/project?id=keystone&tab=tasks'));
   });
 
-  it('still asks for the bar the chat’s own tools are drawn in', () => {
+  it('still asks for the bar the tabs’ own tools are drawn in', () => {
     render(<ProjectPage />);
 
-    expect(
-      screen.getByTestId('asked-for-toolbar'),
-      'only the two tabs go with the board; the filter and branch controls stay (bw-1wak)',
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('asked-for-toolbar')).toBeInTheDocument();
   });
 });

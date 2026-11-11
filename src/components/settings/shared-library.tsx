@@ -40,14 +40,14 @@ const tones: Record<string, Tone> = { available: 'good', not_applicable: 'quiet'
 const sources: Record<string, string> = { global: 'Global', project: 'This project', 'built-in': 'Built-in' };
 /** Pinned entries that are not library items: the always-on instruction text. */
 const GENERAL = '__general';
-const conditionNames: Record<string, string> = { always: 'Always', all: 'All conditions', any: 'Any condition', not: 'Not', file_exists: 'File exists', folder_exists: 'Folder exists', file_contains: 'File contains text', file_matches: 'Filename matches pattern', file_regex: 'File matches regular expression', within: 'Inside folder of matching file', dependency: 'Package declares dependency', json_exists: 'JSON value exists', json_equals: 'JSON value equals', toml_equals: 'TOML value equals', yaml_equals: 'YAML value equals', project_beads: 'Project has a board' };
+const conditionNames: Record<string, string> = { always: 'Always', all: 'All conditions', any: 'Any condition', not: 'Not', file_exists: 'File exists', folder_exists: 'Folder exists', file_contains: 'File contains text', file_matches: 'Filename matches pattern', file_regex: 'File matches regular expression', within: 'Inside folder of matching file', dependency: 'Package declares dependency', json_exists: 'JSON value exists', json_equals: 'JSON value equals', toml_equals: 'TOML value equals', yaml_equals: 'YAML value equals' };
 function newCondition(op: string): Condition {
   if (op === 'file_matches') return { op, pattern: '**/*.rs' };
   if (op === 'file_regex') return { op, path: '', pattern: '' };
   if (op === 'within') return { op, pattern: '**/package.json', condition: { op: 'dependency', path: 'package.json', name: '' } };
   if (op === 'all' || op === 'any') return { op, conditions: [{ op: 'file_exists', path: 'package.json' }] };
   if (op === 'not') return { op, condition: { op: 'file_exists', path: 'package.json' } };
-  if (op === 'always' || op === 'project_beads') return { op };
+  if (op === 'always') return { op };
   if (op === 'dependency') return { op, path: 'package.json', name: '' };
   if (op === 'file_contains') return { op, path: '', text: '' };
   if (op === 'json_exists') return { op, path: '', pointer: '' };
@@ -121,7 +121,7 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
   const [deleteError, setDeleteError] = useState('');
   const [preview, setPreview] = useState('');
   const [previewing, setPreviewing] = useState(false);
-  const [projects, setProjects] = useState<{ name: string; path: string; localPath?: string }[]>([]);
+  const [projects, setProjects] = useState<{ name: string; path: string }[]>([]);
   const [imports, setImports] = useState<{ name: string; path: string; category: string }[]>();
   // The entry each tab has open, so coming back to a tab finds it where it was.
   const [chosen, setChosen] = useState<Partial<Record<Category, string>>>({});
@@ -413,7 +413,7 @@ export function SharedLibrary({ projectPath, projectInstructions }: { projectPat
       <div className={cn('flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2 max-sm:hidden', focused && 'max-lg:hidden')}>
         <ToggleGroup type="single" size="sm" className="flex-wrap justify-start gap-1" aria-label="Library categories" value={category} onValueChange={id => { if (id) choose(id as Category); }}>{(Object.keys(names) as Category[]).map(id => <ToggleGroupItem key={id} value={id} aria-label={names[id]} className="gap-1.5">{names[id]}{id !== 'memory' && counts[id] + (id === 'instruction' && general ? 1 : 0) > 0 && <span aria-hidden="true" className="text-[0.6875rem] tabular-nums text-t-muted">{counts[id] + (id === 'instruction' && general ? 1 : 0)}</span>}</ToggleGroupItem>)}</ToggleGroup>
         <div className="flex min-h-9 flex-wrap items-center gap-2">
-        {!projectPath && !memoryView && <Picker className="w-56 [&>span]:truncate" label="Preview for project" value={preview} onChange={setPreview} choices={[{ value: '', label: 'Preview for project…' }, ...projects.filter(p => !(p.localPath || p.path).startsWith('dolt://')).map(p => ({ value: p.localPath || p.path, label: p.name }))]} />}
+        {!projectPath && !memoryView && <Picker className="w-56 [&>span]:truncate" label="Preview for project" value={preview} onChange={setPreview} choices={[{ value: '', label: 'Preview for project…' }, ...projects.map(p => ({ value: p.path, label: p.name }))]} />}
         <Button variant="outline" size="sm" onClick={() => setPreviewing(true)}><Eye className="size-4" />View prompt</Button>
         </div>
       </div>

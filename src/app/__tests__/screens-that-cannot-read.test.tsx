@@ -18,15 +18,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const useProjectsMock = vi.fn();
 vi.mock('@/hooks/use-projects', () => ({ useProjects: () => useProjectsMock() }));
 
-const useProjectMock = vi.fn();
-vi.mock('@/hooks/use-project', () => ({ useProject: () => useProjectMock() }));
-
-const useBoardCardsMock = vi.fn();
-vi.mock('@/app/project/board-cards', () => ({
-  BoardCards: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useBoardCards: () => useBoardCardsMock(),
-}));
-
 const getTagsMock = vi.fn();
 vi.mock('@/lib/db', () => ({
   getTags: () => getTagsMock(),
@@ -65,7 +56,6 @@ vi.mock('next/navigation', () => ({
 
 /* eslint-disable import/first, import/order */
 import ProjectsPage from '@/app/page';
-import KanbanBoard from '@/app/project/kanban-board';
 import SettingsPage from '@/app/settings/page';
 /* eslint-enable import/first, import/order */
 
@@ -79,14 +69,6 @@ function nothingIsStillSpinning(): void {
   expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
 }
 
-const noCards = {
-  beads: [],
-  ticketNumbers: new Map(),
-  isLoading: false,
-  error: null,
-  refresh: vi.fn(),
-};
-
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -97,7 +79,6 @@ describe('the list of projects', () => {
     useProjectsMock.mockReturnValue({
       projects: [],
       isLoading: false,
-      loadingStatus: null,
       error: new Error('the server did not answer'),
       showArchived: false,
       addProject: vi.fn(),
@@ -120,52 +101,6 @@ describe('the list of projects', () => {
 
     fireEvent.click(tryAgain());
     expect(refetch).toHaveBeenCalled();
-  });
-});
-
-describe('the board', () => {
-  it('says the project could not be read, and reads it again when asked', async () => {
-    const refetch = vi.fn();
-    useProjectMock.mockReturnValue({
-      project: null,
-      isLoading: false,
-      error: new Error('no such project'),
-      refetch,
-    });
-    useBoardCardsMock.mockReturnValue(noCards);
-
-    render(<KanbanBoard />);
-
-    expect(screen.getByTestId('project-error')).toBeInTheDocument();
-    expect(screen.getByText(/no such project/)).toBeInTheDocument();
-    nothingIsStillSpinning();
-
-    fireEvent.click(tryAgain());
-    expect(refetch).toHaveBeenCalled();
-  });
-
-  it('says the cards could not be read, and reads them again when asked', async () => {
-    const refresh = vi.fn();
-    useProjectMock.mockReturnValue({
-      project: { id: 'p1', name: 'Atelier', path: '/work/atelier', localPath: null, tags: [] },
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-    useBoardCardsMock.mockReturnValue({
-      ...noCards,
-      error: new Error('the board file could not be read'),
-      refresh,
-    });
-
-    render(<KanbanBoard />);
-
-    expect(screen.getByTestId('board-error')).toBeInTheDocument();
-    expect(screen.getByText(/the board file could not be read/)).toBeInTheDocument();
-    nothingIsStillSpinning();
-
-    fireEvent.click(tryAgain());
-    expect(refresh).toHaveBeenCalled();
   });
 });
 

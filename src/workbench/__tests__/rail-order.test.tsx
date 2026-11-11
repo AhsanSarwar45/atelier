@@ -1,14 +1,8 @@
 /**
  * The order of the chat's right-hand column, pinned (bw-pl2v.1).
  *
- * Cards first, then the agents it sent off, then the reports — because the
- * cards are the part of the column with a ceiling. Wrapped chips are a few
- * lines however long the session runs; the agents grow one row at a time and
- * used to push the cards off the bottom of the rail
+ * The agents it sent off, and nothing in their place when there are none
  * (docs/agent-workbench.md §8.2.6).
- *
- * Pinned here because the doc and the built column had drifted into naming two
- * different orders for the same rail, and nothing on either side noticed.
  */
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -51,12 +45,11 @@ function sections(): string[] {
     .map((h) => h.textContent ?? '');
 }
 
-const rail = (agents: SentAway[], cards: string[]) =>
+const rail = (agents: SentAway[]) =>
   render(
     <ChatRightRail
       items={[]}
       projectId="beads-web"
-      cards={cards}
       agents={agents}
       sessionId="chat-1"
       agentControls={['stop']}
@@ -68,21 +61,13 @@ const rail = (agents: SentAway[], cards: string[]) =>
   );
 
 describe('what the rail holds, in order', () => {
-  it('puts the part that cannot grow at the top', () => {
-    rail(oneAgent(), ['bw-uiyz.1']);
-
-    expect(sections()).toEqual(['Related cards', 'Subagents']);
-  });
-
-  it('keeps that order when a section has nothing in it', () => {
-    // A missing section is missing, not blank: the ones that are there keep
-    // their places rather than shuffling up into a fixed slot.
-    rail(oneAgent(), []);
+  it('draws the agents it sent off', () => {
+    rail(oneAgent());
     expect(sections()).toEqual(['Subagents']);
   });
 
   it('says so plainly when the chat has touched nothing at all', () => {
-    rail([], []);
+    rail([]);
     expect(sections()).toEqual([]);
     expect(screen.queryByTestId('rail-empty')).not.toBeInTheDocument();
   });

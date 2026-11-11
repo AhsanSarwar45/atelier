@@ -6,14 +6,10 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { EllipsisVertical, Folder, Home, ListTodo, MessageSquare, SquareKanban } from 'lucide-react';
+import { EllipsisVertical, Folder, Home, ListTodo, MessageSquare } from 'lucide-react';
 
 import { BackLink } from '@/components/back-link';
 import { ProjectSwitcher } from '@/components/project-switcher';
-// Only drawn once a card is opened, and it brings the markdown and code
-// highlighter with it, so the board draws without them (bw-fbzd.7).
-const CardPanel = dynamic(() => import('@/components/card-panel').then((m) => m.CardPanel), { ssr: false });
-const ProjectSettingsScreen = dynamic(() => import('@/components/project-settings-screen').then((m) => m.ProjectSettingsScreen), { ssr: false });
 import { Shell } from '@/components/shell';
 import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
@@ -21,18 +17,11 @@ import { ReadFailed } from '@/components/ui/read-failed';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProject } from '@/hooks/use-project';
 import { useTheme } from '@/hooks/use-theme';
-import {
-  addressWith,
-  cardCameFromHere,
-  cardWasClosed,
-  cardWasPushed,
-  stepsOut,
-  whereFrom,
-} from '@/lib/address';
+import { addressWith, stepsOut, whereFrom } from '@/lib/address';
 import { cn, projectDir } from '@/lib/utils';
 import { SearchOpener } from '@/search/opener';
-// Each tab's code is fetched when that tab is first shown, so a board does not
-// wait on the chat's editor and transcript or the files view (bw-fbzd.4).
+// Each tab's code is fetched when that tab is first shown, so the task list
+// does not wait on the chat's editor and transcript or the files view (bw-fbzd.4).
 // The chat is fetched ahead once the screen is idle, so switching to it is
 // still instant.
 const loadChatTab = () => import('@/workbench/chat-tab');
@@ -41,21 +30,18 @@ const PRELOAD_AFTER_MS = 4_000;
 const ChatTab = dynamic(loadChatTab, { ssr: false });
 const FilesTab = dynamic(() => import('@/workbench/files-tab'), { ssr: false });
 const TasksTab = dynamic(() => import('@/workbench/tasks/tasks-tab'), { ssr: false });
+const ProjectSettingsScreen = dynamic(() => import('@/components/project-settings-screen').then((m) => m.ProjectSettingsScreen), { ssr: false });
 const SearchPanel = dynamic(() => import('@/workbench/search-panel').then((m) => m.SearchPanel), { ssr: false });
-const BoardSearchPanel = dynamic(() => import('./board-search').then((m) => m.BoardSearchPanel), { ssr: false });
 const FileSearchPanel = dynamic(() => import('@/workbench/file-search').then((m) => m.FileSearchPanel), { ssr: false });
 import { WorkbenchStatus } from '@/workbench/globals';
 import { PathsOpenProvider } from '@/workbench/open-path';
 import { useShowingFolder } from '@/workbench/terminal-shells';
 
-import { BoardCards } from './board-cards';
-import KanbanBoard from './kanban-board';
-
 /**
  * The three project tabs on a phone.
  *
- * The tab bar is shared: after Chat, Board and Files come whatever tools the
- * open tab hands it, and the board alone hands it eleven. At 390px the three
+ * The tab bar is shared: after Chat, Tasks and Files come whatever tools the
+ * open tab hands it. At 390px the three
  * words were the first thing to spend that row and the tools were what got
  * pushed off it, so below `sm` each tab is its icon alone — the word is still
  * there for a screen reader, as `aria-label` on the tab itself.
@@ -80,29 +66,19 @@ function LoadingFallback() {
 function ProjectTabs() {
   const params = useSearchParams();
   const router = useRouter();
-  // The address decides which tab is showing, which chat is drawn in it and
-  // which card is over the top, so every one of them survives a link, a fresh
-  // tab and the Back button (docs/designs/app-shell.md §1.7).
-  const { id: projectId, tab, chat: openChat, card: openCard, file: openFile, line: openLine, settings: openSettings, ptab, pitem } = whereFrom(params);
+  // The address decides which tab is showing and which chat is drawn in it, so
+  // both survive a link, a fresh tab and the Back button
+  // (docs/designs/app-shell.md §1.7).
+  const { id: projectId, tab: shownTab, chat: openChat, file: openFile, line: openLine, settings: openSettings, ptab, pitem, retired } = whereFrom(params);
   const { project, error: projectError, refetch } = useProject(projectId);
   // The folder this screen is showing, which is where a shell opened from
-  // its bar starts. `projectDir` and not `project.path`, because a
-  // Dolt-backed board's path is a database address and no folder at all.
+  // its bar starts.
   useShowingFolder(projectDir(project));
   const { theme } = useTheme();
   const terminal = theme.headerVariant === 'terminal';
-  const usesBeads = project?.usesBeads !== false;
-  // The board is the one tab a project can opt out of. Files are files whether
-  // or not anybody keeps cards here, so opting out of the board sends the board
-  // back to the chat and leaves the other two alone.
-  const shownTab = usesBeads || tab !== 'board' ? tab : 'chat';
-  const shownCard = usesBeads ? openCard : null;
-
-  // The chat is its own download so the board draws without it; once the
+  // The chat is its own download so the other tabs draw without it; once the
   // screen has nothing else to do it is fetched ahead, and switching to it
-  // does not wait on the network. Idle alone came 70 ms into the load, while
-  // the board was still downloading, and a device on the network fetched
-  // 300 KiB of chat beside it; so it waits until the page's own reads are
+  // does not wait on the network. It waits until the page's own reads are
   // well past (bw-fbzd.9).
   useEffect(() => {
     const idle = window.requestIdleCallback ?? ((ahead: () => void) => window.setTimeout(ahead, 0));
@@ -115,37 +91,18 @@ function ProjectTabs() {
     };
   }, []);
 
-  // Old bookmarks can still name the board for a project that has since opted
-  // out. Draw chat immediately, then clean the address so refresh and Back do
-  // not lead back into a board read that can never succeed.
+  // The board is gone; tasks took its place. An old bookmark that names the
+  // board or one of its cards lands on the Tasks tab, and the address is
+  // cleaned so refresh and Back do not carry the retired parts around.
   useEffect(() => {
-    if (project?.usesBeads === false && (tab === 'board' || openCard)) {
-      router.replace(addressWith(params, { tab: 'chat', card: null }));
-    }
-  }, [project?.usesBeads, tab, openCard, router, params]);
+    if (retired) router.replace(addressWith(params, { tab: 'tasks' }));
+  }, [retired, router, params]);
 
   /** A move he made by hand: it belongs in the history, so Back undoes it. */
   const go = useCallback(
     (patch: Parameters<typeof addressWith>[1]) => router.push(addressWith(params, patch)),
     [router, params],
   );
-
-  // Opening a card pushes, so Back closes it; closing it by hand steps back off
-  // that same entry. Rewriting the address instead would leave a Back press that
-  // goes nowhere, one per card he looked at (bw-m8o.10). A card he ARRIVED on —
-  // a pasted link — has nothing of ours behind it, so that one is rewritten.
-  const closeCard = useCallback(() => {
-    if (cardCameFromHere()) {
-      router.back();
-      return;
-    }
-    router.replace(addressWith(params, { card: null }));
-  }, [router, params]);
-
-  // However the panel went — his Back, its own close, a link — the count of
-  // entries we added comes down when the card leaves the address, so it cannot
-  // drift upwards over a long visit.
-  const cardBefore = useRef(openCard);
 
   // The settings are pushed one entry per section and tab, so the arrow that
   // closes them has to step over every entry this visit added; a pasted
@@ -161,11 +118,6 @@ function ProjectTabs() {
     },
     [go],
   );
-  useEffect(() => {
-    if (cardBefore.current && !openCard) cardWasClosed();
-    cardBefore.current = openCard;
-  }, [openCard]);
-
   // Ctrl+K, or Cmd+K, opens the showing tab's search from anywhere on the
   // screen — but a terminal keeps the keys its shell is owed. A tab's own
   // controls open the same search (src/search/opener.tsx).
@@ -186,8 +138,7 @@ function ProjectTabs() {
   const screen = (
     <Shell
       activeTab={shownTab}
-      // The chat's own controls sit in this bar, so it is drawn whether or not
-      // the project has a board to put tabs in.
+      // The chat's own controls sit in this bar.
       toolbar
       barClassName={terminal ? 'terminal-header' : undefined}
       bar={
@@ -269,7 +220,7 @@ function ProjectTabs() {
           // chat it was pointed at: coming back to a tab should be what he was
           // reading, not an empty one.
           onValueChange={(next) =>
-            go({ tab: next === 'chat' || next === 'tasks' || next === 'files' ? next : 'board' })
+            go({ tab: next === 'chat' || next === 'files' ? next : 'tasks' })
           }
         >
           <TabsList data-testid="project-tabs">
@@ -282,14 +233,6 @@ function ProjectTabs() {
               <ListTodo className={GLYPH} aria-hidden="true" />
               <span className={WORD}>Tasks</span>
             </TabsTrigger>
-            {/* Only the board needs a board. Files stand on the folder itself,
-                so a project that keeps no cards still gets them. */}
-            {usesBeads && (
-              <TabsTrigger value="board" data-testid="tab-board" aria-label="Board" className={TAB}>
-                <SquareKanban className={GLYPH} aria-hidden="true" />
-                <span className={WORD}>Board</span>
-              </TabsTrigger>
-            )}
             <TabsTrigger value="files" data-testid="tab-files" aria-label="Files" className={TAB}>
               <Folder className={GLYPH} aria-hidden="true" />
               <span className={WORD}>Files</span>
@@ -337,39 +280,8 @@ function ProjectTabs() {
         />
       )}
 
-      {/* The board and card panel read ONE list, held here: an edit in the panel
-          moves the card behind it. It is
-          mounted only when one of them is on screen, so the chat tab alone
-          still pays nothing for the board (docs/designs/app-shell.md §1.6). */}
-      {usesBeads && (shownTab === 'board' || shownCard) && project && (
-        <BoardCards projectPath={project.path}>
-          {/* Only the tab in front is mounted: a board kept alive behind the
-              chat is paid for on every switch, both ways. */}
-          {shownTab === 'board' && (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <KanbanBoard />
-            </div>
-          )}
-          {/* One card panel for the whole screen, over whichever tab is showing
-              (docs/designs/app-shell.md §1.8). */}
-          {shownCard && (
-            <CardPanel
-              cardId={shownCard}
-              projectId={projectId}
-              projectPath={project.path}
-              projectLocalPath={project.localPath}
-              onClose={closeCard}
-              onOpenCard={(id) => {
-                cardWasPushed();
-                go({ card: id });
-              }}
-            />
-          )}
-        </BoardCards>
-      )}
-
       {project && openSettings && (
-        // The library window, not a box drawn over the page: the board behind it
+        // The library window, not a box drawn over the page: the tab behind it
         // cannot be reached while it is open, focus moves in on open and back on
         // close. It has no `onClose` — the way out is the bar's own arrow, which
         // steps the address back, so Escape leaves it where it is, as it did.
@@ -404,9 +316,7 @@ function ProjectTabs() {
       <PathsOpenProvider projectPath={projectDir(project)}>
         {screen}
         {searching &&
-          (shownTab === 'board' && project ? (
-            <BoardSearchPanel projectPath={project.path} onClose={closeSearch} />
-          ) : shownTab === 'files' && project ? (
+          (shownTab === 'files' && project ? (
             <FileSearchPanel projectId={projectId} projectPath={project.path} onClose={closeSearch} />
           ) : (
             <SearchPanel projectId={projectId} projectPath={project?.path ?? null} onClose={closeSearch} />

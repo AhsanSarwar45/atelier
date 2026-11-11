@@ -80,8 +80,6 @@ export interface LiveSession {
    */
   lastSpokeAt: string | null;
   startedAt: string;
-  /** Cards this chat has touched, as the machine recorded them. */
-  beads: string[];
 }
 
 /**
@@ -327,7 +325,7 @@ function announce(): void {
 }
 
 function fromSummary(
-  s: SessionSummary & { activity: string; activityDetail?: string; activityCall?: RanCall | null; beads: string[] },
+  s: SessionSummary & { activity: string; activityDetail?: string; activityCall?: RanCall | null },
 ): LiveSession {
   return {
     id: s.id,
@@ -351,7 +349,6 @@ function fromSummary(
     busySince: counting(s.state) ? s.lastActiveAt : null,
     lastSpokeAt: s.lastSpokeAt ?? null,
     startedAt: s.createdAt,
-    beads: s.beads,
   };
 }
 
@@ -526,7 +523,6 @@ function absorb(frame: WatchFrame): void {
         lastSpokeAt: null,
         startedAt: e.at,
         lastActiveAt: e.at,
-        beads: [],
       },
     ];
   }
@@ -576,15 +572,6 @@ function absorb(frame: WatchFrame): void {
       const was = sessions.find((s) => s.id === e.sessionId)?.lastActiveAt;
       if (was && Math.abs(Date.parse(e.at) - Date.parse(was)) < ACTIVE_CLOCK_STEP_MS) return;
       patch(e.sessionId, { lastActiveAt: e.at });
-      break;
-    }
-    case 'link.bead': {
-      const had = sessions.find((s) => s.id === e.sessionId)?.beads ?? [];
-      if (had.includes(e.beadId)) return;
-      patch(e.sessionId, {
-        beads: [...had, e.beadId],
-        ...(moves(e.sessionId) ? { lastActiveAt: e.at } : {}),
-      });
       break;
     }
     case 'error':

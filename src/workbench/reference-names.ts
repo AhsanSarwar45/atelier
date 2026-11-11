@@ -17,7 +17,6 @@
 import { useMemo, useSyncExternalStore } from 'react';
 
 import { diffBadge, type Reference } from '@/components/reference-badge';
-import type { BeadStatus } from '@/types';
 import { useChatNames } from '@/workbench/live';
 import type { Brand, CommandInfo } from '@/workbench/protocol';
 import type { AtelierKind } from '@/workbench/references';
@@ -110,10 +109,7 @@ export type DescribeReference = (kind: AtelierKind, id: string) => Reference;
  * The lookup, kept current: a new function whenever anything it reads changes,
  * so a caller that keys its drawing on it redraws exactly then.
  */
-export function useDescribeReference(
-  statuses: ReadonlyMap<string, BeadStatus>,
-  commands: readonly CommandInfo[] | undefined,
-): DescribeReference {
+export function useDescribeReference(commands: readonly CommandInfo[] | undefined): DescribeReference {
   const live = useChatNames();
   const learned = useSyncExternalStore(subscribe, () => version, () => 0);
   return useMemo(() => {
@@ -122,7 +118,6 @@ export function useDescribeReference(
       if (command.name.startsWith('skill:')) menu.set(command.name.slice('skill:'.length), command);
     }
     return (kind, id) => {
-      if (kind === 'bead') return { kind, id, status: statuses.get(id) };
       if (kind === 'diff') return diffBadge(id);
       if (kind === 'task') {
         if (!id) return { kind, id };
@@ -150,5 +145,5 @@ export function useDescribeReference(
     };
     // `learned` is what says the learned maps moved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, commands, statuses, learned]);
+  }, [live, commands, learned]);
 }

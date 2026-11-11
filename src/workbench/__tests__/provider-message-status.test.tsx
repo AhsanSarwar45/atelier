@@ -22,7 +22,7 @@ const frame = (type: string, over: Record<string, unknown> = {}): WatchFrame => 
 const snapshot = (): WatchFrame => ({ kind: 'snapshot', sessions: [{
   id: 's1', brand: 'codex', externalId: 'x1', projectId: 'p1', projectPath: '/p', cwd: '/p', model: null,
   permissionMode: 'default', title: 'Chat', state: 'idle', createdAt: '2026-08-30T07:00:00Z',
-  lastActiveAt: '2026-08-30T08:00:00Z', lastSpokeAt: null, activity: 'Ready', beads: [],
+  lastActiveAt: '2026-08-30T08:00:00Z', lastSpokeAt: null, activity: 'Ready',
 }] } as WatchFrame);
 
 beforeEach(() => { opened = []; vi.stubGlobal('WebSocket', FakeStream); });

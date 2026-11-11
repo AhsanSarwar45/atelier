@@ -2,26 +2,15 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 
-import { Download, ExternalLink, RefreshCw } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
-import { Spinner } from '@/components/ui/spinner';
 import { request } from '@/lib/api';
-import { onBootstrap } from '@/workbench/live-wire';
 
 interface ToolStatus {
-  tool: 'git' | 'bd' | 'claude' | 'codex' | 'browser';
+  tool: 'git' | 'claude' | 'codex' | 'browser';
   requiredFor: string;
   found: boolean;
   path: string | null;
@@ -32,7 +21,6 @@ interface ToolStatus {
 
 const docs: Record<ToolStatus['tool'], string> = {
   git: 'https://git-scm.com/downloads',
-  bd: 'https://github.com/gastownhall/beads',
   claude: 'https://docs.anthropic.com/en/docs/claude-code',
   codex: 'https://developers.openai.com/codex/cli',
   browser: 'https://www.chromium.org/getting-involved/download-chromium/',
@@ -43,9 +31,6 @@ export function DependenciesSettings() {
   const [paths, setPaths] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [progress, setProgress] = useState<string | null>(null);
-  // The install downloads and runs a program, so it is asked about first.
-  const [asking, setAsking] = useState(false);
 
   const load = useCallback(async () => {
     const response = await request('/api/environment');
@@ -56,13 +41,6 @@ export function DependenciesSettings() {
   }, []);
 
   useEffect(() => { void load().catch((e) => setError(e instanceof Error ? e.message : String(e))); }, [load]);
-  useEffect(() => {
-    return onBootstrap((data) => {
-      const update = JSON.parse(data) as { phase: string; detail: string };
-      setProgress(update.detail);
-      if (update.phase === 'complete') void load();
-    });
-  }, [load]);
 
   async function save(tool: string) {
     setBusy(tool); setError(null);
@@ -72,20 +50,6 @@ export function DependenciesSettings() {
         body: JSON.stringify({ path: paths[tool]?.trim() || null }),
       });
       if (!response.ok) throw new Error((await response.json() as { error?: string }).error ?? `Could not save ${tool}`);
-      await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(null); }
-  }
-
-  async function installBd() {
-    setBusy('bd'); setError(null); setProgress('Starting tracker installation…');
-    try {
-      const response = await request('/api/environment/bd/install', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ consent: true }),
-      });
-      const answer = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(answer.error ?? 'Tracker installation failed');
       await load();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(null); }
@@ -101,21 +65,9 @@ export function DependenciesSettings() {
       <div className="mt-2 flex gap-2">
         <Input className="flex-1 font-mono" aria-label={`${tool.tool} path`} value={paths[tool.tool] ?? ''} placeholder="Search PATH automatically" onChange={(e) => setPaths((old) => ({ ...old, [tool.tool]: e.target.value }))} />
         <Button size="sm" variant="outline" disabled={busy === tool.tool} onClick={() => void save(tool.tool)}>Save</Button>
-        {tool.tool === 'bd' && !tool.found && <Button size="sm" disabled={busy === 'bd'} onClick={() => setAsking(true)}>{busy === 'bd' ? <Spinner size="inherit" /> : <Download />} Install</Button>}
       </div>
       {!tool.found && <p className="mt-1 text-xs text-danger">{tool.hint}</p>}
     </div></Fragment>)}
-    {progress && <p className="flex items-center gap-2 text-xs text-t-muted"><RefreshCw className={busy === 'bd' ? 'size-3 animate-spin' : 'size-3'} />{progress}</p>}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-    <AlertDialog open={asking} onOpenChange={setAsking}>
-      <AlertDialogContent>
-        <AlertDialogTitle>Install the task tracker?</AlertDialogTitle>
-        <AlertDialogDescription>Download the latest verified task tracker CLI and install it in ~/.beads/bin?</AlertDialogDescription>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction className={buttonVariants({ variant: 'primary' })} onClick={() => void installBd()}>Install</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </div>;
 }

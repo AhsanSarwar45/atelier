@@ -169,7 +169,7 @@ describe('when the live stream drops', () => {
     // during an outage hammered a door nobody was behind and the backing-off
     // never actually happened (bw-zkh4.9).
     const { useRunningElsewhere } = await freshModule();
-    const { onBoard } = await import('@/workbench/live-wire');
+    const { onWorkbench } = await import('@/workbench/live-wire');
     renderHook(() => useRunningElsewhere());
 
     act(() => opened[0].dies());
@@ -181,14 +181,14 @@ describe('when the live stream drops', () => {
     // That attempt fails too, so the next one is four seconds away.
     act(() => opened[1].dies());
 
-    // A card list is drawn, which is what opening a project does.
-    const stopWatchingTheBoard = onBoard('/somewhere/a-project', () => {});
+    // Something on screen starts watching, which is what opening a screen does.
+    const stopWatching = onWorkbench({ frame: () => {}, dropped: () => {} });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(opened.length, 'a screen mounting reopened it on the spot').toBe(2);
 
-    stopWatchingTheBoard();
+    stopWatching();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });

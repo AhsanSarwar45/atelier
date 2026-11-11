@@ -25,15 +25,36 @@ describe('the address can name a file', () => {
     expect(whereFrom(new URLSearchParams('tab=chat&file=/work/a.ts')).tab).toBe('chat');
   });
 
-  it('opens on the chat when the address names no tab it knows', () => {
+  it('opens on the tasks when the address names no tab it knows', () => {
     expect(whereFrom(new URLSearchParams('chat=s1')).tab).toBe('chat');
-    expect(whereFrom(new URLSearchParams('')).tab).toBe('chat');
-    expect(whereFrom(new URLSearchParams('tab=reports')).tab).toBe('chat');
-    expect(whereFrom(new URLSearchParams('tab=board')).tab).toBe('board');
+    expect(whereFrom(new URLSearchParams('')).tab).toBe('tasks');
+    expect(whereFrom(new URLSearchParams('tab=reports')).tab).toBe('tasks');
+  });
+
+  // The board is gone. An address saved while it was here still opens, on the
+  // tasks, and is rewritten without the parts that named it.
+  it('sends an address of the retired board to the tasks', () => {
+    for (const old of ['tab=board', 'id=p1&tab=board&card=bw-1', 'id=p1&card=bw-1', 'id=p1&bead=bw-1']) {
+      const where = whereFrom(new URLSearchParams(old));
+      expect(where.tab, old).toBe('tasks');
+      expect(where.retired, old).toBe(true);
+    }
+    expect(whereFrom(new URLSearchParams('id=p1&tab=chat&chat=s1')).retired).toBe(false);
+    // A card named beside a chat still opens that chat.
+    expect(whereFrom(new URLSearchParams('id=p1&chat=s1&card=bw-1')).tab).toBe('chat');
+  });
+
+  it('writes the address back without the retired board', () => {
+    const address = addressWith(new URLSearchParams('id=p1&tab=board&card=bw-1&bead=bw-2'), {});
+    const written = new URLSearchParams(address.split('?')[1]);
+    expect(written.get('tab')).toBe('tasks');
+    expect(written.has('card')).toBe(false);
+    expect(written.has('bead')).toBe(false);
+    expect(written.get('id')).toBe('p1');
   });
 
   it('keeps no file and no line when the address names neither', () => {
-    const where = whereFrom(new URLSearchParams('id=p1&tab=board'));
+    const where = whereFrom(new URLSearchParams('id=p1&tab=tasks'));
     expect(where.file).toBeNull();
     expect(where.line).toBeNull();
   });
@@ -52,7 +73,7 @@ describe('the address can name a file', () => {
   });
 
   it('writes a file and a line back into an address a reader could have typed', () => {
-    const address = addressWith(new URLSearchParams('id=p1&tab=board'), {
+    const address = addressWith(new URLSearchParams('id=p1&tab=tasks'), {
       tab: 'files',
       file: '/work/atelier/README.md',
       line: 7,

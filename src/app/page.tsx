@@ -9,7 +9,7 @@ import { Plus, Github, Search, X, Archive } from "lucide-react";
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { ProjectCard } from "@/components/project-card";
 import { Shell } from "@/components/shell";
-import { Badge, BadgeDot } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RoiuiCard } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,7 @@ export default function ProjectsPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
-  const { projects, isLoading, loadingStatus, error, showArchived, updateProjectTags, refetch, archiveProject, unarchiveProject, deleteProject, toggleShowArchived } = useProjects();
+  const { projects, isLoading, error, showArchived, updateProjectTags, refetch, archiveProject, unarchiveProject, deleteProject, toggleShowArchived } = useProjects();
 
   // Get all unique tags across projects
   const allTags = useMemo(() => {
@@ -167,14 +167,6 @@ export default function ProjectsPage() {
             </div>
           )}
 
-          {/* Loading status line */}
-          {loadingStatus && (
-            <div className="mb-4 flex items-center gap-2 text-xs text-t-muted animate-pulse">
-              <BadgeDot solid className="text-info animate-ping" />
-              {loadingStatus}
-            </div>
-          )}
-
           {isLoading ? (
             <div role="status" aria-label="Loading projects" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map((i) => (
@@ -218,13 +210,7 @@ export default function ProjectsPage() {
                   id={project.id}
                   name={project.name}
                   path={project.path}
-                  localPath={project.localPath}
                   tags={project.tags}
-                  beadCounts={project.beadCounts}
-                  countsLoaded={project.countsLoaded ?? false}
-                  dataSource={project.dataSource}
-                  beadError={project.beadError}
-                  usesBeads={project.usesBeads}
                   archivedAt={project.archivedAt}
                   onTagsChange={(tags) => updateProjectTags(project.id, tags)}
                   onUpdated={refetch}
@@ -262,13 +248,6 @@ export default function ProjectsPage() {
               <span>Atelier</span>
             </a>
           </Button>
-          <span className="text-t-faint" aria-hidden="true">·</span>
-          <Button asChild variant="dim" size="sm" className="gap-2 text-sm">
-            <a href="https://github.com/gastownhall/beads" target="_blank" rel="noopener noreferrer">
-              <Github className="h-4 w-4" aria-hidden="true" />
-              <span>Beads CLI</span>
-            </a>
-          </Button>
         </div>
       </footer>
 
@@ -277,7 +256,6 @@ export default function ProjectsPage() {
         open={isAddDialogOpen}
         onOpenChange={setIsAddDialogOpen}
         onInitialized={refetch}
-        existingProjectNames={projects.map((p) => p.name)}
       />
 
     </div>

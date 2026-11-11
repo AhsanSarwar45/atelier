@@ -4,11 +4,8 @@
  * it. What it has spent stays on that line, where a reader watching it work can
  * see the number without opening anything (bw-7ks.22.13).
  *
- * The cards used to ride on the open chat's own line, which is a row, and a row
- * is the axis there is least of: twenty-six of them drew 2277px inside a pane
- * about 700px wide and squeezed the words naming the agent to 37px (bw-p61.3).
- * A column has height nobody is competing for, so all of them are drawn and
- * none of them is a count — docs/agent-workbench.md §8.2.1, §8.2.6.
+ * A column has height nobody is competing for, so everything is drawn and
+ * none of it is a count — docs/agent-workbench.md §8.2.1, §8.2.6.
  *
  * The way in and out is a button on the bar above, mirroring the one that
  * opens the chat list on the other edge — not a handle built into the rail
@@ -30,17 +27,14 @@
  */
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { BeadChip } from '@/components/bead-chip-row';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { NOT_PHONE_SCREEN, usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
-import { byJob, jobTitle } from '@/workbench/cards-by-job';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import { GitView } from '@/workbench/git-view';
-import { useKnownCardStatuses } from '@/workbench/known-cards';
 import type { AgentControl } from '@/workbench/protocol';
 import { SentAwayPanel } from '@/workbench/sent-away';
 
@@ -195,14 +189,13 @@ const RAIL_LABEL = 'What this chat has touched';
 const RAIL_TAB: Record<RailView, string> = { chat: 'Agents', git: 'Git' };
 
 export interface ChatRightRailProps {
+  /** The project this rail belongs to. */
   projectId: string | null;
   /*
    * Everything the Agents view is drawn from. All of it is optional, because
    * the Files tab mounts this same column with the Git tab alone and has no
-   * chat behind it to have touched a card or sent anything away (bw-rpgh.5).
+   * chat behind it to have sent anything away (bw-rpgh.5).
    */
-  /** Every card this chat has touched, in the order it touched them. */
-  cards?: string[];
   /** Everything it handed to something else, oldest first (§8.2.7). */
   agents?: SentAway[];
   finishedAgentCount?: number;
@@ -217,7 +210,7 @@ export interface ChatRightRailProps {
   open: boolean;
   /** Which view is drawn. What this chat has touched, unless Git was asked for. */
   view?: RailView;
-  /** The project's checkout — where its cards are read from. */
+  /** The project's checkout. */
   projectPath?: string | null;
   /**
    * The folder THIS chat is running in, which for a chat started in a worktree
@@ -276,8 +269,6 @@ export interface ChatRightRailProps {
 const NOTHING: never[] = [];
 
 export function ChatRightRail({
-  projectId,
-  cards = NOTHING,
   agents = NOTHING,
   finishedAgentCount,
   items = NOTHING,
@@ -303,10 +294,8 @@ export function ChatRightRail({
   scrimTestId = 'chat-right-rail-scrim',
 }: ChatRightRailProps) {
   const phone = usePhoneScreen();
-  const jobs = useMemo(() => byJob(cards), [cards]);
-  const cardStatuses = useKnownCardStatuses(projectPath);
-  // Cards belong to the project; what git has to say belongs to this chat's own
-  // folder. They are the same path only for a chat started in the checkout.
+  // What git has to say belongs to this chat's own folder, which is the
+  // project's checkout only for a chat started there.
   const gitPath = workingIn ?? projectPath;
   return (
     // The library's sheet held inside the work area: on a phone a sheet down
@@ -333,8 +322,6 @@ export function ChatRightRail({
       data-testid="chat-right-rail"
       data-open={open}
       data-view={view}
-      data-cards={jobs.length}
-      data-pieces={cards.length}
       style={{ '--chat-right-rail-width': `${desktopWidth}px` } as React.CSSProperties}
       className={cn(
         'z-30 flex shrink-0 flex-col overflow-hidden border-border/60 bg-background',
@@ -424,40 +411,6 @@ export function ChatRightRail({
 
           {view === 'chat' && (
             <>
-          {/* First in the column, and a fixed few lines of it. The helpers used
-              to sit here because they are the part that moves — but they are
-              also the part that grows, and by the fiftieth of them the cards
-              this chat has touched had been pushed off the bottom of the rail
-              (bw-pl2v.1). Wrapped chips are one short block whatever the
-              session has done; the list below them is not. */}
-          {jobs.length > 0 && (
-            <Section title="Related cards">
-              {/* One chip per JOB, and all of them: the column exists so nothing
-                  has to be hidden behind a count (§8.2.1), and a job's pieces
-                  are folded into it because a dozen chips reading bw-uiyz.N say
-                  one thing a dozen times (bw-7ks.22.11).
-
-                  The fold is kept on purpose, and the chip's colour is the JOB's
-                  own board status — never a piece's. A chip in the transcript
-                  names the piece and wears the piece's own status. So an open
-                  epic's chip here is blue while its closed piece's chip in the
-                  message is green, and both are right: every chip says exactly
-                  what the board page says about the card it names (bw-pq2a.1). */}
-              <div className="flex flex-wrap gap-1" data-testid="rail-cards">
-                {jobs.map((job) => (
-                  <BeadChip
-                    key={job.id}
-                    id={job.id}
-                    projectId={projectId}
-                    status={cardStatuses.get(job.id)}
-                    size="sm"
-                    title={jobTitle(job)}
-                  />
-                ))}
-              </div>
-            </Section>
-          )}
-
           {(agents.length > 0 || (finishedAgentCount ?? 0) > 0) && (
             <Section title="Subagents">
               <SentAwayPanel

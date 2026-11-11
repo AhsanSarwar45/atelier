@@ -558,7 +558,6 @@ describe('the row and the bar say the same thing', () => {
       lastActiveAt: new Date(NOW).toISOString(),
       lastSpokeAt: null,
       startedAt: new Date(BEGAN).toISOString(),
-      beads: [],
       ...over,
     };
   }
@@ -578,7 +577,6 @@ describe('the row and the bar say the same thing', () => {
       cwdHint: '/home/me/project',
       folder: 'project',
       branch: null,
-      beads: [],
       ...over,
     };
   }

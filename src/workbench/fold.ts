@@ -417,8 +417,6 @@ export interface SessionView {
   agents: SentAway[];
   /** Finished rows omitted from the opening snapshot; fetched only on expansion. */
   finishedAgentCount?: number;
-  /** Cards this chat has touched, as the machine recorded them. */
-  beads: string[];
   /**
    * What the reader wrote while the agent worked and chose to hold, oldest
    * first. Kept by the server, so it is the same list in every window and
@@ -484,7 +482,6 @@ export const EMPTY: SessionView = {
   context: null,
   todos: [],
   agents: [],
-  beads: [],
   held: [],
   permissionMode: null,
   autoApprove: false,
@@ -580,7 +577,6 @@ export function asView(sent: Partial<SessionView> | null | undefined): SessionVi
     // arrives already folded: a chat restored asleep with rows still saying
     // "working" would never see another `session.state` to correct them.
     agents: nothingIsDriving(list(raw.agents, EMPTY.agents), raw.state ?? EMPTY.state),
-    beads: list(raw.beads, EMPTY.beads),
     held: list(raw.held, EMPTY.held),
     menu: menuOf(menu),
   };
@@ -944,8 +940,8 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.todos = e.items;
       return next;
 
+    // Left by the retired board in older transcripts; nothing reads it now.
     case 'link.bead':
-      next.beads = view.beads.includes(e.beadId) ? view.beads : [...view.beads, e.beadId];
       return next;
 
     case 'ask.permission':
@@ -1086,10 +1082,8 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     // What follows replaces what came before: a chat re-read under a newer
     // reading of the record republishes its whole transcript, and a browser
     // already drawing the old copy must drop it rather than append (bw-1u1.27).
-    // The cards go with it — they are read out of the same record.
     case 'transcript.reset':
       next.items = [];
-      next.beads = [];
       next.agents = [];
       if (view.finishedAgentCount !== undefined) next.finishedAgentCount = 0;
       return next;
@@ -1147,12 +1141,10 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
   const thinkingAt = new Map<string, number>();
   const toolAt = new Map<string, number>();
   const askAt = new Map<string, number>();
-  const beads: string[] = [];
-  const beadSeen = new Set<string>();
   const agents: SentAway[] = [];
   const agentAt = new Map<string, number>();
 
-  const view: SessionView = { ...EMPTY, items, beads, agents, todos: [] };
+  const view: SessionView = { ...EMPTY, items, agents, todos: [] };
 
   const forget = () => {
     items.length = 0;
@@ -1160,8 +1152,6 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
     thinkingAt.clear();
     toolAt.clear();
     askAt.clear();
-    beads.length = 0;
-    beadSeen.clear();
     agents.length = 0;
     agentAt.clear();
   };
@@ -1481,10 +1471,6 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         break;
 
       case 'link.bead':
-        if (!beadSeen.has(e.beadId)) {
-          beadSeen.add(e.beadId);
-          beads.push(e.beadId);
-        }
         break;
 
       case 'ask.permission':

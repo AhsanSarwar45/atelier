@@ -26,7 +26,6 @@ function row(over: Partial<RestoreRow> = {}): RestoreRow {
     cwdHint: '/home/me/project',
     folder: 'project',
     branch: null,
-    beads: [],
     ...over,
     // Every row the server sends is named (protocol.ts, RestoreRow.name).
     name: over.name ?? over.title ?? 'An older chat',
@@ -50,7 +49,6 @@ function session(over: Partial<LiveSession> = {}): LiveSession {
     lastActiveAt: '2026-08-16T11:00:00.000Z',
     lastSpokeAt: null,
     startedAt: '2026-08-16T11:00:00.000Z',
-    beads: [],
     ...over,
   };
 }
@@ -100,8 +98,7 @@ describe('which chats are listed is the server\'s answer', () => {
   });
 
   it('what the row already knew survives a live frame that knows less', () => {
-    const merged = withLive([row({ beads: ['bw-1'] })], [session({ id: 's1', title: null, beads: [] })]);
-    expect(merged[0]!.beads).toEqual(['bw-1']);
+    const merged = withLive([row()], [session({ id: 's1', title: null })]);
     expect(merged[0]!.title).toBe('An older chat');
   });
 

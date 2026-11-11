@@ -43,7 +43,7 @@ describe('the references in a run of text', () => {
 
   it('leaves a kind still being written alone, rather than calling it a file', () => {
     expect(findReferences('use @skill:')).toEqual([]);
-    expect(findReferences('see @bead: and @chat:')).toEqual([]);
+    expect(findReferences('see @task: and @chat:')).toEqual([]);
   });
 
   it('leaves a lone @ alone', () => {

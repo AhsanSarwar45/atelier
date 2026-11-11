@@ -2,8 +2,7 @@
  * Every colour a state asks for has to survive the build.
  *
  * Tailwind emits a class only if it read the file that spells it, so the state
- * colours went grey the moment they moved out of a scanned folder — the board
- * kept exactly one, the one another component happened to spell by hand.
+ * colours went grey the moment they moved out of a scanned folder.
  * Reading the source and reasoning about it is what missed that, so this runs
  * the real thing: Tailwind, over the real tree, with the shipped config, and
  * asks whether the class came out the far end.
@@ -12,16 +11,14 @@ import postcss from "postcss";
 import tailwind from "tailwindcss";
 import { describe, expect, it } from "vitest";
 
-import { getStatusDotColor } from "@/lib/bead-utils";
-import { classesFor } from "@/lib/state-styles";
-import { STATES } from "@/types";
+import { classesFor, TONE_NAMES, type Tone } from "@/lib/state-styles";
 
 import config from "../../../tailwind.config";
 
 /** The class names in one tone's set, split out of the strings the app hands to Tailwind. */
-function classesOf(status: string): string[] {
-  const set = classesFor(status as never);
-  return [set.text, set.borderTop, set.badge]
+function classesOf(tone: Tone): string[] {
+  const set = classesFor(tone);
+  return [set.text, set.badge]
     .join(" ")
     .split(/\s+/)
     .filter((c) => c.includes("status-"));
@@ -41,18 +38,9 @@ async function build(): Promise<string> {
 }
 
 describe("state colours reach the stylesheet", () => {
-  it("builds every class every state asks for", async () => {
+  it("builds every class every tone asks for", async () => {
     const css = await build();
-    const missing = STATES.flatMap((s) => classesOf(s.id))
-      .filter((c) => !css.includes(selector(c)));
-    expect(missing).toEqual([]);
-  }, 60_000);
-
-  it("builds the dot beside every piece listed under a card", async () => {
-    // The columns and the dots went grey together; they read the same file, so
-    // the dot is asked for by the name the card list actually calls.
-    const css = await build();
-    const missing = STATES.map((s) => getStatusDotColor(s.id))
+    const missing = TONE_NAMES.flatMap(classesOf)
       .filter((c) => !css.includes(selector(c)));
     expect(missing).toEqual([]);
   }, 60_000);
@@ -67,7 +55,7 @@ describe("state colours reach the stylesheet", () => {
     const out = await postcss([tailwind(narrowed)]).process("@tailwind utilities;", {
       from: undefined,
     });
-    const missing = STATES.flatMap((s) => classesOf(s.id))
+    const missing = TONE_NAMES.flatMap(classesOf)
       .filter((c) => !out.css.includes(selector(c)));
     expect(missing.length).toBeGreaterThan(0);
   }, 60_000);

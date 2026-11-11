@@ -4,9 +4,9 @@
  */
 
 import { apiUrl } from '@/lib/api-base';
-import { onBoard, onFolder, onRepository, type WatchEvent } from '@/workbench/live-wire';
-import { BeadsResponseSchema, CardResponseSchema, CardStatusesResponseSchema, TaskActionResponseSchema, TaskDetailSchema, TasksResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
-import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, CachedCounts } from '@/types';
+import { onFolder, onRepository } from '@/workbench/live-wire';
+import { TaskActionResponseSchema, TaskDetailSchema, TasksResponseSchema } from '@/lib/api-schemas';
+import type { Project, Tag } from '@/types';
 import type { OwnerAction, Task, TaskEvent, TaskTypeInfo } from '@/workbench/tasks/types';
 
 /**
@@ -21,12 +21,7 @@ export type ManifestStorage = 'personal' | 'repository';
 
 export interface ProjectManifest {
   schema_version: number;
-  project: { display_name: string; use_beads: boolean; summary: string };
-  git: { completed_work_branch: string; agents_may_merge_completed_work: boolean; protected_branches: string[] };
-  beads: { issue_id_prefix: string; work_areas: string[] };
-  verification: { commands: { name: string; command: string; paths?: string[] }[] };
-  review: { external_review: 'agent_decides' | 'always' | 'never' };
-  cross_project: { delivery_projects: string[] };
+  project: { display_name: string; summary: string };
   /** What the project's chats are called (bw-mv45). Absent means the app's own rule. */
   chat_name?: ChatNameSettings;
 }
@@ -56,8 +51,6 @@ export interface ProjectProbe {
   existing: boolean;
   storage?: ManifestStorage;
   manifestPath?: string;
-  /** Whether this computer has bd at all (bw-3tkl.2). */
-  beadsAvailable: boolean;
 }
 
 export interface ProjectSettingsAnswer {
@@ -66,8 +59,6 @@ export interface ProjectSettingsAnswer {
   instructions: string;
   path: string;
   storage: ManifestStorage;
-  /** See ProjectProbe.beadsAvailable. */
-  beadsAvailable: boolean;
 }
 
 /**
@@ -165,68 +156,10 @@ export interface FsPathMoved {
 }
 
 /**
- * Git branch status information
- */
-export interface BranchStatus {
-  exists: boolean;
-  ahead: number;
-  behind: number;
-}
-
-/**
- * BD CLI command result
- */
-export interface BdCommandResult {
-  stdout: string;
-  stderr: string;
-  code: number;
-}
-
-/**
- * File watcher event.
- *
- * Defined beside the connection that carries it, because the board feed is one
- * tag on the window's one stream rather than a stream of its own (bw-zkh4).
- */
-export type { WatchEvent } from '@/workbench/live-wire';
-
-/**
- * How many background chores may be in the air at once.
- *
- * A browser opens six connections to a host and hands them out first come,
- * first served. Chores like reading a worktree or asking GitHub about a pull
- * request take seconds each and there is one per card, so unbounded they take
- * every connection and whatever the reader is actually waiting for queues
- * behind them — measured at eight seconds for the chat list (bw-ccm.3).
- */
-const CHORES_AT_A_TIME = 2;
-
-let choresRunning = 0;
-const choresWaiting: (() => void)[] = [];
-
-/**
- * Runs a background chore once a slot is free. Anything a person is waiting on
- * goes straight to `fetchApi` and is never queued behind these.
- */
-async function chore<T>(run: () => Promise<T>): Promise<T> {
-  if (choresRunning >= CHORES_AT_A_TIME) {
-    await new Promise<void>((resume) => choresWaiting.push(resume));
-  }
-  choresRunning += 1;
-  try {
-    return await run();
-  } finally {
-    choresRunning -= 1;
-    choresWaiting.shift()?.();
-  }
-}
-
-/**
  * Reads already on their way, by what they are reading.
  *
  * A screen is built from many parts and several of them ask for the same thing
- * as it opens — the project list four times over, the memory twice, the board
- * from every hook that wants a count. Each of those was a separate journey to
+ * as it opens — the project list four times over, the memory twice. Each of those was a separate journey to
  * the server, so the reader waited for the same answer several times over
  * (bw-uiyz.9). Now the first asker's journey is the one everybody waits on.
  *
@@ -282,7 +215,7 @@ function eitherOf(theirs: AbortSignal | null | undefined, deadline: AbortSignal)
  *
  * It is also where nothing is kept. Everything asked for here is a picture of
  * work that changes while the reader is looking at it, and its address is the
- * same after a card moves as it was before — so there is no name a stale copy
+ * same after anything moves as it was before — so there is no name a stale copy
  * could ever be asked about by. The server says so on every answer it gives;
  * this is the same thing said on the way out, so a browser that never saw the
  * header still does not draw a board out of a copy it kept (bw-8um.3.18).
@@ -447,12 +380,12 @@ export const projects = {
 
 /** One line of the composer's `@` menu (bw-mi3s.4). */
 export interface MentionOffer {
-  kind: 'file' | 'bead' | 'chat' | 'skill' | 'diff' | 'task';
+  kind: 'file' | 'chat' | 'skill' | 'diff' | 'task';
   /** What goes after `@kind:` — or, for a file, after `@`. A diff's is its path. */
   id: string;
-  /** A file's name, a card's or a task's title, a chat's or a skill's name. */
+  /** A file's name, a task's title, a chat's or a skill's name. */
   label: string;
-  /** Read after it, dimmed: a file's folder, a card's id, a chat's last activity, a skill's description. */
+  /** Read after it, dimmed: a file's folder, a chat's last activity, a skill's description. */
   detail?: string;
   folder?: boolean;
   status?: string;
@@ -464,7 +397,7 @@ export interface MentionOffer {
 export interface MentionPlace {
   /** The folder the chat works in: its files and its skills. */
   cwd: string;
-  /** The project's folder, whose board the cards come from. */
+  /** The project's folder. */
   project: string | null;
   projectId: string | null;
   /** The chat asking, which is not offered to itself. */
@@ -483,7 +416,7 @@ function mentionAddress(place: MentionPlace, more: Record<string, string>): stri
 
 export const mention = {
   /**
-   * Files, cards, chats and skills that answer what was typed after an `@`,
+   * Files, tasks, chats and skills that answer what was typed after an `@`,
    * grouped by kind with the best group first. The order is the server's.
    */
   search: (place: MentionPlace, q: string, limit = 20, signal?: AbortSignal, kind?: MentionOffer['kind']) =>
@@ -520,124 +453,6 @@ export const tags = {
     { method: 'DELETE' }
   ),
 };
-
-/**
- * Beads API
- */
-/**
- * Input for creating a new bead
- */
-export interface CreateBeadInput {
-  path: string;
-  title: string;
-  description?: string;
-  issue_type?: string;
-  priority?: number;
-  parent_id?: string;
-}
-
-export interface CardStatus {
-  id: string;
-  status: string;
-  updated_at?: string | null;
-  /** Closed and labelled `cancelled`. */
-  dropped?: boolean;
-}
-
-export const beads = {
-  /**
-   * How many cards sit in each column of a board, without the cards.
-   *
-   * The list of projects wants the numbers, not the work — and downloading a
-   * whole card database to count it cost megabytes per project on a screen
-   * that draws a handful of names (bw-uiyz.2). The server counts what it
-   * already has to read and sends back the figures.
-   */
-  counts: async (path: string) => {
-    const params = new URLSearchParams({ path, counts: '1' });
-    const data = await fetchApi<{ counts: CachedCounts; source?: string }>(`/api/beads?${params}`);
-    return data;
-  },
-
-  /**
-   * The cards of a board. `brief` leaves out each card's notes, design, close
-   * reason and comments, carrying `comment_count` instead: the board draws none
-   * of that text and it was most of a 7 MiB answer (bw-fbzd.7). The card panel
-   * fetches it for the open card with `card` below.
-   */
-  read: async (path: string, updatedAfter?: string, options?: { brief?: boolean }) => {
-    const params = new URLSearchParams({ path });
-    if (updatedAfter) params.set('updated_after', updatedAfter);
-    if (options?.brief) params.set('brief', '1');
-    const data = await fetchApi<{ beads: Bead[]; source?: string }>(
-      `/api/beads?${params}`
-    );
-    BeadsResponseSchema.parse(data);
-    return data;
-  },
-
-  /** Each card's id and status, for a reader that only colours card names (bw-fbzd.7). */
-  statuses: async (path: string, updatedAfter?: string) => {
-    const params = new URLSearchParams({ path, ids: '1' });
-    if (updatedAfter) params.set('updated_after', updatedAfter);
-    const data = await fetchApi<{ beads: CardStatus[]; source?: string }>(`/api/beads?${params}`);
-    CardStatusesResponseSchema.parse(data);
-    return data;
-  },
-
-  /** One card whole, with the long text a brief read leaves out. */
-  card: async (path: string, id: string) => {
-    const params = new URLSearchParams({ path, id });
-    const data = await fetchApi<{ bead: Bead; source?: string }>(`/api/beads/card?${params}`);
-    CardResponseSchema.parse(data);
-    return data;
-  },
-
-  create: (data: CreateBeadInput) => fetchApi<{ id: string }>('/api/beads/create', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-
-  update: (data: { path: string; id: string; title?: string; description?: string; status?: string; issue_type?: string; priority?: number; add_label?: string; remove_label?: string; approve_tree?: string }) =>
-    fetchApi<{ success: boolean }>('/api/beads/update', {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    }),
-};
-
-/**
- * BD CLI API
- */
-export const bd = {
-  command: (args: string[], cwd?: string) => fetchApi<BdCommandResult>('/api/bd/command', {
-    method: 'POST',
-    body: JSON.stringify({ args, cwd }),
-  }),
-};
-
-/**
- * Worktree creation response
- */
-export interface CreateWorktreeResponse {
-  success: boolean;
-  worktree_path: string;
-  branch: string;
-  already_existed: boolean;
-}
-
-/**
- * Worktree deletion response
- */
-export interface DeleteWorktreeResponse {
-  success: boolean;
-}
-
-/**
- * List worktrees response
- */
-export interface ListWorktreesResponse {
-  worktrees: WorktreeEntry[];
-}
 
 /**
  * What a repository has changed, in the shape the server parses out of
@@ -919,43 +734,6 @@ const REMOTE_DEADLINE_MS = 15 * 60_000;
  * Git API
  */
 export const git = {
-  /**
-   * Get branch status relative to main
-   * @deprecated Use `worktreeStatus()` instead. Branch-based workflow is deprecated in favor of worktrees.
-   */
-  branchStatus: (path: string, branch: string) => fetchApi<BranchStatus>(
-    `/api/git/branch-status?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`
-  ),
-
-  // Worktree endpoints
-  worktreeStatus: async (repoPath: string, beadId: string, signal?: AbortSignal) => {
-    const data = await chore(() => fetchApi<WorktreeStatus>(
-      `/api/git/worktree-status?repo_path=${encodeURIComponent(repoPath)}&bead_id=${encodeURIComponent(beadId)}`,
-      // A git walk over a big repository is slow on purpose, so this one waits
-      // longer than a read a person is sitting in front of — but it still waits
-      // a bounded time, which it did not before.
-      { deadlineMs: 30_000, ...(signal ? { signal } : {}) }
-    ));
-    WorktreeStatusSchema.parse(data);
-    return data;
-  },
-
-  createWorktree: (repoPath: string, beadId: string, baseBranch = 'main') =>
-    fetchApi<CreateWorktreeResponse>('/api/git/worktree', {
-      method: 'POST',
-      body: JSON.stringify({ repo_path: repoPath, bead_id: beadId, base_branch: baseBranch }),
-    }),
-
-  deleteWorktree: (repoPath: string, beadId: string) =>
-    fetchApi<DeleteWorktreeResponse>('/api/git/worktree', {
-      method: 'DELETE',
-      body: JSON.stringify({ repo_path: repoPath, bead_id: beadId }),
-    }),
-
-  listWorktrees: (repoPath: string) => fetchApi<ListWorktreesResponse>(
-    `/api/git/worktrees?repo_path=${encodeURIComponent(repoPath)}`
-  ),
-
   // The chat's own Git view (bw-8dp8). Every one of these takes the project's
   // working directory — `Project.path`, which `ChatTab` already holds — and the
   // server runs it through its own path check before it shells out to git.
@@ -1154,14 +932,13 @@ export const git = {
    * It says only that something moved; the panel answers by reading `status`
    * and `log` again, because those are what it draws and only git knows what
    * they say now. Carried on the window's one connection, tagged `git`, for
-   * the reason `watch.beads` below is: a stream of its own would spend one of
+   * the same reason every watch is: a stream of its own would spend one of
    * the six a browser allows and never give it back.
    */
   watch: (path: string, onChange: () => void) => onRepository(path, onChange),
 
   // A project's checkouts, which is what "where will this chat work" is
-  // chosen from (bw-ov7a.3). Keyed by a name a person types, unlike the
-  // card-keyed `listWorktrees` above.
+  // chosen from (bw-ov7a.3). Keyed by a name a person types.
 
   /** Every checkout of the project, and where a new one would be put. */
   trees: (path: string, signal?: AbortSignal) => fetchApi<GitTreesResponse>(
@@ -1379,42 +1156,6 @@ export const fs = {
       method: 'POST',
       body: JSON.stringify(line == null ? { path, target } : { path, target, line }),
     }),
-};
-
-/**
- * Dolt database status
- */
-export interface DoltStatus {
-  running: boolean;
-  database_count: number | null;
-}
-
-/**
- * Dolt database entry
- */
-export interface DoltDatabase {
-  name: string;
-  project_name: string;
-}
-
-/**
- * Discovered running Dolt server process
- */
-export interface DoltServer {
-  pid: number;
-  port: number;
-  project_path: string;
-  db_name: string | null;
-  source: 'auto-start' | 'central';
-}
-
-/**
- * Dolt API
- */
-export const dolt = {
-  status: () => fetchApi<DoltStatus>('/api/dolt/status'),
-  databases: () => fetchApi<{ databases: DoltDatabase[] }>('/api/dolt/databases'),
-  servers: () => fetchApi<{ servers: DoltServer[] }>('/api/dolt/servers'),
 };
 
 /**
@@ -1790,8 +1531,6 @@ export interface StorageRunReport {
 
 export interface StorageRules {
   rules: StorageRule[];
-  /** Chats linked to an open card are left alone. */
-  keepLinked: boolean;
   lastRun: StorageRunReport | null;
 }
 
@@ -1838,8 +1577,6 @@ export interface StorageChat {
   /** Images and files only this chat shows. */
   media: number;
   active: boolean;
-  /** Linked to an open card. */
-  kept: boolean;
 }
 
 /** One archived chat (server/src/workbench/store/upkeep.rs). */
@@ -1860,10 +1597,10 @@ const post = (path: string, body?: unknown, deadlineMs?: number) =>
 export const storage = {
   usage: async (fresh = false) => storageAnswer<StorageUsage>(await request(`/api/storage${fresh ? '?fresh=true' : ''}`)),
   rules: async () => storageAnswer<StorageRules>(await request('/api/storage/rules')),
-  saveRules: async (rules: StorageRule[], keepLinked: boolean) =>
-    storageAnswer<StorageRules>(await request('/api/storage/rules', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ rules, keepLinked }) })),
-  preview: async (rules: StorageRule[], keepLinked: boolean) =>
-    (await storageAnswer<{ effects: StorageEffect[] }>(await post('/api/storage/preview', { rules, keepLinked }))).effects,
+  saveRules: async (rules: StorageRule[]) =>
+    storageAnswer<StorageRules>(await request('/api/storage/rules', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ rules }) })),
+  preview: async (rules: StorageRule[]) =>
+    (await storageAnswer<{ effects: StorageEffect[] }>(await post('/api/storage/preview', { rules }))).effects,
   largest: async (limit = 20) =>
     storageAnswer<{ chats: StorageChat[]; ready: boolean }>(await request(`/api/storage/chats?limit=${limit}`)),
   clearChats: async (ids: string[], action: 'delete' | 'archive') =>
@@ -1874,20 +1611,6 @@ export const storage = {
   deleteUnused: async () => storageAnswer<{ images: number; files: number }>(await post('/api/storage/unused', undefined, 15 * 60_000)),
   compact: async () => storageAnswer<{ before: number; after: number }>(await post('/api/storage/compact', undefined, 60 * 60_000)),
   run: async () => storageAnswer<StorageRunReport>(await request('/api/storage/run', { method: 'POST', deadlineMs: 15 * 60_000 })),
-};
-
-/**
- * File Watcher.
- *
- * The board is one tag on the window's one connection rather than a stream of
- * its own: a stream never gives its browser connection back, and a handful of
- * them is what left ordinary reads queued behind streams that would never end
- * (live-wire.ts, bw-zkh4). This also means a dropped board watch is opened
- * again — it used to close on the first error and stay closed, so the cards
- * quietly stopped following the file until the page was reloaded.
- */
-export const watch = {
-  beads: (path: string, onEvent: (event: WatchEvent) => void) => onBoard(path, onEvent),
 };
 
 /**

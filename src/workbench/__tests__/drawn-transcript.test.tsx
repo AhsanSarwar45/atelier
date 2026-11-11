@@ -13,7 +13,7 @@ import { DrawnTranscript, OVERSCAN, SCREENFUL } from '@/workbench/drawn-transcri
 import type { DrawnRow } from '@/workbench/machine-lines';
 import type { LookableImage } from '@/workbench/protocol';
 
-const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id };
+const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }] };
 const LOOK = (_image: LookableImage) => {};
 const NOWHERE = () => {};
 const STAND = () => NOWHERE;

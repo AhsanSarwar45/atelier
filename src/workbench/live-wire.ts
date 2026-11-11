@@ -5,9 +5,8 @@
  *
  * A browser allows six connections to one address ACROSS EVERY WINDOW it has,
  * and an event stream never gives its slot back. The app used to open one per
- * feed — the helper's own stream from the top bar, the project's board file
- * wherever the card list was drawn, the open chat — so two or three windows
- * spent the whole budget, and every ordinary read then queued behind streams
+ * feed — the helper's own stream from the top bar, the open chat — so two or
+ * three windows spent the whole budget, and every ordinary read then queued behind streams
  * that would never end. That is what a screen stuck on loading was, and why
  * reloading it worked: a reload frees that window's streams, and the reads go
  * out before the streams reopen (bw-zkh4).
@@ -31,15 +30,6 @@
  */
 
 import { apiUrl } from '@/lib/api-base';
-
-/** One board change, as the server reports it. */
-export interface WatchEvent {
-  path: string;
-  type: string;
-}
-
-/** Told when the project's board moved. */
-type BoardListener = (event: WatchEvent) => void;
 
 /**
  * Told when the repository moved underneath the Git panel — a commit, a push,
@@ -80,7 +70,6 @@ interface ChatListener {
   since: () => number;
 }
 
-const boards = new Map<string, Set<BoardListener>>();
 const workbenchers = new Set<WorkbenchListener>();
 const chats = new Map<string, Set<ChatListener>>();
 const repositories = new Map<string, Set<RepositoryListener>>();
@@ -124,16 +113,9 @@ let again: ReturnType<typeof setTimeout> | null = null;
  */
 let missed = false;
 
-/**
- * What this window is watching, as the route takes it.
- *
- * More than one board is joined by a newline rather than repeated, because a
- * repeated key is the one thing a query string cannot say plainly to the server
- * (server/src/routes/live.rs). A project path never contains one.
- */
+/** What this window is watching, as the route takes it. */
 function shape(): string {
   const params = new URLSearchParams();
-  if (boards.size > 0) params.set('board', Array.from(boards.keys()).join('\n'));
   if (workbenchers.size > 0) params.set('workbench', '1');
   if (bootstrappers.size > 0) params.set('bootstrap', '1');
   if (updaters.size > 0) params.set('update', '1');
@@ -189,41 +171,6 @@ function furthestSeen(chat: string): number {
     seen = Math.max(seen, listener.since());
   });
   return seen;
-}
-
-/**
- * Whether `path` is the project itself, or something inside it.
- *
- * Both separators count. The server builds the path it reports by joining onto
- * the project path this window sent it, so on Windows it comes back written the
- * Windows way — `C:\work\proj\.beads\issues.jsonl` under a project of
- * `C:\work\proj`. Looking only for a forward slash after the project's name
- * matched none of those, so every board change was dropped on the floor and a
- * Windows board went on not moving until the page was reloaded: the exact fault
- * this job exists to remove, left standing on one platform (bw-zkh4.13).
- *
- * The project's name has to end where its own does — `/work/proj-two` is not
- * inside `/work/proj` — which is what looking at the character after it is for.
- */
-function inside(path: string, project: string): boolean {
-  const withoutTrailing = (of: string) => of.replace(/[\\/]+$/, '');
-  const child = withoutTrailing(path);
-  const parent = withoutTrailing(project);
-  if (child === parent) return true;
-  if (!child.startsWith(parent)) return false;
-  const after = child[parent.length];
-  return after === '/' || after === '\\';
-}
-
-/** Whoever is listening for a board change under `path`. */
-function boardsUnder(path: string): Set<BoardListener>[] {
-  const told: Set<BoardListener>[] = [];
-  boards.forEach((listeners, project) => {
-    // The server reports the file that moved — the board file itself, or the
-    // database directory — which is always inside the project asked about.
-    if (inside(path, project)) told.push(listeners);
-  });
-  return told;
 }
 
 function close(): void {
@@ -292,15 +239,6 @@ function heard(raw: string): void {
   }
   const said = frame.data ?? '';
   switch (frame.tag) {
-    case 'board': {
-      try {
-        const moved = JSON.parse(said) as WatchEvent;
-        for (const listeners of boardsUnder(moved.path)) listeners.forEach((tell) => tell(moved));
-      } catch {
-        // As above: one unreadable board frame, not the connection.
-      }
-      return;
-    }
     case 'workbench':
       workbenchers.forEach((w) => w.frame(said));
       return;
@@ -389,7 +327,6 @@ function dropped(): void {
 
 function nothingWanted(): boolean {
   return (
-    boards.size === 0 &&
     workbenchers.size === 0 &&
     chats.size === 0 &&
     bootstrappers.size === 0 &&
@@ -526,19 +463,6 @@ function waitNoLonger(): void {
   }
 }
 
-/** Watch one project's board. Returns the way to stop. */
-export function onBoard(project: string, tell: BoardListener): () => void {
-  const listeners = boards.get(project) ?? new Set<BoardListener>();
-  listeners.add(tell);
-  boards.set(project, listeners);
-  reshape();
-  return () => {
-    listeners.delete(tell);
-    if (listeners.size === 0) boards.delete(project);
-    reshape();
-  };
-}
-
 /**
  * Watch one repository's git directory, for as long as the Git panel is on
  * screen. Returns the way to stop.
@@ -643,7 +567,6 @@ export function watching(): string {
 
 /** Forgets everything, so one test's connection is not another's. */
 export function forgetEverything(): void {
-  boards.clear();
   workbenchers.clear();
   repositories.clear();
   watchedFolders.clear();

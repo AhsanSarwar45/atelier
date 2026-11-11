@@ -4,8 +4,7 @@
  *
  * Written out by hand. These were zod schemas, and zod was 56 KB of every
  * screen's first download — the home screen and settings included — to check
- * four answers, and it walked every field of every card on each board poll
- * (bw-fbzd.9). A bad answer still throws, naming where it went wrong.
+ * a handful of answers (bw-fbzd.9). A bad answer still throws, naming where it went wrong.
  */
 
 type Check = (value: unknown, at: string) => void;
@@ -59,77 +58,6 @@ const schema = (check: Check): Schema => ({
     return value;
   },
 });
-
-const comment = object({
-  id: either([number, string], 'number or string'),
-  issue_id: string,
-  author: string,
-  text: string,
-  created_at: string,
-});
-
-const strings = array(string);
-
-const bead = object({
-  id: string,
-  title: string,
-  description: nullish(string),
-  status: string,
-  priority: nullish(number),
-  issue_type: nullish(string),
-  owner: nullish(string),
-  created_at: nullish(string),
-  updated_at: nullish(string),
-  comments: nullish(array(comment)),
-  // A brief board read carries how many comments a card has instead of them (bw-fbzd.7).
-  comment_count: nullish(number),
-  parent_id: nullish(string),
-  children: nullish(strings),
-  design: nullish(string),
-  notes: nullish(string),
-  deps: nullish(strings),
-  blockers: nullish(strings),
-  relates_to: nullish(strings),
-  labels: nullish(strings),
-  _originalStatus: nullish(string),
-  close_reason: nullish(string),
-  closed_at: nullish(string),
-  created_by: nullish(string),
-});
-
-export const CommentSchema = schema(comment);
-
-export const BeadSchema = schema(bead);
-
-export const BeadsResponseSchema = schema(object({
-  beads: array(bead),
-  source: optional(string),
-}));
-
-export const CardStatusesResponseSchema = schema(object({
-  beads: array(object({
-    id: string,
-    status: string,
-    updated_at: nullish(string),
-    dropped: optional(boolean),
-  })),
-  source: optional(string),
-}));
-
-export const CardResponseSchema = schema(object({
-  bead,
-  source: optional(string),
-}));
-
-export const WorktreeStatusSchema = schema(object({
-  exists: boolean,
-  worktree_path: nullable(string),
-  branch: nullable(string),
-  ahead: number,
-  behind: number,
-  dirty: boolean,
-  last_modified: nullable(string),
-}));
 
 /** A task (docs/tasks.md, "HTTP"): the fields every screen that draws one reads. */
 const task = object({

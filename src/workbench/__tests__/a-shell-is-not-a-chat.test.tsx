@@ -33,7 +33,7 @@ import { SentAwayPanel } from '@/workbench/sent-away';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 
 const AT = '2026-09-04T09:00:00.000Z';
-const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
+const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }] };
 
 let stamped = 0;
 type Said<T> = T extends unknown ? Omit<T, 'seq' | 'sessionId' | 'at'> : never;

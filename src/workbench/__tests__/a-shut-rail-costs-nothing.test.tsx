@@ -77,7 +77,6 @@ function rail(open: boolean) {
   return render(
     <ChatRightRail
       projectId="a-project"
-      cards={[]}
       agents={[]}
       items={[]}
       sessionId="chat-1"

@@ -22,7 +22,7 @@ import type { ImagePayload } from '@/workbench/protocol';
 import type { Mentions } from '@/components/markdown-body';
 
 /** Words drawn as words: nothing in these messages is a path or a card. */
-const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
+const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }] };
 
 const SHOT = 'data:image/png;base64,iVBORw0KGgo=';
 const shot = (alt: string, at?: number): ImagePayload => ({ mime: 'image/png', dataUrl: SHOT, alt, ...(at === undefined ? {} : { at }) });

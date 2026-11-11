@@ -5,9 +5,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { AlertTriangle, Archive, ArchiveRestore, Code, FolderOpen, Settings } from "lucide-react";
+import { Archive, ArchiveRestore, Code, FolderOpen, Settings } from "lucide-react";
 
-import { StatusDonut } from "@/components/status-donut";
 import { TagPicker } from "@/components/tag-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,8 +23,6 @@ import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { Tag } from "@/lib/db";
 import { projectTitle } from "@/lib/project-title";
-import { deriveBeadPrefix } from "@/lib/utils";
-import { NO_COUNTS, type BeadCounts } from "@/types";
 
 /**
  * Returns the OS-appropriate file manager name
@@ -42,18 +39,7 @@ interface ProjectCardProps {
   id: string;
   name: string;
   path: string;
-  localPath?: string;
   tags: Tag[];
-  beadCounts?: BeadCounts;
-  /**
-   * True once `beadCounts` reflects either cached or freshly-fetched
-   * data. When false, the card renders a dashed placeholder donut so
-   * the user never sees misleading zeros on first paint.
-   */
-  countsLoaded?: boolean;
-  dataSource?: string;
-  beadError?: string;
-  usesBeads?: boolean;
   archivedAt?: string;
   onTagsChange?: (tags: Tag[]) => void;
   onUpdated?: () => void;
@@ -66,13 +52,7 @@ export function ProjectCard({
   id,
   name,
   path,
-  localPath,
   tags,
-  beadCounts = NO_COUNTS(),
-  countsLoaded = true,
-  dataSource,
-  beadError,
-  usesBeads = true,
   archivedAt,
   onTagsChange,
   onUnarchive,
@@ -81,9 +61,7 @@ export function ProjectCard({
   const [isOpening, setIsOpening] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // For dolt projects, use localPath for filesystem operations; for regular projects use path
-  const isDolt = path.startsWith("dolt://");
-  const fsPath = isDolt ? localPath : path;
+  const fsPath = path;
 
   const handleOpenExternal = async (target: 'vscode' | 'cursor' | 'finder', e: React.MouseEvent) => {
     e.stopPropagation();
@@ -109,9 +87,6 @@ export function ProjectCard({
       setIsOpening(null);
     }
   };
-
-  const total = Object.values(beadCounts ?? {}).reduce<number>((n, c) => n + (typeof c === "number" ? c : 0), 0);
-  const done = beadCounts?.closed ?? 0;
 
   return (
     <>
@@ -162,54 +137,11 @@ export function ProjectCard({
 
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {usesBeads && (beadError ? (
-            <Tooltip side="bottom" label={beadError}>
-              <span className="relative flex items-center gap-1.5 text-sm text-warning">
-                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                Board unreadable
-              </span>
-            </Tooltip>
-          ) : (
-            <span className="relative flex items-center gap-2 text-sm text-t-tertiary">
-              <StatusDonut beadCounts={beadCounts} size={24} countsLoaded={countsLoaded} />
-              {countsLoaded && (total === 0 ? "No tasks" : `${total} ${total === 1 ? "task" : "tasks"} · ${done} done`)}
-            </span>
-          ))}
           {archivedAt && (
             <Badge variant="secondary" appearance="light" size="sm" shape="circle" className="shrink-0 gap-1">
               <Archive className="h-3 w-3" aria-hidden="true" />
               Archived
             </Badge>
-          )}
-          {!archivedAt && dataSource === 'jsonl' && (
-            <Tooltip
-              label={
-                <div className="space-y-1">
-                  <p className="text-xs">
-                    This project uses the old JSONL data format. Run this in the project directory to migrate to Dolt:
-                  </p>
-                  <Badge asChild variant="secondary" appearance="light" size="sm" className="w-full">
-                    <code>bd init --prefix {deriveBeadPrefix(path, name)}</code>
-                  </Badge>
-                </div>
-              }
-            >
-              <Badge
-                variant="warning"
-                appearance="outline"
-                size="sm"
-                shape="circle"
-                className="relative shrink-0 gap-1"
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => e.stopPropagation()}
-                role="note"
-                tabIndex={0}
-                aria-label={`Old data format — migrate with bd init --prefix ${deriveBeadPrefix(path, name)}`}
-              >
-                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-                Old format — migrate
-              </Badge>
-            </Tooltip>
           )}
         </div>
         <div className="relative flex items-center gap-1 shrink-0">

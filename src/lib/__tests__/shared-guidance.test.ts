@@ -21,8 +21,8 @@ describe('lossless shared guidance editing', () => {
     expect(buildCustomization(source, source)).toEqual({ disabled: false, content: null, when: null, automatic: null, parameters: {} });
   });
   it('keeps explicit differences while preserving disabled state', () => {
-    const draft = { ...source, content: 'project', automatic: false, when: { op: 'project_beads' }, parameters: { runner: 'cargo test', extra: 'value' } };
-    expect(buildCustomization(draft, source, true)).toEqual({ disabled: true, content: 'project', when: { op: 'project_beads' }, automatic: false, parameters: draft.parameters });
+    const draft = { ...source, content: 'project', automatic: false, when: { op: 'file_exists', path: 'Cargo.toml' }, parameters: { runner: 'cargo test', extra: 'value' } };
+    expect(buildCustomization(draft, source, true)).toEqual({ disabled: true, content: 'project', when: { op: 'file_exists', path: 'Cargo.toml' }, automatic: false, parameters: draft.parameters });
   });
   it('reset values and removed project-only parameters do not retain stale overrides', () => {
     const overridden = { ...source, parameters: { runner: 'cargo test', extra: 'remove' } };

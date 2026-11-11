@@ -5,17 +5,10 @@ import { AddProjectDialog } from '../add-project-dialog';
 
 const mocks = vi.hoisted(() => ({ manifest: {
   schema_version: 1,
-  project: { display_name: 'Keystone', use_beads: true, summary: '' },
-  git: { completed_work_branch: 'ours', agents_may_merge_completed_work: true, protected_branches: ['main'] },
-  beads: { issue_id_prefix: 'key', work_areas: ['interface'] },
-  verification: { commands: [{ name: 'Tests', command: 'npm test', paths: ['src/'] }] },
-  review: { external_review: 'agent_decides' as const },
-  cross_project: { delivery_projects: [] },
+  project: { display_name: 'Keystone', summary: '' },
 }, initialize: vi.fn().mockResolvedValue({ id: 'p1' }), toast: vi.fn() }));
 vi.mock('@/lib/api', () => ({
   projects: { probe: vi.fn().mockResolvedValue({ manifest: mocks.manifest, instructions: 'Start command: npm run dev', existing: false, storage: null }), initialize: mocks.initialize },
-  git: { branches: vi.fn().mockResolvedValue({ current: 'ours', branches: [{ name: 'ours' }, { name: 'main' }] }) },
-  dolt: { databases: vi.fn().mockResolvedValue({ databases: [] }), servers: vi.fn().mockResolvedValue({ servers: [] }) },
 }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 
@@ -26,9 +19,7 @@ describe('project onboarding', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(await screen.findByLabelText('Project name')).toHaveValue('Keystone');
-    expect(screen.getByLabelText('Use task tracking for project work')).toBeChecked();
-    expect(screen.getByLabelText('Card ID prefix')).toHaveValue('key');
-    expect(screen.getByRole('combobox', { name: 'Finished work lands on' })).toHaveTextContent('ours');
+    expect(screen.queryByText(/task tracking/i)).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add Project' }));
     // The instructions the probe inferred are added with the project, not

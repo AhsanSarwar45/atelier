@@ -11,7 +11,7 @@
  * this line that MUST be read: a chat that has quietly stopped asking before it
  * runs things is a trap, and grey text an inch long is how it hid. The model
  * takes a hue off its own name, the way every other chip the data colours does
- * (src/lib/bead-labels.ts).
+ * (src/lib/hue.ts).
  *
  * This is the first thing on the line allowed to give way when the line runs
  * short, and the only one that can: both are named again on the writing box
@@ -24,7 +24,7 @@ import { Cloud, Cpu, Gauge, Shield, ShieldAlert, ShieldCheck, ShieldHalf, Shield
 
 import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
-import { hueFor } from '@/lib/bead-labels';
+import { hueFor } from '@/lib/hue';
 import { cn } from '@/lib/utils';
 import { effortInWords, inWords, PERMISSION_MODE, UNKNOWN_MODE_TONE } from '@/workbench/machine-words';
 import { BRAND_DEFAULT_MODEL, type ApiProvider, type CollaborationModeChoice, type EffortChoice, type ModelChoice } from '@/workbench/protocol';

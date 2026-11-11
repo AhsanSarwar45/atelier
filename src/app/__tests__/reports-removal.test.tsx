@@ -15,12 +15,7 @@ vi.mock('@/hooks/use-project', () => ({ useProject: () => ({
   refetch: vi.fn(),
 }) }));
 vi.mock('@/workbench/chat-tab', () => ({ default: () => <div data-testid="chat-tab" /> }));
-vi.mock('@/app/project/kanban-board', () => ({ default: () => <div data-testid="board" /> }));
-vi.mock('@/app/project/board-cards', () => ({
-  BoardCards: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useBoardCards: () => ({ beads: [], ticketNumbers: new Map(), isLoading: false, error: null, refresh: vi.fn() }),
-}));
-vi.mock('@/components/card-panel', () => ({ CardPanel: () => null }));
+vi.mock('@/workbench/tasks/tasks-tab', () => ({ default: () => <div data-testid="tasks-tab" /> }));
 vi.mock('@/components/project-settings-screen', () => ({ ProjectSettingsScreen: () => null }));
 vi.mock('@/workbench/globals', () => ({ WorkbenchStatus: () => null }));
 vi.mock('@/components/shell', () => ({
@@ -28,14 +23,14 @@ vi.mock('@/components/shell', () => ({
 }));
 
 describe('retiring reports as a destination', () => {
-  it('shows only Chat and Board and sends an old report address to the chat', async () => {
-    expect(whereFrom(params).tab).toBe('chat');
+  it('shows no report tab and sends an old report address to the tasks', async () => {
+    expect(whereFrom(params).tab).toBe('tasks');
 
     render(<ProjectPage />);
 
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeVisible();
-    expect(screen.getByRole('tab', { name: 'Board' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Tasks' })).toBeVisible();
     expect(screen.queryByRole('tab', { name: /report/i })).not.toBeInTheDocument();
-    expect(await screen.findByTestId('chat-tab')).toBeVisible();
+    expect(await screen.findByTestId('tasks-tab')).toBeVisible();
   });
 });

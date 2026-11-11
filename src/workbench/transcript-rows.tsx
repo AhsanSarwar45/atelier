@@ -1248,10 +1248,9 @@ function AttachmentChip({ image, onLook }: { image: ImagePayload; onLook: OnLook
       >
         {/* `size="none"`: the badge around it already sets the height, the
             side padding and the type. The button is here for what it does —
-            the pointer, the focus ring — not for a box of its own, the same
-            way a bead chip wears one (bead-chip-row.tsx).
+            the pointer, the focus ring — not for a box of its own.
 
-            And nothing else. It wore a `font-inherit` copied from that chip,
+            And nothing else. It wore a `font-inherit` copied from another chip,
             which is not a class this project builds — but tailwind-merge reads
             it as an answer to the font-family question and drops the chip's own
             `font-mono` on the way past, so the name was drawn in the page's

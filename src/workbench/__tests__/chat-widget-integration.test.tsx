@@ -5,7 +5,7 @@ import { foldAll } from '@/workbench/fold';
 import type { WbpEvent } from '@/workbench/protocol';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 
-const mentions: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
+const mentions: Mentions = { split: (text) => [{ kind: 'text', text }] };
 const source = `Numbers\n\n\`\`\`atelier-widget\n{"type":"metrics","items":[{"label":"Speed","value":"42 ms"}]}\n\`\`\``;
 
 describe('chat widget integration', () => {

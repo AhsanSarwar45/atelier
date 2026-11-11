@@ -8,7 +8,7 @@ import { TranscriptRow } from '@/workbench/transcript-rows';
 import { PictureViewer } from '@/workbench/chat-tab';
 import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
 
-const mentions: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
+const mentions: Mentions = { split: (text) => [{ kind: 'text', text }] };
 const image = (alt: string): ImagePayload => ({ mime: 'image/png', dataUrl: `data:image/png;base64,${alt}`, alt });
 const spec = `\`\`\`atelier-image-compare
 {"mode":"wipe","before":{"path":"before.png","caption":"Old"},"after":{"path":"after.png","caption":"New"}}
