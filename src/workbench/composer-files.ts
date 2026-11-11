@@ -67,7 +67,7 @@ import type { Brand, CommandInfo } from '@/workbench/protocol';
 import { resolvePath } from '@/workbench/paths';
 import { knownReal } from '@/workbench/paths-on-disk';
 import { learnChat, learnSkill, learnTask, setReferenceAsker } from '@/workbench/reference-names';
-import { canBeginReference, formatAtelierReference, formatReference, NEW_TASK, type AtelierKind } from '@/workbench/references';
+import { canBeginReference, formatAtelierReference, formatReference, MERGE, NEW_TASK, type AtelierKind } from '@/workbench/references';
 
 /** How many the menu ever shows. Past this nobody is reading, he is typing. */
 const MOST_OFFERED = 20;
@@ -354,7 +354,8 @@ function offer(found: FsFoundPath, rank = 0, cwd = ''): Completion {
 
 /** What the badge for an offered task, chat or skill draws. */
 function referenceOf(found: MentionOffer): Reference {
-  const kind = found.kind as AtelierKind;
+  // The menu offers things with an id; `@merge` is its own line (mergeBranch).
+  const kind = found.kind as Exclude<AtelierKind, 'merge'>;
   if (kind === 'diff') return diffBadge(found.id, found.status);
   if (kind === 'task') return { kind, id: found.id, title: found.label, status: found.status };
   if (kind === 'chat') {
@@ -390,7 +391,7 @@ function chatDetail(found: MentionOffer): string {
  * picking it writes — and what tells it apart after it.
  */
 function atelierOffer(found: MentionOffer, rank: number): Completion {
-  const kind = found.kind as AtelierKind;
+  const kind = found.kind as Exclude<AtelierKind, 'merge'>;
   const insert = formatAtelierReference(kind, found.id);
   return {
     label: insert,
@@ -423,6 +424,28 @@ function newTask(): Completion {
       view.dispatch({ changes: { from, to, insert: NEW_TASK }, selection: { anchor: from + NEW_TASK.length } });
     },
   };
+}
+
+/**
+ * The menu's line while what is typed could still be `@merge`: the owner
+ * asking the agent to merge this branch into the base branch (docs/tasks.md,
+ * "Merging"). It writes a bare `@merge `.
+ */
+function mergeBranch(): Completion {
+  return {
+    label: MERGE.trimEnd(),
+    displayLabel: ' ',
+    detail: 'Ask the agent to merge this branch into the base branch',
+    type: 'merge',
+    apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+      view.dispatch({ changes: { from, to, insert: MERGE }, selection: { anchor: from + MERGE.length } });
+    },
+  };
+}
+
+/** Whether the word after the `@` could still be `merge`, on the menu's first tab. */
+export function offersMerge(typed: string, scope: Scope): boolean {
+  return scope === 'all' && typed.length > 0 && 'merge'.startsWith(typed.toLowerCase());
 }
 
 /** Whether the word after the `@` could still be `task`, and the tab lets a task in. */
@@ -481,6 +504,9 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
     const picked = TYPED_KIND.test(token.text) ? 'all' : context.state.field(pickedScope, false) ?? 'all';
     const fresh = offersNewTask(token.text.slice(1), picked) ? newTask() : null;
     if (fresh) drawnBadges.set(fresh, { kind: 'task', id: '' });
+    const merge = offersMerge(token.text.slice(1), picked) ? mergeBranch() : null;
+    if (merge) drawnBadges.set(merge, { kind: 'merge', id: '' });
+    const asked = [fresh, merge].filter((line): line is Completion => line !== null);
     let found;
     try {
       found = await mention.search(place, token.text.slice(1), MOST_OFFERED, stale.signal, picked === 'all' ? undefined : picked);
@@ -488,7 +514,7 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
       // A checkout that has gone away, or a server that is restarting: the
       // right answer is no menu, not a red line under what he is writing —
       // unless a new task is on offer, which needs nothing from the server.
-      return fresh && !context.aborted ? { from: token.from, options: [fresh], filter: false } : null;
+      return asked.length && !context.aborted ? { from: token.from, options: asked, filter: false } : null;
     }
     if (context.aborted) return null;
 
@@ -497,7 +523,7 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
       if (one.kind !== 'file') drawnBadges.set(options[at]!, referenceOf(one));
     });
     // Unsectioned, so CodeMirror draws it above every group.
-    if (fresh) options.unshift(fresh);
+    options.unshift(...asked);
     // A tab with nothing in it still shows its tabs, or there would be no way
     // back from it but deleting what was typed.
     if (!options.length) options.push(nothingFound(scopeOf(context.state)));
@@ -903,7 +929,7 @@ const menuTheme = EditorView.theme({
   },
   '.cm-commandPending': { fontSize: '12px', opacity: '0.6' },
   // A chat's, a skill's and a task's badge is its name, so the line has no words of its own.
-  '.cm-completion-chat .cm-completionLabel, .cm-completion-skill .cm-completionLabel, .cm-completion-task .cm-completionLabel, .cm-completion-new-task .cm-completionLabel': { display: 'none' },
+  '.cm-completion-chat .cm-completionLabel, .cm-completion-skill .cm-completionLabel, .cm-completion-task .cm-completionLabel, .cm-completion-new-task .cm-completionLabel, .cm-completion-merge .cm-completionLabel': { display: 'none' },
   // `> ul >` to outrank CodeMirror's own heading rule, which underlines it;
   // the tabs above already rule the list off.
   '.cm-tooltip.cm-tooltip-autocomplete > ul > completion-section': {
@@ -924,7 +950,7 @@ const menuTheme = EditorView.theme({
   '.cm-completionLabel': { flexShrink: '0' },
   // A skill's description is a sentence, read from its start: cut at the
   // end, unlike a folder, whose end is the part that tells.
-  '.cm-completion-chat .cm-completionDetail, .cm-completion-skill .cm-completionDetail, .cm-completion-task .cm-completionDetail, .cm-completion-new-task .cm-completionDetail': {
+  '.cm-completion-chat .cm-completionDetail, .cm-completion-skill .cm-completionDetail, .cm-completion-task .cm-completionDetail, .cm-completion-new-task .cm-completionDetail, .cm-completion-merge .cm-completionDetail': {
     direction: 'ltr',
     textAlign: 'left',
     marginLeft: '0',

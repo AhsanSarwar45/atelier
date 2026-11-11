@@ -27,5 +27,9 @@
   {"text": "@task: nothing", "found": []},
   {"text": "@task.", "found": []},
   {"text": "me@task now", "found": []},
-  {"text": "`@task` and `@task:2`", "found": []}
+  {"text": "`@task` and `@task:2`", "found": []},
+  {"text": "@merge", "found": [{"kind": "merge", "id": "", "start": 0, "end": 6, "run": false}]},
+  {"text": "ok @merge now", "found": [{"kind": "merge", "id": "", "start": 3, "end": 9, "run": false}]},
+  {"text": "@merged and @merge: and @merge:main and @merge.", "found": []},
+  {"text": "`@merge`", "found": []}
 ]

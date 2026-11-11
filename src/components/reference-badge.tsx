@@ -22,7 +22,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { FileDiff, ListChecks, ListPlus, MessageSquare, Sparkles } from 'lucide-react';
+import { FileDiff, GitMerge, ListChecks, ListPlus, MessageSquare, Sparkles } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -69,6 +69,11 @@ export type Reference =
       title?: string | null;
       /** The task's status (docs/tasks.md), when it is known. */
       status?: string;
+    }
+  | {
+      /** A bare `@merge`: the owner asking the agent to merge this branch. */
+      kind: 'merge';
+      id: '';
     };
 
 /**
@@ -115,6 +120,7 @@ export function referenceLabel(ref: Reference): string {
     return `${ref.diff.commit ? `${ref.diff.commit.slice(0, 7)} ` : ''}${name}${diffLines(ref.diff)}`;
   }
   if (ref.kind === 'task') return ref.id ? `#${ref.id}${ref.title ? ` ${ref.title}` : ''}` : 'New task';
+  if (ref.kind === 'merge') return 'Merge branch';
   return ref.name || ref.id;
 }
 
@@ -129,6 +135,7 @@ export function referenceTitle(ref: Reference): string {
     if (!ref.id) return 'Asks the agent to make a task of this message';
     return `Open tasks · #${ref.id}${ref.status ? ` · ${ref.status.replace('_', ' ')}` : ''}`;
   }
+  if (ref.kind === 'merge') return 'Asks the agent to merge this branch into the base branch';
   return ref.description ? `Skill · ${ref.description}` : 'Skill';
 }
 
@@ -143,6 +150,7 @@ function referenceClass(ref: Reference): string {
   if (ref.kind === 'chat') return cn(ONE_LINE, ref.brand ? BRAND_COLOR[ref.brand] : classesFor(undefined).badge);
   if (ref.kind === 'diff') return cn(ONE_LINE, DIFF_COLOR);
   if (ref.kind === 'task') return cn(ONE_LINE, classesFor(ref.status ? TASK_TONE[ref.status] : undefined).badge);
+  if (ref.kind === 'merge') return cn(ONE_LINE, classesFor(undefined).badge);
   return cn(ONE_LINE, SKILL_COLOR);
 }
 
@@ -167,6 +175,8 @@ export function ReferenceFace({ reference }: { reference: Reference }) {
       ) : (
         <ListPlus className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
       )
+    ) : reference.kind === 'merge' ? (
+      <GitMerge className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
     ) : reference.kind === 'chat' ? (
       reference.brand ? (
         <BrandIcon brand={reference.brand} className="mr-0.5 size-3" />
@@ -240,6 +250,8 @@ export function ReferenceBadge({
     } else if (reference.kind === 'task') {
       // A bare `@task` names no task yet; there is nothing to open.
       if (reference.id) router.push(addressWith(params, { id: projectId, tab: 'tasks', task: lineFrom(reference.id) }));
+    } else if (reference.kind === 'merge') {
+      // A request, not a thing: there is nothing to open.
     } else if (reference.kind === 'chat') {
       router.push(addressWith(params, { id: reference.projectId ?? projectId, tab: 'chat', chat: reference.id }));
     } else {

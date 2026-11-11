@@ -119,6 +119,7 @@ export function useDescribeReference(commands: readonly CommandInfo[] | undefine
     }
     return (kind, id) => {
       if (kind === 'diff') return diffBadge(id);
+      if (kind === 'merge') return { kind, id: '' };
       if (kind === 'task') {
         if (!id) return { kind, id };
         const known = tasks.get(id);

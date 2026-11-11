@@ -346,11 +346,17 @@ export function resolveReference(ref: Reference, root: string | Rooted): string 
  * task of the message (docs/tasks.md). It is found with an empty id, so it is
  * drawn as a badge and written back as `@task`.
  *
+ * A bare `@merge`, likewise a word of its own, is the owner asking the agent to
+ * merge the chat's branch into the base branch; the server adds what git says
+ * about the chat's folder (docs/tasks.md, "Merging"). It has an empty id, and
+ * `@merge:…` is nothing.
+ *
  * `@bead:…` named a card on the retired Beads board. It is no longer a kind, so
  * an old transcript that wrote one shows it as the words it was.
  */
-export type AtelierKind = 'chat' | 'skill' | 'diff' | 'task';
+export type AtelierKind = 'chat' | 'skill' | 'diff' | 'task' | 'merge';
 
+/** The kinds written with an id after a colon. `@merge` never has one. */
 export const ATELIER_KINDS: readonly AtelierKind[] = ['chat', 'skill', 'diff', 'task'];
 
 /** An Atelier reference found inside a larger text, and where in it it sits. */
@@ -384,6 +390,8 @@ const LEADING_SKILL = new RegExp(`^/skill:(${ATELIER_ID})(?![A-Za-z0-9_])`);
 const TASK_NUMBER = /^[1-9][0-9]*$/;
 /** A bare `@task`: the word alone, ended by whitespace or the text. */
 const NEW_TASK_AT = /@task(?=\s|$)/y;
+/** A bare `@merge`: the word alone, ended by whitespace or the text. */
+const MERGE_AT = /@merge(?=\s|$)/y;
 
 function atelierAt(text: string, at: number): FoundAtelierReference | null {
   DIFF_AT.lastIndex = at;
@@ -402,6 +410,8 @@ function atelierAt(text: string, at: number): FoundAtelierReference | null {
   // `@task:` with no number after it is not a task, nor a bare `@task`.
   NEW_TASK_AT.lastIndex = at;
   if (NEW_TASK_AT.test(text)) return { kind: 'task', id: '', start: at, end: at + '@task'.length, run: false };
+  MERGE_AT.lastIndex = at;
+  if (MERGE_AT.test(text)) return { kind: 'merge', id: '', start: at, end: at + '@merge'.length, run: false };
   return null;
 }
 
@@ -424,13 +434,16 @@ export function findAtelierReferences(text: string): FoundAtelierReference[] {
   return found;
 }
 
-/** The one form this app writes an Atelier reference in. A bare `@task` has no id. */
+/** The one form this app writes an Atelier reference in. A bare `@task` or `@merge` has no id. */
 export function formatAtelierReference(kind: AtelierKind, id: string): string {
   return id ? `@${kind}:${id}` : `@${kind}`;
 }
 
 /** What the `@` menu's "New task" line writes: a bare `@task` and a space. */
 export const NEW_TASK = '@task ';
+
+/** What the `@` menu's "Merge branch" line writes: a bare `@merge` and a space. */
+export const MERGE = '@merge ';
 
 /**
  * The reference a pasted address of this app stands for (bw-mi3s.5).

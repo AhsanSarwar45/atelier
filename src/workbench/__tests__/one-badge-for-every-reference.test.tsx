@@ -17,6 +17,7 @@ const CHAT = '0b8f6c1e-2d3a-4f5b-9c7d-1e2f3a4b5c6d';
 function describeRef(kind: AtelierKind, id: string): Reference {
   if (kind === 'chat') return { kind, id, name: 'Standup notes', brand: 'claude', projectId: 'p2' };
   if (kind === 'diff') return diffBadge(id);
+  if (kind === 'merge') return { kind, id: '' };
   return { kind, id, name: 'Standup', description: 'Write the standup' };
 }
 
