@@ -81,7 +81,7 @@
     --border-subtle: 240 4% 12%;     /* faint dividers */
     --border-strong: 240 4% 24%;     /* hover, focused borders */
 
-    /* Status: kanban column colors */
+    /* Status colors */
     --status-open: 217 91% 60%;
     --status-progress: 38 92% 50%;
     --status-review: 192 91% 55%;
@@ -156,7 +156,7 @@
     --radius-column: 0.75rem;      /* 12px - column border radius */
     --radius-badge: 0.375rem;      /* 6px - badge border radius */
     --border-w: 1px;               /* border width for cards/columns */
-    --column-gap: 1rem;            /* gap between kanban columns */
+    --column-gap: 1rem;            /* gap between columns */
     --column-min: 20rem;           /* narrowest a column may be squeezed before the board scrolls */
 
     /* ===== Typography ===== */

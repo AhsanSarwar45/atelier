@@ -88,7 +88,7 @@ const config: Config = {
           strong: 'hsl(var(--border-strong))',
         },
 
-        // Status: kanban column colors
+        // Status colors
         status: {
           open: 'hsl(var(--status-open))',
           progress: 'hsl(var(--status-progress))',
