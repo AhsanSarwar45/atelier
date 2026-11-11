@@ -268,6 +268,7 @@ function ProjectTabs() {
       {shownTab === 'tasks' && !projectError && projectId && (
         <TasksTab
           projectId={projectId}
+          projectPath={project?.path ?? null}
           // The open task is the address's, so a link, a reload and Back all
           // show the same one; picking another rewrites the address in place.
           selected={openTask}

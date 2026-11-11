@@ -269,8 +269,10 @@ function StaleCancel({ task }: { task: Task }) {
   );
 }
 
-export default function TasksTab({ projectId, selected: shown, onSelect, onOpenChat, onNewChat }: {
+export default function TasksTab({ projectId, projectPath, selected: shown, onSelect, onOpenChat, onNewChat }: {
   projectId: string;
+  /** The project's repository, watched so Merged follows a merge. */
+  projectPath?: string | null;
   /**
    * The task whose detail is open, when the screen holds it (the address's
    * `task`). Left out, the tab keeps its own.
@@ -283,7 +285,7 @@ export default function TasksTab({ projectId, selected: shown, onSelect, onOpenC
   /** Opens the New chat dialog, whose chat starts with `@task ` in it. */
   onNewChat?: () => void;
 }) {
-  const { tasks, loaded, error, refetch } = useTasks(projectId);
+  const { tasks, loaded, error, refetch } = useTasks(projectId, null, projectPath);
   const live = useLiveSessions();
   const sessions = useMemo(() => new Map(live.map((s) => [s.id, s])), [live]);
   const [filter, setFilter] = useState<SessionFilter>('all');

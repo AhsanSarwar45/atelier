@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { tasks as tasksApi } from '@/lib/api';
-import { onWorkbench } from '@/workbench/live-wire';
+import { onRepository, onWorkbench } from '@/workbench/live-wire';
 import type { Task } from '@/workbench/tasks/types';
 
 /**
@@ -36,9 +36,10 @@ export interface TasksRead {
  *
  * Every change to a task is announced on the `workbench` feed, and the list is
  * read again when it is. A dropped connection may have missed one, so the
- * first frame after it reads the list again too.
+ * first frame after it reads the list again too. Given `repo`, a change to
+ * that repository reads it again as well, so Merged follows a merge.
  */
-export function useTasks(projectId: string | null, sessionId?: string | null): TasksRead {
+export function useTasks(projectId: string | null, sessionId?: string | null, repo?: string | null): TasksRead {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -82,6 +83,21 @@ export function useTasks(projectId: string | null, sessionId?: string | null): T
       dropped: () => { missed.current = true; },
     });
   }, [projectId, refetch]);
+
+  // Merged or not is read from git, and a merge changes no task, so no
+  // `tasks.changed` comes for it. The repository's own feed does.
+  useEffect(() => {
+    if (!projectId || !repo) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const stop = onRepository(repo, () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(refetch, 500);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      stop();
+    };
+  }, [projectId, repo, refetch]);
 
   return useMemo(() => ({ tasks, loaded, error, refetch }), [tasks, loaded, error, refetch]);
 }

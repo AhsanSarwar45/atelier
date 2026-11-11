@@ -1208,7 +1208,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const facts = factsRead?.facts ?? null;
   // The chat's checklist is the tasks it holds; the project's whole list is
   // read so a task card in the transcript can show any task's status live.
-  const projectTasks = useTasks(projectId);
+  const projectTasks = useTasks(projectId, null, projectPath);
   const liveTasks = useMemo(() => byNumber(projectTasks.tasks), [projectTasks.tasks]);
   const checklist = useMemo(
     () => checklistForTasks(projectTasks.tasks, reading, view.state),
