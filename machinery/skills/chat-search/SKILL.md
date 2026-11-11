@@ -34,7 +34,6 @@ The query understands:
 | `project:web` | chats in a project, by name |
 | `provider:claude` | chats with one provider (`claude`, `codex`, `local`) |
 | `after:7d` `after:2026-09-01` `before:2026-09-10` | chats by date |
-| `card:bw-12` | chats that worked on a board card |
 
 `read_chat` takes `id`, and optionally `offset` and `limit`. It returns the
 chat's title and project, then what was said in order, each part with its

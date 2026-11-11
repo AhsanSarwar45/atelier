@@ -7,7 +7,7 @@ description: Find the files in a checkout a person describes in their own words,
 
 A person is looking for one or more files in their project. They describe
 them the way they remember: "where we parse the config", "the test for the
-login redirect", "the component that draws the board's columns". Find the files
+login redirect", "the component that draws the task list". Find the files
 they mean, and the line that shows it when there is one.
 
 You can only search and read. You cannot change anything, and you do not need to.
