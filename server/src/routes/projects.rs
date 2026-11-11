@@ -280,6 +280,7 @@ pub async fn create_project(
     Json(input): Json<CreateProjectInput>,
 ) -> Result<(StatusCode, Json<ProjectWithTags>), (StatusCode, Json<ErrorResponse>)> {
     let project = db.create_project(input).map_err(db_error_response)?;
+    tidy(std::path::Path::new(project.local_path.as_deref().unwrap_or(&project.path)));
 
     // Return project with empty tags array
     let project_with_tags = ProjectWithTags {
@@ -363,6 +364,10 @@ pub async fn touch_project(
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     db.touch_project(&id).map_err(db_error_response)?;
+    // Opening a project takes out what an older Atelier wired into it.
+    if let Ok(project) = db.get_project(&id) {
+        tidy(std::path::Path::new(project.local_path.as_deref().unwrap_or(&project.path)));
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
