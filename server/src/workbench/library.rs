@@ -1137,6 +1137,13 @@ fn builtins() -> Vec<Item> {
             vec![],
         ),
         (
+            "atelier-tasks",
+            "Tasks",
+            include_str!("../../../machinery/skills/tasks/SKILL.md"),
+            Condition::Always,
+            vec![],
+        ),
+        (
             "atelier-beads",
             "Beads workflow",
             include_str!("../../../machinery/skills/beads/SKILL.md"),

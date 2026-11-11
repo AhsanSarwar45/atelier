@@ -138,6 +138,21 @@ mod tests {
         assert!(text.contains("Beads epic"), "{text}");
     }
 
+    /// The task rules are in every session's guidance, whatever the project
+    /// and whether or not it uses Beads (docs/tasks.md).
+    #[test]
+    fn every_session_is_given_the_task_rules() {
+        let data = tempfile::tempdir().unwrap();
+        let rules = body(&bundled_skills().join("tasks/SKILL.md")).unwrap();
+        for root in [None, Some(tempfile::tempdir().unwrap())] {
+            let snapshot = super::super::library::resolve(data.path(), root.as_ref().map(|r| r.path())).unwrap();
+            let guidance = snapshot.guidance();
+            assert!(guidance.contains("instructions — Tasks:"), "{guidance}");
+            assert!(guidance.contains(rules.trim()), "the tasks skill is missing:\n{guidance}");
+            assert!(guidance.contains("atelier task create"), "{guidance}");
+        }
+    }
+
     fn located(instructions: &str) -> crate::project_manifest::LocatedManifest {
         let mut manifest = crate::project_manifest::infer_virtual("Keystone");
         manifest.project.summary = "A workbench".into();
