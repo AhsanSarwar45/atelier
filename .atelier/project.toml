@@ -3,3 +3,8 @@ schema_version = 1
 [project]
 display_name = "Atelier"
 summary = "Atelier — agent chats and tasks for your projects, a Next.js front end over a Rust back end"
+
+[git]
+completed_work_branch = "main"
+agents_may_merge_completed_work = true
+protected_branches = ["main"]
