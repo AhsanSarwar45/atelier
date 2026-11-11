@@ -2,38 +2,4 @@ schema_version = 1
 
 [project]
 display_name = "Atelier"
-use_beads = true
-summary = "the Beads Web project — the manager's own board screen and its server, a Next.js front end over a Rust back end"
-
-[git]
-completed_work_branch = "main"
-agents_may_merge_completed_work = true
-protected_branches = ["main"]
-
-[beads]
-issue_id_prefix = "bw"
-work_areas = [
-    "board",
-    "screen",
-    "server",
-    "storage",
-    "reports",
-    "packaging",
-    "interface",
-    "tests",
-    "tooling",
-    "docs",
-    "gates",
-    "steps",
-    "craft",
-]
-
-[[verification.commands]]
-name = "Project checks"
-command = "npm test && (cd server && cargo test)"
-
-[review]
-external_review = "agent_decides"
-
-[cross_project]
-delivery_projects = ["corsetta"]
+summary = "Atelier — agent chats and tasks for your projects, a Next.js front end over a Rust back end"

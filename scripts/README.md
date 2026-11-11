@@ -172,12 +172,12 @@ computer that has none of it.
 
 Every folder, name ending and fallback in the tool lookup was written from
 documentation and read back by nobody: the rest of the checks all run here,
-where git, python, node, npm and bd are installed already and on the PATH. So
+where git, python, node and npm are installed already and on the PATH. So
 "the app finds what it needs" was a claim about code that had never been put to
 a computer missing any of it (bw-dwxw).
 
-It takes a container holding none of the five and adds them back one at a time
-— none, git only, git and the board tool, all of them — and asks the program
+It takes a container holding none of the four and adds them back one at a time
+— none, git only, all of them — and asks the program
 itself, with `atelier tools`, what it can see. Each case is asked twice: once
 normally, and once with the environment emptied, because a copy the machine
 starts at login is handed no PATH at all and that is the case the whole lookup
@@ -192,7 +192,7 @@ bash scripts/fresh-machine.sh
 ```
 
 Needs docker. `ATELIER_BINARY` checks a binary you already have; `IMAGE`
-changes the base, which must carry none of the five and a C library no older
+changes the base, which must carry none of the four and a C library no older
 than the one the binary needs.
 
 ## Adding to these

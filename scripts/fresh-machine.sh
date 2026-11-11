@@ -46,9 +46,6 @@ if [ -z "$FIXTURE" ] || [ ! -x "$FIXTURE" ]; then
 fi
 pass "Rust provider fixture: $(basename "$FIXTURE")"
 
-BD="$(command -v bd 2>/dev/null || true)"
-[ -n "$BD" ] && BD="$(readlink -f "$BD")"
-[ -x "$BD" ] || { fail "no bd executable to mount"; exit 1; }
 
 say "Fresh images with no language runtime"
 EMPTY_IMAGE="atelier-fresh-empty"
@@ -84,15 +81,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-matrix_case() { # label, image, bd-present, providers-present, expected-found words
-  local label="$1" image="$2" with_bd="$3" with_providers="$4" expected="$5"
+matrix_case() { # label, image, providers-present, expected-found words
+  local label="$1" image="$2" with_providers="$3" expected="$4"
   local case_dir="$RUN/matrix-${label//+/-}" args=() url port answer found tool
   mkdir -p "$case_dir/home" "$case_dir/data"
   chmod 777 "$case_dir/home" "$case_dir/data"
   args=(-d --user "$(id -u):$(id -g)" -p 127.0.0.1::3008 -e ATELIER_HOST=0.0.0.0 -e ATELIER_PORT=3008
     -e HOME=/case/home -e ATELIER_DATA_DIR=/case/data -e PATH=/usr/local/bin:/usr/bin:/bin
     -v "$BINARY":/opt/atelier:ro -v "$case_dir":/case)
-  [ "$with_bd" = yes ] && args+=(-v "$BD":/usr/local/bin/bd:ro)
   if [ "$with_providers" = yes ]; then
     args+=(-e CLAUDE_PATH=/fixtures/claude -e CODEX_PATH=/fixtures/codex
       -v "$FIXTURE":/opt/atelier-tests:ro -v "$RUN/providers":/fixtures:ro)
@@ -104,21 +100,20 @@ matrix_case() { # label, image, bd-present, providers-present, expected-found wo
     fail "$label environment did not answer"
   else
     found=""
-    for tool in git bd claude codex browser; do
+    for tool in git claude codex browser; do
       if printf '%s' "$answer" | grep -q "\"tool\":\"$tool\"[^}]*\"found\":true"; then found="$found $tool"; fi
     done
     found="${found# }"
     [ "$found" = "$expected" ] && pass "$label reports exactly: ${expected:-no tools}" || fail "$label reported '$found', expected '$expected'"
-    curl -sf "$url/" >/dev/null && pass "$label serves the board shell" || fail "$label board shell did not serve"
+    curl -sf "$url/" >/dev/null && pass "$label serves the app shell" || fail "$label app shell did not serve"
   fi
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; CONTAINER=""
 }
 
 say "Environment matrix"
-matrix_case nothing "$EMPTY_IMAGE" no no ""
-matrix_case git-only "$IMAGE_NAME" no no "git"
-matrix_case git+bd "$IMAGE_NAME" yes no "git bd"
-matrix_case everything "$IMAGE_NAME" yes yes "git bd claude codex"
+matrix_case nothing "$EMPTY_IMAGE" no ""
+matrix_case git-only "$IMAGE_NAME" no "git"
+matrix_case everything "$IMAGE_NAME" yes "git claude codex"
 
 CONTAINER="$(docker run -d --user "$(id -u):$(id -g)" -p 127.0.0.1::3008 \
   -e ATELIER_HOST=0.0.0.0 -e ATELIER_PORT=3008 \
@@ -127,7 +122,7 @@ CONTAINER="$(docker run -d --user "$(id -u):$(id -g)" -p 127.0.0.1::3008 \
   -e CLAUDE_PATH=/fixtures/claude -e CODEX_PATH=/fixtures/codex \
   -e PATH=/usr/local/bin:/usr/bin:/bin \
   -v "$BINARY":/opt/atelier:ro -v "$FIXTURE":/opt/atelier-tests:ro \
-  -v "$RUN/providers":/fixtures:ro -v "$BD":/usr/local/bin/bd:ro \
+  -v "$RUN/providers":/fixtures:ro \
   -v "$RUN":/fresh "$IMAGE_NAME" /opt/atelier)" || {
     fail "container did not start"; exit 1;
   }
