@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-board';
+import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-project';
 import {
   CHAT_SAID,
   EACH_HELPER,
@@ -809,12 +809,6 @@ test.describe('the agents a chat sends off', () => {
       await expect(row.getByTestId('sent-away-for')).toHaveText(/\d+[smh]/);
       await expect(row.getByTestId('sent-away-spend')).toHaveText(/\d/);
       await expect(row.getByTestId('sent-away-result')).toContainText(HELPER_ANSWERED);
-
-      // ---- the card only the helper touched --------------------------------
-      // Polled: the board is asked about each candidate behind the drawing.
-      await expect(page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`).first()).toBeVisible({
-        timeout: HELLO_MS,
-      });
 
       await page.screenshot({ path: `${SHOTS}/chat-agents-read-back.png`, fullPage: false });
 

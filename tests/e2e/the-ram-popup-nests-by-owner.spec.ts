@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-board';
+import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-project';
 import { writeChatWithHelper } from './fixture-record';
 
 /**

@@ -71,7 +71,7 @@ async function openTheBox(page: Page, request: APIRequestContext, fixture: strin
   });
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [] }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({
-    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'At menu', cwd: fixture, beads: [] },
+    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'At menu', cwd: fixture },
   }));
   const made = await request.post('/api/projects', { data: { name: `${basename(fixture)}-${Date.now()}`, path: fixture, isTest: true } });
   expect(made.status(), await made.text()).toBe(201);

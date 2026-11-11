@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { foldAll } from '../../src/workbench/fold';
 import { changeOf } from '../../src/workbench/line-diff';
 import type { WbpEvent } from '../../src/workbench/protocol';
-import { discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 
 /** A base64 file as a chat writes one: a single line, no breaks. */
 const LINE = 'iVBORw0KGgoAAAANSUhEUgAAB3EAAAgFCAIAAADne8+0AAAAAXNSR0IArs4c6QAAIABJREFUeAHs3XlcVdXC'.repeat(2500);
@@ -65,8 +65,8 @@ test('a one-line file of 200,000 characters draws as a card, not a column', asyn
     url.searchParams.set('include_test', 'true');
     await route.continue({ url: url.toString() });
   });
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: chat, externalId: 'fixture', brand: 'claude', title: 'One-line file', name: 'One-line file', origin: 'terminal', projectId: null, folder: null, branch: null, state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${chat}$`), (route) => route.fulfill({ json: { sessionId: chat, origin: 'terminal', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'One-line file', cwd: projectPath, beads: [] } }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: chat, externalId: 'fixture', brand: 'claude', title: 'One-line file', name: 'One-line file', origin: 'terminal', projectId: null, folder: null, branch: null, state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null }] }));
+  await page.route(new RegExp(`/api/workbench/session/${chat}$`), (route) => route.fulfill({ json: { sessionId: chat, origin: 'terminal', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'One-line file', cwd: projectPath } }));
 
   let project: { id: string } | null = null;
   try {

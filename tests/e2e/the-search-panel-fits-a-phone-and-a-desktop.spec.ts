@@ -1,15 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
-import { bd } from './fixture-board';
-import { aChatSomebodyElseIsIn, aProjectOfItsOwn, backend, openChatTab } from './fixture-held';
+import { aChatSomebodyElseIsIn, aProjectOfItsOwn, openChatTab } from './fixture-held';
 
 /**
- * The shared search, drawn for chats, cards and files, on a desktop and on a
+ * The shared search, drawn for chats and files, on a desktop and on a
  * phone: every control reachable, nothing said twice, results readable
  * (bw-ac7z.1). SEARCH_SHOTS names the set of pictures taken.
  */
@@ -48,29 +46,7 @@ test('the search panel fits a phone and a desktop', async ({ browser, request },
     ['fn main() {', '    let rows = read();', `    // the ${word} cache stays off while importing very large boards`, '    tune(rows);', '}', `fn ${word}_off() {}`, ''].join('\n'),
   );
 
-  const dir = join(__dirname, '..', '.held-run', `shots-${randomUUID().slice(0, 8)}`);
-  mkdirSync(dir, { recursive: true });
-  let boardId: string | null = null;
-
   try {
-    execFileSync('git', ['init', '-q', '.'], { cwd: dir, stdio: 'pipe' });
-    bd(['init', '--prefix', 'sh'], dir);
-    mkdirSync(join(dir, '.atelier'), { recursive: true });
-    writeFileSync(
-      join(dir, '.atelier', 'project.toml'),
-      ['schema_version = 1', '', '[project]', `display_name = "${basename(dir)}"`, 'use_beads = true', 'summary = ""', '', '[git]', 'completed_work_branch = "master"', '', '[beads]', 'issue_id_prefix = "sh"', ''].join('\n'),
-    );
-    const seed = [
-      { id: 'sh-tune1', title: 'Tune the importer so large boards stop stalling', description: `The ${word} cache made it worse.`, status: 'in_progress', issue_type: 'bug', priority: 1 },
-      { id: 'sh-other1', title: `Count the ${word} rows`, status: 'open', issue_type: 'task', priority: 2 },
-    ];
-    writeFileSync(join(dir, 'seed.jsonl'), seed.map((card) => JSON.stringify(card)).join('\n') + '\n');
-    bd(['import', '--input', 'seed.jsonl'], dir);
-    bd(['comments', 'add', 'sh-tune1', `We turned the ${word} cache off and the importer stopped stalling.`, '--author', 'sam'], dir);
-    const made = await request.post(`${backend()}/api/projects`, { data: { name: 'held-board', path: dir, isTest: true } });
-    expect(made.status(), await made.text()).toBe(201);
-    boardId = ((await made.json()) as { id: string }).id;
-
     const chosen = await request.put('/api/settings/search', {
       data: { provider: 'claude', profile: null, model: null, effort: null, timeLimitSeconds: 60 },
     });
@@ -105,14 +81,6 @@ test('the search panel fits a phone and a desktop', async ({ browser, request },
       await shot('chat-ai');
       await page.getByTestId('search-close').click();
 
-      await page.goto(`/project?id=${encodeURIComponent(boardId)}&tab=board`);
-      await expect(page.getByText('Tune the importer').first()).toBeVisible({ timeout: 90_000 });
-      await openSearch();
-      await panel.getByTestId('search-input').fill(`${word} `);
-      await expect(page.getByTestId('search-card')).toHaveCount(2, { timeout: 30_000 });
-      await shot('board-results');
-      await page.getByTestId('search-close').click();
-
       await page.goto(`/project?id=${encodeURIComponent(chats.id)}&tab=files`);
       await expect(page.getByTestId('files-tab')).toBeVisible({ timeout: 60_000 });
       await openSearch();
@@ -125,7 +93,5 @@ test('the search panel fits a phone and a desktop', async ({ browser, request },
   } finally {
     chat.forget();
     await chats.remove();
-    if (boardId) await request.delete(`${backend()}/api/projects/${boardId}`);
-    rmSync(dir, { recursive: true, force: true });
   }
 });

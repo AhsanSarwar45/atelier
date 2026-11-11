@@ -180,7 +180,6 @@ function everySession(projectId: string, projectPath: string) {
     activity: state === 'streaming' ? 'Writing' : 'Idle',
     activityDetail: '',
     activityCall: null,
-    beads: [],
   });
   const all = [one(CHAT, 'Typing while the agent talks', 'idle')];
   for (let i = 0; i < OTHERS; i += 1) {
@@ -357,7 +356,6 @@ test('a keystroke costs the same whether or not the agent is talking', async ({ 
         held: null,
         title: 'Typing while the agent talks',
         cwd: fixture,
-        beads: [],
       },
     }),
   );

@@ -56,7 +56,7 @@ test('an image draft survives reload at its insertion point and picker labels cl
 
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [] }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({
-    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Draft images', cwd: RUN, beads: [] },
+    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Draft images', cwd: RUN },
   }));
 
   try {

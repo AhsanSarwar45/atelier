@@ -241,7 +241,6 @@ test('a thumb reaches every control, and the @ menu stays out from under the key
         held: null,
         title: 'A chat read on a phone',
         cwd: fixture,
-        beads: [],
       },
     }),
   );

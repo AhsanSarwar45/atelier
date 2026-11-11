@@ -4,13 +4,11 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { bd } from './fixture-board';
-
 /**
  * The project tab bar read on a phone (bw-4kp0.1).
  *
- * The tab bar carries Chat, Board and Files and then, on the same row, whatever
- * tools the open tab hands it — the board alone has eleven. At 390px the three
+ * The tab bar carries Chat, Tasks and Files and then, on the same row, whatever
+ * tools the open tab hands it. At 390px the three
  * words are the first thing to spend that row's width, and what they push off
  * it is the tools. So below the `sm` breakpoint each tab is drawn as its icon
  * alone.
@@ -37,7 +35,7 @@ const THUMB = 44;
 /** The three tabs, each with the word it is drawn as on a wide screen. */
 const TABS = [
   { testid: 'tab-chat', word: 'Chat' },
-  { testid: 'tab-board', word: 'Board' },
+  { testid: 'tab-tasks', word: 'Tasks' },
   { testid: 'tab-files', word: 'Files' },
 ];
 
@@ -53,11 +51,7 @@ function git(where: string, ...args: string[]): void {
   execFileSync('git', args, { cwd: where, stdio: 'pipe' });
 }
 
-/**
- * A project the Board tab is really drawn for: the app only offers Board when
- * the manifest says the project keeps cards, so a fixture without one would
- * measure two tabs and call it three.
- */
+/** A small project of its own, so the run never reads anyone else's. */
 function seed(where: string): void {
   rmSync(where, { recursive: true, force: true });
   mkdirSync(join(where, 'src'), { recursive: true });
@@ -70,33 +64,6 @@ function seed(where: string): void {
   git(where, 'config', 'commit.gpgsign', 'false');
   git(where, 'add', '-A');
   git(where, 'commit', '-qm', 'seed');
-
-  bd(['init', '--prefix', 'pt'], where);
-  mkdirSync(join(where, '.atelier'), { recursive: true });
-  writeFileSync(
-    join(where, '.atelier', 'project.toml'),
-    [
-      'schema_version = 1',
-      '',
-      '[project]',
-      'display_name = "the-project-tabs-on-a-phone"',
-      'use_beads = true',
-      'summary = ""',
-      '',
-      '[git]',
-      'completed_work_branch = "main"',
-      '',
-      '[beads]',
-      'issue_id_prefix = "pt"',
-      '',
-    ].join('\n'),
-  );
-  const cards = [
-    { id: 'pt-1', title: 'Something still waiting', status: 'open', issue_type: 'task', priority: 1 },
-    { id: 'pt-2', title: 'Something under way', status: 'in_progress', issue_type: 'task', priority: 1 },
-  ];
-  writeFileSync(join(where, 'seed.jsonl'), cards.map((one) => JSON.stringify(one)).join('\n') + '\n');
-  bd(['import', '--input', 'seed.jsonl'], where);
 }
 
 async function fixtureProject(request: APIRequestContext, name: string, path: string) {
@@ -135,9 +102,9 @@ test('the project tabs are icons on a phone and words on a wide screen', async (
   mkdirSync(SHOTS, { recursive: true });
 
   // ---- 1. The bar at 390px, where the words are what is in the way. ------
-  await page.goto(`/project?id=${project.id}&tab=board`);
+  await page.goto(`/project?id=${project.id}&tab=tasks`);
   await page.getByTestId('project-tabs').waitFor({ timeout: WAIT });
-  await page.getByTestId('board-scroll').waitFor({ timeout: WAIT });
+  await page.getByTestId('tasks-tab').waitFor({ timeout: WAIT });
   await page.waitForTimeout(2000);
   await page.screenshot({ path: `${SHOTS}/phone.png`, animations: 'disabled' });
 

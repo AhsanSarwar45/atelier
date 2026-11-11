@@ -217,7 +217,6 @@ test('the composer row at 390, 700 and 900, with every steering control a chat c
         held: null,
         title: 'A chat with every control it can have',
         cwd: fixture,
-        beads: [],
       },
     }),
   );

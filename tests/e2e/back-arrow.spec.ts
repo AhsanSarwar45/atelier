@@ -35,7 +35,7 @@ async function projectId(request: APIRequestContext): Promise<string> {
 test.describe('the project bar arrow', () => {
   test('gives back a move made inside the app', async ({ page, request }) => {
     const id = await projectId(request);
-    await page.goto(`/project?id=${id}&tab=board`);
+    await page.goto(`/project?id=${id}&tab=tasks`);
     await expect(page.getByTestId('back-arrow')).toBeVisible({ timeout: 30_000 });
 
     // The tabs push, the same as a report chip does.
@@ -43,24 +43,24 @@ test.describe('the project bar arrow', () => {
     await expect(page).toHaveURL(/tab=reports/);
 
     await page.getByTestId('back-arrow').click();
-    await expect(page, 'the arrow went to the list instead of back').toHaveURL(/tab=board/);
+    await expect(page, 'the arrow went to the list instead of back').toHaveURL(/tab=tasks/);
   });
 
   test('gives back a whole page the reader loaded', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto('/');
-    await page.goto(`/project?id=${id}&tab=board`);
+    await page.goto(`/project?id=${id}&tab=tasks`);
     await page.goto(`/project?id=${id}&tab=reports`);
     await expect(page.getByTestId('back-arrow')).toBeVisible({ timeout: 30_000 });
 
     await page.getByTestId('back-arrow').click();
-    await expect(page).toHaveURL(/tab=board/);
+    await expect(page).toHaveURL(/tab=tasks/);
   });
 
   test('is not the way to the project list — the house beside it is', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto('/');
-    await page.goto(`/project?id=${id}&tab=board`);
+    await page.goto(`/project?id=${id}&tab=tasks`);
     await page.goto(`/project?id=${id}&tab=reports`);
     await expect(page.getByTestId('home-button')).toBeVisible({ timeout: 30_000 });
 
@@ -71,7 +71,7 @@ test.describe('the project bar arrow', () => {
 
   test('and the house have names a reader can tell apart', async ({ page, request }) => {
     const id = await projectId(request);
-    await page.goto(`/project?id=${id}&tab=board`);
+    await page.goto(`/project?id=${id}&tab=tasks`);
     await expect(page.getByTestId('back-arrow')).toBeVisible({ timeout: 30_000 });
 
     await expect(page.getByRole('link', { name: 'Back', exact: true })).toBeVisible();

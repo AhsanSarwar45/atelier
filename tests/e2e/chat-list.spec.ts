@@ -98,25 +98,12 @@ test.describe('the list of chats', () => {
     await page.goto(`/project?id=${id}&tab=chat`);
     await page.getByTestId('restore-row').first().waitFor();
 
-    // The chat with the most cards on it, since that is the one that crowds the
-    // open chat's own line. The row no longer draws them, so it is read off the
-    // ids the row carries.
     const ready = page.locator('[data-testid="restore-row"]:not([data-state="dormant"])');
     await ready.first().waitFor({ timeout: 20_000 });
     await page.waitForTimeout(1500);
-    const counts = await ready.evaluateAll((rows) =>
-      rows.map((r) => (r.getAttribute('data-beads') ?? '').split(' ').filter(Boolean).length),
-    );
-    const most = counts.reduce((best, n, i) => (n > counts[best] ? i : best), 0);
-    const pick = ready.nth(counts.length > 0 && counts[most] > 0 ? most : 0);
-    await pick.getByTestId('row-name').click();
+    await ready.first().getByTestId('row-name').click();
     await page.getByTestId('chat-tab').waitFor({ timeout: 60_000 });
     await page.waitForTimeout(1000);
-
-    // None of them, now: the cards are in the rail, which is a column, and the
-    // line keeps only what names the agent (docs/agent-workbench.md §8.2.1).
-    const onTheLine = await page.getByTestId('chat-status-line').getByTestId('bead-chip').count();
-    expect(onTheLine, `${onTheLine} cards were drawn on the line`).toBe(0);
 
     const line = await page.evaluate(() => {
       const meta = document.querySelector('[data-testid="session-meta"]') as HTMLElement | null;

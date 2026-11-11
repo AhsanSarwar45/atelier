@@ -298,7 +298,6 @@ test('the caret and the selection band in the chat and in the Files tab, in four
         held: null,
         title: 'A chat whose caret is looked at',
         cwd: fixture,
-        beads: [],
       },
     }),
   );

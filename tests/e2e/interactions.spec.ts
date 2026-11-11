@@ -68,12 +68,12 @@ test('questions and proposed plans share one complete interaction language', asy
   });
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{
     sessionId: CHAT, externalId: 'fixture-thread', brand: 'codex', projectId: 'fixture', title: 'Interaction cards', name: 'Interaction cards',
-    state: 'waiting_permission', lastActiveAt: new Date(0).toISOString(), cwdHint: process.cwd(), runningElsewhere: false, held: null, beads: [],
+    state: 'waiting_permission', lastActiveAt: new Date(0).toISOString(), cwdHint: process.cwd(), runningElsewhere: false, held: null,
   }] }));
   await page.route(/\/api\/workbench\/command$/, (route) => route.fulfill({ json: {} }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: {
     sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture-thread', runningElsewhere: false,
-    held: null, title: 'Interaction cards', name: 'Interaction cards', cwd: process.cwd(), folder: 'bw-bxq7', branch: 'bw-bxq7', beads: [],
+    held: null, title: 'Interaction cards', name: 'Interaction cards', cwd: process.cwd(), folder: 'bw-bxq7', branch: 'bw-bxq7',
   } }));
 
   let project: { id: string } | null = null;
@@ -160,11 +160,11 @@ test('an answered question and a plan sent back keep the note and the changes th
   });
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{
     sessionId: chat, externalId: 'fixture-sent', brand: 'claude', projectId: 'fixture', title: 'Sent answers', name: 'Sent answers',
-    state: 'running', lastActiveAt: new Date(0).toISOString(), cwdHint: process.cwd(), runningElsewhere: false, held: null, beads: [],
+    state: 'running', lastActiveAt: new Date(0).toISOString(), cwdHint: process.cwd(), runningElsewhere: false, held: null,
   }] }));
   await page.route(new RegExp(`/api/workbench/session/${chat}$`), (route) => route.fulfill({ json: {
     sessionId: chat, origin: 'terminal', brand: 'claude', externalId: 'fixture-sent', runningElsewhere: false,
-    held: null, title: 'Sent answers', name: 'Sent answers', cwd: process.cwd(), folder: 'bw-di436', branch: 'bw-di436', beads: [],
+    held: null, title: 'Sent answers', name: 'Sent answers', cwd: process.cwd(), folder: 'bw-di436', branch: 'bw-di436',
   } }));
 
   let project: { id: string } | null = null;

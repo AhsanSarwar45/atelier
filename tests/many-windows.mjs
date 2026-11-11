@@ -15,10 +15,10 @@
  * that nothing is queueing behind them — which is only possible if the app's
  * live connections cost the reads nothing at all.
  *
- * The board's own harness expects @playwright/test, which is not installed;
+ * The app's own harness expects @playwright/test, which is not installed;
  * the playwright library is, so this drives the browser itself.
  *
- * Prerequisite: atelier serving a project with a board.
+ * Prerequisite: atelier serving at least one project.
  *
  *   node tests/many-windows.mjs
  */
@@ -57,9 +57,9 @@ function heldByTheBrowser() {
 }
 
 const projects = await (await fetch(`${HOST}/api/projects`)).json();
-const owner = projects.find((p) => p.path && !p.path.startsWith('dolt://')) ?? projects[0];
+const owner = projects[0];
 if (!owner) {
-  console.error('no project on this machine has a board — nothing to check');
+  console.error('no project on this machine — nothing to check');
   process.exit(2);
 }
 
@@ -85,7 +85,7 @@ await context.addInitScript(() => {
 const pages = [];
 for (let i = 0; i < WINDOWS; i++) {
   const page = await context.newPage();
-  await page.goto(`${HOST}/project?id=${owner.id}&tab=board`, { waitUntil: 'load' });
+  await page.goto(`${HOST}/project?id=${owner.id}&tab=tasks`, { waitUntil: 'load' });
   pages.push(page);
 }
 

@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 
 import { foldAll } from '../../src/workbench/fold';
 import type { ImagePayload, WbpEvent } from '../../src/workbench/protocol';
-import { makeFixtureProject } from './fixture-board';
+import { makeFixtureProject } from './fixture-project';
 
 /**
  * A sent message shows the same strip it was written with (bw-oamr.9).
@@ -89,8 +89,8 @@ test('his message shows every file it carries; the agent’s shows only what can
     url.searchParams.set('include_test', 'true');
     await route.continue({ url: url.toString() });
   });
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'claude', title: 'Every file it carries', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Every file it carries', cwd: projectPath, beads: [] } }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'claude', title: 'Every file it carries', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null }] }));
+  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Every file it carries', cwd: projectPath } }));
 
   const made = await request.post('/api/projects', { data: { name: 'Every file it carries', path: projectPath, isTest: true } });
   expect(made.status(), await made.text()).toBe(201);

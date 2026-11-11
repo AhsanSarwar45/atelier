@@ -34,8 +34,8 @@ test('project and settings layouts keep their browser titles through child navig
     await expect(page).toHaveTitle('Aspen | Atelier');
     await expect(page.getByRole('heading', { name: 'Aspen' })).toBeVisible();
 
-    await page.getByRole('tab', { name: 'Board' }).click();
-    await expect(page).toHaveURL(/tab=board/);
+    await page.getByRole('tab', { name: 'Tasks' }).click();
+    await expect(page).toHaveURL(/tab=tasks/);
     await expect(page).toHaveTitle('Aspen | Atelier');
     await page.screenshot({ path: 'tests/results/bw-5t45-project-title.png' });
 

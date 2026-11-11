@@ -227,7 +227,6 @@ test('the git diff on a phone: one column of readable lines, and side by side le
         held: null,
         title: 'A diff read on a phone',
         cwd: fixture,
-        beads: [],
       },
     }),
   );

@@ -72,11 +72,6 @@ function aProjectOfTheirOwn(dir: string): void {
   execFileSync('git', ['init', '-q', '.'], { cwd: dir, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.email', 'clean@example.invalid'], { cwd: dir, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.name', 'a clean machine'], { cwd: dir, stdio: 'pipe' });
-  try {
-    execFileSync('bd', ['init', '--prefix', 'cm'], { cwd: dir, stdio: 'pipe', timeout: 60_000 });
-  } catch {
-    // No tracker on this machine. The Chat tab does not need one.
-  }
 }
 
 let work = '';

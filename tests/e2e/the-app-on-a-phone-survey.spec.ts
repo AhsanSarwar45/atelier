@@ -4,7 +4,6 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { bd } from './fixture-board';
 import { gitViewExists, openGitView } from './open-git-view';
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
@@ -105,38 +104,6 @@ function seed(where: string): void {
     'export const main = 2;\nexport const alsoRatherLongSoTheDiffHasSomethingWideToDrawOnEachSide = 3;\n',
   );
   writeFileSync(join(where, 'scratch.txt'), 'a file git has never been told about\n');
-
-  // A board of its own, so the Board tab has columns to draw rather than the
-  // empty case: the app only believes a project keeps cards when its manifest
-  // says so, and only draws them when a database is really there.
-  bd(['init', '--prefix', 'ph'], where);
-  mkdirSync(join(where, '.atelier'), { recursive: true });
-  writeFileSync(
-    join(where, '.atelier', 'project.toml'),
-    [
-      'schema_version = 1',
-      '',
-      '[project]',
-      'display_name = "phone-survey"',
-      'use_beads = true',
-      'summary = ""',
-      '',
-      '[git]',
-      'completed_work_branch = "main"',
-      '',
-      '[beads]',
-      'issue_id_prefix = "ph"',
-      '',
-    ].join('\n'),
-  );
-  const cards = [
-    { id: 'ph-1', title: 'A card with a title long enough to need wrapping in a column', status: 'open', issue_type: 'epic', priority: 1 },
-    { id: 'ph-2', title: 'Something under way', status: 'in_progress', issue_type: 'task', priority: 1 },
-    { id: 'ph-3', title: 'Something finished', status: 'closed', issue_type: 'task', priority: 2 },
-    { id: 'ph-4', title: 'Something still waiting', status: 'open', issue_type: 'task', priority: 2 },
-  ];
-  writeFileSync(join(where, 'seed.jsonl'), cards.map((one) => JSON.stringify(one)).join('\n') + '\n');
-  bd(['import', '--input', 'seed.jsonl'], where);
 }
 
 async function fixtureProject(request: APIRequestContext, name: string, path: string) {
@@ -335,7 +302,6 @@ test('every screen at a phone width, and what it does there', async ({ page, req
           cwdHint: fixture,
           runningElsewhere: false,
           held: null,
-          beads: [],
         },
       ],
     }),
@@ -351,7 +317,6 @@ test('every screen at a phone width, and what it does there', async ({ page, req
         held: null,
         title: 'A chat read on a phone',
         cwd: fixture,
-        beads: [],
       },
     }),
   );
@@ -547,19 +512,11 @@ test('every screen at a phone width, and what it does there', async ({ page, req
       await page.keyboard.press('Escape');
     }
 
-    // 8. The board.
-    await page.goto(`/project?id=${project.id}&tab=board`);
-    await page.waitForTimeout(4000);
-    if (await page.getByTestId('column-scroll').count()) {
-      const columns = await page
-        .getByTestId('column-scroll')
-        .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().width)));
-      note('the board', `${columns.length} columns, the first ${columns[0]}px wide, in a 390px window`);
-      await survey(page, 'the board', '09-board');
-    } else {
-      note('the board', 'this project keeps no cards, so the board drew nothing to measure');
-      await survey(page, 'the board (no cards)', '09-board-empty');
-    }
+    // 8. The task list.
+    await page.goto(`/project?id=${project.id}&tab=tasks`);
+    await page.getByTestId('tasks-tab').waitFor({ timeout: WAIT });
+    await page.waitForTimeout(1000);
+    await survey(page, 'the task list', '09-tasks');
 
     // 9. The Files tab: the tree.
     await page.goto(`/project?id=${project.id}&tab=files`);

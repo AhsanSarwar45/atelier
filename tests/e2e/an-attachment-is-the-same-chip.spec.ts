@@ -94,7 +94,7 @@ async function openWithAPictureAttached(page: Page, request: { post: Function; g
   }, { chat: CHAT, view: foldAll(events) });
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [] }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({
-    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'An attachment is the same chip', cwd: FIXTURE, beads: [] },
+    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'An attachment is the same chip', cwd: FIXTURE },
   }));
 
   await page.goto(`/project?id=${project.id}&chat=${CHAT}`);

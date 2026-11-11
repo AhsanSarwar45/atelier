@@ -4,19 +4,15 @@ import { join } from 'node:path';
 
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
-import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-board';
+import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-project';
 
 const CHAT = 'chat-badges-fixture';
 
-test('provider formatting differences share card and typed file badges', async ({ page, request }) => {
+test('provider formatting differences share typed file badges', async ({ page, request }) => {
   await page.setViewportSize({ width: 1100, height: 720 });
   const run = join(process.cwd(), 'tests', '.workbench-run-badges');
   const projectPath = makeFixtureProject(join(run, 'project'), join(run, 'reporting'));
   const text = [
-    `Open card in prose: ${PARENT_CARD} is ready.`,
-    '',
-    'Closed card in Markdown: `wl-kid1` landed.',
-    '',
     `Embedded path stays whole: /home/me/worktrees/${PARENT_CARD}/src/app.ts.`,
     '',
     'Changed [message renderer](</home/ahsan/dev/beads-web/src/components/markdown-body.tsx:132>) and captured [visual proof](</home/ahsan/dev/beads-web/tests/results/chat-badges-after.png>).',
@@ -55,8 +51,8 @@ test('provider formatting differences share card and typed file badges', async (
     url.searchParams.set('include_test', 'true');
     await route.continue({ url: url.toString() });
   });
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'codex', title: 'Shared chat badges', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Shared chat badges', cwd: projectPath, beads: [] } }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'codex', title: 'Shared chat badges', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null }] }));
+  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Shared chat badges', cwd: projectPath } }));
 
   let project: { id: string } | null = null;
   try {
@@ -65,12 +61,7 @@ test('provider formatting differences share card and typed file badges', async (
     project = await made.json();
     await page.goto(`/project?id=${project!.id}&tab=chat`);
     await page.getByTestId('restore-row').filter({ hasText: 'Shared chat badges' }).getByTestId('row-name').click();
-    await expect(page.getByText('Open card in prose:')).toBeVisible();
-    await expect(page.getByTestId('mention-card')).toHaveCount(2);
     await expect(page.getByText(new RegExp(`/home/me/worktrees/${PARENT_CARD}/src/app\\.ts`))).toBeVisible();
-    expect(await page.getByTestId('mention-card').nth(1).evaluate((node) => node.closest('code'))).toBeNull();
-    await expect(page.locator('[data-bead-status="open"]')).toHaveCount(1);
-    await expect(page.locator('[data-bead-status="closed"]')).toHaveCount(1);
     await expect(page.getByTestId('markdown-file-link')).toHaveCount(2);
     await expect(page.locator('[data-testid="markdown-web-badge"][data-web-kind="pull"]')).toHaveCount(1);
     await expect(page.locator('[data-testid="markdown-web-badge"][data-web-kind="issue"]')).toHaveCount(1);

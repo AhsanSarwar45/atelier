@@ -74,9 +74,9 @@ for (const theme of THEMES) {
   }
 }
 
-// ─── Project board test (requires a project in DB) ───
+// ─── Project tasks test (requires a project in DB) ───
 
-test.describe('project board themes', () => {
+test.describe('project tasks themes', () => {
   test.beforeEach(async ({ page }) => {
     // Go to home and find first project link
     await page.goto('/', { waitUntil: 'networkidle' });
@@ -89,17 +89,17 @@ test.describe('project board themes', () => {
       return;
     }
 
-    // A project opens on its chat; these shots are of the board.
+    // A project opens on its chat; these shots are of the task list.
     const href = await projectLink.getAttribute('href');
-    await page.goto(`${href}&tab=board`, { waitUntil: 'networkidle' });
+    await page.goto(`${href}&tab=tasks`, { waitUntil: 'networkidle' });
   });
 
   for (const theme of THEMES) {
-    test(`${theme.name} - board`, async ({ page }) => {
+    test(`${theme.name} - tasks`, async ({ page }) => {
       await applyTheme(page, theme.id, theme.mode);
 
       await expect(page).toHaveScreenshot(
-        `${theme.id}-board.png`,
+        `${theme.id}-tasks.png`,
         { fullPage: true, maxDiffPixelRatio: 0.02 }
       );
     });

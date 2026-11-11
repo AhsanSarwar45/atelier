@@ -73,7 +73,7 @@ async function openTheBox(page: Page, request: { post: Function; get: Function }
   }, { chat: CHAT, view: foldAll(events) });
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [] }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({
-    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Dropped in', cwd: FIXTURE, beads: [] },
+    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Dropped in', cwd: FIXTURE },
   }));
 
   await page.goto(`/project?id=${project.id}&chat=${CHAT}`);

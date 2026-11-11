@@ -178,7 +178,6 @@ test('the phone rails: the bar stays reachable, one breakpoint decides, and the 
         held: null,
         title: 'A chat read on a phone',
         cwd: fixture,
-        beads: [],
       },
     }),
   );

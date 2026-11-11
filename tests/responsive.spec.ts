@@ -63,9 +63,8 @@ interface Offender {
  * Everything drawn outside the screen.
  *
  * An element sitting past the right edge is only a fault if nothing can bring
- * it into view: the board's strip of columns is deliberately wider than the
- * window and is scrolled sideways, and the columns hanging off it are not
- * lost. So anything inside an ancestor that scrolls sideways is left alone,
+ * it into view: a strip that is deliberately wider than the window is
+ * scrolled sideways, and what hangs off it is not lost. So anything inside an ancestor that scrolls sideways is left alone,
  * and everything else past the edge is reported.
  */
 async function offscreen(page: Page): Promise<Offender[]> {
@@ -305,20 +304,20 @@ async function judge(page: Page, where: string, opts: { tap?: boolean } = {}) {
   }
 }
 
-/** The project the run drives. The first real one the board knows about. */
+/** The project the run drives. The first real one the app knows about. */
 async function projectId(page: Page): Promise<string> {
-  // A dev preview serves the screens and nothing else — the board it reads
+  // A dev preview serves the screens and nothing else — the server it reads
   // from answers on its own port, which is what BEADS_E2E_BACKEND names.
-  const board = process.env.BEADS_E2E_BACKEND ?? '';
-  const res = await page.request.get(`${board}/api/projects`);
-  expect(res.ok(), 'the board did not answer /api/projects').toBeTruthy();
+  const server = process.env.BEADS_E2E_BACKEND ?? '';
+  const res = await page.request.get(`${server}/api/projects`);
+  expect(res.ok(), 'the server did not answer /api/projects').toBeTruthy();
   const projects = (await res.json()) as Array<{ id: string; isTest?: boolean }>;
   const real = projects.find((p) => !p.isTest) ?? projects[0];
   expect(real, 'no project to drive the screens with').toBeTruthy();
   return real.id;
 }
 
-async function openProject(page: Page, tab: 'board' | 'chat' | 'reports') {
+async function openProject(page: Page, tab: 'tasks' | 'chat' | 'reports') {
   const id = await projectId(page);
   await page.goto(`/project?id=${id}&tab=${tab}`);
   await page.waitForSelector('[data-testid="shell"]', { timeout: WAY_IN_MS });
@@ -436,86 +435,6 @@ test.describe('project list', () => {
       return cards.filter((c) => c.getBoundingClientRect().bottom <= window.innerHeight).length;
     });
     expect(whole, 'whole project cards visible on a phone without scrolling').toBeGreaterThanOrEqual(2);
-  });
-});
-
-// ─── The board ───
-
-test.describe('board', () => {
-  // A phone is a touch screen, so the thumb-sized floor is in force here.
-  test.use({ hasTouch: true, isMobile: true });
-
-  test('board columns land squarely at 390', async ({ page }) => {
-    await page.setViewportSize(PHONE);
-    await openProject(page, 'board');
-    const strip = page.locator('[data-testid="board-scroll"]');
-    await expect(strip).toBeVisible();
-
-    // One column per screen, and a swipe stops on the next one rather than
-    // between two.
-    const shape = await strip.evaluate((el) => {
-      const first = el.firstElementChild?.firstElementChild as HTMLElement | undefined;
-      return {
-        snap: getComputedStyle(el).scrollSnapType,
-        childSnap: first ? getComputedStyle(first).scrollSnapAlign : 'none',
-        column: first ? Math.round(first.getBoundingClientRect().width) : 0,
-        window: window.innerWidth,
-      };
-    });
-    expect(shape.snap, 'the board strip does not snap sideways').toContain('x');
-    expect(shape.childSnap, 'a board column does not say where a swipe should land').not.toBe('none');
-    expect(shape.column, `one column should fill the screen, it is ${shape.column} of ${shape.window}`).toBeGreaterThan(shape.window * 0.8);
-
-    await expect(page.locator('[data-testid="column-tabs"]'), 'no row of column names to say which column you are on').toBeVisible();
-    await shoot(page, 'board-390-col1');
-    await judge(page, 'board-390');
-  });
-
-  test('board tools are all reachable at 390', async ({ page }) => {
-    await page.setViewportSize(PHONE);
-    await openProject(page, 'board');
-    // The tool row held 155 pixels of a 289-pixel strip and did not scroll, so
-    // New and the filters were invisible and unclickable on a phone. Now the
-    // row holds New and the board's menu, which folds in everything else.
-    for (const label of ['New', 'Board options']) {
-      const control = page.getByRole('button', { name: new RegExp(`^${label}$`, 'i') }).first();
-      await expect(control, `${label} is not on the board's tool row`).toBeAttached();
-      await control.scrollIntoViewIfNeeded();
-      await expect(control, `${label} cannot be clicked at 390 wide`).toBeVisible();
-      const box = await control.boundingBox();
-      expect(box, `${label} has no box`).toBeTruthy();
-      expect(box!.x + box!.width, `${label} is drawn off the right of a 390 screen`).toBeLessThanOrEqual(PHONE.width + 1);
-      expect(Math.min(box!.width, box!.height), `${label} is smaller than a thumb`).toBeGreaterThanOrEqual(TAP);
-    }
-    const row = await page.getByRole('toolbar', { name: 'Quick filters' }).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
-    expect(row.scroll, 'a control on the board row sits past the edge of a phone').toBeLessThanOrEqual(row.client + 1);
-    await page.getByRole('button', { name: /^board options$/i }).click();
-    await expect(page.getByTestId('board-menu-items').getByRole('menuitemcheckbox', { name: 'Today' })).toBeVisible();
-    await page.getByTestId('board-menu-items').getByRole('menuitem', { name: /^search/i }).click();
-    // The board's search is the shared one, over the screen (bw-21a2.7).
-    await expect(page.getByTestId('search-panel').getByTestId('search-input')).toBeFocused();
-    await page.getByTestId('search-close').click();
-    await shoot(page, 'board-tools-390');
-  });
-
-  test('card panel fits a phone', async ({ page }) => {
-    await page.setViewportSize(PHONE);
-    await openProject(page, 'board');
-    const card = page.locator('[data-bead-id]').first();
-    await card.scrollIntoViewIfNeeded();
-    await card.click();
-    const panel = page.locator('[data-testid="bead-detail"]');
-    await expect(panel).toBeVisible({ timeout: 15_000 });
-    await page.waitForTimeout(600);
-
-    const width = await panel.evaluate((el) => Math.round(el.getBoundingClientRect().width));
-    expect(width, 'the card panel does not fill a phone screen').toBeGreaterThan(PHONE.width * 0.95);
-
-    // Two ways out — a Back arrow and a cross — is one too many.
-    const closers = await page.locator('[data-testid="bead-detail"] [aria-label*="lose" i], [data-testid="bead-detail"] [aria-label*="ack" i]').count();
-    expect(closers, 'the card panel has more than one way to close it').toBeLessThanOrEqual(1);
-
-    await judge(page, 'card-390');
   });
 });
 
@@ -846,16 +765,6 @@ test.describe('overlays and dialogs', () => {
       await page.keyboard.press('Escape');
       await page.waitForTimeout(300);
     }
-
-    await openProject(page, 'board');
-    const create = page.getByRole('button', { name: /^new$/i }).first();
-    if (await create.count()) {
-      await create.scrollIntoViewIfNeeded();
-      await create.click();
-      await page.waitForTimeout(600);
-      await judge(page, 'dialog-new-bead-390');
-      await page.keyboard.press('Escape');
-    }
   });
 
   /**
@@ -927,7 +836,7 @@ test.describe('overlays and dialogs', () => {
       // judgements above passed it and the owner had to report it by eye.
       //
       // On the project list rather than a chat, because the notice draws on
-      // every screen and this asks nothing of the board behind it.
+      // every screen and this asks nothing of the project behind it.
       await page.setViewportSize(size);
       await page.route('**/api/version/check*', (route) =>
         route.fulfill({
@@ -1099,7 +1008,7 @@ test.describe('tap targets', () => {
     });
   }
 
-  for (const tab of ['board', 'chat'] as const) {
+  for (const tab of ['tasks', 'chat'] as const) {
     test(`tap targets on the ${tab}`, async ({ page }) => {
       await page.setViewportSize(PHONE);
       await openProject(page, tab);
@@ -1119,10 +1028,10 @@ test.describe('a mouse', () => {
     // The floor is a touch rule. A desktop bar built from 28-pixel icons is
     // not a fault and must not be grown to satisfy it.
     await page.setViewportSize({ width: 1440, height: 900 });
-    await openProject(page, 'board');
+    await openProject(page, 'tasks');
     const coarse = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches);
     expect(coarse, 'a desktop window should not report a coarse pointer').toBeFalsy();
-    await shoot(page, 'board-1440');
+    await shoot(page, 'tasks-1440');
   });
 
   test('the shut right rail takes no width on a wide screen either', async ({ page }) => {

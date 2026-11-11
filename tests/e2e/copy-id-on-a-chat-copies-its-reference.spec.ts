@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 
 /**
  * Copy ID on a sidebar chat copies the reference the composer reads,

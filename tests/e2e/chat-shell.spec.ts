@@ -57,21 +57,21 @@ test.describe('the chat screen', () => {
     // waiting for when he switches.
     await page.goto(`/project?id=${id}&tab=chat`);
     await page.getByTestId('restore-row').first().waitFor();
-    await page.goto(`/project?id=${id}&tab=board`);
-    await page.getByTestId('board-scroll').waitFor();
+    await page.goto(`/project?id=${id}&tab=tasks`);
+    await page.getByTestId('tasks-tab').waitFor();
 
     const toChat = Date.now();
     await page.getByTestId('tab-chat').click();
     await page.getByTestId('restore-row').first().waitFor();
     const chatWait = Date.now() - toChat;
 
-    const toBoard = Date.now();
-    await page.getByTestId('tab-board').click();
-    await page.getByTestId('board-scroll').waitFor();
-    const boardWait = Date.now() - toBoard;
+    const toTasks = Date.now();
+    await page.getByTestId('tab-tasks').click();
+    await page.getByTestId('tasks-tab').waitFor();
+    const tasksWait = Date.now() - toTasks;
 
     expect(chatWait, `waited ${chatWait}ms for the chats`).toBeLessThan(AT_ONCE_MS);
-    expect(boardWait, `waited ${boardWait}ms for the board`).toBeLessThan(AT_ONCE_MS);
+    expect(tasksWait, `waited ${tasksWait}ms for the tasks`).toBeLessThan(AT_ONCE_MS);
   });
 
   test('a chat started here appears in the list while it is starting', async ({ page, request }) => {

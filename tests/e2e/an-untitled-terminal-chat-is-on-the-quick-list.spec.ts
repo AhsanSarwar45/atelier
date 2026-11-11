@@ -15,7 +15,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
-import { discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 import { configDir, projectSlug } from './fixture-record';
 
 const SHOTS = 'tests/results';

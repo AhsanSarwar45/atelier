@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
-import { discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 
 /**
  * A copy copies on a page opened at a plain http address that is not this

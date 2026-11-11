@@ -26,15 +26,10 @@ test('saved and newly opened chats are visible through native Rust routes', asyn
   rmSync(FIXTURE, { recursive: true, force: true });
   mkdirSync(FIXTURE, { recursive: true });
   execFileSync('git', ['init', '-q', '.'], { cwd: FIXTURE });
-  // The app process intentionally has no general-purpose PATH. Keep the empty
-  // board readable through the server's documented JSONL fallback even when
-  // the disposable bd database has no daemon serving it.
-  mkdirSync(join(FIXTURE, '.beads'), { recursive: true });
-  writeFileSync(join(FIXTURE, '.beads', 'issues.jsonl'), '');
   mkdirSync(join(FIXTURE, '.atelier'), { recursive: true });
   writeFileSync(
     join(FIXTURE, '.atelier', 'project.toml'),
-    'schema_version = 1\n\n[project]\ndisplay_name = "native-chat-runtime"\nuse_beads = true\nsummary = ""\n\n[git]\ncompleted_work_branch = "master"\n\n[beads]\nissue_id_prefix = "nr"\n',
+    'schema_version = 1\n\n[project]\ndisplay_name = "native-chat-runtime"\nsummary = ""\n',
   );
 
   const made = await request.post('/api/projects', {
@@ -63,17 +58,14 @@ test('saved and newly opened chats are visible through native Rust routes', asyn
   try {
     const health = await request.get('/api/workbench/health');
     expect(await health.json()).toEqual({ status: 'ok', workbench: 'native' });
-    const board = await request.get(`/api/beads?path=${encodeURIComponent(project.path)}`);
-    expect(board.status(), await board.text()).toBe(200);
 
     await open('saved-before-rust', 'Saved before the Rust cutover', '2026-08-29T12:00:00.000Z');
     const sessions = (await (await request.get(`/api/workbench/sessions?project=${project.id}`)).json()) as {
       id: string;
-      beads?: string[];
       activity?: string;
     }[];
     expect(sessions).toEqual([
-      expect.objectContaining({ id: 'saved-before-rust', beads: [], activity: '' }),
+      expect.objectContaining({ id: 'saved-before-rust', activity: '' }),
     ]);
     await page.goto(`/project?id=${project.id}&tab=chat`);
     await page.waitForTimeout(2000);

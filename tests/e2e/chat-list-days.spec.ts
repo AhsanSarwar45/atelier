@@ -24,7 +24,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
-import { discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 import { writeChatSpokenAt } from './fixture-record';
 
 /** Where a run leaves its proof. */

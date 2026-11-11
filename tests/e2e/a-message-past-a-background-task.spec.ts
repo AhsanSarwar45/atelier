@@ -142,7 +142,6 @@ test('a message typed while only a sent-away task is running is sent, not queued
         held: null,
         title: 'A chat with a task of its own still running',
         cwd: fixture,
-        beads: [],
       },
     }),
   );

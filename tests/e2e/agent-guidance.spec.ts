@@ -157,8 +157,8 @@ for (const brand of ['claude', 'codex'] as const) test(`${brand} chat guidance h
     }
     Object.defineProperty(window, 'WebSocket', { value: FixtureSocket, configurable: true });
   }, { chat, view: foldAll(events) });
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, route => route.fulfill({ json: [{ sessionId: chat, externalId: 'fixture', brand, title: 'Guidance preview', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: project.path, runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${chat}$`), route => route.fulfill({ json: { sessionId: chat, origin: 'terminal', brand, externalId: 'fixture', title: 'Guidance preview', cwd: project.path, runningElsewhere: false, held: null, beads: [] } }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, route => route.fulfill({ json: [{ sessionId: chat, externalId: 'fixture', brand, title: 'Guidance preview', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: project.path, runningElsewhere: false, held: null }] }));
+  await page.route(new RegExp(`/api/workbench/session/${chat}$`), route => route.fulfill({ json: { sessionId: chat, origin: 'terminal', brand, externalId: 'fixture', title: 'Guidance preview', cwd: project.path, runningElsewhere: false, held: null } }));
   await page.goto(`/project?id=${project.id}&tab=chat&chat=${chat}`);
   const badge = page.getByTestId('chat-shared-library');
   await expect(badge).toBeVisible();

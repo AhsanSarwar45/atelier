@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
-import { discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 
 const CHAT = 'large-edit-card-fixture';
 
@@ -53,8 +53,8 @@ test('a large edit says how much it hides instead of showing partial code', asyn
     url.searchParams.set('include_test', 'true');
     await route.continue({ url: url.toString() });
   });
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'codex', title: 'Large edit card', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Large edit card', cwd: projectPath, beads: [] } }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'codex', title: 'Large edit card', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null }] }));
+  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Large edit card', cwd: projectPath } }));
 
   let project: { id: string } | null = null;
   try {

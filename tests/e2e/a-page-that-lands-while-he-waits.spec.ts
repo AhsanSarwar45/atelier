@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { expect, test } from '@playwright/test';
 
-import { discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 import { raggedChatSaidWithPictures, writeLongChat } from './fixture-record';
 
 const HELLO_MS = 120_000;

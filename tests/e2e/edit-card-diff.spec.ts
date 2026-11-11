@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
-import { discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 
 const CHAT = 'edit-card-diff-fixture';
 
@@ -63,8 +63,8 @@ test('the edit card opens on its diff and shuts on it', async ({ page, request }
     url.searchParams.set('include_test', 'true');
     await route.continue({ url: url.toString() });
   });
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'codex', title: 'Edit card diff', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Edit card diff', cwd: projectPath, beads: [] } }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'codex', title: 'Edit card diff', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null }] }));
+  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Edit card diff', cwd: projectPath } }));
 
   let project: { id: string } | null = null;
   try {

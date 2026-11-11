@@ -4,14 +4,12 @@ import { join } from 'node:path';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 /**
- * A project with no board keeps the bar its chat's own tools are drawn in.
+ * A bare folder gets the same bar its chat's own tools are drawn in.
  *
- * The second bar carried two things at once: the Chat/Board selector, and the
- * slots every tab fills with its own controls. It was drawn only when there
- * were tabs, so a project that does not use Beads lost the whole bar — and
- * with it the chat's filter and its branch drawer, neither of which has
- * anything to do with a board (bw-1wak). Only the two tabs belong to the
- * board; the bar itself does not.
+ * The second bar carries two things at once: the tab selector, and the slots
+ * every tab fills with its own controls. A project that is only a folder once
+ * lost the whole bar, and with it the chat's filter and its branch drawer
+ * (bw-1wak). Every project now has its tabs, so the bar is always there.
  *
  * Run: scripts/workbench-e2e.sh tests/e2e/chat-only-keeps-the-tools-bar.spec.ts
  */
@@ -19,7 +17,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 /** Where a run leaves its proof. */
 const SHOTS = 'tests/results';
 
-/** A folder of its own: a bare directory, so the project has no board. */
+/** A folder of its own: a bare directory with nothing set up in it. */
 const FIXTURE = join(__dirname, '..', '.workbench-run-chat-only');
 
 /** The project list arrives over the network before the name can be read. */
@@ -42,17 +40,15 @@ async function chatOnlyProject(request: APIRequestContext): Promise<string> {
   return id;
 }
 
-test.describe('a project with no board', () => {
-  test('keeps the tools bar and loses only the tabs', async ({ page, request }) => {
+test.describe('a project that is only a folder', () => {
+  test('keeps the tabs and the tools bar', async ({ page, request }) => {
     const id = await chatOnlyProject(request);
     try {
       await page.goto(`/project?id=${id}&tab=chat`);
 
-      // The name settles the question: it comes from the same fetch as the
-      // tab strip, so once it is on screen the strip's absence is final.
       await expect(page.getByTestId('project-name')).toHaveText('chat-only', { timeout: OPEN_MS });
 
-      await expect(page.getByTestId('project-tabs'), 'the board is the only thing gone').toHaveCount(0);
+      await expect(page.getByTestId('project-tabs'), 'every project has its tabs').toBeVisible();
       const bar = page.getByTestId('tab-bar');
       await expect(bar, 'the chat has its own tools and nowhere else to draw them').toBeVisible();
       await expect(page.getByTestId('tab-lead')).toBeAttached();

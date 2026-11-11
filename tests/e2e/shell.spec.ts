@@ -39,8 +39,8 @@ async function pageOverflow(page: Page): Promise<number> {
 /**
  * Scrolls a pane and reports how far it actually went.
  *
- * There are six board columns and only the full ones can scroll, so the one
- * with something in it is the one asked to move.
+ * Only a full pane can scroll, so of the panes with this name the one with
+ * something in it is the one asked to move.
  */
 async function scrollPane(page: Page, testId: string): Promise<number> {
   const panes = page.getByTestId(testId);
@@ -57,7 +57,7 @@ test.describe('shell', () => {
   test('two bars on every tab, and the window itself never scrolls', async ({ page, request }) => {
     const id = await projectId(request);
 
-    for (const tab of ['board', 'chat'] as const) {
+    for (const tab of ['tasks', 'chat'] as const) {
       await page.goto(`/project?id=${id}&tab=${tab}`);
       await expect(page.getByTestId('shell')).toBeVisible({ timeout: 30_000 });
 
@@ -68,23 +68,6 @@ test.describe('shell', () => {
 
       expect(await pageOverflow(page), `the ${tab} page scrolls as a whole`).toBeLessThanOrEqual(1);
     }
-  });
-
-  test('the bars hold their place while the board scrolls underneath them', async ({ page, request }) => {
-    const id = await projectId(request);
-    await page.goto(`/project?id=${id}&tab=board`);
-    await expect(page.getByTestId('shell')).toBeVisible({ timeout: 30_000 });
-
-    const bars = page.locator('[data-shell-bar]');
-    const before = await bars.first().boundingBox();
-
-    const moved = await scrollPane(page, 'column-scroll');
-    expect(moved, 'the board column did not scroll: this project has too few cards to prove anything').toBeGreaterThan(
-      0,
-    );
-
-    expect(await bars.first().boundingBox(), 'a bar moved when the board scrolled').toEqual(before);
-    expect(await pageOverflow(page), 'the window scrolled with the board').toBeLessThanOrEqual(1);
   });
 
   test('a long list of chats scrolls inside itself and moves nothing else', async ({ page, request }) => {

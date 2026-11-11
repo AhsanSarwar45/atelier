@@ -138,7 +138,7 @@ test('a tap on the paperclip opens a chooser, and both a picture and a file land
   }, { chat: CHAT, view: foldAll(events) });
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [] }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({
-    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'A phone attaches a file', cwd: FIXTURE, beads: [] },
+    json: { sessionId: CHAT, origin: 'app', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'A phone attaches a file', cwd: FIXTURE },
   }));
 
   try {

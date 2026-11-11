@@ -1,16 +1,10 @@
 /**
  * What the chat's right rail draws, and in what order (bw-pl2v).
  *
- * Two things, on one chat, because they are one reading: the cards this chat
- * has touched are drawn ABOVE the agents it sent off, and the agents section
- * lists only what is still going until the reader asks for the rest.
- *
- * They belong together because they fix the same complaint. The agents used to
- * be first on the grounds that they are the part of the rail that moves — but
- * they are also the part that grows without a ceiling, so a long session drew a
- * wall of finished helpers and pushed the cards off the bottom. Cards go first
- * because wrapped chips are a few lines whatever the session has done, and the
- * finished helpers go behind one control that names how many there are.
+ * The agents section lists only what is still going until the reader asks for
+ * the rest. The agents are the part of the rail that grows without a ceiling,
+ * so a long session drew a wall of finished helpers; the finished ones go
+ * behind one control that names how many there are.
  *
  * Written, not run: this needs one helper still going and one that has stopped,
  * in the same rail, at the same moment. A live run would have to start a real
@@ -31,7 +25,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
-import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-board';
+import { PARENT_CARD, discardFixture, makeFixtureProject } from './fixture-project';
 import { HELPER_AGENT, writeChatWithHelper } from './fixture-record';
 
 /** Where a run leaves its proof. */
@@ -92,7 +86,7 @@ test.describe('the sections of a chat’s right rail', () => {
     });
   });
 
-  test('draws the cards above the helpers, and keeps the finished helper behind a control', async ({
+  test('keeps the finished helper behind a control', async ({
     page,
     request,
   }) => {
@@ -100,8 +94,7 @@ test.describe('the sections of a chat’s right rail', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     makeFixtureProject(PROJECT, join(RUN, 'reporting'));
     const project = await projectAt(request, PROJECT);
-    // One helper already finished, and a card only that helper touched — so a
-    // chip for it on the rail can have come from nowhere else.
+    // One helper already finished.
     const written = writeChatWithHelper({
       cwd: PROJECT,
       sessionId: randomUUID(),
@@ -143,39 +136,10 @@ test.describe('the sections of a chat’s right rail', () => {
         .toBe('1');
       await expect(page.getByTestId('sent-away-panel')).toHaveAttribute('data-finished', '1');
 
-      // ---- the cards are drawn above the helpers ---------------------------
-      await expect(
-        page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`).first(),
-        'no chip for the card the helper touched',
-      ).toBeVisible({ timeout: HELLO_MS });
-
-      // The words as they are written, not as the stylesheet shouts them: these
-      // headings are drawn `uppercase`, and innerText would hand back the shout.
       expect(
         await page.getByTestId('chat-right-rail-body').locator('h3').allTextContents(),
-        'the rail’s sections are not in the order the reader is promised',
-      ).toEqual(['Related cards', 'Subagents']);
-
-      // Said twice, because a heading above a panel is not the same claim as
-      // the panel being above the other panel: in the words, and on the glass.
-      const laidOut = await page.evaluate(() => {
-        const cards = document.querySelector('[data-testid="rail-cards"]');
-        const helpers = document.querySelector('[data-testid="sent-away-panel"]');
-        return {
-          drawn: Boolean(cards && helpers),
-          cardsFirst: Boolean(
-            cards && helpers && cards.compareDocumentPosition(helpers) & Node.DOCUMENT_POSITION_FOLLOWING,
-          ),
-          cardsBottom: cards?.getBoundingClientRect().bottom ?? 0,
-          helpersTop: helpers?.getBoundingClientRect().top ?? 0,
-        };
-      });
-      expect(laidOut.drawn, 'the rail drew no cards, or no helpers').toBe(true);
-      expect(laidOut.cardsFirst, 'the helpers come before the cards in the rail').toBe(true);
-      expect(
-        laidOut.cardsBottom,
-        `the cards end at ${laidOut.cardsBottom}px and the helpers start at ${laidOut.helpersTop}px`,
-      ).toBeLessThanOrEqual(laidOut.helpersTop);
+        'the rail draws a section other than its agents',
+      ).toEqual(['Subagents']);
 
       // ---- at rest, only what is still going -------------------------------
       const stopped = page.getByTestId('sent-away-stopped');

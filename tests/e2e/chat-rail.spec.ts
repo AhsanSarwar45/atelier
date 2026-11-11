@@ -20,9 +20,6 @@ const SHOTS = 'tests/results';
 /** Opening a chat's past is a file read plus a wake; this is the whole way in. */
 const WAY_IN_MS = 120_000;
 
-/** The line naming the agent is one line high, whatever the chat has done. */
-const ONE_LINE_PX = 44;
-
 /** Long enough to watch the whole fold, which the rail runs in 200ms. */
 const FOLD_MS = 400;
 
@@ -92,95 +89,6 @@ test.describe('the right rail', () => {
     await page.reload();
     await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
     await expect(rail, 'the rail came back shut after being opened').toHaveAttribute('data-open', 'true');
-  });
-
-  test('the cards a chat has touched are all in the column, and none of them is on its line', async ({
-    page,
-    request,
-  }) => {
-    const id = await projectId(request);
-    // Twenty-six cards is the chat that was measured drawing a 2277px row
-    // inside a 700px pane (bw-p61.3). The chat is the instance's own; what it
-    // has touched is this test's, so the case is the same every run.
-    const many = Array.from({ length: 26 }, (_, i) => `bw-rail${i + 1}`);
-    await page.route('**/api/workbench/session/*', async (route) => {
-      const answer = await route.fetch();
-      const facts = (await answer.json()) as Record<string, unknown>;
-      await route.fulfill({ json: { ...facts, beads: many } });
-    });
-
-    await openAChat(page, id);
-    const rail = page.locator('[data-testid="chat-right-rail"]');
-    await expect(rail).toHaveAttribute('data-open', 'true');
-
-    // Every one of them, drawn — not the first few and a count. Counted by
-    // which cards are there rather than how many: the chat this opens is the
-    // instance's own, and a card named in its conversation is drawn beside the
-    // ones this case put there.
-    await expect(rail.getByTestId('bead-chip').first()).toBeVisible({ timeout: 30_000 });
-    await expect
-      .poll(
-        async () =>
-          (await rail.getByTestId('bead-chip').evaluateAll((els) => els.map((e) => e.getAttribute('data-bead-id'))))
-            .filter((id) => many.includes(id ?? '')).length,
-        { message: 'a card this chat touched is missing from the column', timeout: 30_000 },
-      )
-      .toBe(many.length);
-    await expect(page.getByTestId('bead-chip-more'), 'the column is still crowding').toHaveCount(0);
-    await page.screenshot({ path: `${SHOTS}/chat-right-rail-cards.png` });
-
-    // And the line naming the agent carries none of them, at one line high.
-    const line = page.getByTestId('chat-status-line');
-    await expect(line.getByTestId('bead-chip'), 'cards are still on the chat’s own line').toHaveCount(0);
-    const high = await line.evaluate((el) => el.getBoundingClientRect().height);
-    expect(high, `the chat's line drew ${high}px high`).toBeLessThanOrEqual(ONE_LINE_PX);
-  });
-
-  test('a card is named by the job it belongs to, so a chat that worked one job draws one chip', async ({
-    page,
-    request,
-  }) => {
-    const id = await projectId(request);
-    // The same twenty-six, but as pieces of two jobs — which is what a session
-    // that works a job actually touches (bw-7ks.22.11).
-    const pieces = [
-      ...Array.from({ length: 20 }, (_, i) => `bw-rail1.${i + 1}`),
-      ...Array.from({ length: 5 }, (_, i) => `bw-rail2.${i + 1}`),
-      'bw-rail2',
-    ];
-    await page.route('**/api/workbench/session/*', async (route) => {
-      const answer = await route.fetch();
-      const facts = (await answer.json()) as Record<string, unknown>;
-      await route.fulfill({ json: { ...facts, beads: pieces } });
-    });
-
-    await openAChat(page, id);
-    const rail = page.locator('[data-testid="chat-right-rail"]');
-    await expect(rail).toHaveAttribute('data-open', 'true');
-
-    // Two jobs, two chips — and the rail says how many pieces it folded. Only
-    // this case's own cards are counted: the chat it opens is the instance's
-    // own, and a card named in its conversation is drawn beside them.
-    const chips = rail.getByTestId('bead-chip');
-    const ours = async () =>
-      (await chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-bead-id') ?? ''))).filter((id) =>
-        id.startsWith('bw-rail'),
-      );
-    await expect
-      .poll(ours, { message: 'the pieces were not folded into their two jobs', timeout: 30_000 })
-      .toEqual(['bw-rail1', 'bw-rail2']);
-    expect(
-      Number(await rail.getAttribute('data-pieces')),
-      'the column does not say how many pieces it folded',
-    ).toBeGreaterThanOrEqual(pieces.length);
-
-    // Nothing is lost: the pointer names every piece the chip stands for.
-    const said = (await chips.first().getAttribute('title')) ?? '';
-    expect(said, `the chip said "${said}"`).toContain('20 pieces');
-    expect(said, 'the pieces are not named').toContain('bw-rail1.20');
-    // A job the chat touched itself says nothing about pieces it did not.
-    expect((await chips.nth(1).getAttribute('title')) ?? '').toContain('5 pieces');
-    await page.screenshot({ path: `${SHOTS}/chat-right-rail-jobs.png` });
   });
 
   test('folds between its two widths, and holds still when less motion is asked for', async ({ page, request }) => {

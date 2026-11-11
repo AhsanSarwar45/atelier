@@ -197,7 +197,6 @@ test('the git diff on a phone is read with nothing over it, and one press brings
         held: null,
         title: 'A diff reached on a phone',
         cwd: fixture,
-        beads: [],
       },
     }),
   );

@@ -148,10 +148,10 @@ const THEMES = [
 ] as const;
 
 test.describe('chrome', () => {
-  // One at a time. Every case here drives the same preview, and the board's
-  // columns do not finish drawing while four other cases are loading it — the
-  // rail case then reads a screen with no pane on it and fails for a reason
-  // that has nothing to do with rails.
+  // One at a time. Every case here drives the same preview, and a screen does
+  // not finish drawing while four other cases are loading it — the rail case
+  // then reads a screen with no pane on it and fails for a reason that has
+  // nothing to do with rails.
   test.describe.configure({ mode: 'serial' });
 
   test('the way out to settings is a control on the first bar, not floating over the screen', async ({
@@ -162,7 +162,7 @@ test.describe('chrome', () => {
 
     for (const [where, url] of [
       ['the project list', '/'],
-      ['the board', `/project?id=${id}&tab=board`],
+      ['the task list', `/project?id=${id}&tab=tasks`],
     ] as const) {
       await page.goto(url);
       const bar = page.getByTestId('project-bar');
@@ -196,7 +196,7 @@ test.describe('chrome', () => {
     test(`the gear keeps the bar's row under the ${theme} theme`, async ({ page, request }) => {
       const id = await projectId(request);
       await page.addInitScript((t) => localStorage.setItem('beads-theme', t), theme);
-      await page.goto(`/project?id=${id}&tab=board`);
+      await page.goto(`/project?id=${id}&tab=tasks`);
       await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
       await expect(page.locator('a[aria-label="Settings"]')).toBeVisible();
 
@@ -223,12 +223,12 @@ test.describe('chrome', () => {
    * looking at it.
    */
   test('the gear is inked by every one of the eleven themes, not by a fallback', async ({ page, request }) => {
-    // Eleven loads of the board, against a preview four other cases are using.
+    // Eleven loads of the task list, against a preview four other cases are using.
     test.slow();
     const id = await projectId(request);
     const themes = THEMES;
 
-    await page.goto(`/project?id=${id}&tab=board`);
+    await page.goto(`/project?id=${id}&tab=tasks`);
     await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
 
     const off: string[] = [];
@@ -270,12 +270,12 @@ test.describe('chrome', () => {
     page,
     request,
   }) => {
-    // Eleven loads of the board, against a preview four other cases are using.
+    // Eleven loads of the task list, against a preview four other cases are using.
     test.slow();
     const id = await projectId(request);
     const themes = THEMES;
 
-    await page.goto(`/project?id=${id}&tab=board`);
+    await page.goto(`/project?id=${id}&tab=tasks`);
     await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
 
     const weak: string[] = [];
@@ -325,7 +325,7 @@ test.describe('chrome', () => {
         document.body.appendChild(probe);
         const muted = num(getComputedStyle(probe).color).slice(0, 3);
         probe.remove();
-        const pane = document.querySelector('[data-testid="column-scroll"]') ?? document.body;
+        const pane = document.querySelector('[data-testid="tasks-tab"]') ?? document.body;
         const paneBg = behind(pane);
         const share = Number(getComputedStyle(document.documentElement).getPropertyValue('--rail-strength').trim() || 0.25);
         return {
@@ -351,14 +351,14 @@ test.describe('chrome', () => {
   });
 
   test('every pane that scrolls gets the app’s hairline, and nothing switches it off', async ({ page, request }) => {
-    // The board has to finish drawing before there is a pane to read, and the
-    // preview these run against is compiling while four other cases drive it.
+    // The chat list has to finish drawing before there is a pane to read, and
+    // the preview these run against is compiling while four other cases drive it.
     test.slow();
     const id = await projectId(request);
-    await page.goto(`/project?id=${id}&tab=board`);
+    await page.goto(`/project?id=${id}&tab=chat`);
     await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
-    // The board has to have something in it, or there is no pane to read.
-    await expect.poll(() => page.getByTestId('column-scroll').count(), { timeout: 90_000 }).toBeGreaterThan(0);
+    // The list has to have something in it, or there is no pane to read.
+    await expect.poll(() => page.getByTestId('restore-row').count(), { timeout: 90_000 }).toBeGreaterThan(0);
 
     const rails = await page.evaluate(() => {
       const scrolls = [...document.querySelectorAll('*')].filter((e) => {

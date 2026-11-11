@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSy
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { PARENT_CARD, bd, discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 import { openChatTab } from './open-chat-tab';
 import { restartInstance } from './restart';
 import { quadrantPng } from './fixture-png';
@@ -121,7 +121,7 @@ test.describe('workbench', () => {
    * fixture project is marked `isTest` so a plain `GET /api/projects` leaves it
    * off the owner's real dashboard (bw-6m6w.9), but with nothing else said that
    * same filtering makes it invisible to its OWN browser tab too: the project
-   * page never resolves a name and the board never mounts. So every request
+   * page never resolves a name and the screen never mounts. So every request
    * this page makes for the plain list is asked for test projects as well — a
    * rewrite scoped to this page alone, so a real visitor typing the same URL
    * still sees none of them.
@@ -253,24 +253,15 @@ test.describe('workbench', () => {
    * the live-turn test, and cards in between would push the six things being
    * judged off one screen.
    */
-  test('transcript shows tools, a diff, a picture, the checklist and a subagent', async ({ page, request }) => {
+  test('transcript shows tools, a diff, a picture and a subagent', async ({ page, request }) => {
     test.setTimeout(600_000);
 
-    // A board, because a checklist in this app is a view of an epic and of
-    // nothing else: the panel is drawn from that epic's children, read from
-    // Beads, and a list the agent keeps for itself is deliberately not drawn
-    // (machinery/skills/beads/SKILL.md, "Live checklist"). Asking the agent
-    // for its own three items therefore tested a thing the product refuses to
-    // do, and the panel it waited for was never coming (bw-t26l.20).
     const RUN_DIR = fixtureFor('transcript');
     const FIXTURE = join(RUN_DIR, 'work');
     discardFixture(RUN_DIR);
     makeFixtureProject(FIXTURE, join(RUN_DIR, 'reporting'), {
       specPath: join(RUN_DIR, 'reporting', 'unused.report.json'),
     });
-    // One child left mid-flight, so the panel has a ticked row and a running
-    // one to draw at the same moment.
-    bd(['update', 'wl-kid2', '--status', 'in_progress'], FIXTURE);
     writeFileSync(join(FIXTURE, 'notes.txt'), 'alpha\nbeta\ngamma\n');
     writeFileSync(join(FIXTURE, 'wheels.md'), '# Wheels\nThey are round.\n');
     writeFileSync(join(FIXTURE, 'brakes.md'), '# Brakes\nThey are hot.\n');
@@ -315,27 +306,11 @@ test.describe('workbench', () => {
       await page.getByTestId('composer').fill(
         [
           'Do all of this in one go, using the tools named:',
-          // The checklist tool is asked for by what it does, not by one name:
-          // the adapter turns both TodoWrite and TaskCreate/TaskUpdate into the
-          // ACP `plan` update the panel is drawn from, and which of the two an
-          // agent has depends on its model. The tools exist at all only because
-          // the adapter is launched with the provider's own switch for them,
-          // which it was not: the provider withholds them from every current
-          // model, so the agent said it had "no task/checklist tool at all" and
-          // no plan update ever reached the app (bw-t26l.20; acp/adapter.rs).
-          //
-          // What it publishes is the epic's id, alone. Atelier replaces that
-          // one row with the epic's children and reads their titles and
-          // statuses from the board, so a list the agent writes itself is not
-          // a checklist and is not drawn.
-          `1. Using your checklist tool (TodoWrite, or TaskCreate if that is what you have), publish a checklist`,
-          `   whose single item is exactly "${PARENT_CARD}" — the id of this project's epic, and nothing else.`,
-          '2. Read notes.txt.',
-          '3. Use the Task tool to launch a general-purpose subagent that reads wheels.md and brakes.md',
+          '1. Read notes.txt.',
+          '2. Use the Task tool to launch a general-purpose subagent that reads wheels.md and brakes.md',
           '   and reports what they say.',
-          '4. Use Edit on notes.txt to change the line "beta" to "BETA" and add a line "HELLO" after "gamma".',
-          '   Do not touch the board: no bd commands, and no further checklist changes.',
-          '5. Finish by saying, in one sentence, what colours the attached picture has.',
+          '3. Use Edit on notes.txt to change the line "beta" to "BETA" and add a line "HELLO" after "gamma".',
+          '4. Finish by saying, in one sentence, what colours the attached picture has.',
         ].join('\n'),
       );
       await page.getByTestId('send-button').click();
@@ -370,19 +345,7 @@ test.describe('workbench', () => {
           message: 'the agent should have seen the attached picture',
         })
         .toEqual(COLOURS);
-      // 4. the checklist: the epic's own children, with one ticked and one
-      //    running, and their titles taken from the board rather than from
-      //    anything the agent wrote.
-      await expect(page.getByTestId('todo-panel')).toBeVisible({ timeout: 30_000 });
-      // `toContainText`, because the ticked row draws its own tick before the
-      // title.
-      await expect(page.locator('[data-testid="todo-item"][data-todo-status="completed"]')).toContainText([
-        'First piece of the work',
-      ]);
-      await expect(page.locator('[data-testid="todo-item"][data-todo-status="in_progress"]')).toContainText([
-        'Second piece of the work',
-      ]);
-      // 5. the subagent: a row on the rail, and — opened — the reading it
+      // 4. the subagent: a row on the rail, and — opened — the reading it
       //    actually did. Not a row in this transcript: work the chat sent away
       //    is deliberately kept out of it (`sentAway` in
       //    src/workbench/message-filter.ts, bw-qdim.12), and the reader who
@@ -457,102 +420,6 @@ test.describe('workbench', () => {
       });
       await page.screenshot({ path: join(SHOTS, 'transcript.png'), fullPage: false });
       // 6. cost, already asserted above
-    } finally {
-      await request.delete(`/api/projects/${project.id}`);
-    }
-  });
-
-  /**
-   * The interconnection: chat to card, and the card back to the chat. Runs
-   * against a throwaway board the fixture builds — never a live one — with
-   * permissions bypassed so the screens stay uncluttered.
-   *
-   * A third part used to sit between those two, asking for the report the chat
-   * had just written: drawn in the stream, opened in its own tab, and still
-   * there after a Back. The owner retired reports outright in 384beb2 — the
-   * tab, the routes, the builder and the blocks all went — and this kept
-   * asking for `report-inline` regardless, so a live run spent a minute
-   * waiting on an element deliberately deleted and failed on it every time
-   * (bw-t26l.20). What is left is the join, which is what the case is for.
-   */
-  test('links a chat to the card it touched and carries row chips both ways', async ({ page, request }) => {
-    test.setTimeout(600_000);
-
-    const RUN_DIR = fixtureFor('links');
-    const FIXTURE = join(RUN_DIR, 'linked');
-    discardFixture(RUN_DIR);
-    makeFixtureProject(FIXTURE, join(RUN_DIR, 'reporting'));
-    mkdirSync(SHOTS, { recursive: true });
-
-    const project = await projectAt(request, FIXTURE, 'workbench-links');
-
-    try {
-      const started = await request.post('/api/workbench/command', {
-        data: {
-          type: 'session.start',
-          projectId: project.id,
-          projectPath: FIXTURE,
-          brand: 'claude',
-          permissionMode: 'bypassPermissions',
-        },
-      });
-      expect(started.status(), await started.text()).toBe(200);
-      const session = (await started.json()) as { id: string };
-
-      await page.goto(`/project?id=${project.id}&chat=${session.id}`);
-      await openChatTab(page);
-      await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
-
-      // Nothing here names the card to the app: the agent is told to run a bd
-      // command, and the app has to notice that by itself.
-      await page.getByTestId('composer').fill(
-        [
-          `Run this exact shell command and show me its output: bd note ${PARENT_CARD} "looked at by the workbench"`,
-          '',
-          'Do nothing else.',
-        ].join('\n'),
-      );
-      await page.getByTestId('send-button').click();
-
-      // ---- (a) the chip nobody typed --------------------------------------
-      const chip = page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`);
-      await expect(chip).toBeVisible({ timeout: 300_000 });
-      await page.screenshot({ path: join(SHOTS, 'link-a.png'), fullPage: false });
-
-      // The board is the record, so the edge must be readable straight from bd.
-      const onBoard = await request.get(
-        `/api/workbench/links/bead/${PARENT_CARD}?path=${encodeURIComponent(FIXTURE)}`,
-      );
-      expect(onBoard.status()).toBe(200);
-      const chats = (await onBoard.json()) as { sessionId: string }[];
-      expect(chats.map((c) => c.sessionId)).toContain(session.id);
-
-      // ---- (b) the card's own side of the join ----------------------------
-      await page.setViewportSize({ width: 1440, height: 1000 });
-      await page.goto(`/project?id=${project.id}`);
-      await page.getByTestId('tab-board').click();
-      await page.getByText('The card this chat works on').first().click();
-
-      const chatList = page.getByTestId('card-chats');
-      await expect(chatList).toBeVisible({ timeout: 60_000 });
-      const entry = chatList.locator(`[data-session-id="${session.id}"]`);
-      await expect(entry).toBeVisible();
-      await page.screenshot({ path: join(SHOTS, 'link-b.png'), fullPage: false });
-
-      // Clicking it lands back on that very chat.
-      await entry.click();
-      await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', session.id, {
-        timeout: 60_000,
-      });
-      await expect(
-        page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`),
-      ).toBeVisible({ timeout: 60_000 });
-
-      // ---- and the chat list says the same thing, one line per chat -------
-      // The row knows which cards the chat worked on — it carries them rather than
-      // drawing them, so the rail stays two lines of words.
-      const row = page.locator(`[data-testid="restore-row"][data-row-key="${session.id}"]`);
-      await expect(row).toHaveAttribute('data-beads', new RegExp(`\\b${PARENT_CARD}\\b`), { timeout: 60_000 });
     } finally {
       await request.delete(`/api/projects/${project.id}`);
     }
@@ -828,53 +695,31 @@ test.describe('workbench', () => {
   });
 
   /**
-   * From the card, on the board, and on a phone.
-   *
-   * One chat serves all three: started from a card so it opens already knowing
-   * what the card says, which puts a live line on that card back on the board,
-   * and read once more at phone size.
+   * A chat read on a phone: the list is a drawer, and the composer is in reach.
    */
-  test('from-card briefs the chat, marks the board, and reads on a phone', async ({ page, request }) => {
+  test('a chat reads on a phone', async ({ page, request }) => {
     test.setTimeout(600_000);
 
-    const FIXTURE = fixtureFor('from-card');
-    const REPORTS = join(__dirname, '..', '.workbench-run-from-card-reports');
+    const FIXTURE = fixtureFor('on-a-phone');
+    const REPORTS = join(__dirname, '..', '.workbench-run-on-a-phone-reports');
     discardFixture(REPORTS);
     makeFixtureProject(FIXTURE, REPORTS);
     mkdirSync(SHOTS, { recursive: true });
 
     const project = await projectAt(request, FIXTURE);
     try {
-      await page.goto(`/project?id=${project.id}&tab=board`);
-
-      // Open the card, and start a chat from it.
-      await page.locator(`[data-bead-id="${PARENT_CARD}"]`).first().click();
-      const start = page.getByTestId('start-chat-from-card');
-      await expect(start).toBeVisible({ timeout: 60_000 });
-      await start.click();
-
-      // It lands on a chat that already quotes the card, with its chip in the header.
-      const tab = page.getByTestId('chat-tab');
-      await expect(tab).toBeVisible({ timeout: 120_000 });
-      const opened = await tab.getAttribute('data-session-id');
-      expect(opened, 'the button opened a chat').toBeTruthy();
-      await expect(page.getByTestId('user-message').first()).toContainText('The card this chat works on', {
-        timeout: 60_000,
+      const started = await request.post('/api/workbench/command', {
+        data: {
+          type: 'session.start',
+          projectId: project.id,
+          projectPath: FIXTURE,
+          brand: 'claude',
+          permissionMode: 'bypassPermissions',
+        },
       });
-      await expect(page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`)).toBeVisible({
-        timeout: 60_000,
-      });
-      await page.screenshot({ path: join(SHOTS, 'from-card.png'), fullPage: false });
+      expect(started.status(), await started.text()).toBe(200);
+      const opened = ((await started.json()) as { id: string }).id;
 
-      // Back on the board, that card is the one showing a live line.
-      await page.getByTestId('tab-board').click();
-      const liveLine = page.locator(`[data-testid="card-live-chat"][data-bead-id="${PARENT_CARD}"]`);
-      await expect(liveLine).toBeVisible({ timeout: 120_000 });
-      await expect(liveLine).toHaveAttribute('data-session-id', opened!);
-      await expect(page.getByTestId('card-live-chat')).toHaveCount(1);
-      await page.screenshot({ path: join(SHOTS, 'board-dot.png'), fullPage: false });
-
-      // And the same chat on a phone: the list is a drawer, the composer is in reach.
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`/project?id=${project.id}&tab=chat&chat=${opened}`);
       await expect(page.getByTestId('composer')).toBeVisible({ timeout: 60_000 });

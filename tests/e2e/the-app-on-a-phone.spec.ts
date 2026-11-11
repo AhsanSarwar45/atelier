@@ -4,7 +4,6 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { bd } from './fixture-board';
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
 
@@ -27,8 +26,8 @@ import type { WbpEvent } from '../../src/workbench/protocol';
  * screen, fits the hand it is held in.
  *
  * Two lists sit at the top of this file and they mean opposite things. EXEMPT
- * is what the survey found to be the design and not a fault — the board's
- * sideways swipe, a fenced code block, a picture at its own pixel size — each
+ * is what the survey found to be the design and not a fault — a fenced code
+ * block, a picture at its own pixel size — each
  * written by name with its reason and each proved to still be what it claims.
  * KNOWN is what this walk found to be a real fault and could not fix here, with
  * the card it was filed under. Neither is a loosened assertion: anything not on
@@ -57,7 +56,7 @@ test.use({ viewport: PHONE, deviceScaleFactor: 2, hasTouch: true, isMobile: true
 /**
  * The exemptions: what is allowed to run past the right edge, and why.
  *
- * The survey found three places where sideways movement is the design and not
+ * The survey found the places where sideways movement is the design and not
  * a fault. They are written here by name with the reason, rather than by
  * loosening the assertion — a weaker rule would also excuse the next real
  * fault, and nobody reading it would know which of the two it was for. Each is
@@ -65,16 +64,6 @@ test.use({ viewport: PHONE, deviceScaleFactor: 2, hasTouch: true, isMobile: true
  * belongs to, by the steps below: an exemption nobody checks is a hole.
  */
 const EXEMPT: { what: string; because: string }[] = [
-  {
-    what: 'board-scroll',
-    because:
-      'the board is a stack of full-width columns a thumb swipes between: snap-x snap-mandatory with --column-min set to the window, so one column at a time is the whole point (kanban-board.tsx)',
-  },
-  {
-    what: 'column-tabs',
-    because:
-      'the row of column names pages sideways with the columns it names, and every name can be brought into view by the same swipe',
-  },
   {
     what: 'open-files-strip',
     because:
@@ -211,38 +200,6 @@ function seed(where: string): void {
   // Something for the Git view and the diff to have to say.
   writeFileSync(join(where, 'src', 'main.ts'), AFTER);
   writeFileSync(join(where, 'scratch.txt'), 'a file git has never been told about\n');
-
-  // A board of its own, so the Board tab has columns to draw rather than the
-  // empty case: the app only believes a project keeps cards when its manifest
-  // says so, and only draws them when a database is really there.
-  bd(['init', '--prefix', 'ph'], where);
-  mkdirSync(join(where, '.atelier'), { recursive: true });
-  writeFileSync(
-    join(where, '.atelier', 'project.toml'),
-    [
-      'schema_version = 1',
-      '',
-      '[project]',
-      'display_name = "the-app-on-a-phone"',
-      'use_beads = true',
-      'summary = ""',
-      '',
-      '[git]',
-      'completed_work_branch = "main"',
-      '',
-      '[beads]',
-      'issue_id_prefix = "ph"',
-      '',
-    ].join('\n'),
-  );
-  const cards = [
-    { id: 'ph-1', title: 'A card with a title long enough to need wrapping in a column', status: 'open', issue_type: 'epic', priority: 1 },
-    { id: 'ph-2', title: 'Something under way', status: 'in_progress', issue_type: 'task', priority: 1 },
-    { id: 'ph-3', title: 'Something finished', status: 'closed', issue_type: 'task', priority: 2 },
-    { id: 'ph-4', title: 'Something still waiting', status: 'open', issue_type: 'task', priority: 2 },
-  ];
-  writeFileSync(join(where, 'seed.jsonl'), cards.map((one) => JSON.stringify(one)).join('\n') + '\n');
-  bd(['import', '--input', 'seed.jsonl'], where);
 }
 
 async function fixtureProject(request: APIRequestContext, name: string, path: string) {
@@ -695,7 +652,6 @@ test('every screen at a phone width, judged', async ({ page, request }) => {
           cwdHint: fixture,
           runningElsewhere: false,
           held: null,
-          beads: [],
         },
       ],
     }),
@@ -712,7 +668,6 @@ test('every screen at a phone width, judged', async ({ page, request }) => {
         title: 'A chat read on a phone',
         name: 'A chat read on a phone',
         cwd: fixture,
-        beads: [],
       },
     }),
   );
@@ -730,37 +685,11 @@ test('every screen at a phone width, judged', async ({ page, request }) => {
     await page.waitForTimeout(1500);
     await judge(page, 'the project list', '01-project-list');
 
-    // ---- 2. The board, and the swipe it is built around. -----------------
-    await page.goto(`/project?id=${project.id}&tab=board`);
-    await page.getByTestId('board-scroll').waitFor({ timeout: WAIT });
-    await page.waitForTimeout(3000);
-    await judge(page, 'the board', '02-board');
-
-    // The exemption above says the board pages sideways on purpose. Prove it
-    // is still that, and not a board that has simply become too wide: one
-    // column to a screen, snapped, and the next one a swipe away.
-    const strip = await page.getByTestId('board-scroll').evaluate((el) => {
-      const first = el.querySelector('[data-testid="column-scroll"]')?.parentElement as HTMLElement | null;
-      return {
-        snap: getComputedStyle(el).scrollSnapType,
-        shown: el.clientWidth,
-        column: first ? Math.round(first.getBoundingClientRect().width) : -1,
-      };
-    });
-    note(`   the board's strip snaps "${strip.snap}" and a column is ${strip.column}px of the ${strip.shown}px it shows`);
-    expect(strip.snap, 'the board strip must snap, one column to a swipe').toContain('mandatory');
-    expect(strip.column, 'a column on a phone is the width of the screen it is read on').toBeGreaterThan(strip.shown * 0.8);
-
-    // And the row of column names reaches its last name by the same swipe.
-    const namesReach = await page.getByTestId('column-tabs').evaluate(async (el) => {
-      el.scrollLeft = el.scrollWidth;
-      await new Promise((done) => setTimeout(done, 300));
-      const last = el.lastElementChild as HTMLElement | null;
-      const box = last?.getBoundingClientRect();
-      return { onScreen: Boolean(box && box.right <= window.innerWidth + 1 && box.left >= -1) };
-    });
-    expect(namesReach.onScreen, 'the last column name must be reachable by scrolling its own row').toBe(true);
-    await shoot(page, '02b-board-columns-swiped');
+    // ---- 2. The task list, the project's first tab. --------------------
+    await page.goto(`/project?id=${project.id}&tab=tasks`);
+    await page.getByTestId('tasks-tab').waitFor({ timeout: WAIT });
+    await page.waitForTimeout(1500);
+    await judge(page, 'the task list', '02-tasks');
 
     // ---- 3. The chat tab, its list of chats shut and open. ---------------
     await page.goto(`/project?id=${project.id}&tab=chat`);

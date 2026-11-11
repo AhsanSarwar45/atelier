@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { foldAll } from '../../src/workbench/fold';
 import { changeOf } from '../../src/workbench/line-diff';
 import type { WbpEvent } from '../../src/workbench/protocol';
-import { discardFixture, makeFixtureProject } from './fixture-board';
+import { discardFixture, makeFixtureProject } from './fixture-project';
 
 /** A file large enough that the wire's four-thousand-character bound bites. */
 const FILE = Array.from({ length: 1500 }, (_, at) => `const line${at + 1} = ${at + 1};`).join('\n') + '\n';
@@ -82,8 +82,8 @@ async function openTheChat(page: Page, request: APIRequestContext, chat: string,
     url.searchParams.set('include_test', 'true');
     await route.continue({ url: url.toString() });
   });
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: chat, externalId: 'fixture', brand: 'codex', title: 'Large edit', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${chat}$`), (route) => route.fulfill({ json: { sessionId: chat, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Large edit', cwd: projectPath, beads: [] } }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: chat, externalId: 'fixture', brand: 'codex', title: 'Large edit', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath, runningElsewhere: false, held: null }] }));
+  await page.route(new RegExp(`/api/workbench/session/${chat}$`), (route) => route.fulfill({ json: { sessionId: chat, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Large edit', cwd: projectPath } }));
 
   const made = await request.post('/api/projects', { data: { name: `Large edit ${chat}`, path: projectPath, isTest: true } });
   expect(made.status(), await made.text()).toBe(201);

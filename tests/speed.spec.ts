@@ -8,9 +8,8 @@ import { expect, test, type APIRequestContext, type Page, type Request } from '@
 /**
  * How long the app takes to appear.
  *
- * Four numbers, one per screen the manager waits on: the board, the list of
- * projects, a chat, and what the board asks anyone else while it draws. Every
- * case prints its number and goes red when it is over budget, so a change that
+ * Two numbers, one per screen the manager waits on: the list of projects and
+ * a chat. Every case prints its number and goes red when it is over budget, so a change that
  * makes a screen slower is caught here rather than in his afternoon.
  *
  * Run it against a BUILT instance, never `next dev`: the development server
@@ -25,34 +24,20 @@ import { expect, test, type APIRequestContext, type Page, type Request } from '@
  * The budgets are the ones the job was opened against (bw-uiyz).
  */
 
-/** The board is on screen this long after the click. */
-const BOARD_DRAWN_MS = 1_500;
 /** The list of projects is on screen this long after the click. */
 const LIST_DRAWN_MS = 800;
 /** A chat with a long history is on screen this long after the click. */
 const CHAT_DRAWN_MS = 700;
-/** Board data the list of projects downloads to draw a handful of names. */
+/** Data the list of projects downloads to draw a handful of names. */
 const LIST_BYTES = 300 * 1024;
 /**
  * The app's own code, which every screen downloads before it can draw.
  *
  * Held at what it costs today so it cannot quietly grow; bringing it down is
- * its own job, because it is the same weight on every screen and nothing to do
- * with how a board is read.
+ * its own job, because it is the same weight on every screen.
  */
 const APP_BYTES = 1_100 * 1024;
-/** How many pieces of screen a board of hundreds of cards may hold at rest. */
-const BOARD_PIECES = 1_500;
-/**
- * How many questions about pull requests a board may ask: none.
- *
- * The manager does not use pull requests, so nothing on a card has an answer
- * worth waiting for — and every one of these questions was a call across the
- * internet before it could be answered at all.
- */
-const PR_ASKS = 0;
-
-/** A screen drawn from hundreds of cards can take a while to settle the first time. */
+/** A long screen can take a while to settle the first time. */
 const WAY_IN_MS = 120_000;
 /** How many chats are opened before the longest of them is held to the budget. */
 const CHATS_TRIED = 4;
@@ -68,12 +53,6 @@ interface RestoreRow {
   externalId: string | null;
   title: string | null;
   state: string;
-}
-
-interface Bead {
-  id: string;
-  title: string | null;
-  status: string;
 }
 
 /** What one request cost, as the browser saw it. */
@@ -120,14 +99,8 @@ function ownCheckout(): string {
   return dirname(git);
 }
 
-/**
- * The board this run measures: this project's own, or whichever is named.
- *
- * Not simply the largest one the instance holds — how much a board costs
- * depends on what its cards carry, and picking by size lands on a board that
- * asks nothing and reports a screen that is fast when the one beside it is not.
- */
-async function boardUnderTest(request: APIRequestContext): Promise<{ project: Project; beads: Bead[] }> {
+/** The project this run measures: this checkout's own, or whichever is named. */
+async function projectUnderTest(request: APIRequestContext): Promise<Project> {
   const api = backend();
   const projects = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
   expect(projects.length, 'the instance lists no projects').toBeGreaterThan(0);
@@ -138,12 +111,7 @@ async function boardUnderTest(request: APIRequestContext): Promise<{ project: Pr
     projects.find((p) => p.path === here) ??
     projects[0];
   expect(project, 'the instance does not list the project this run is measuring').toBeTruthy();
-  const answer = await request.get(`${api}/api/beads?path=${encodeURIComponent(project.path)}`, {
-    timeout: WAY_IN_MS,
-  });
-  expect(answer.ok(), `the board at ${project.path} could not be read`).toBe(true);
-  const body = (await answer.json()) as { beads?: Bead[] };
-  return { project, beads: body.beads ?? [] };
+  return project;
 }
 
 /**
@@ -172,15 +140,10 @@ function saidBytes(externalId: string | null): number {
   return 0;
 }
 
-/** Cards drawn on the board right now. */
-function cards(page: Page) {
-  return page.locator('[aria-label^="Select bead"], [aria-label^="Select epic"]');
-}
-
 /**
  * Waits until the screen has stopped changing, and says how long that took.
  *
- * Drawn is not the first card: a board that paints one column and then spends
+ * Drawn is not the first row: a screen that paints a little and then spends
  * five seconds fetching the rest is what this whole job is about. The number is
  * the moment the count of what is on screen stopped moving.
  */
@@ -204,52 +167,21 @@ async function settle(page: Page, count: () => Promise<number>): Promise<number>
   throw new Error('the screen never stopped changing');
 }
 
-/** Pieces of screen the document holds. */
-function pieces(page: Page): Promise<number> {
-  return page.evaluate(() => document.querySelectorAll('*').length);
-}
-
 test.describe('how long the app takes to appear', () => {
-  // One screen at a time, whatever the rest of the suite does: four of these
+  // One screen at a time, whatever the rest of the suite does: two of these
   // running at once fight over the same server and time each other's queue
   // rather than the screen. A screen that is over budget is still measured
   // rather than abandoned — the number is what the case is for.
   test.describe.configure({ mode: 'default', timeout: 300_000 });
 
-  test('board asks about no pull requests, and calls nothing outside', async ({ page, request }) => {
-    const { project, beads } = await boardUnderTest(request);
-
-    const asked = await asksDuring(page, async () => {
-      await page.goto('/');
-      const opener = page.locator(`[aria-label="View ${project.name} project"]`).first();
-      await opener.waitFor({ timeout: WAY_IN_MS });
-      await opener.click();
-      await cards(page).first().waitFor({ timeout: WAY_IN_MS });
-      await settle(page, () => cards(page).count());
-      // A board that only asks after it is drawn is still a board that asks.
-      await page.waitForTimeout(2_000);
-    });
-
-    const github = asked.filter((a) => a.url.includes('github.com'));
-    const pr = asked.filter((a) => a.url.includes('/api/git/pr-status') || a.url.includes('/api/git/prs'));
-    const slowest = pr.reduce((worst, a) => Math.max(worst, a.ms), 0);
-    // eslint-disable-next-line no-console
-    console.log(
-      `board of ${beads.length} cards: ${pr.length} pull-request questions, slowest ${Math.round(slowest)}ms, ${github.length} calls to github`,
-    );
-
-    expect(github, 'the screen called github itself').toHaveLength(0);
-    expect(pr.length, `${pr.length} pull-request questions for one board`).toBeLessThanOrEqual(PR_ASKS);
-  });
-
-  test('project list is drawn from counts, not from every board', async ({ page }) => {
+  test('project list is drawn from counts, not from every project', async ({ page }) => {
     let drawn = 0;
     const asked = await asksDuring(page, async () => {
       await page.goto('/');
       drawn = await settle(page, () => page.locator('[aria-label^="View "]').count());
     });
 
-    // The app's own code and the board data it asks for are two different
+    // The app's own code and the data it asks for are two different
     // weights with two different cures, and adding them together hides which
     // one moved.
     const code = asked.filter((a) => a.url.includes('/_next/'));
@@ -258,11 +190,11 @@ test.describe('how long the app takes to appear', () => {
     const dataBytes = data.reduce((total, a) => total + a.bytes, 0);
     // eslint-disable-next-line no-console
     console.log(
-      `project list: ${Math.round(dataBytes / 1024)}KB of board data over ${data.length} asks, ` +
+      `project list: ${Math.round(dataBytes / 1024)}KB of data over ${data.length} asks, ` +
         `${Math.round(codeBytes / 1024)}KB of app code, drawn in ${drawn}ms`,
     );
 
-    expect(dataBytes, `${Math.round(dataBytes / 1024)}KB of board data to draw a list of names`).toBeLessThan(
+    expect(dataBytes, `${Math.round(dataBytes / 1024)}KB of data to draw a list of names`).toBeLessThan(
       LIST_BYTES,
     );
     expect(codeBytes, `${Math.round(codeBytes / 1024)}KB of app code before anything is drawn`).toBeLessThan(
@@ -271,35 +203,8 @@ test.describe('how long the app takes to appear', () => {
     expect(drawn, `the list took ${drawn}ms`).toBeLessThan(LIST_DRAWN_MS);
   });
 
-  test('board draws what is on screen, not every card there is', async ({ page, request }) => {
-    const { project, beads } = await boardUnderTest(request);
-
-    await page.goto('/');
-    const opener = page.locator(`[aria-label="View ${project.name} project"]`).first();
-    await opener.waitFor({ timeout: WAY_IN_MS });
-    const started = Date.now();
-    await opener.click();
-    await cards(page).first().waitFor({ timeout: WAY_IN_MS });
-    const watching = Date.now();
-    const drawn = watching - started + (await settle(page, () => cards(page).count()));
-    const held = await pieces(page);
-    // eslint-disable-next-line no-console
-    console.log(`board of ${beads.length} cards: drawn in ${drawn}ms, holding ${held} pieces of screen`);
-
-    expect(drawn, `the board took ${drawn}ms`).toBeLessThan(BOARD_DRAWN_MS);
-    expect(held, `the board holds ${held} pieces of screen`).toBeLessThan(BOARD_PIECES);
-
-    // A board that draws only what is on screen must still find what is not.
-    const buried = beads.filter((b) => (b.title ?? '').length > 25).at(-1);
-    expect(buried, 'the board has no card with a title long enough to search for').toBeTruthy();
-    await page.getByPlaceholder(/search/i).first().fill(buried!.title!.slice(0, 40));
-    await expect(
-      page.locator(`[aria-label*="${buried!.title!.slice(0, 30).replace(/"/g, '')}"]`).first(),
-    ).toBeVisible({ timeout: 10_000 });
-  });
-
   test('chat opens at once, however much was said in it', async ({ page, request }) => {
-    const { project } = await boardUnderTest(request);
+    const project = await projectUnderTest(request);
     const api = backend();
     const q = new URLSearchParams({ project: project.id, path: project.path });
     const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as RestoreRow[];

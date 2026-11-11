@@ -51,8 +51,8 @@ test('CLI-produced media survives a chat reload', async ({ page, request }) => {
     Object.defineProperty(window, 'WebSocket', { value: Socket, configurable: true });
   }, { chat: CHAT, view: snapshot });
   await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => { if (route.request().method() !== 'GET') return route.continue(); const url = new URL(route.request().url()); url.searchParams.set('include_test', 'true'); await route.continue({ url: url.toString() }); });
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'media', brand: 'codex', title: 'Durable visuals', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: process.cwd(), runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'media', runningElsewhere: false, held: null, title: 'Durable visuals', cwd: process.cwd(), beads: [] } }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'media', brand: 'codex', title: 'Durable visuals', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: process.cwd(), runningElsewhere: false, held: null }] }));
+  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'media', runningElsewhere: false, held: null, title: 'Durable visuals', cwd: process.cwd() } }));
   let project: { id: string } | null = null;
   try {
     const made = await request.post('/api/projects', { data: { name: 'Durable visual proof', path: process.cwd(), isTest: true } });

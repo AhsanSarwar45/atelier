@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { foldAll } from '../../src/workbench/fold';
 import type { WbpEvent } from '../../src/workbench/protocol';
-import { PARENT_CARD, makeFixtureProject } from './fixture-board';
+import { makeFixtureProject } from './fixture-project';
 
 /**
  * Where a status-line chip's letters actually land, at the density they are
@@ -44,7 +44,6 @@ async function mount(page: Page, projectPath: string) {
     { ...base, seq: 7, type: 'cost', cost: { kind: 'tokens', input: 20_000_000, output: 4_010_484, total: 24_010_484 } },
   ];
   const snapshot = foldAll(events);
-  const beads = [PARENT_CARD, 'wl-kid1', 'wl-kid2'];
 
   await page.addInitScript(({ chat, view }) => {
     class FixtureSocket {
@@ -84,7 +83,7 @@ async function mount(page: Page, projectPath: string) {
   const session = {
     sessionId: CHAT, externalId: 'fixture', brand: 'claude', title: 'Chip centering',
     state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: projectPath,
-    origin: 'terminal', cwd: projectPath, runningElsewhere: false, held: null, beads,
+    origin: 'terminal', cwd: projectPath, runningElsewhere: false, held: null,
   };
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [session] }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: session }));

@@ -539,7 +539,7 @@ test.describe('a chat another program is running', () => {
 
       // He looks at something else, and what was in the air lands while nobody
       // is watching that chat.
-      await page.goto(`/project?id=${project.id}&tab=board`);
+      await page.goto(`/project?id=${project.id}&tab=tasks`);
       await expect(page.getByTestId('transcript')).toHaveCount(0, { timeout: 30_000 });
     } finally {
       release();

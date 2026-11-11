@@ -140,8 +140,8 @@ test('the tree menu and the chat menu offer the same list for the same file', as
     await route.fulfill({ json: { id: 'fixture-shell' } });
   });
   await seeTestProjects(page);
-  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'codex', name: 'One menu vocabulary', title: 'One menu vocabulary', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: fixture, runningElsewhere: false, held: null, beads: [] }] }));
-  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, name: 'One menu vocabulary', title: 'One menu vocabulary', cwd: fixture, beads: [] } }));
+  await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [{ sessionId: CHAT, externalId: 'fixture', brand: 'codex', name: 'One menu vocabulary', title: 'One menu vocabulary', state: 'idle', lastActiveAt: new Date(0).toISOString(), cwdHint: fixture, runningElsewhere: false, held: null }] }));
+  await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) => route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'codex', externalId: 'fixture', runningElsewhere: false, held: null, name: 'One menu vocabulary', title: 'One menu vocabulary', cwd: fixture } }));
 
   let project: { id: string } | null = null;
   try {

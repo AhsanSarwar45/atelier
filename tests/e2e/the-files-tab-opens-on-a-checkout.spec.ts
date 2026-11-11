@@ -87,10 +87,9 @@ test('the Files tab opens on a checkout the reader chose, and remembers it', asy
       { timeout: WAIT },
     ).toBe(FIXTURE);
 
-    // A board is what a project can opt out of; this fixture keeps no cards, so
-    // the Board trigger is absent and Files is still there beside Chat.
+    // Files sits beside Chat and Tasks on every project.
     await expect(page.getByTestId('tab-chat')).toBeVisible();
-    await expect(page.getByTestId('tab-board')).toHaveCount(0);
+    await expect(page.getByTestId('tab-tasks')).toBeVisible();
 
     const checkouts = await offered(page, 2);
     expect(checkouts.some((row) => row.includes('files-tab')), `picker offered ${checkouts.join(' | ')}`).toBe(true);

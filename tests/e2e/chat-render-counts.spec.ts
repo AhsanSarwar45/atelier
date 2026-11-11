@@ -91,7 +91,7 @@ function everySession(projectId: string, projectPath: string) {
   const one = (id: string, title: string, state: string) => ({
     id, brand: 'claude', externalId: id, projectId, projectPath, cwd: projectPath, model: 'opus', permissionMode: 'on-request',
     title, state, createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(),
-    activity: state === 'streaming' ? 'Writing' : 'Idle', activityDetail: '', activityCall: null, beads: [],
+    activity: state === 'streaming' ? 'Writing' : 'Idle', activityDetail: '', activityCall: null,
   });
   const all = [one(CHAT, 'Counting renders', 'idle')];
   for (let i = 0; i < OTHERS; i += 1) all.push(one(`other-${i}`, `Another chat ${i}`, i % 3 === 0 ? 'streaming' : 'idle'));
@@ -210,7 +210,7 @@ test('what one keystroke, one word and one new row cause React to run', async ({
 
   await seeTestProjects(page);
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) =>
-    route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Counting renders', cwd: fixture, beads: [] } }),
+    route.fulfill({ json: { sessionId: CHAT, origin: 'terminal', brand: 'claude', externalId: 'fixture', runningElsewhere: false, held: null, title: 'Counting renders', cwd: fixture } }),
   );
 
   await page.goto(`/project?id=${project.id}&tab=chat&chat=${CHAT}`);
