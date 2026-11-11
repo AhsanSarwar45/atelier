@@ -27,7 +27,7 @@ import { useLiveSessions, type LiveSession } from '@/workbench/live';
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
 import { startTaskIn } from '@/workbench/tasks/new-task';
 import { isStale, STALE_REASON } from '@/workbench/tasks/stale';
-import { TaskCard, TaskOwnerActions, TaskStatusChip, shownStatus } from '@/workbench/tasks/task-card';
+import { MergeBadge, TaskCard, TaskOwnerActions, TaskStatusChip, shownStatus } from '@/workbench/tasks/task-card';
 import { STATUS_LABEL, typeLabel, type Task, type TaskEvent, type TaskStatus } from '@/workbench/tasks/types';
 import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
 
@@ -384,6 +384,7 @@ export default function TasksTab({ projectId, selected: shown, onSelect, onOpenC
                               {task.shortfalls && (
                                 <AlertTriangle role="img" aria-label="Finished with shortfalls" data-testid="task-row-shortfalls" className="size-3.5 shrink-0 text-[var(--color-warning-accent)]" />
                               )}
+                              <MergeBadge task={task} className="shrink-0" />
                               <TaskStatusChip status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} className="shrink-0" />
                             </Row>
                             {stale.has(task.number) && <StaleCancel task={task} />}

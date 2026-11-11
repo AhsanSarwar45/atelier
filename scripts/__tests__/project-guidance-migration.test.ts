@@ -19,8 +19,9 @@ describe('this project uses Atelier guidance', () => {
     for (const path of ['AGENTS.md', 'CLAUDE.md', '.agents/skills/beads/SKILL.md', '.agents/skills/beads/agents/openai.yaml']) {
       expect(existsSync(path), path).toBe(false);
     }
-    for (const path of ['.claude/settings.json', '.codex/config.toml', '.codex/hooks.json']) {
+    for (const path of ['.claude/settings.json', '.codex/config.toml']) {
       expect(existsSync(path), path).toBe(true);
     }
+    expect(existsSync('.codex/hooks.json'), 'Beads compaction hooks are gone').toBe(false);
   });
 });
