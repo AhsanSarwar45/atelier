@@ -30,7 +30,7 @@ function Playback({composition,config}:{composition:React.ComponentType<any>;con
       <input aria-label="Timeline" type="range" min={0} max={config.durationInFrames-1} value={frame} onChange={e=>{player.current?.pause();player.current?.seekTo(Number(e.target.value));}} style={{flex:1,minWidth:0,accentColor:'#69e3d3'}}/>
       <output style={{fontSize:12,fontVariantNumeric:'tabular-nums'}}>{Math.floor(frame/config.fps)} / {Math.ceil(config.durationInFrames/config.fps)} s</output>
     </div>
-    {!!config.chapters?.length&&<nav aria-label="Chapters" style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'center'}}>{config.chapters.map((chapter,i)=>{
+    {!!config.chapters?.length&&<nav aria-label="Chapters" style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'center',maxHeight:'30%',overflowY:'auto',flexShrink:0}}>{config.chapters.map((chapter,i)=>{
       const active=frame>=chapter.frame&&frame<(config.chapters?.[i+1]?.frame??Infinity);
       return <button key={chapter.frame} aria-current={active?'step':undefined} onClick={()=>{player.current?.pause();player.current?.seekTo(chapter.frame);}} style={{background:active?'#243d55':'#142033',color:'#edf2fa',border:'1px solid #34506b',borderRadius:6,padding:'8px 10px',cursor:'pointer',fontSize:12}}>{chapter.label}</button>;
     })}</nav>}

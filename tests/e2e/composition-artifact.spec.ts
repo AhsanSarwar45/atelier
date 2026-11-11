@@ -6,7 +6,9 @@ import type { ChatWidget } from '../../src/workbench/chat-widgets';
 
 const CHAT = 'visual-gallery';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { widgetSpecs } from '../../src/workbench/chat-widgets';
 
 test('directed composition plays and seeks inside an isolated frame', async ({ page, request, browser }) => {
@@ -14,7 +16,18 @@ test('directed composition plays and seeks inside an isolated frame', async ({ p
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 2100 });
-  writeFileSync('/tmp/bw-2txyi-probe.json', JSON.stringify({version:1,kind:'composition',title:'Isolation probe',width:800,height:450,html:`<div id="result">starting</div><script>
+  const generated=mkdtempSync(join(tmpdir(),'atelier-composition-e2e-'));
+  const bundle=(source:string,destination:string)=>execFileSync(process.execPath,[join(process.cwd(),'scripts/compositions/build.mjs'),source,destination],{cwd:process.cwd()});
+  let visuals:ChatWidget[];
+  try {
+  bundle(join(process.cwd(),'examples/compositions/meshlets.tsx'),join(generated,'meshlets.json'));
+  bundle(join(process.cwd(),'examples/compositions/cache.tsx'),join(generated,'cache.json'));
+  writeFileSync(join(generated,'many.tsx'),`export {default} from ${JSON.stringify(join(process.cwd(),'examples/compositions/meshlets.tsx'))};`);
+  const manyConfig=JSON.parse(readFileSync(join(process.cwd(),'examples/compositions/meshlets.json'),'utf8'));
+  manyConfig.chapters=Array.from({length:30},(_,i)=>({frame:i*60,label:`Chapter ${i+1}: a longer explanation`}));
+  writeFileSync(join(generated,'many.json'),JSON.stringify(manyConfig));
+  bundle(join(generated,'many.tsx'),join(generated,'many-artifact.json'));
+  writeFileSync(join(generated,'probe.json'), JSON.stringify({version:1,kind:'composition',title:'Isolation probe',width:800,height:450,html:`<div id="result">starting</div><script>
 (async()=>{const r={script:true,parent:false,storage:false,fetch:false,image:false,navigation:false,popup:false};
 try{parent.document.body.dataset.compromised='true';r.parent=true}catch{}
 try{localStorage.setItem('composition-probe','yes');r.storage=true}catch{}
@@ -23,7 +36,8 @@ try{r.popup=!!window.open('about:blank')}catch{}
 try{top.location.href='https://example.invalid/composition-escape';r.navigation=true}catch{}
 await new Promise(done=>{const i=new Image;i.onload=()=>{r.image=true;done()};i.onerror=done;i.src='https://example.invalid/composition-image'});
 document.querySelector('#result').textContent=JSON.stringify(r)})();<\/script>`}));
-  const visuals: ChatWidget[] = ['/tmp/bw-2txyi-meshlets.json', '/tmp/bw-2txyi-probe.json', '/tmp/bw-2txyi-cache.json'].map(file => widgetSpecs(execFileSync(process.env.ATELIER_BINARY!, ['tool', 'present', 'artifact', '--file', file], { env: process.env, encoding: 'utf8' }))[0]!);
+  visuals = ['meshlets.json', 'probe.json', 'cache.json', 'many-artifact.json'].map(name => join(generated,name)).map(file => widgetSpecs(execFileSync(process.env.ATELIER_BINARY!, ['tool', 'present', 'artifact', '--file', file], { env: process.env, encoding: 'utf8' }))[0]!);
+  } finally { rmSync(generated,{recursive:true,force:true}); }
   const common = { sessionId: CHAT, at: new Date(0).toISOString() };
   const events: WbpEvent[] = [{ ...common, seq: 1, type: 'session.started', brand: 'codex', externalId: 'gallery', model: 'gpt-5', cwd: process.cwd(), permissionMode: 'on-request' }];
   let seq = 2;
@@ -119,6 +133,18 @@ document.querySelector('#result').textContent=JSON.stringify(r)})();<\/script>`}
       const frameBox=await widget.boundingBox();
       await expect.poll(async()=>(await film.locator('canvas').first().boundingBox())!.width).toBeGreaterThan(frameBox!.width*.7);
     }
+    await page.setViewportSize({width:390,height:844});
+    const many=page.getByTestId('composition-artifact').nth(3);
+    const manyFilm=many.contentFrame();
+    await many.scrollIntoViewIfNeeded();
+    const lastChapter=manyFilm.getByRole('navigation',{name:'Chapters'}).getByRole('button').last();
+    await lastChapter.focus();
+    await lastChapter.press('Enter');
+    await expect(lastChapter).toHaveAttribute('aria-current','step');
+    await manyFilm.getByRole('slider',{name:'Timeline',exact:true}).fill('480');
+    const manyBox=(await many.boundingBox())!;
+    await expect.poll(async()=>(await manyFilm.locator('canvas').first().boundingBox())!.width).toBeGreaterThan(manyBox.width*.7);
+    await many.screenshot({path:'/tmp/bw-2txyi-many-mobile.png'});
     await page.setViewportSize({width:1440,height:1200});
     const originalFrame=await widget.elementHandle();
     const beforeFullscreen=await main.getAttribute('data-frame');
