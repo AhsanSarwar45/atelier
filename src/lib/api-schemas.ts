@@ -130,3 +130,24 @@ export const WorktreeStatusSchema = schema(object({
   dirty: boolean,
   last_modified: nullable(string),
 }));
+
+/** A task (docs/tasks.md, "HTTP"): the fields every screen that draws one reads. */
+const task = object({
+  projectId: string,
+  number: number,
+  type: string,
+  title: string,
+  status: string,
+  sessionId: nullish(string),
+  plan: nullish(object({})),
+  result: nullish(object({})),
+});
+
+export const TasksResponseSchema = schema(object({ tasks: array(task) }));
+
+export const TaskDetailSchema = schema(object({
+  task,
+  events: array(object({ seq: number, at: number, kind: string, actor: string })),
+}));
+
+export const TaskActionResponseSchema = schema(object({ task, widget: nullish(string) }));

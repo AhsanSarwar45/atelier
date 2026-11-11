@@ -81,7 +81,7 @@ import { usePathsOnDisk, type Disk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, HeldMessage, ImagePayload, LookableImage, OnLook, ProfileChoice, SessionConfigOption, TodoItem } from '@/workbench/protocol';
+import type { Brand, HeldMessage, ImagePayload, LookableImage, OnLook, ProfileChoice, SessionConfigOption } from '@/workbench/protocol';
 import { opens } from '@/workbench/attachment-look';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
@@ -112,7 +112,9 @@ import { ChatAccount, useSignIn } from '@/workbench/sign-in-dialog';
 import { SignedOutMark, useStanding } from '@/workbench/account-standing';
 import { workingLine } from '@/workbench/working-line';
 import { AttachmentViewer } from '@/workbench/attachment-viewer';
-import { useEpicChecklist } from '@/workbench/epic-checklist';
+import { checklistForTasks, finished, type ChecklistItem } from '@/workbench/tasks/checklist';
+import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
+import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
 import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
 import { useSteadyCallback } from '@/hooks/use-steady-callback';
@@ -625,9 +627,15 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
   );
 }
 
-/** An epic's board-backed checklist, as it stands right now. */
-export function TodoPanel({ items }: { items: TodoItem[] }) {
-  const complete = items.filter((item) => item.status === 'completed').length;
+const CHECKLIST_NOTE: Partial<Record<ChecklistItem['status'], string>> = {
+  paused: 'Paused',
+  blocked: 'Blocked',
+  review: 'In review',
+};
+
+/** The tasks this chat holds, with their live statuses (docs/tasks.md). */
+export function TodoPanel({ items }: { items: ChecklistItem[] }) {
+  const complete = items.filter(finished).length;
   const allComplete = complete === items.length;
   // An opened chat is opened to be read: the checklist starts as its one-line
   // header, and the reader unfolds it when they want it (bw-i7pg.1).
@@ -656,10 +664,12 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         <ListChecks className="h-4 w-4 text-muted-foreground" />
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Checklist</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tasks</span>
         {!expanded && !allComplete && (
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {items.find((item) => item.status === 'in_progress')?.text ?? items.find((item) => item.status === 'pending')?.text}
+            {(['in_progress', 'paused', 'blocked', 'review', 'pending'] as const)
+              .map((status) => items.find((item) => item.status === status)?.text)
+              .find(Boolean)}
           </span>
         )}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">{complete}/{items.length}</span>
@@ -678,13 +688,33 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
                 not a control, so it is kept out of the tab order. The one the
                 agent is on is the half-ticked box, pulsing. */}
             <Checkbox
-              checked={t.status === 'completed' ? true : t.status === 'in_progress' ? 'indeterminate' : false}
+              checked={finished(t) ? true : t.status === 'in_progress' || t.status === 'paused' ? 'indeterminate' : false}
               aria-readonly="true"
               aria-labelledby={`${tickId}-${t.id}`}
               tabIndex={-1}
               className={cn(t.status === 'in_progress' && 'animate-pulse')}
             />
-            <span id={`${tickId}-${t.id}`} className={cn(t.status === 'completed' && 'text-muted-foreground line-through')}>{t.text}</span>
+            <span
+              id={`${tickId}-${t.id}`}
+              className={cn(
+                'min-w-0 truncate',
+                finished(t) && 'text-muted-foreground',
+                t.status === 'cancelled' && 'line-through',
+              )}
+            >
+              {t.text}
+            </span>
+            {CHECKLIST_NOTE[t.status] && (
+              <span
+                data-testid="todo-note"
+                className={cn(
+                  'ml-auto shrink-0 text-xs',
+                  t.status === 'blocked' ? 'text-[var(--color-warning-accent)]' : 'text-muted-foreground',
+                )}
+              >
+                {CHECKLIST_NOTE[t.status]}
+              </span>
+            )}
           </li>
         ))}
       </ul>
@@ -1166,7 +1196,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const view = useSession(reading, { shape: true });
   const factsRead = useSessionFactsRead(reading);
   const facts = factsRead?.facts ?? null;
-  const checklist = useEpicChecklist(view.todos, projectPath);
+  // The chat's checklist is the tasks it holds; the project's whole list is
+  // read so a task card in the transcript can show any task's status live.
+  const projectTasks = useTasks(projectId);
+  const liveTasks = useMemo(() => byNumber(projectTasks.tasks), [projectTasks.tasks]);
+  const checklist = useMemo(
+    () => checklistForTasks(projectTasks.tasks, reading, view.state),
+    [projectTasks.tasks, reading, view.state],
+  );
+  // A follow-up's "Create task" writes into this chat's composer.
+  const prefillComposer = useCallback((line: string) => { if (sessionId) prefillChat(sessionId, line); }, [sessionId]);
   // What the board knows plus what this chat has been seen doing since.
   const cards = useMemo(
     () => Array.from(new Set([...(facts?.beads ?? []), ...view.beads])),
@@ -3155,7 +3194,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   );
 
   const shell = (inner: React.ReactNode) => (
-    // The height is the shell's to give: this box fills what the bars left.
+    <LiveTasksContext.Provider value={liveTasks}>
+    <ComposerPrefillContext.Provider value={sessionId ? prefillComposer : null}>
+    {/* The height is the shell's to give: this box fills what the bars left. */}
     <div ref={shellRef} className="relative flex min-h-0 flex-1">
       {/* First thing on the row, ahead of Chat/Board/Reports: the way into the
           chat list is not one tool among this tab's own, it opens a whole other
@@ -3183,6 +3224,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           an empty screen says nothing and takes width to say it. */}
       {rail}
     </div>
+    </ComposerPrefillContext.Provider>
+    </LiveTasksContext.Provider>
   );
 
   // A chat that has been asked for but does not yet exist. The click moves the

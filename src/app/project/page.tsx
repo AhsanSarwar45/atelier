@@ -6,7 +6,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { EllipsisVertical, Folder, Home, MessageSquare, SquareKanban } from 'lucide-react';
+import { EllipsisVertical, Folder, Home, ListTodo, MessageSquare, SquareKanban } from 'lucide-react';
 
 import { BackLink } from '@/components/back-link';
 import { ProjectSwitcher } from '@/components/project-switcher';
@@ -40,6 +40,7 @@ const loadChatTab = () => import('@/workbench/chat-tab');
 const PRELOAD_AFTER_MS = 4_000;
 const ChatTab = dynamic(loadChatTab, { ssr: false });
 const FilesTab = dynamic(() => import('@/workbench/files-tab'), { ssr: false });
+const TasksTab = dynamic(() => import('@/workbench/tasks/tasks-tab'), { ssr: false });
 const SearchPanel = dynamic(() => import('@/workbench/search-panel').then((m) => m.SearchPanel), { ssr: false });
 const BoardSearchPanel = dynamic(() => import('./board-search').then((m) => m.BoardSearchPanel), { ssr: false });
 const FileSearchPanel = dynamic(() => import('@/workbench/file-search').then((m) => m.FileSearchPanel), { ssr: false });
@@ -268,13 +269,18 @@ function ProjectTabs() {
           // chat it was pointed at: coming back to a tab should be what he was
           // reading, not an empty one.
           onValueChange={(next) =>
-            go({ tab: next === 'chat' ? 'chat' : next === 'files' ? 'files' : 'board' })
+            go({ tab: next === 'chat' || next === 'tasks' || next === 'files' ? next : 'board' })
           }
         >
           <TabsList data-testid="project-tabs">
             <TabsTrigger value="chat" data-testid="tab-chat" aria-label="Chat" className={TAB}>
               <MessageSquare className={GLYPH} aria-hidden="true" />
               <span className={WORD}>Chat</span>
+            </TabsTrigger>
+            {/* Tasks belong to the app, so every project has them (docs/tasks.md). */}
+            <TabsTrigger value="tasks" data-testid="tab-tasks" aria-label="Tasks" className={TAB}>
+              <ListTodo className={GLYPH} aria-hidden="true" />
+              <span className={WORD}>Tasks</span>
             </TabsTrigger>
             {/* Only the board needs a board. Files stand on the folder itself,
                 so a project that keeps no cards still gets them. */}
@@ -314,6 +320,10 @@ function ProjectTabs() {
 
       {shownTab === 'chat' && !projectError && (
         <ChatTab projectId={projectId} projectPath={project?.path ?? null} openSessionId={openChat} />
+      )}
+
+      {shownTab === 'tasks' && !projectError && projectId && (
+        <TasksTab projectId={projectId} onOpenChat={(chat) => go({ tab: 'chat', chat })} />
       )}
 
       {/* Only the tab in front is mounted here too: a tree left alive behind the

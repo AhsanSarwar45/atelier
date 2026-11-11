@@ -427,6 +427,10 @@ function noteMismatch(now: boolean): void {
 }
 
 function absorb(frame: WatchFrame): void {
+  // A task changed (docs/tasks.md). It is about no chat, so this store has
+  // nothing to do with it; the tasks hook reads it off the same feed.
+  const named = frame as { kind?: unknown; type?: unknown };
+  if (named.kind === 'tasks.changed' || named.type === 'tasks.changed') return;
   if (frame.kind === 'usage') {
     const key = usageKey(frame.brand ?? 'claude', frame.profile);
     usage.set(key, frame.usage);

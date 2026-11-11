@@ -5,8 +5,9 @@
 
 import { apiUrl } from '@/lib/api-base';
 import { onBoard, onFolder, onRepository, type WatchEvent } from '@/workbench/live-wire';
-import { BeadsResponseSchema, CardResponseSchema, CardStatusesResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
+import { BeadsResponseSchema, CardResponseSchema, CardStatusesResponseSchema, TaskActionResponseSchema, TaskDetailSchema, TasksResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
 import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, CachedCounts } from '@/types';
+import type { OwnerAction, Task, TaskEvent, TaskTypeInfo } from '@/workbench/tasks/types';
 
 /**
  * Input for creating a new project
@@ -1887,4 +1888,32 @@ export const storage = {
  */
 export const watch = {
   beads: (path: string, onEvent: (event: WatchEvent) => void) => onBoard(path, onEvent),
+};
+
+/**
+ * Tasks (docs/tasks.md, "HTTP"). The screens act as the owner; agents change
+ * tasks through `atelier task`, never through here.
+ */
+export const tasks = {
+  list: async (projectId: string, sessionId?: string | null) => {
+    const query = new URLSearchParams({ project: projectId });
+    if (sessionId) query.set('session', sessionId);
+    const answer = await fetchApi<{ projectId: string; tasks: Task[] }>(`/api/workbench/tasks?${query}`);
+    return TasksResponseSchema.parse(answer).tasks;
+  },
+  get: async (projectId: string, number: number) => {
+    const answer = await fetchApi<{ task: Task; events: TaskEvent[] }>(
+      `/api/workbench/tasks/${encodeURIComponent(projectId)}/${number}`,
+    );
+    return TaskDetailSchema.parse(answer);
+  },
+  types: async () => (await fetchApi<{ types: TaskTypeInfo[] }>('/api/workbench/task-types')).types,
+  /** One owner action. A refusal throws an ApiError carrying the server's sentence. */
+  act: async (projectId: string, number: number, action: OwnerAction, payload?: Record<string, unknown>) => {
+    const answer = await fetchApi<{ task: Task; widget: string | null; summary?: string }>('/api/workbench/task', {
+      method: 'POST',
+      body: JSON.stringify({ action, actor: 'owner', project: projectId, number, ...(payload ? { payload } : {}) }),
+    });
+    return TaskActionResponseSchema.parse(answer);
+  },
 };

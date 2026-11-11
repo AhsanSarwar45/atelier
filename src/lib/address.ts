@@ -4,7 +4,7 @@
  * Everything a reader could arrive at is in the address and nothing that a link
  * could carry is held in a component's own state:
  *
- *   /project?id=<project>&tab=chat|board|files&chat=<sessionId>&card=<cardId>
+ *   /project?id=<project>&tab=chat|tasks|board|files&chat=<sessionId>&card=<cardId>
  *   …&file=<absolute path>&line=<1-based line>
  *   …&message=<id>                            a search's jump into the chat, dropped once made
  *   …&diff=<@diff id>                          a diff to show, dropped once shown
@@ -14,7 +14,7 @@
  * Design: docs/designs/app-shell.md §1.7.
  */
 
-export type Tab = 'chat' | 'board' | 'files';
+export type Tab = 'chat' | 'tasks' | 'board' | 'files';
 
 export interface Where {
   /** The project. Null only while the screen is being sent back to the list. */
@@ -72,7 +72,9 @@ export function whereFrom(params: URLSearchParams): Where {
   const tab: Tab =
     rawTab === 'chat'
       ? 'chat'
-      : rawTab === 'board'
+      : rawTab === 'tasks'
+        ? 'tasks'
+        : rawTab === 'board'
         ? 'board'
         : rawTab === 'files'
           ? 'files'

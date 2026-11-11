@@ -1,3 +1,7 @@
+import { TASK_STATUSES, type TaskWidget } from '@/workbench/tasks/types';
+
+export type { TaskWidget } from '@/workbench/tasks/types';
+
 const BLOCK = /```atelier-widget\s*\n([\s\S]*?)\n```/g;
 
 export type MetricWidget = {
@@ -41,7 +45,7 @@ export type ExplainerWidget = {
   steps: Array<{ label: string; detail?: string; active: string[] }>;
   evidence?: Array<{ label: string; path: string; line?: number }>;
 };
-export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ImageWidget | ImageCompareWidget | ArtifactWidget | ExplainerWidget;
+export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ImageWidget | ImageCompareWidget | ArtifactWidget | ExplainerWidget | TaskWidget;
 
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -59,6 +63,7 @@ const artifactAsset = (value: unknown): value is string => typeof value === 'str
 
 export function widget(value: unknown): ChatWidget | null {
   if (!object(value) || !text(value.type) || !title(value.title)) return null;
+  if (value.type === 'task') return taskWidget(value);
   const nodes = value.nodes;
   const edges = value.edges;
   const steps = value.steps;
@@ -116,6 +121,23 @@ export function widget(value: unknown): ChatWidget | null {
   return null;
 }
 
+/**
+ * A task card (docs/tasks.md). Checked loosely: the server already checked the
+ * task when it was changed, so this only makes sure there is a task to draw.
+ * The plan and result are drawn field by field, and a missing field is drawn
+ * as missing rather than refusing the card.
+ */
+function taskWidget(value: Record<string, unknown>): TaskWidget | null {
+  const task = value.task;
+  if (!text(value.event) || !object(task)) return null;
+  if (typeof task.projectId !== 'string' || !Number.isInteger(task.number) || Number(task.number) < 1) return null;
+  if (typeof task.type !== 'string' || typeof task.title !== 'string' || !task.title.trim()) return null;
+  if (!(TASK_STATUSES as readonly unknown[]).includes(task.status)) return null;
+  if (!object(task.plan)) return null;
+  if (task.result != null && !object(task.result)) return null;
+  return value as unknown as TaskWidget;
+}
+
 const TOP_LEVEL_FIELDS: Record<ChatWidget['type'], Set<string>> = {
   metrics: new Set(['type', 'title', 'items']),
   chart: new Set(['type', 'title', 'chart', 'series', 'data']),
@@ -127,6 +149,7 @@ const TOP_LEVEL_FIELDS: Record<ChatWidget['type'], Set<string>> = {
   image_compare: new Set(['type', 'title', 'mode', 'before', 'after']),
   artifact: new Set(['type', 'title', 'kind', 'asset']),
   explainer: new Set(['type', 'layout', 'title', 'summary', 'nodes', 'edges', 'steps', 'evidence']),
+  task: new Set(['type', 'title', 'event', 'task']),
 };
 
 const fieldsAre = (value: Record<string, unknown>, allowed: Set<string>) =>
