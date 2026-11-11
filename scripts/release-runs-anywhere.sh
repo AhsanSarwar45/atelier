@@ -146,7 +146,7 @@ trap cleanup EXIT
 
 # `env -i` is the point of the whole check: CARGO_MANIFEST_DIR, every BEADS_*
 # and ATELIER_* switch, and whatever else a build or a session left in the
-# environment are all gone. PATH stays because git, bd and the selected AI
+# environment are all gone. PATH stays because git and the selected AI
 # provider are the reader's own programs, not this project's.
 LOG="$WORK/said.txt"
 env -i \

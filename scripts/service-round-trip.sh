@@ -196,8 +196,8 @@ for setting in "ATELIER_PORT=$PORT" "ATELIER_DATA_DIR=$WORK/data" "BEADS_WORKBEN
 done
 
 # The list of places the reader's own tools were found on. Without it the
-# machine starts the board with a dead chat and no boards on it, because
-# `node`, `npm`, `bd` and `dolt` are all bare names looked up on a list a
+# machine starts Atelier with a dead chat, because
+# `node`, `npm` and `git` are all bare names looked up on a list a
 # service is handed none of (bw-w5zs).
 if grep -qF "Environment=\"PATH=$PLACES\"" "$UNIT_FILE"; then
   pass "it carried the places the reader's own tools were found on"

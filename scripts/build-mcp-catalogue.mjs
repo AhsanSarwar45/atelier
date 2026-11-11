@@ -31,7 +31,7 @@ const wait = (ms) => new Promise((go) => setTimeout(go, ms));
 /** Retried, because a few hundred searches in a row is enough to be throttled. */
 async function json(url, tries = 4) {
   for (let go = 0; ; go += 1) {
-    const r = await fetch(url, { headers: { 'user-agent': 'beads-web-catalogue-builder' } }).catch(() => null);
+    const r = await fetch(url, { headers: { 'user-agent': 'atelier-catalogue-builder' } }).catch(() => null);
     if (r?.ok) return r.json();
     if (go + 1 >= tries) throw new Error(`${r?.status ?? 'no answer'} ${url}`);
     await wait(500 * 2 ** go);
@@ -39,7 +39,7 @@ async function json(url, tries = 4) {
 }
 
 async function text(url) {
-  const r = await fetch(url, { headers: { 'user-agent': 'beads-web-catalogue-builder' } });
+  const r = await fetch(url, { headers: { 'user-agent': 'atelier-catalogue-builder' } });
   if (!r.ok) throw new Error(`${r.status} ${url}`);
   return r.text();
 }

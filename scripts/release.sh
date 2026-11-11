@@ -12,8 +12,8 @@
 #
 # So it is one command with no number in it. The number is read out of the work
 # itself: a breaking change raises the first, a feature raises the second,
-# anything else raises the third. A feature is a `feat:` subject or a card of
-# kind feature named in a subject (scripts/release-bump.sh).
+# anything else raises the third. A feature is a `feat:` subject
+# (scripts/release-bump.sh); `--as` takes a bigger step for one named otherwise.
 #
 #   bash scripts/release.sh              # cut and publish the next version
 #   bash scripts/release.sh --dry-run    # print every step and write nothing
@@ -231,9 +231,7 @@ else
   stop "nothing has changed since $LAST, so there is nothing to release"
 fi
 
-# A breaking marker raises the first number and a feature the second. A
-# feature is known by its card as well as by `feat:`, since commits here are
-# named after the card they finish (bw-4c76n.1).
+# A breaking marker raises the first number and a `feat:` subject the second.
 BUMP=$(bash scripts/release-bump.sh "v$LAST") \
   || die "could not work out how big a step this release is"
 

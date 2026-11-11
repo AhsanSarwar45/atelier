@@ -163,8 +163,7 @@ binaries and checksums — just no formula.
   `clippy`, `tsc`, or `eslint` automatically, so a regression can merge — or ship
   in a release — undetected. Until that is added, run `npm run lint`,
   `npm run typecheck`, `npm run test`, and (in `server/`) `cargo test --lib`
-  locally before tagging. On Windows `cargo test` (full) hangs because the
-  `memory_bd` integration test starts Dolt — use `cargo test --lib`.
+  locally before tagging.
 - **Version duplication.** The version is repeated in `package.json`,
   `package-lock.json`, `server/Cargo.toml`, `server/Cargo.lock`, and `flake.nix`
   (twice). All but `Cargo.lock` are held together by a check

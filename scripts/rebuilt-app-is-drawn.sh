@@ -171,9 +171,9 @@ fi
 say "Answers about the work itself"
 
 # A file is kept and asked about by its tag. These have no tag they could be
-# asked about by: the address of a board is the same after a card moves as it
+# asked about by: the address of a list is the same after the work moves as it
 # was before it, so the only safe answer is that there is nothing to keep.
-for asked in "/api/health" "/api/beads?path=$REPO" "/api/projects"; do
+for asked in "/api/health" "/api/projects"; do
   head="$(headers_of "http://127.0.0.1:$PORT$asked")"
   kept="$(value_of "$head" "cache-control")"
   name="${asked%%\?*}"

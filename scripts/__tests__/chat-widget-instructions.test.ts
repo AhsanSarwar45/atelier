@@ -37,10 +37,9 @@ describe('agent chat widget instructions', () => {
     for (const want of ['atelier tool memory add', '--scope', 'One fact per memory']) expect(reference).toContain(want);
   });
 
-  it('keeps the retired board out of the skill every session gets', () => {
+  it('keeps checklists out of the skill every session gets', () => {
     for (const text of [instructions[0], reference]) {
       expect(text).not.toMatch(/checklist/i);
-      expect(text).not.toMatch(/beads/i);
     }
   });
 });

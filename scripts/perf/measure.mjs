@@ -6,14 +6,14 @@
 // number of requests, and how long until the screen is drawn. Every screen is
 // loaded with an empty cache twice over — once as the host (no throttling) and
 // once as a device on Wi-Fi — so the network cost is seen where it is paid. It
-// then leaves the board and a long chat open and records the server's memory
+// then leaves the Tasks tab and a long chat open and records the server's memory
 // and CPU over an idle minute.
 //
 //   node scripts/perf/measure.mjs --binary server/target/release/atelier \
 //     --data tests/.perf-run-data --label after [--runs 3] [--idle 60]
 //
 // `--data` holds `workbench.db` (+ `-wal`/`-shm`) and a `beads-web/` project
-// with `.beads/issues.jsonl`; the database is copied (reflink) per run so runs
+// folder; the database is copied (reflink) per run so runs
 // start equal. Nothing outside that folder and two probed ports is touched.
 
 import { spawn, execFileSync } from 'node:child_process';
@@ -124,8 +124,6 @@ async function start() {
     stdio: ['ignore', 'ignore', 'ignore'],
     env: {
       HOME: process.env.HOME,
-      // `bin/bd` answers the board's reads from the fixture's issues.jsonl, so
-      // no real tracker or database is ever reached.
       PATH: `${join(data, 'bin')}:/usr/bin:/bin`,
       ATELIER_DATA_DIR: join(run, 'data'),
       ATELIER_PRESENTATION_MEDIA_DIR: join(run, 'media'),
@@ -253,16 +251,10 @@ try {
   });
   if (made.status !== 201) throw new Error(`project: ${made.status} ${await made.text()}`);
   const project = await made.json();
-  {
-    const began = Date.now();
-    const board = await fetch(`${base}/api/beads?path=${encodeURIComponent(project.path)}`, { headers: { 'accept-encoding': 'gzip' } });
-    const body = await board.arrayBuffer();
-    report.board_api_cold = { status: board.status, ms: Date.now() - began, content_encoding: board.headers.get('content-encoding'), decoded_kib: +(body.byteLength / 1024).toFixed(1) };
-  }
 
   const screens = [
-    { name: 'home', path: '/', drawn: '[aria-label="Open Beads Web"]' },
-    { name: 'board', path: `/project?id=${project.id}&tab=board`, drawn: '[aria-label^="Select card:"], [aria-label^="Select epic:"]' },
+    { name: 'home', path: '/', drawn: '[aria-label^="Open "]' },
+    { name: 'tasks', path: `/project?id=${project.id}&tab=tasks`, drawn: '[data-testid="tasks-tab"]' },
     { name: 'chat', path: `/project?id=${project.id}&tab=chat&chat=${chatId}`, drawn: '[data-testid="transcript-rows"] > *' },
     { name: 'settings', path: '/settings', drawn: 'h1, h2, [role="tablist"]' },
   ].filter((s) => !only || only.has(s.name));
@@ -282,10 +274,10 @@ try {
   report.memory.after_screens = memory(child.pid);
 
   if (idleSeconds > 0) {
-    // Idle: the board and the long chat left open, nobody touching anything.
+    // Idle: the Tasks tab and the long chat left open, nobody touching anything.
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const open = [];
-    for (const screen of screens.filter((s) => s.name === 'board' || s.name === 'chat')) {
+    for (const screen of screens.filter((s) => s.name === 'tasks' || s.name === 'chat')) {
       const page = await context.newPage();
       await page.goto(base + screen.path);
       await page.locator(screen.drawn).first().waitFor({ timeout: 90_000 }).catch(() => {});
