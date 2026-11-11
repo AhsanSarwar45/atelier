@@ -10,7 +10,7 @@ Before publishing, build the frontend and release binary, run the Rust and UI
 contract suites, run `scripts/release-runs-anywhere.sh`, and run
 `scripts/fresh-machine.sh`. The fresh-machine check starts only isolated
 containers and proves native Claude and Codex start, resume, stream, approval,
-stop, environment reporting, board access, and absence of Node/npm/Python.
+stop, environment reporting, project access, and absence of Node/npm/Python.
 Archive jobs pass their produced files through `ATELIER_ARCHIVES` so contents
 are inspected byte-for-byte on every supported platform.
 

@@ -205,9 +205,6 @@ reader's own instance, and by `src/workbench/__tests__/`.
 - The chat tab used to subtract a hardcoded bar height from the window height.
   A measurement of the chrome, held in a place that could not see the chrome,
   is wrong the moment a bar changes; the shell hands the tab its height instead.
-- The terminal theme's header printed `N beads // N epics // N blocked`.
-  Dropped: every column already counts what it drew, so the totals restated the
-  board back to itself.
 
 ## 3. Measured, so it is not guessed at
 

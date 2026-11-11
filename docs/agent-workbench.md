@@ -9,8 +9,8 @@
 > contract is [ACP transport](architecture/acp-transport.md).
 
 The app becomes the place the owner talks to coding agents. Per project, two
-tabs: **Chat** and **Board**. A chat knows the cards it worked on, a card knows
-the chats that touched it, and a report links to both. Claude Code and OpenAI
+tabs: **Chat** and **Tasks** (beside **Files**). A task knows the chat that
+holds it ([tasks](tasks.md)), and a report links to its chat. Claude Code and OpenAI
 Codex are supported from day one behind one internal protocol; a third brand is
 one new driver file.
 
@@ -29,7 +29,7 @@ Three processes, one port for the browser.
                         ▼
         ┌───────────────────────────────────────────┐
         │  axum server  :3008   (0.0.0.0)           │
-        │  board · reports · static · bd            │
+        │  projects · reports · static              │
         │  NEW: /api/workbench/* → reverse proxy    │
         └───────────────────────────────────────────┘
                         │ HTTP, loopback only
@@ -39,9 +39,9 @@ Three processes, one port for the browser.
         │  Node 22 · TypeScript                     │
         │  drivers · event log · linker · registry  │
         └───────────────────────────────────────────┘
-             │ stdio                    │ stdio            │ argv
-             ▼                          ▼                  ▼
-    claude (Agent SDK)          codex app-server          bd
+             │ stdio                    │ stdio
+             ▼                          ▼
+    claude (Agent SDK)          codex app-server
 ```
 
 ### 1.1 Why a Node sidecar and not the axum server
@@ -73,7 +73,7 @@ have.
 The cost, stated plainly: **this fork needs Node present at runtime for the
 Chat tab.** Node is already required to build the front end, and decision 15
 scopes this to one computer. If `node` is missing the proxy answers 503 and the
-Chat tab shows an offline banner — the board half is untouched and keeps
+Chat tab shows an offline banner — the rest of the app is untouched and keeps
 working.
 
 Codex speaks newline-delimited JSON-RPC 2.0 over stdio, which is equally easy
@@ -133,9 +133,7 @@ workbench/
     server.ts           http, SSE, command routes
     store.ts            node:sqlite — schema, event log, replay, search, spend
     registry.ts         sessions, restore list, terminal-session discovery
-    linker.ts           bead-id extraction → bd provenance (brand-agnostic)
     reports.ts          report detection
-    bd.ts               spawn bd, parse --json
     drivers/
       types.ts          the Driver interface + Capabilities
       index.ts          brand → driver
@@ -487,7 +485,6 @@ message(session_id, message_id, role, text, at)   -- flattened, for search
 turn(id PK, session_id, project_id, day, brand,
      usd REAL NULL, tokens_in INT NULL, tokens_out INT NULL, at)
 ask(session_id, ask_id, kind, json, answered_at, answer_json)
-bead_link(session_id, bead_id, via, first_seen_at, PRIMARY KEY(session_id, bead_id))
 report_link(session_id, project, slug, at)
 ```
 
@@ -501,9 +498,6 @@ report_link(session_id, project, slug, at)
   back still asking (and still counted in the tray).
 - `turn` carries only what the brand reported — `usd` is null for Codex,
   `tokens_*` is null for Claude. Nothing is derived across that line.
-- **`bead_link` is a cache, not the record.** The record is on the board
-  (§6.1). Deleting `workbench.db` loses the transcripts; it does not lose a
-  single chat↔card link.
 - Search is `LIKE` over `message.text` joined to `session`. Deliberately not
   FTS5: the corpus is one person's chats, `LIKE` is instant at this size, and
   it avoids depending on a SQLite build flag nobody has verified.
@@ -514,79 +508,16 @@ report_link(session_id, project, slug, at)
 
 ## 6. The links
 
-### 6.1 Chat ↔ card, recorded by the machine
+### 6.1 Chat ↔ task
 
-Decision 7: the machine watches tool calls; the agent is never asked to
-remember. The record lives on the board, in `bd`'s own append-only provenance
-log:
-
-```
-bd provenance record --issue <bead> --kind used \
-    --source workbench-tool --ref <sessionId> --ref-kind transcript
-```
-
-Both directions are `bd`'s, already:
-
-- **chat → cards:** `bd provenance by-ref <sessionId> --json`
-- **card → chats:** `bd provenance log <beadId> --json`, keeping
-  `ref_kind == "transcript"`
-
-**Measured, not assumed.** Against a throwaway `bd` database: two cards bound
-to one session id, one card bound to two session ids; `by-ref` returned both
-cards, `log` returned both sessions. And the idempotency is on
-`source:issue:kind:ref` — recording the same pair a second time was a no-op and
-**the second payload was discarded**. Two consequences, both load-bearing:
-
-1. The linker may fire on *every* tool call without any deduplication of its
-   own. Four hundred tool calls that touch one card produce exactly one edge.
-   (It still memoises in RAM per session, to save four hundred process spawns —
-   but that is performance, not correctness.)
-2. The provenance row is an **edge, not a log**. Per-tool-call detail belongs in
-   our `event` table, never in the payload — the payload only survives from the
-   first write.
-
-`--source` distinguishes how the edge was born, and different sources coexist
-on the same pair: `workbench-brief` for a chat started from a card (decision
-16b — linked at birth), `workbench-tool` for one the machine observed,
-`workbench-manual` if the owner attaches one by hand.
-
-**How a card is spotted.** The linker sits *above* the drivers: it consumes our
-own `tool.started` events, not brand events, so a third brand gets linking for
-free. For each event it serialises the tool input to text, together with the
-user's prompt text, and pulls out every token shaped like a bead id
-(`^[a-z0-9]{2,6}-[a-z0-9.]+$`). Each distinct candidate is confirmed by
-`bd show <id> --json`, cached per session — a real card confirms, a false
-positive does not. **The exit code is not the answer:** measured, `bd show` on
-an unknown id exits 0 and returns `{"error":"no issues found matching the
-provided IDs"}`. Confirmation is "the JSON is an array with a matching `id`",
-and anything else is a miss. Confirmed candidates become provenance rows and a
-`link.bead` event. In practice the strong signals are the agent's own
-`bd` commands, its `git commit` messages (which carry the card id in this
-house), and writes under `.beads/`.
-
-**One refinement of decision 7, stated openly.** The decision names Claude's
-PreToolUse/PostToolUse hooks as the mechanism. The primary source will instead
-be the `tool_use` / `tool_result` blocks in the SDK's own output stream: it is
-the same data — every tool call, its name, its input, its result — arriving
-typed, in-process, with subagent attribution attached, and it needs no hook
-script and no loopback callback back into the sidecar. The hooks remain the
-declared fallback (`--include-hook-events`, or a hook script posting to the
-sidecar) if any tool proves invisible in the stream. The rule decision 7
-actually sets — *the machine watches, the agent never remembers* — is
-unchanged, and work item 3's screen test is what proves the feed is complete.
+A task records the session that holds it and every change it goes through;
+[tasks](tasks.md) is the whole of it. Nothing is inferred from tool calls.
 
 ### 6.2 Reports, linked to both
 
-A report already knows its card: `GET /api/reports` returns `{project, slug,
-title, card}` from the spec. So report→card exists today and is not rebuilt.
-
-Report→chat is machine-observed the same way as cards: a tool call that runs
+Report→chat is machine-observed: a tool call that runs
 `report <slug>` or writes `<data>/reports/<project>/<slug>.report.json`
-produces a `report.available` event and a `report_link` row. When the report's
-spec names a card, the sidecar also records
-`bd provenance record --issue <card> --kind used --source workbench-report
---ref <project>/<slug> --ref-kind work-id`, so the card's own history shows the
-report as well as the chats.
+produces a `report.available` event and a `report_link` row.
 
 Nothing under `reporting/` is touched — it is out of scope by the card.
 
@@ -623,10 +554,6 @@ name, the cwd and the branch, and its shape is the SDK's contract rather than a
 format we guessed at — which is why the earlier rule ("never open a transcript,
 the line format is unstable") is retired: we still never parse one, the SDK
 does. Resuming goes through `claude --resume <id>`, which is the contract.
-
-A card chip appears once the chat is known to have worked on that card, which
-means a tool call of its own acted on it (§6.1). A chat the app has never
-driven therefore carries no card chips until it is opened and its history read.
 
 Codex sessions we did not start are **not listed**, because the sessions
 directory is not first-party-confirmed. The Codex group simply does not appear
@@ -1023,20 +950,16 @@ named-instruction mechanism, and the honest Codex answer to "custom commands".
 
 ## 8. The window
 
-### 8.1 Two tabs
+### 8.1 The tabs
 
-`src/app/project/page.tsx` is 19 lines and does nothing but wrap
-`<KanbanBoard/>` in `<Suspense>`. It becomes a `<Tabs>` shell with **Chat** and
-**Board**; the Board tab renders the same `<KanbanBoard/>`, unchanged and
-un-reindented. `src/components/ui/tabs.tsx` already exists in the repo and has
-no importers — it is wired in, not written.
-
-No third tab. Results, questions, images and comparisons stay in the chat.
+`src/app/project/page.tsx` is a `<Tabs>` shell with **Chat**, **Tasks** and
+**Files**. Every project has all three; there is no setting that hides one.
+Results, questions, images and comparisons stay in the chat.
 
 ### 8.2 The chat tab
 
 - **Left sidebar** — every chat in this project, grouped by day, with brand
-  icon, title, state pill and its card chips. A "＋ New chat" header with the
+  icon, title and state pill. A "＋ New chat" header with the
   brand / model / effort pickers.
 - **Transcript** — user and assistant bubbles; text arriving word by word;
   images as images; a collapsible thinking block; a tool row per call showing
@@ -1047,7 +970,6 @@ No third tab. Results, questions, images and comparisons stay in the chat.
 - **Composer** — multiline, paste/drop an image, `@` opens file completion,
   `/` opens the typed-command menu, Stop replaces Send while a turn runs.
 - **Right rail** — the chat's own second column, collapsible and remembered:
-  the cards this chat has touched (clicking one opens it on the Board tab), the
   every agent it sent off, and what the work cost
   (§8.2.6).
 
@@ -1311,15 +1233,15 @@ the family carries the colour and the mark:
 Three rules hold this together, and each of them is a fault it already had:
 
 - **The colours are tokens the app already owns**, never colours of their own,
-  so red means the same thing in a chat as it does on the board and every one of
+  so red means the same thing in a chat as it does anywhere else and every one of
   the eleven skins gets a family palette for nothing. The same test reads
   `src/app/themes.css` block by block and names any skin short of one of the six;
   reading only `globals.css`, whose own blocks satisfy the check on their own,
   proved a test that could not fail (bw-jkh2.9).
 - **The classes are spelled out one family at a time and never built from the
   family's name.** Tailwind ships a class only when it read the literal string in
-  the source; interpolating the name is exactly how the board's own state
-  colours went grey (bw-ufso.2, `src/lib/state-styles.ts`).
+  the source; interpolating the name is exactly how the app's own state
+  colours once went grey (bw-ufso.2, `src/lib/state-styles.ts`).
   `src/workbench/__tests__/machine-lines.test.tsx` runs the real Tailwind over
   the real tree, and has a case that goes red when the file spelling them is out
   of reach.
@@ -1843,17 +1765,8 @@ phone's width, and the conversation is what the reader came for.
 
 What it holds, in this order:
 
-- **The cards this chat has touched** — all of them, one per line, id and title,
-  clicking through to the Board tab. This is where they live now (§8.2.1). A
-  card touched only by an agent the chat sent off is still this chat's card,
-  which is the fault §8.2.7 fixes on the way past. First in the rail because it
-  is the part of it with a CEILING: wrapped chips are a few lines however long
-  the session runs. The agents used to sit here on the grounds that they are the
-  part that moves — but they are also the part that grows without limit, and by
-  the fiftieth of them the cards had been pushed off the bottom of the rail
-  (bw-pl2v.1 — this order is the built one, and a test pins it).
 - **The agents it sent off** — §8.2.7. The tallest thing in the rail and the
-  reason the rail exists, so it takes the rest of the column below the cards.
+  reason the rail exists, so it takes the rest of the column.
   What still runs is what the reader opened the rail for, so those rows come
   first inside the section and the ones that are over stay behind a control
   (§8.2.7).
@@ -2164,7 +2077,7 @@ doing nothing, and who holds it.
 
 Why: four screens answered this four ways and none of them answered all of it.
 The open chat's line drew one word; a row in the list drew a pill that was
-either "ready" or "working"; a board card drew a pulsing dot and an activity; the
+either "ready" or "working"; a card on the old board drew a pulsing dot and an activity; the
 glance strip, while it was in the bar, drew a dot, a word and a count of its own.
 The loudest of them, the
 green **working** pill, was derived from the marker directory alone — occupancy,
@@ -2177,14 +2090,13 @@ of chat is intuitive. currently its awful."
 from what the driver last published and what the sidecar says about the holder,
 to the three facts. Every screen draws that and nothing else, so they cannot
 disagree; it is a function rather than a component because the sidebar row, the
-chat's own line and the board card all need the answer and none of them are in
+chat's own line and the tray all need the answer and none of them are in
 the same tree.
 
 **The strip is gone; the tray is not.** The bar carried both — what runs beside
 what waits — until 055a5c8 took the running half out and left the waiting half,
 so what follows the owner across every screen is now the tray alone. Nothing
-under it changed: `isRunning` still answers the same question for the board dot
-and the chat's own line, and the strip itself is one component in the history if
+under it changed: `isRunning` still answers the same question for the chat's own line, and the strip itself is one component in the history if
 it is ever wanted back. An e2e case went on asking for it for a week and failed
 on an element deliberately deleted (bw-t26l.20).
 
@@ -2375,21 +2287,10 @@ conversation (bw-dmxj.12, bw-96is.22). A drop clears both halves of what the
 stream said; the map of what each holder is doing carried a comment claiming it
 already did, and did not.
 
-### 8.3 The board tab
+### 8.3 The Tasks tab
 
-Unchanged, plus one thing: decision 11 — a card being worked on shows its live
-chat. `src/components/bead-card.tsx` gains a single `<CardLiveChat
-beadId={bead.id}/>`, which renders nothing at all unless a running session is
-linked to that card, and otherwise shows the same mark every other screen draws
-(§8.2.9) — spinner, verb and seconds while it works, one word where it stands
-otherwise — clicking through to the chat. The pulsing dot it used to draw said
-"attached" and was read as "working", and it kept pulsing over a chat sitting
-idle for as long as the tab stayed open.
-
-The card detail panel gains a **Chats** list from `GET /links/bead/:id`, and a
-**Start chat** button (decision 16b) which opens a new session pre-briefed with
-the card's title, description and acceptance criteria, and records the link at
-birth with `--source workbench-brief`.
+Every project's tasks, grouped by the chat that holds them, with a detail
+panel per task. What a task is and how it moves is [tasks](tasks.md).
 
 ### 8.4 The six additions
 
@@ -2398,14 +2299,15 @@ or `ended` state, mounted in `src/app/layout.tsx` so it is visible on every
 page, with a count badge. Fed by the single global SSE stream. Clicking a row
 lands on that chat with the ask focused.
 
-**(b) Start a chat from a card.** §8.3.
+**(b) Start a chat for a task.** The Tasks tab's **New task** opens a chat
+that is asked to make one (§8.3).
 
 **(c) Glance strip.** A collapsible one-line-per-running-session strip under the
 header: brand, project, title, current activity, elapsed. Same global stream,
 same store.
 
 **(d) Phone, home network only.** axum already binds `0.0.0.0:3008`, so the
-board is reachable today; the sidecar stays on loopback and is reached only
+app is reachable today; the sidecar stays on loopback and is reached only
 through the proxy, so the workbench adds no new exposed port. On top of that,
 the workbench routes carry a middleware that refuses a peer address outside
 loopback and the RFC1918 private ranges — "home network only" implemented as
@@ -2417,8 +2319,8 @@ results grouped by session with the matched sentence highlighted and its
 project and date; clicking jumps to the chat scrolled to that message.
 Reachable from the header.
 
-Opened from inside a project, it starts in that project, the way the board and
-the files searches always did (bw-c1ti). The box opens already reading
+Opened from inside a project, it starts in that project, the way the files
+search always did (bw-c1ti). The box opens already reading
 `project:<name>`, which the Project menu reads back and which can be deleted to
 search every project again — the scope is a word in the query, never a hidden
 setting. The AI ask has no box to read, so it is held to the project on the
@@ -2446,8 +2348,8 @@ only when the widget exists.
 The repo has no global store. It has one idiom for cross-component state:
 `useSyncExternalStore` over a module-level listener set (`src/hooks/use-theme.ts`).
 The workbench follows it — a single module-level store owns the one global
-`EventSource` and the per-session state that the tray, the strip and the board
-cards all read. One connection for the whole app, not one per component.
+`EventSource` and the per-session state that the tray, the strip and the
+chat list all read. One connection for the whole app, not one per component.
 
 **A frame the page cannot read is a fact about the sidecar, not a crash.** The
 sidecar is one long-lived process started once by the host, and nothing restarts
@@ -2561,16 +2463,13 @@ No price, ever: tokens are never converted into money anywhere in this app
 | `server/src/routes/mod.rs` | `pub mod workbench;` — 1 line |
 | `server/src/main.rs` | one `.nest("/api/workbench", …)` + one `spawn_sidecar()` — 2 lines |
 | `server/Cargo.toml` | reqwest's `stream` feature — one word, and SSE cannot pass through the proxy without it |
-| `src/app/project/page.tsx` | 19-line file becomes a Tabs shell around the unchanged `<KanbanBoard/>` |
+| `src/app/project/page.tsx` | becomes a Tabs shell |
 | `src/app/layout.tsx` | one `<WorkbenchGlobals/>` — tray + strip |
-| `src/components/bead-card.tsx` | one `<CardLiveChat beadId=…/>` |
-| `src/app/project/kanban-board.tsx` | one `<CardChats …/>`; a card's chats belong in its detail panel, whose extra sections are passed in from here |
 | `package.json` | added dependency and script lines only; no existing line modified |
 | `tsconfig.json` | `workbench` added to `exclude` — the sidecar carries its own |
-| `playwright.config.ts` | `baseURL` reads `BEADS_E2E_URL`, so a worktree drives its own instance instead of the one serving the owner's board |
+| `playwright.config.ts` | `baseURL` reads `BEADS_E2E_URL`, so a worktree drives its own instance instead of the owner's |
 
-Ten files, seven of them a single line or word. `server/src/db.rs`,
-`bead-detail.tsx`, `src/lib/api.ts` and everything under `reporting/` are not
+`server/src/db.rs`, `src/lib/api.ts` and everything under `reporting/` are not
 touched at all. If the build needs to exceed this list, that is a design
 change and it gets said out loud, not absorbed.
 
@@ -2596,9 +2495,6 @@ search, spend, plan usage, the token picture, report viewer), `tests/e2e/workben
   the live stream and are never written into a chat's record, so no record
   fixture can produce one; proving them on a real screen needs a stand-in
   program speaking the stream protocol, which this repo does not have.
-- `bead_link` and `report_link` duplicate what the board holds. They are a
-  read cache for speed; the board is the record, and a rebuild from
-  `bd provenance` must always be possible.
 - Search is `LIKE`, not FTS5. It will need revisiting if the corpus grows
   past tens of thousands of messages.
 - The Claude terminal-session project guess reads the directory name as
@@ -2779,9 +2675,9 @@ always a screen, per the owner's standing rule on this job.
 
 2. **The rest of the transcript vocabulary: tool feed, diffs, images, todo list, subagents, cost.** | One screenshot of a finished turn shows all six at once — a row per tool call with name and summary, an expanded Edit row with before and after side by side and the changed lines marked, a pasted PNG rendered as a picture in the user's own bubble, the todo checklist with at least one item ticked and one running, an indented subagent block under its parent row, and a dollar cost chip in the turn footer.
 
-3. **The machine-recorded chat↔card link, both directions, plus reports inline and in a modal.** | Three screenshots: (a) the chat header grows a card chip nobody typed, right after the agent runs a `bd` command; (b) that card opened on the Board tab lists this chat under "Chats", and clicking it lands back on the chat; (c) a report rendered as an inline preview card in the transcript, and after a click the same report filling a modal over the app.
+3. **Reports inline and in a modal.** | A screenshot of a report rendered as an inline preview card in the transcript, and after a click the same report filling a modal over the app.
 
-4. **Session registry, the restore list, and resume — including a session started in a terminal.** | After killing and restarting the server, a screenshot of the chat sidebar shows sessions grouped with a "Yesterday" heading, each row carrying the conversation's own name, its card chips and the folder it ran in, and a terminal-started Claude session among them; clicking Resume on that row flips its pill to ready and a new prompt's answer streams into it.
+4. **Session registry, the restore list, and resume — including a session started in a terminal.** | After killing and restarting the server, a screenshot of the chat sidebar shows sessions grouped with a "Yesterday" heading, each row carrying the conversation's own name and the folder it ran in, and a terminal-started Claude session among them; clicking Resume on that row flips its pill to ready and a new prompt's answer streams into it.
 
 5. **The Codex driver behind the same protocol, with the capability matrix hiding what it lacks.** | Two screenshots at the same size, a Claude chat and a Codex chat: both stream text and show tool rows; the Codex one shows a token-count chip and has no plan-approve control and no subagent panel; the Claude one shows a dollar chip and has both. (Blocked until `codex` is installed — see §11.3.)
 
@@ -2791,6 +2687,6 @@ always a screen, per the owner's standing rule on this job.
 
 8. **Search across all conversations, and spend per project per day.** | A screenshot of the search panel with a query typed shows matches from at least two different chats, each with the matched sentence highlighted and its project and date; a second screenshot of the spend view shows a bar per day grouped by project, with the dollars chart and the tokens chart drawn as two separate charts and no total combining them.
 
-9. **Start-a-chat-from-a-card, the live chat on the board card, and the phone layout.** | A screenshot after clicking a card's "Start chat" shows a new chat whose first message already quotes the card's title and body and whose header already carries the card chip; a screenshot of the Board tab shows that card with a pulsing dot and a live activity line; a 390×844 screenshot of the same chat is readable with no horizontal scrolling and the composer in reach.
+9. **The phone layout.** | A 390×844 screenshot of a chat is readable with no horizontal scrolling and the composer in reach.
 
-10. **The acceptance run.** | `npx playwright test tests/e2e/workbench.spec.ts` reports 0 failures, and the screenshots the run saves under `tests/results/` show, one per assertion: an answer streaming in, a picture inline, a report open large, and the hop from a card landing on its chat.
+10. **The acceptance run.** | `npx playwright test tests/e2e/workbench.spec.ts` reports 0 failures, and the screenshots the run saves under `tests/results/` show, one per assertion: an answer streaming in, a picture inline and a report open large.

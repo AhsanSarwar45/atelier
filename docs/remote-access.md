@@ -1,6 +1,6 @@
-# Reaching the board from outside your network
+# Reaching Atelier from outside your network
 
-The board answers everyone on your own network already, and
+Atelier answers everyone on your own network already, and
 [the README says how to open it on a phone](../README.md#open-it-on-your-phone).
 This is the other question: reaching it from a café, from a train, from
 anywhere that is not your house.
@@ -21,7 +21,7 @@ What a caller who reaches it can do, with no credential of any kind:
 - Start and prompt Claude or Codex under your own signed-in accounts, and read
   every chat you have ever had — `/api/workbench/*`.
 - Commit, push and pull with your own git credentials — `/api/git/*`.
-- Repoint the path this program uses for `git`, `bd`, `claude` or `codex` at
+- Repoint the path this program uses for `git`, `claude` or `codex` at
   any binary on the machine — `/api/environment/:tool`. That one is arbitrary
   code execution wearing a settings screen.
 
@@ -41,7 +41,7 @@ What follows keeps the port off the internet entirely.
 
 [Tailscale](https://tailscale.com) builds a private network out of the devices
 you sign in — your computer, your phone, nothing else. Your phone reaches the
-board because it is on that network, not because the board is reachable.
+Atelier because it is on that network, not because Atelier is reachable.
 
 It also solves a second problem for free. A phone will not give a page
 notification powers over plain `http`: `navigator.serviceWorker` and
@@ -76,7 +76,7 @@ real consequence and the next section says what it means.
 Now open **Settings › Remote access** and turn **Reach it from anywhere** on.
 The section tells you which of installed, running, signed in and named is the
 one still missing, and names the single thing to do about each. With nothing
-missing, the switch puts the board on your tailnet and shows the `https`
+missing, the switch puts Atelier on your tailnet and shows the `https`
 address your phone opens.
 
 The switch stays on across restarts: the app serves when it starts and stops
@@ -122,7 +122,7 @@ being on your tailnet. Rename the machine first if its current name says
 something you would not put on a postcard.
 
 **The phone needs the Tailscale app running.** It is always-on and quiet, but
-it is a thing that can be off, and when it is off the board is not there.
+it is a thing that can be off, and when it is off Atelier is not there.
 
 **Certificates last 90 days.** `tailscale serve` renews its own. A certificate
 you fetched by hand with `tailscale cert` does not renew itself.
@@ -131,13 +131,13 @@ you fetched by hand with `tailscale cert` does not renew itself.
 computer directly over your own network whenever it can, so the traffic does
 not leave the house and the speed is the speed you have now. It falls back to
 relaying through a Tailscale server only when a network blocks the direct path
-— some guest and corporate Wi-Fi does. If the board feels slow on your own
+— some guest and corporate Wi-Fi does. If Atelier feels slow on your own
 network, `tailscale status` says `direct` or `relay` for each device, and that
 is the thing to look at.
 
 ## The alternative, and why it is second
 
-A Cloudflare Tunnel with Cloudflare Access in front of it reaches the board from
+A Cloudflare Tunnel with Cloudflare Access in front of it reaches Atelier from
 a device with nothing installed, which is the one thing Tailscale cannot do.
 The costs are real, though: every request travels to a Cloudflare data centre
 and back even when the phone is in the same room, so it is slower on your own

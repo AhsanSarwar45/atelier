@@ -73,4 +73,4 @@ A "Chat names" section in project settings:
   extracted text, or a text field for text. Each chip has a remove button.
 - A live preview lists recent chats with their current and new names.
 - A preset button, "Ticket key from worktree", fills in the template
-  `[key from worktree] [: ] [Chat title]`, using the board's issue prefix.
+  `[key from worktree] [: ] [Chat title]`.

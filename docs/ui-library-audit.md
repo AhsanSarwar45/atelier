@@ -108,8 +108,7 @@ drawing but use library parts for any ordinary control inside them.
 `Row` gained `gap` (a row laid out as a line of pieces), `inset="xs"` and `look="quiet"` (a row heading a box of its own, which lifts its words instead of filling).
 
 - `agent-files-browser.tsx` file list and "Available to create" → `Row gap="lg"`, the open file `selected`
-- `bead-detail.tsx` related tasks → `Row gap="md"`
-- `folder-browser.tsx` folder options → `Row role="option"`, the chosen folder `selected`; the beads bar on its edge stays
+- `folder-browser.tsx` folder options → `Row role="option"`, the chosen folder `selected`; the bar on its edge stays
 - `tag-picker.tsx` tag list and "Create new tag" → `Row gap="md"`
 - `subtask-list.tsx` sub-tasks → `Row gap="md"`, top-aligned
 - `chat-tab.tsx` checklist header → `Row gap="md"`
@@ -165,7 +164,6 @@ drawing but use library parts for any ordinary control inside them.
 - `visual-artifact-view.tsx` mock-up chip → `Badge appearance="outline" size="lg" shape="circle"`, the mock-up's tone as the variant
 - `chat-widget-view.tsx` diagram edge → `Badge color` in the node's accent, `tint` when lit and `faint` when not
 - `dependency-badge.tsx` BLOCKED → `Badge variant="destructive" size="xs"`; BLOCKING → `Badge variant="warning" size="xs"`
-- `kanban-column.tsx` column count → `Badge`'s own `md` size; the state's colours stay
 - `path-chip.tsx` file chip → `Badge wrap`; `FILE_BADGE_CLASS` keeps only the margin and the type, and the other file chips (markdown-body, composer-editor, transcript-rows) take `wrap` too
 - `globals.tsx` tray count → `Badge size="xs"` with no padding of its own
 - `app/page.tsx` tag filter → `Badge color colorFill`, `solid` when chosen and `faint` when not

@@ -1,8 +1,8 @@
 # Tasks
 
-Tasks replace Beads. A task is a piece of work owned by the app, tied to the
-chat session that holds it, with a type that decides what the agent must
-promise when it creates the task and what it must prove when it finishes.
+A task is a piece of work owned by the app, tied to the chat session that
+holds it, with a type that decides what the agent must promise when it creates
+the task and what it must prove when it finishes.
 
 ## Principles
 
@@ -309,9 +309,8 @@ must have exactly one entry per plan id.
   status; the plan rendered per type; once done, the result per type
   (optimization as a before/after/target table, ui_change as image compares,
   plan as rendered markdown). The status chip is live.
-- **Checklist panel**: the current session's tasks with live statuses,
-  replacing the Beads epic checklist.
-- **Tasks tab** on the project screen, replacing Board: tasks grouped by
+- **Checklist panel**: the current session's tasks with live statuses.
+- **Tasks tab** on the project screen, on every project: tasks grouped by
   status, filters for session and unassigned, a detail panel with history,
   and owner actions: approve or reopen (review), approve or reject an amend,
   cancel, release (unassign), and turn a follow-up into a task (this puts

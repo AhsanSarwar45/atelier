@@ -381,7 +381,7 @@ redirections, cwd, environment, and boundaries—not the original provider call.
 
 Rules should prefer strong evidence in this order:
 
-1. exact executable plus subcommand (`git push`, `cargo test`, `bd close`);
+1. exact executable plus subcommand (`git push`, `cargo test`, `gh pr create`);
 2. project script metadata (`npm run test`, package script names);
 3. conventional executable families (`pytest`, `ruff`, `tsc`);
 4. shell structure (file redirection, executable script body);

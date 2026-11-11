@@ -6,11 +6,10 @@ show it, and never refuses anything.
 
 ## Retired hooks
 
-Earlier versions wired the Beads board's gates into every project —
+Earlier versions wired workflow gates into every project —
 `workflow-gate`, `board-actor`, `board-status-gate`, `board-merge-gate`,
 `landing-gate`, `board-gate`, `board-touch`, `board-prime`, `board-push`,
-`wait-gate` and `completion-gate` — plus a git landing guard. The board is gone,
-and so are they.
+`wait-gate` and `completion-gate` — plus a git landing guard. They are gone.
 
 - `atelier hook <any other name>` still runs: it reads its input and exits 0
   with no output, so a provider that still has an old entry carries on as if

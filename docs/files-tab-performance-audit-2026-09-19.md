@@ -151,7 +151,7 @@ re-serialises it, re-transfers it, re-parses the JSON and rebuilds the editor.
 That is why "re-open" in the table above is never cheaper than "open". Zed and
 VS Code are instant here because the buffer is still in memory.
 
-`no-store` is the right instinct for a board whose address cannot express its
+`no-store` is the right instinct for a list whose address cannot express its
 version. A file is not that: it has an mtime and the read already computes a
 `sha256`. Fix in two halves — an LRU of recently read file text in the client,
 keyed by path and validated by sha; and `ETag` + `no-cache` (not `no-store`)

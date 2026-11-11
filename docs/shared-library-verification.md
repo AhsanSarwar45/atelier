@@ -52,7 +52,6 @@ The installed `atelier` on the host predates the skills CLI. One Codex turn trie
 that old CLI, received `skills is not an Atelier workflow tool`, then successfully
 used the current build's MCP tool. The current binary's CLI/MCP reader is covered
 by the regression suite; no owner's installation was changed for this test.
-The non-Beads fixture projects return 404 from board discovery, as expected.
 Initial WebSocket-close warnings were observed during navigation; completed
 turns, refreshed revisions and persisted results were checked separately.
 
