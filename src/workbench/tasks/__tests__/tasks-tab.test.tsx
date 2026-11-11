@@ -134,6 +134,46 @@ describe('the Tasks tab', () => {
     expect(within(detail).getByRole('button', { name: 'Reopen' })).toBeVisible();
   });
 
+  it('shows the chosen task after an owner action on another one', async () => {
+    act.mockResolvedValue({ task: { ...tasks[5], status: 'done', updatedAt: 99 }, widget: null });
+    render(<TasksTab projectId="p1" />);
+    fireEvent.click(await screen.findByText('Look at this'));
+    let detail = await screen.findByTestId('task-detail');
+    fireEvent.click(within(detail).getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(within(detail).getByTestId('task-card')).toHaveAttribute('data-task-status', 'done'));
+    fireEvent.click(screen.getByText('Current work'));
+    detail = await screen.findByTestId('task-detail');
+    expect(within(detail).getByText('Task #2')).toBeVisible();
+    expect(within(detail).getByTestId('task-card')).toHaveAttribute('data-task-status', 'in_progress');
+    expect(within(detail).getByRole('heading', { name: 'Current work' })).toBeVisible();
+  });
+
+  it('starts a cancel form afresh when another task is chosen', async () => {
+    render(<TasksTab projectId="p1" />);
+    fireEvent.click(await screen.findByText('Current work'));
+    let detail = await screen.findByTestId('task-detail');
+    fireEvent.click(within(detail).getByRole('button', { name: 'Cancel task' }));
+    expect(within(detail).getByRole('textbox', { name: 'Reason' })).toBeVisible();
+    fireEvent.click(screen.getByText('Loose work'));
+    detail = await screen.findByTestId('task-detail');
+    expect(within(detail).queryByRole('textbox', { name: 'Reason' })).toBeNull();
+  });
+
+  it('marks a row whose plan change waits for the owner, and one finished with shortfalls', async () => {
+    list.mockResolvedValue([
+      makeTask({ number: 1, title: 'Amended', status: 'in_progress', pendingAmend: { outcome: 'x', criteria: [] } }),
+      makeTask({ number: 2, title: 'Short', status: 'done', shortfalls: true }),
+    ]);
+    render(<TasksTab projectId="p1" />);
+    const amended = (await screen.findByText('Amended')).closest('[data-testid="task-row"]') as HTMLElement;
+    expect(within(amended).getByTestId('task-row-amend')).toHaveTextContent('Plan change');
+    expect(within(amended).queryByTestId('task-row-shortfalls')).toBeNull();
+    const group = screen.getAllByTestId('task-group').find((g) => g.getAttribute('data-status') === 'done')!;
+    fireEvent.click(within(group).getByRole('button', { name: /Done/ }));
+    const short = within(group).getByText('Short').closest('[data-testid="task-row"]') as HTMLElement;
+    expect(within(short).getByRole('img', { name: 'Finished with shortfalls' })).toBeInTheDocument();
+  });
+
   it('reads the list again when the feed says the tasks changed', async () => {
     render(<TasksTab projectId="p1" />);
     await screen.findByText('Current work');

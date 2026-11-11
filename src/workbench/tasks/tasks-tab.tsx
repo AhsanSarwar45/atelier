@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { ListTodo, X } from 'lucide-react';
+import { AlertTriangle, ListTodo, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -232,6 +232,12 @@ export default function TasksTab({ projectId, onOpenChat }: {
                             <Badge variant="secondary" size="sm" className="shrink-0"><span>{typeLabel(task.type)}</span></Badge>
                             <span className={cn('min-w-0 flex-1 truncate text-sm', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</span>
                             <span className="hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground sm:inline">{sessionName(task, sessions)}</span>
+                            {task.pendingAmend && (
+                              <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-amend" className="shrink-0"><span>Plan change</span></Badge>
+                            )}
+                            {task.shortfalls && (
+                              <AlertTriangle role="img" aria-label="Finished with shortfalls" data-testid="task-row-shortfalls" className="size-3.5 shrink-0 text-[var(--color-warning-accent)]" />
+                            )}
                             <TaskStatusChip status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} className="shrink-0" />
                           </Row>
                         ))}
@@ -246,7 +252,7 @@ export default function TasksTab({ projectId, onOpenChat }: {
 
         {chosen && (
           <aside className="flex min-h-0 w-full flex-col border-l border-border/60 md:w-[min(44rem,55%)]">
-            <TaskDetail task={chosen} onClose={() => setSelected(null)} onOpenChat={onOpenChat} />
+            <TaskDetail key={chosen.number} task={chosen} onClose={() => setSelected(null)} onOpenChat={onOpenChat} />
           </aside>
         )}
       </div>

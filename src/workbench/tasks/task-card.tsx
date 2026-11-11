@@ -673,7 +673,10 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
 }) {
   const live = useLiveTask(snapshot);
   const [acted, setActed] = useState<Task | null>(null);
-  const task = acted && acted.updatedAt >= live.updatedAt ? acted : live;
+  // What an owner button answered, until the feed catches up. Only for this
+  // task: the detail panel reuses the card when another task is chosen.
+  const mine = acted && acted.projectId === live.projectId && acted.number === live.number ? acted : null;
+  const task = mine && mine.updatedAt >= live.updatedAt ? mine : live;
   const sessions = useLiveSessions();
   const session = task.sessionId ? sessions.find((s) => s.id === task.sessionId) : undefined;
   const status = shownStatus(task, session?.state);
