@@ -6,7 +6,7 @@
 //! same gates under its own Goose home, and installed a Git
 //! `reference-transaction` guard. Beads is gone, so all of that is taken out
 //! again — and only that: an entry is removed only when it runs one of the
-//! names Atelier itself wrote, so the project's own hooks, and every other key
+//! names Atelier itself wrote, or Beads' own `bd` program, so the project's own hooks, and every other key
 //! in those files, are left exactly as they were.
 //!
 //! `doing` is the exception. It is not a board gate: it tells the screen a
@@ -34,9 +34,12 @@ const RETIRED: &[&str] = &[
     "agent-fence.py", "slice-gate.py", "helper-proof.py", "habit-reading.py",
 ];
 
-/// The one line Beads itself added to Codex beside Atelier's gates, which
-/// Atelier always took out with them.
-const BD_CODEX_HOOK: &str = "bd codex-hook UserPromptSubmit";
+/// Beads wrote hooks of its own (`bd prime`, `bd codex-hook …`). With Beads
+/// gone they go too: any hook whose program is `bd`.
+fn runs_bd(command: &Value) -> bool {
+    command.as_str().and_then(|command| command.split_whitespace().next())
+        .is_some_and(|program| Path::new(program).file_name().is_some_and(|file| file == "bd"))
+}
 
 /// The first lines of the Git guard Atelier installed.
 const GUARD_MARK: &str = "# Atelier landing guard";
@@ -108,7 +111,7 @@ fn runs(command: &Value, name: &str) -> bool {
 
 fn retired(hook: &Value) -> bool {
     RETIRED.iter().any(|name| runs(&hook["command"], name))
-        || hook["command"].as_str() == Some(BD_CODEX_HOOK)
+        || runs_bd(&hook["command"])
 }
 
 fn strip_value(value: &mut Value) {
@@ -235,7 +238,9 @@ mod tests {
                 "Stop": [{"hooks": [{"type": "command", "command": "atelier hook board-gate"}]}],
                 "PreCompact": [{"hooks": [{"type": "command", "command": "atelier hook doing"}]}],
                 "Notification": [{"hooks": [{"type": "command", "command": "atelier hook doing"}]}],
-                "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "bd codex-hook UserPromptSubmit"}]}]
+                "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "bd codex-hook UserPromptSubmit"}]}],
+                "PostCompact": [{"matcher": "manual|auto", "hooks": [{"type": "command", "command": "bd codex-hook PostCompact"}]}],
+                "SessionEnd": [{"hooks": [{"type": "command", "command": "/usr/local/bin/bd prime"}, {"type": "command", "command": "bdx keep"}]}]
             }
         })
     }
@@ -246,7 +251,9 @@ mod tests {
         strip_value(&mut value);
         let mut left = commands(&value);
         left.sort();
-        assert_eq!(left, vec!["atelier hook doing", "atelier hook doing", "my-project-hook"]);
+        assert_eq!(left, vec!["atelier hook doing", "atelier hook doing", "bdx keep", "my-project-hook"]);
+        assert!(value["hooks"].get("PostCompact").is_none());
+        assert!(value["hooks"].get("UserPromptSubmit").is_none());
         assert_eq!(value["permissions"]["allow"][0], "Bash(npm test)");
         assert_eq!(value["autoCompactWindow"], 200000);
         assert!(value["hooks"].get("SessionStart").is_none());
