@@ -350,10 +350,21 @@ async fn checked(cache: &VersionCache, refresh: bool) -> VersionCheckResponse {
 async fn run_update(check: VersionCheckResponse, watch: UpdateWatch, how: InstallMethod) {
     crate::handover::hold_for_update(true);
     let outcome = match how {
-        InstallMethod::Homebrew => run_homebrew(&watch, check.asset_size).await,
+        InstallMethod::Homebrew => {
+            run_homebrew(
+                &watch,
+                check.asset_size,
+                check.latest.as_deref().unwrap_or(CURRENT_VERSION),
+            )
+            .await
+        }
         InstallMethod::Standalone => run_standalone(check, &watch).await.map(Some),
     };
 
+    finish_update(watch, outcome).await;
+}
+
+async fn finish_update(watch: UpdateWatch, outcome: Result<Option<PathBuf>, String>) {
     match outcome {
         // A service manager brings this program back however it stops, and
         // starts it through the link brew has just moved on to the new
@@ -541,11 +552,35 @@ async fn run_standalone(
 /// downloads into `<brew --cache formula>.incomplete` and renames it when it is
 /// done, so the size of that file against the size the release lists is a true
 /// byte count. Brew's own step headings move the screen on from there.
-async fn run_homebrew(watch: &UpdateWatch, size: Option<u64>) -> Result<Option<PathBuf>, String> {
-    let brew = install_method::brew().ok_or(
-        "This copy was installed with Homebrew, but brew cannot be found to upgrade it.",
-    )?;
+async fn run_homebrew(
+    watch: &UpdateWatch,
+    size: Option<u64>,
+    target: &str,
+) -> Result<Option<PathBuf>, String> {
+    let brew = install_method::brew()
+        .ok_or("This copy was installed with Homebrew, but brew cannot be found to upgrade it.")?;
 
+    let current_exe = crate::handover::program().ok_or("Cannot determine executable path")?;
+    let restart_as = install_method::linked(&current_exe).unwrap_or(current_exe);
+    run_homebrew_with(
+        &brew,
+        watch,
+        size,
+        target,
+        &restart_as,
+        crate::handover::can_come_back(),
+    )
+    .await
+}
+
+async fn run_homebrew_with(
+    brew: &Path,
+    watch: &UpdateWatch,
+    size: Option<u64>,
+    target: &str,
+    restart_as: &Path,
+    managed: bool,
+) -> Result<Option<PathBuf>, String> {
     // `brew upgrade` can only see a release the tap has been told about.
     watch
         .phase(
@@ -578,28 +613,70 @@ async fn run_homebrew(watch: &UpdateWatch, size: Option<u64>) -> Result<Option<P
     }
     upgraded?;
 
-    if crate::handover::can_come_back() {
+    // An exit code of zero also means "already installed" when the tap has
+    // not published the advertised release. Prove what the restart would run
+    // before either the service manager or a restart script is allowed to act.
+    verify_homebrew_version(restart_as, target).await?;
+
+    if managed {
         return Ok(None);
     }
 
-    // Brew's cleanup has deleted the file this process runs from, and Linux
-    // then names it `<path> (deleted)`. Taken as a path, that restarted a
-    // program called `atelier (deleted)`, which does not exist (bw-45wvy).
-    let current_exe = crate::handover::program().ok_or("Cannot determine executable path")?;
     let port = std::env::var("PORT").unwrap_or_else(|_| "3008".to_string());
-
-    // Started again through the link on the path, not through the resolved
-    // Cellar path this process was launched from: that one still names the
-    // version brew has just replaced.
-    let restart_as = install_method::linked(&current_exe).unwrap_or(current_exe);
 
     // Written to the temporary folder, not beside the program: brew's cleanup
     // has just deleted the folder this program was started from, and every
     // Homebrew update ended "Failed to write restart script" after it had
     // succeeded (bw-45wvy).
-    generate_unix_restart_script(&std::env::temp_dir(), &restart_as, std::process::id(), &port)
-        .map(Some)
-        .map_err(|e| format!("Failed to create restart script: {}", e))
+    generate_unix_restart_script(
+        &std::env::temp_dir(),
+        &restart_as,
+        std::process::id(),
+        &port,
+    )
+    .map(Some)
+    .map_err(|e| format!("Failed to create restart script: {}", e))
+}
+
+/// Check the linked program rather than Homebrew metadata: this is the file
+/// the restart launches. A newer install is valid too, if another update won
+/// the race while the advertised release was cached.
+async fn verify_homebrew_version(program: &Path, target: &str) -> Result<(), String> {
+    let mut command = tokio::process::Command::new(program);
+    command.arg("--version").kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(10), command.output())
+        .await
+        .map_err(|_| {
+            "Couldn't verify the installed version. The version check timed out.".to_string()
+        })?
+        .map_err(|e| format!("Couldn't verify the installed version: {e}"))?;
+    if !output.status.success() {
+        return Err("Couldn't verify the installed version. The version check failed.".into());
+    }
+    let said = String::from_utf8_lossy(&output.stdout);
+    let installed = said
+        .trim()
+        .strip_prefix(crate::identity::DISPLAY)
+        .and_then(|rest| rest.strip_prefix(' '));
+    let valid = |version: &str| {
+        !version.is_empty()
+            && version.split('.').all(|part| {
+                !part.is_empty()
+                    && part.bytes().all(|byte| byte.is_ascii_digit())
+                    && part.parse::<u32>().is_ok()
+            })
+    };
+    let installed = installed.filter(|version| valid(version)).ok_or_else(|| {
+        "Couldn't verify the installed version. The version check returned an invalid response."
+            .to_string()
+    })?;
+    if !valid(target) {
+        return Err("Couldn't verify the update. The release version is invalid.".into());
+    }
+    if is_newer(target, installed) {
+        return Err(format!("Couldn't update to {target}. Homebrew still has {installed} installed. Try again after the Homebrew release is available."));
+    }
+    Ok(())
 }
 
 /// Where brew writes the formula's archive while it is still arriving.
@@ -1482,6 +1559,74 @@ mod tests {
             !windows.to_ascii_lowercase().contains("node"),
             "the Windows updater must not mention Node, got:\n{windows}"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn homebrew_noop_must_not_restart_an_older_version() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let brew = dir.path().join("brew");
+        let program = dir.path().join("atelier");
+        std::os::unix::fs::symlink("/bin/true", &brew).unwrap();
+        std::fs::write(&program, "#!/bin/sh\necho 'Atelier 0.25.1'\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for managed in [true, false] {
+            let watch = crate::routes::update_run::new_watch();
+            assert!(watch.claim(Some("0.25.2".into())).await);
+            let result = run_homebrew_with(&brew, &watch, None, "0.25.2", &program, managed).await;
+            assert!(
+                result.is_err(),
+                "An unchanged install must not restart: {result:?}"
+            );
+            assert!(result.as_ref().unwrap_err().contains("0.25.1"));
+            finish_update(watch.clone(), result).await;
+            let state = watch.now().await;
+            assert_eq!(state.phase, Phase::Failed);
+            assert_eq!(state.note, None, "A failure must clear stale progress text");
+            assert!(!state.busy());
+            println!(
+                "UPDATE_REGRESSION_STATE={}",
+                serde_json::to_string(&state).unwrap()
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn homebrew_verifies_the_executable_before_restart() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let brew = dir.path().join("brew");
+        let program = dir.path().join("atelier");
+        std::os::unix::fs::symlink("/bin/true", &brew).unwrap();
+        for (response, succeeds) in [
+            ("echo 'Atelier 0.25.2'", true),
+            ("echo 'Atelier 0.26.0'", true),
+            ("echo 'Atelier 0.25.1'", false),
+            ("echo 'Atelier broken'", false),
+            ("echo 'Atelier 0.25.2'; exit 1", false),
+            ("echo 'SomeOtherApp 0.25.2'", false),
+        ] {
+            std::fs::write(
+                &program,
+                format!("#!/bin/sh\n[ \"$1\" = --version ] || exit 2\n{response}\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let result = run_homebrew_with(
+                &brew,
+                &crate::routes::update_run::new_watch(),
+                None,
+                "0.25.2",
+                &program,
+                true,
+            )
+            .await;
+            assert_eq!(result.is_ok(), succeeds, "{response}: {result:?}");
+        }
+        std::fs::remove_file(&program).unwrap();
+        assert!(verify_homebrew_version(&program, "0.25.2").await.is_err());
     }
 
     /// A failed upgrade is reported by brew's own `Error:` line, not by the

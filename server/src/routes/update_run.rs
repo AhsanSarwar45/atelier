@@ -171,6 +171,7 @@ impl UpdateWatcher {
     pub async fn failed(&self, why: impl Into<String>) {
         let mut now = self.now.write().await;
         now.phase = Phase::Failed;
+        now.note = None;
         now.failed = Some(why.into());
         let _ = self.changes.send(now.clone());
     }
