@@ -99,3 +99,11 @@ state, but do not imitate a production screen merely as decoration.
 ```json
 {"version":1,"kind":"mockup","title":"Invite flow","initialScreen":"form","viewport":{"width":1200,"height":760},"screens":[{"id":"form","title":"Invite teammate","components":[{"id":"panel","type":"card","text":"Invite teammate","tone":"neutral","children":[{"id":"intro","type":"text","text":"They will receive access to this project."},{"id":"email","type":"input","label":"Email","placeholder":"teammate@example.com"},{"id":"send","type":"button","text":"Send invite","tone":"primary","action":{"type":"navigate","screen":"sent"}}]}]},{"id":"sent","title":"Invitation sent","components":[{"id":"success","type":"card","tone":"success","children":[{"id":"title","type":"heading","text":"Invitation sent"},{"id":"detail","type":"text","text":"The teammate can now join the project."},{"id":"again","type":"button","text":"Invite another","tone":"neutral","action":{"type":"navigate","screen":"form"}}]}]}]}
 ```
+
+## Computed rendering
+
+Use `kind: "render"` for synchronized numerical comparisons, parameter controls,
+color/depth/motion/history buffers, and a shared pixel inspector. Read
+[the rendering model contract](rendering-models.md) and its complete TAA and
+image-filter examples before authoring one. `scene` remains the choice for
+narrated geometric illustrations that do not require computed pixel values.

@@ -1,0 +1,243 @@
+{
+  "version": 1,
+  "kind": "render",
+  "title": "Unsharp masking boosts edges and can overshoot",
+  "description": "Computed three-tap horizontal and vertical filters, followed by source + amount \u00d7 (source \u2212 blur). Raw values can exceed the display range; inspect an edge to see overshoot.",
+  "width": 32,
+  "height": 20,
+  "frames": 1,
+  "fps": 1,
+  "parameters": [
+    {
+      "id": "radius",
+      "label": "Sample offset (pixels)",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "value": 1
+    },
+    {
+      "id": "amount",
+      "label": "Sharpening amount",
+      "min": 0,
+      "max": 3,
+      "step": 0.1,
+      "value": 1
+    }
+  ],
+  "buffers": [
+    {
+      "id": "source",
+      "label": "Source",
+      "channels": [
+        "Luma"
+      ],
+      "values": [
+        [
+          "if",
+          [
+            "and",
+            [
+              "gt",
+              "x",
+              10
+            ],
+            [
+              "lt",
+              "x",
+              21
+            ]
+          ],
+          0.8,
+          0.1
+        ]
+      ]
+    },
+    {
+      "id": "horizontal",
+      "label": "Horizontal blur",
+      "channels": [
+        "Luma"
+      ],
+      "values": [
+        [
+          "div",
+          [
+            "add",
+            [
+              "add",
+              [
+                "sample",
+                "source",
+                0,
+                [
+                  "sub",
+                  "x",
+                  "radius"
+                ],
+                "y",
+                "current"
+              ],
+              [
+                "sample",
+                "source",
+                0,
+                "x",
+                "y",
+                "current"
+              ]
+            ],
+            [
+              "sample",
+              "source",
+              0,
+              [
+                "add",
+                "x",
+                "radius"
+              ],
+              "y",
+              "current"
+            ]
+          ],
+          3
+        ]
+      ]
+    },
+    {
+      "id": "blur",
+      "label": "Separable blur",
+      "channels": [
+        "Luma"
+      ],
+      "values": [
+        [
+          "div",
+          [
+            "add",
+            [
+              "add",
+              [
+                "sample",
+                "horizontal",
+                0,
+                "x",
+                [
+                  "sub",
+                  "y",
+                  "radius"
+                ],
+                "current"
+              ],
+              [
+                "sample",
+                "horizontal",
+                0,
+                "x",
+                "y",
+                "current"
+              ]
+            ],
+            [
+              "sample",
+              "horizontal",
+              0,
+              "x",
+              [
+                "add",
+                "y",
+                "radius"
+              ],
+              "current"
+            ]
+          ],
+          3
+        ]
+      ]
+    },
+    {
+      "id": "sharpen",
+      "label": "Sharpened result",
+      "channels": [
+        "Luma"
+      ],
+      "values": [
+        [
+          "add",
+          [
+            "sample",
+            "source",
+            0,
+            "x",
+            "y",
+            "current"
+          ],
+          [
+            "mul",
+            "amount",
+            [
+              "sub",
+              [
+                "sample",
+                "source",
+                0,
+                "x",
+                "y",
+                "current"
+              ],
+              [
+                "sample",
+                "blur",
+                0,
+                "x",
+                "y",
+                "current"
+              ]
+            ]
+          ]
+        ]
+      ]
+    }
+  ],
+  "views": [
+    {
+      "id": "original",
+      "label": "Source",
+      "buffer": "source",
+      "display": "scalar",
+      "channels": [
+        0
+      ],
+      "range": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "blurred",
+      "label": "Blur",
+      "buffer": "blur",
+      "display": "scalar",
+      "channels": [
+        0
+      ],
+      "range": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": "sharp",
+      "label": "Sharpened",
+      "buffer": "sharpen",
+      "display": "scalar",
+      "channels": [
+        0
+      ],
+      "range": [
+        0,
+        1
+      ]
+    }
+  ]
+}

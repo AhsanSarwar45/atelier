@@ -256,6 +256,7 @@ fn mockup_components(
 /// draw, and the reader answered with "Stored artifact failed validation"
 /// after the agent had already said the diagram was there.
 pub fn artifact(value: &Value) -> Result<(), String> {
+    if value.get("kind").and_then(Value::as_str) == Some("render") { return super::render_model::validate(value); }
     let object = value.as_object().ok_or("an artifact is a JSON object")?;
     if object.get("version") != Some(&Value::from(1)) {
         return Err("version is required and is 1".into());
@@ -265,7 +266,7 @@ pub fn artifact(value: &Value) -> Result<(), String> {
     let kind = object
         .get("kind")
         .and_then(Value::as_str)
-        .ok_or("kind is required and is mermaid, flow, scene or mockup")?;
+        .ok_or("kind is required and is mermaid, flow, scene, mockup or render")?;
     let shared = ["version", "kind", "title", "description"];
     let with = |extra: &[&str]| -> Vec<String> {
         shared
@@ -281,7 +282,7 @@ pub fn artifact(value: &Value) -> Result<(), String> {
         "mockup" => with(&["initialScreen", "viewport", "screens"]),
         other => {
             return Err(format!(
-                "{other} is not an artifact kind: use mermaid, flow, scene or mockup"
+                "{other} is not an artifact kind: use mermaid, flow, scene, mockup or render"
             ))
         }
     };
@@ -635,7 +636,7 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
             if !asset_name(object.get("asset").unwrap_or(&Value::Null), true) {
                 return Err("asset must name a stored artifact, as <64 hex characters>.artifact.json".into());
             }
-            one_of(object, "kind", &["mermaid", "flow", "scene", "mockup"], true)?;
+            one_of(object, "kind", &["mermaid", "flow", "scene", "mockup", "render"], true)?;
         }
         "metrics" => {
             for item in list(object, "items", 1, 6)? {

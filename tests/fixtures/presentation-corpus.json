@@ -3012,6 +3012,17 @@
           }
         ]
       }
+    },
+    {
+      "name": "render artifact envelope",
+      "verdict": "accept",
+      "why": "reader recognizes computed rendering assets",
+      "payload": {
+        "type": "artifact",
+        "title": "Computed model",
+        "kind": "render",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.artifact.json"
+      }
     }
   ],
   "artifacts": [
@@ -8363,6 +8374,2994 @@
                 "along": "road",
                 "progress": 1
               }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "computed TAA model",
+      "verdict": "accept",
+      "why": "bounded numerical model with history",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "TAA history rejection removes stale foreground",
+        "description": "Computed linear-RGB temporal resolve, not a full TAA renderer: no subpixel jitter or neighborhood clipping. Inspect pixel (4, 8) at frame 1, then raise the depth threshold or change history weight.",
+        "width": 32,
+        "height": 20,
+        "frames": 12,
+        "fps": 4,
+        "parameters": [
+          {
+            "id": "weight",
+            "label": "History weight",
+            "min": 0,
+            "max": 0.98,
+            "step": 0.01,
+            "value": 0.85
+          },
+          {
+            "id": "threshold",
+            "label": "Depth threshold",
+            "min": 0,
+            "max": 1,
+            "step": 0.01,
+            "value": 0.05
+          },
+          {
+            "id": "speed",
+            "label": "Object speed (pixels/frame)",
+            "min": 0,
+            "max": 2,
+            "step": 1,
+            "value": 1
+          }
+        ],
+        "buffers": [
+          {
+            "id": "surface",
+            "label": "Foreground mask",
+            "channels": [
+              "Mask"
+            ],
+            "values": [
+              [
+                "and",
+                [
+                  "and",
+                  [
+                    "ge",
+                    "x",
+                    [
+                      "add",
+                      4,
+                      [
+                        "mul",
+                        "frame",
+                        "speed"
+                      ]
+                    ]
+                  ],
+                  [
+                    "lt",
+                    "x",
+                    [
+                      "add",
+                      10,
+                      [
+                        "mul",
+                        "frame",
+                        "speed"
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "and",
+                  [
+                    "ge",
+                    "y",
+                    4
+                  ],
+                  [
+                    "lt",
+                    "y",
+                    16
+                  ]
+                ]
+              ]
+            ]
+          },
+          {
+            "id": "color",
+            "label": "Current color",
+            "channels": [
+              "R",
+              "G",
+              "B"
+            ],
+            "values": [
+              [
+                "if",
+                [
+                  "sample",
+                  "surface",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                0.9,
+                [
+                  "add",
+                  0.04,
+                  [
+                    "mul",
+                    0.04,
+                    [
+                      "mod",
+                      [
+                        "add",
+                        [
+                          "floor",
+                          [
+                            "div",
+                            "x",
+                            4
+                          ]
+                        ],
+                        [
+                          "floor",
+                          [
+                            "div",
+                            "y",
+                            4
+                          ]
+                        ]
+                      ],
+                      2
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "if",
+                [
+                  "sample",
+                  "surface",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                0.22,
+                [
+                  "add",
+                  0.1,
+                  [
+                    "mul",
+                    0.04,
+                    [
+                      "mod",
+                      [
+                        "add",
+                        [
+                          "floor",
+                          [
+                            "div",
+                            "x",
+                            4
+                          ]
+                        ],
+                        [
+                          "floor",
+                          [
+                            "div",
+                            "y",
+                            4
+                          ]
+                        ]
+                      ],
+                      2
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "if",
+                [
+                  "sample",
+                  "surface",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                0.03,
+                [
+                  "add",
+                  0.2,
+                  [
+                    "mul",
+                    0.04,
+                    [
+                      "mod",
+                      [
+                        "add",
+                        [
+                          "floor",
+                          [
+                            "div",
+                            "x",
+                            4
+                          ]
+                        ],
+                        [
+                          "floor",
+                          [
+                            "div",
+                            "y",
+                            4
+                          ]
+                        ]
+                      ],
+                      2
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          },
+          {
+            "id": "depth",
+            "label": "Depth",
+            "channels": [
+              "Depth"
+            ],
+            "values": [
+              [
+                "if",
+                [
+                  "sample",
+                  "surface",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                0.2,
+                0.8
+              ]
+            ]
+          },
+          {
+            "id": "motion",
+            "label": "Motion vectors",
+            "channels": [
+              "X",
+              "Y"
+            ],
+            "values": [
+              [
+                "if",
+                [
+                  "sample",
+                  "surface",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                "speed",
+                0
+              ],
+              0
+            ]
+          },
+          {
+            "id": "history",
+            "label": "Reprojected history",
+            "channels": [
+              "R",
+              "G",
+              "B"
+            ],
+            "values": [
+              [
+                "if",
+                [
+                  "eq",
+                  "frame",
+                  0
+                ],
+                [
+                  "sample",
+                  "color",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "sample",
+                  "resolved",
+                  0,
+                  [
+                    "sub",
+                    "x",
+                    [
+                      "sample",
+                      "motion",
+                      0,
+                      "x",
+                      "y",
+                      "current"
+                    ]
+                  ],
+                  [
+                    "sub",
+                    "y",
+                    [
+                      "sample",
+                      "motion",
+                      1,
+                      "x",
+                      "y",
+                      "current"
+                    ]
+                  ],
+                  "previous"
+                ]
+              ],
+              [
+                "if",
+                [
+                  "eq",
+                  "frame",
+                  0
+                ],
+                [
+                  "sample",
+                  "color",
+                  1,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "sample",
+                  "resolved",
+                  1,
+                  [
+                    "sub",
+                    "x",
+                    [
+                      "sample",
+                      "motion",
+                      0,
+                      "x",
+                      "y",
+                      "current"
+                    ]
+                  ],
+                  [
+                    "sub",
+                    "y",
+                    [
+                      "sample",
+                      "motion",
+                      1,
+                      "x",
+                      "y",
+                      "current"
+                    ]
+                  ],
+                  "previous"
+                ]
+              ],
+              [
+                "if",
+                [
+                  "eq",
+                  "frame",
+                  0
+                ],
+                [
+                  "sample",
+                  "color",
+                  2,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "sample",
+                  "resolved",
+                  2,
+                  [
+                    "sub",
+                    "x",
+                    [
+                      "sample",
+                      "motion",
+                      0,
+                      "x",
+                      "y",
+                      "current"
+                    ]
+                  ],
+                  [
+                    "sub",
+                    "y",
+                    [
+                      "sample",
+                      "motion",
+                      1,
+                      "x",
+                      "y",
+                      "current"
+                    ]
+                  ],
+                  "previous"
+                ]
+              ]
+            ]
+          },
+          {
+            "id": "valid",
+            "label": "Valid history",
+            "channels": [
+              "Valid"
+            ],
+            "values": [
+              [
+                "and",
+                [
+                  "gt",
+                  "frame",
+                  0
+                ],
+                [
+                  "and",
+                  [
+                    "and",
+                    [
+                      "ge",
+                      [
+                        "sub",
+                        "x",
+                        [
+                          "sample",
+                          "motion",
+                          0,
+                          "x",
+                          "y",
+                          "current"
+                        ]
+                      ],
+                      0
+                    ],
+                    [
+                      "lt",
+                      [
+                        "sub",
+                        "x",
+                        [
+                          "sample",
+                          "motion",
+                          0,
+                          "x",
+                          "y",
+                          "current"
+                        ]
+                      ],
+                      "width"
+                    ]
+                  ],
+                  [
+                    "le",
+                    [
+                      "abs",
+                      [
+                        "sub",
+                        [
+                          "sample",
+                          "depth",
+                          0,
+                          "x",
+                          "y",
+                          "current"
+                        ],
+                        [
+                          "sample",
+                          "depth",
+                          0,
+                          [
+                            "sub",
+                            "x",
+                            [
+                              "sample",
+                              "motion",
+                              0,
+                              "x",
+                              "y",
+                              "current"
+                            ]
+                          ],
+                          [
+                            "sub",
+                            "y",
+                            [
+                              "sample",
+                              "motion",
+                              1,
+                              "x",
+                              "y",
+                              "current"
+                            ]
+                          ],
+                          "previous"
+                        ]
+                      ]
+                    ],
+                    "threshold"
+                  ]
+                ]
+              ]
+            ]
+          },
+          {
+            "id": "naive",
+            "label": "Without rejection",
+            "channels": [
+              "R",
+              "G",
+              "B"
+            ],
+            "values": [
+              [
+                "if",
+                [
+                  "eq",
+                  "frame",
+                  0
+                ],
+                [
+                  "sample",
+                  "color",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "mix",
+                  [
+                    "sample",
+                    "color",
+                    0,
+                    "x",
+                    "y",
+                    "current"
+                  ],
+                  [
+                    "sample",
+                    "naive",
+                    0,
+                    [
+                      "sub",
+                      "x",
+                      [
+                        "sample",
+                        "motion",
+                        0,
+                        "x",
+                        "y",
+                        "current"
+                      ]
+                    ],
+                    [
+                      "sub",
+                      "y",
+                      [
+                        "sample",
+                        "motion",
+                        1,
+                        "x",
+                        "y",
+                        "current"
+                      ]
+                    ],
+                    "previous"
+                  ],
+                  "weight"
+                ]
+              ],
+              [
+                "if",
+                [
+                  "eq",
+                  "frame",
+                  0
+                ],
+                [
+                  "sample",
+                  "color",
+                  1,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "mix",
+                  [
+                    "sample",
+                    "color",
+                    1,
+                    "x",
+                    "y",
+                    "current"
+                  ],
+                  [
+                    "sample",
+                    "naive",
+                    1,
+                    [
+                      "sub",
+                      "x",
+                      [
+                        "sample",
+                        "motion",
+                        0,
+                        "x",
+                        "y",
+                        "current"
+                      ]
+                    ],
+                    [
+                      "sub",
+                      "y",
+                      [
+                        "sample",
+                        "motion",
+                        1,
+                        "x",
+                        "y",
+                        "current"
+                      ]
+                    ],
+                    "previous"
+                  ],
+                  "weight"
+                ]
+              ],
+              [
+                "if",
+                [
+                  "eq",
+                  "frame",
+                  0
+                ],
+                [
+                  "sample",
+                  "color",
+                  2,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "mix",
+                  [
+                    "sample",
+                    "color",
+                    2,
+                    "x",
+                    "y",
+                    "current"
+                  ],
+                  [
+                    "sample",
+                    "naive",
+                    2,
+                    [
+                      "sub",
+                      "x",
+                      [
+                        "sample",
+                        "motion",
+                        0,
+                        "x",
+                        "y",
+                        "current"
+                      ]
+                    ],
+                    [
+                      "sub",
+                      "y",
+                      [
+                        "sample",
+                        "motion",
+                        1,
+                        "x",
+                        "y",
+                        "current"
+                      ]
+                    ],
+                    "previous"
+                  ],
+                  "weight"
+                ]
+              ]
+            ]
+          },
+          {
+            "id": "resolved",
+            "label": "With rejection",
+            "channels": [
+              "R",
+              "G",
+              "B"
+            ],
+            "values": [
+              [
+                "if",
+                [
+                  "sample",
+                  "valid",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "mix",
+                  [
+                    "sample",
+                    "color",
+                    0,
+                    "x",
+                    "y",
+                    "current"
+                  ],
+                  [
+                    "sample",
+                    "history",
+                    0,
+                    "x",
+                    "y",
+                    "current"
+                  ],
+                  "weight"
+                ],
+                [
+                  "sample",
+                  "color",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ]
+              ],
+              [
+                "if",
+                [
+                  "sample",
+                  "valid",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "mix",
+                  [
+                    "sample",
+                    "color",
+                    1,
+                    "x",
+                    "y",
+                    "current"
+                  ],
+                  [
+                    "sample",
+                    "history",
+                    1,
+                    "x",
+                    "y",
+                    "current"
+                  ],
+                  "weight"
+                ],
+                [
+                  "sample",
+                  "color",
+                  1,
+                  "x",
+                  "y",
+                  "current"
+                ]
+              ],
+              [
+                "if",
+                [
+                  "sample",
+                  "valid",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "mix",
+                  [
+                    "sample",
+                    "color",
+                    2,
+                    "x",
+                    "y",
+                    "current"
+                  ],
+                  [
+                    "sample",
+                    "history",
+                    2,
+                    "x",
+                    "y",
+                    "current"
+                  ],
+                  "weight"
+                ],
+                [
+                  "sample",
+                  "color",
+                  2,
+                  "x",
+                  "y",
+                  "current"
+                ]
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "current",
+            "label": "Current frame",
+            "buffer": "color",
+            "display": "rgb",
+            "channels": [
+              0,
+              1,
+              2
+            ],
+            "range": [
+              0,
+              1
+            ],
+            "encoding": "linear"
+          },
+          {
+            "id": "naive",
+            "label": "Without rejection",
+            "buffer": "naive",
+            "display": "rgb",
+            "channels": [
+              0,
+              1,
+              2
+            ],
+            "range": [
+              0,
+              1
+            ],
+            "encoding": "linear"
+          },
+          {
+            "id": "resolved",
+            "label": "With rejection",
+            "buffer": "resolved",
+            "display": "rgb",
+            "channels": [
+              0,
+              1,
+              2
+            ],
+            "range": [
+              0,
+              1
+            ],
+            "encoding": "linear"
+          },
+          {
+            "id": "mask",
+            "label": "History validity (white = valid)",
+            "buffer": "valid",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "computed filter model",
+      "verdict": "accept",
+      "why": "a different model uses the same computation contract",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Unsharp masking boosts edges and can overshoot",
+        "description": "Computed three-tap horizontal and vertical filters, followed by source + amount \u00d7 (source \u2212 blur). Raw values can exceed the display range; inspect an edge to see overshoot.",
+        "width": 32,
+        "height": 20,
+        "frames": 1,
+        "fps": 1,
+        "parameters": [
+          {
+            "id": "radius",
+            "label": "Sample offset (pixels)",
+            "min": 1,
+            "max": 4,
+            "step": 1,
+            "value": 1
+          },
+          {
+            "id": "amount",
+            "label": "Sharpening amount",
+            "min": 0,
+            "max": 3,
+            "step": 0.1,
+            "value": 1
+          }
+        ],
+        "buffers": [
+          {
+            "id": "source",
+            "label": "Source",
+            "channels": [
+              "Luma"
+            ],
+            "values": [
+              [
+                "if",
+                [
+                  "and",
+                  [
+                    "gt",
+                    "x",
+                    10
+                  ],
+                  [
+                    "lt",
+                    "x",
+                    21
+                  ]
+                ],
+                0.8,
+                0.1
+              ]
+            ]
+          },
+          {
+            "id": "horizontal",
+            "label": "Horizontal blur",
+            "channels": [
+              "Luma"
+            ],
+            "values": [
+              [
+                "div",
+                [
+                  "add",
+                  [
+                    "add",
+                    [
+                      "sample",
+                      "source",
+                      0,
+                      [
+                        "sub",
+                        "x",
+                        "radius"
+                      ],
+                      "y",
+                      "current"
+                    ],
+                    [
+                      "sample",
+                      "source",
+                      0,
+                      "x",
+                      "y",
+                      "current"
+                    ]
+                  ],
+                  [
+                    "sample",
+                    "source",
+                    0,
+                    [
+                      "add",
+                      "x",
+                      "radius"
+                    ],
+                    "y",
+                    "current"
+                  ]
+                ],
+                3
+              ]
+            ]
+          },
+          {
+            "id": "blur",
+            "label": "Separable blur",
+            "channels": [
+              "Luma"
+            ],
+            "values": [
+              [
+                "div",
+                [
+                  "add",
+                  [
+                    "add",
+                    [
+                      "sample",
+                      "horizontal",
+                      0,
+                      "x",
+                      [
+                        "sub",
+                        "y",
+                        "radius"
+                      ],
+                      "current"
+                    ],
+                    [
+                      "sample",
+                      "horizontal",
+                      0,
+                      "x",
+                      "y",
+                      "current"
+                    ]
+                  ],
+                  [
+                    "sample",
+                    "horizontal",
+                    0,
+                    "x",
+                    [
+                      "add",
+                      "y",
+                      "radius"
+                    ],
+                    "current"
+                  ]
+                ],
+                3
+              ]
+            ]
+          },
+          {
+            "id": "sharpen",
+            "label": "Sharpened result",
+            "channels": [
+              "Luma"
+            ],
+            "values": [
+              [
+                "add",
+                [
+                  "sample",
+                  "source",
+                  0,
+                  "x",
+                  "y",
+                  "current"
+                ],
+                [
+                  "mul",
+                  "amount",
+                  [
+                    "sub",
+                    [
+                      "sample",
+                      "source",
+                      0,
+                      "x",
+                      "y",
+                      "current"
+                    ],
+                    [
+                      "sample",
+                      "blur",
+                      0,
+                      "x",
+                      "y",
+                      "current"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "original",
+            "label": "Source",
+            "buffer": "source",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "blurred",
+            "label": "Blur",
+            "buffer": "blur",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "sharp",
+            "label": "Sharpened",
+            "buffer": "sharpen",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render cannot execute code",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "eval",
+                "fetch(\"https://example.com\")"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render variable must exist",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              "missing"
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render channel must exist",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              1
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render current-frame cycle refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "sample",
+                "a",
+                0,
+                "x",
+                "y",
+                "current"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render previous-frame self-read allowed",
+      "verdict": "accept",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "sample",
+                "a",
+                0,
+                "x",
+                "y",
+                "previous"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render previous-frame forward reference allowed",
+      "verdict": "accept",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "sample",
+                "b",
+                0,
+                "x",
+                "y",
+                "previous"
+              ]
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              1
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render current-frame forward reference refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "sample",
+                "b",
+                0,
+                "x",
+                "y",
+                "current"
+              ]
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              1
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render sample unknown buffer refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "sample",
+                "missing",
+                0,
+                "x",
+                "y",
+                "current"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render unknown field refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ],
+        "script": "alert(1)"
+      }
+    },
+    {
+      "name": "render wrong operator arity refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                1
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render dimension too large refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 65,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render fractional dimension refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2.5,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render zero frame count refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 0,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render fps too large refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 31,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render null initial refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ],
+            "initial": null
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render wrong initial channel count refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ],
+            "initial": [
+              0,
+              1
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render null encoding refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ],
+            "encoding": null
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render inverted display range refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              1,
+              0
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render reserved parameter refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [
+          {
+            "id": "frame",
+            "label": "Frame",
+            "min": 0,
+            "max": 1,
+            "step": 0.1,
+            "value": 0.5
+          }
+        ],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render parameter outside range refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [
+          {
+            "id": "p",
+            "label": "P",
+            "min": 0,
+            "max": 1,
+            "step": 0.1,
+            "value": 2
+          }
+        ],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render duplicate buffer refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          },
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render duplicate view refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render only one view refused",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                "x",
+                "frame"
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render nesting limit enforced",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 2,
+        "height": 2,
+        "frames": 2,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "abs",
+                [
+                  "abs",
+                  [
+                    "abs",
+                    [
+                      "abs",
+                      [
+                        "abs",
+                        [
+                          "abs",
+                          [
+                            "abs",
+                            [
+                              "abs",
+                              [
+                                "abs",
+                                [
+                                  "abs",
+                                  [
+                                    "abs",
+                                    [
+                                      "abs",
+                                      [
+                                        "abs",
+                                        [
+                                          "abs",
+                                          0
+                                        ]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "render total computation budget enforced",
+      "verdict": "refuse",
+      "why": "computed rendering contract boundary",
+      "payload": {
+        "version": 1,
+        "kind": "render",
+        "title": "Small numerical model",
+        "width": 64,
+        "height": 64,
+        "frames": 60,
+        "fps": 2,
+        "parameters": [],
+        "buffers": [
+          {
+            "id": "a",
+            "label": "A",
+            "channels": [
+              "V"
+            ],
+            "values": [
+              [
+                "add",
+                [
+                  "add",
+                  [
+                    "add",
+                    [
+                      "add",
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ],
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ]
+                    ],
+                    [
+                      "add",
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ],
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ]
+                    ]
+                  ],
+                  [
+                    "add",
+                    [
+                      "add",
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ],
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ]
+                    ],
+                    [
+                      "add",
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ],
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "add",
+                  [
+                    "add",
+                    [
+                      "add",
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ],
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ]
+                    ],
+                    [
+                      "add",
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ],
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ]
+                    ]
+                  ],
+                  [
+                    "add",
+                    [
+                      "add",
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ],
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ]
+                    ],
+                    [
+                      "add",
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ],
+                      [
+                        "add",
+                        [
+                          "add",
+                          1,
+                          1
+                        ],
+                        [
+                          "add",
+                          1,
+                          1
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          }
+        ],
+        "views": [
+          {
+            "id": "a",
+            "label": "A",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
+            ]
+          },
+          {
+            "id": "b",
+            "label": "B",
+            "buffer": "a",
+            "display": "scalar",
+            "channels": [
+              0
+            ],
+            "range": [
+              0,
+              1
             ]
           }
         ]
