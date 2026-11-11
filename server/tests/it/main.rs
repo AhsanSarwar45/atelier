@@ -18,7 +18,7 @@ mod a_session_event_reaches_the_file_on_disk;
 mod a_start_leaves_the_readers_own_settings_alone;
 mod build_hygiene;
 mod carried_folders_reach_the_build;
-mod hook_identity;
+mod retired_hooks_allow;
 mod legacy_database_clone;
 mod native_machinery;
 mod no_node_runtime;

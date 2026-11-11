@@ -40,8 +40,6 @@ pub enum Ask {
     /// Set a project up: lay the working rules down and wire that project to
     /// them. The words after it are passed to the rules' own joining tool.
     Init(Vec<String>),
-    /// Say whether Beads is enabled for a folder.
-    ProjectBeads(Vec<String>),
     /// Run one session gate by name, on behalf of a project whose settings
     /// name a word rather than a path.
     Hook { name: String, rest: Vec<String> },
@@ -97,9 +95,6 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
         // Everything after the word goes to the joining tool untouched, so
         // its flags do not have to be listed in two places to keep working.
         "init" => Ask::Init(args[1..].to_vec()),
-        "project" if args.get(1).map(String::as_str) == Some("beads") => {
-            Ask::ProjectBeads(args[2..].to_vec())
-        }
         // Not for typing. It is what a project's own settings file names, so
         // the gates it runs are a word every machine has instead of one
         // person's home folder (bw-8um.3.3).
@@ -149,15 +144,13 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
 pub fn help() -> String {
     format!(
         "\
-{DISPLAY} — project boards and agent chats.
+{DISPLAY} — agent chats and tasks for your projects.
 
 Usage:
   atelier run                 Start Atelier and open it
   atelier run --no-browser    Start without opening a browser
   atelier                     Same as `run --no-browser`
   atelier init [folder]       Configure a project
-  atelier project beads [folder]
-                              Print whether Beads is enabled for this folder
   atelier tool <name> [...]   Run an Atelier tool
   atelier task <command>      Create and finish tasks from a chat session
   atelier where               Show app addresses
@@ -171,10 +164,9 @@ Usage:
   atelier --version           Show the version
   atelier --help              Show help
 
-`atelier run` starts the board and chat service.
+`atelier run` starts the chat service.
 
-`init` asks whether the project uses Beads. Pass `--beads` or `--chat` to choose
-without a prompt. Run `atelier tools` to check dependencies.
+Run `atelier tools` to check dependencies.
 
 `remote install` installs Tailscale. After setup, manage access in
 Settings > Remote access.
@@ -303,15 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn project_beads_is_a_read_only_question_with_an_optional_folder() {
-        assert_eq!(ask(&["project", "beads"]), Ask::ProjectBeads(vec![]));
-        assert_eq!(
-            ask(&["project", "beads", "."]),
-            Ask::ProjectBeads(vec![".".into()])
-        );
-    }
-
-    #[test]
     fn the_joining_tools_own_flags_reach_it_untouched() {
         // Listing them here would be a second help screen to keep in step
         // with the first, and it would go stale on the next flag.
@@ -341,10 +324,10 @@ mod tests {
     #[test]
     fn a_bundled_workflow_tool_carries_its_arguments_untouched() {
         assert_eq!(
-            ask(&["tool", "board/job", "under", "bw-one"]),
+            ask(&["tool", "chrome", "down", "now"]),
             Ask::Tool {
-                name: "board/job".to_string(),
-                rest: vec!["under".to_string(), "bw-one".to_string()]
+                name: "chrome".to_string(),
+                rest: vec!["down".to_string(), "now".to_string()]
             }
         );
     }
@@ -455,7 +438,7 @@ mod tests {
     #[test]
     fn the_help_screen_says_run_starts_both_services() {
         assert!(
-            help().contains("`atelier run` starts the board and chat service"),
+            help().contains("`atelier run` starts the chat service"),
             "the help screen does not describe what run starts"
         );
     }

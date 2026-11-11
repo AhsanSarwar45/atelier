@@ -119,13 +119,10 @@ fn launch_config_at(
     if brand == super::super::local::BRAND {
         let (runtime, model) = super::super::local::decode_model(model?)?;
         let root = crate::identity::data_dir()?.join("goose");
-        // Put Atelier's gates where this session will look for them. Best
-        // effort on purpose: a plugin that cannot be written is a session
-        // without gates, which is what every local session was until now, and
-        // refusing to start one instead would be a worse answer than the one
-        // it replaces (bw-lbkg.1).
-        if let Err(error) = crate::join::goose_plugin(&root) {
-            eprintln!("atelier: could not install the Goose gate plugin: {error}");
+        // Older versions put board gates in a plugin under this home; they
+        // are taken back out before the session reads it.
+        if let Err(error) = crate::join::tidy_goose_plugin(&root) {
+            eprintln!("atelier: could not tidy the retired Goose gate plugin: {error}");
         }
         config = config
             .args(["acp", "--with-builtin", "developer,summon"])

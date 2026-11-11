@@ -1,489 +1,322 @@
-//! Native project joining. This owns only reproducible project state: Beads
-//! initialization, provider hook wiring and the Git landing guard.
+//! Taking back what older versions wired into a project for the board.
+//!
+//! Atelier used to join a project to Beads: it ran `bd init`, wrote its board,
+//! landing and review gates into `.claude/settings.json` and
+//! `.codex/hooks.json` as `atelier hook <name>`, put a Goose plugin carrying the
+//! same gates under its own Goose home, and installed a Git
+//! `reference-transaction` guard. Beads is gone, so all of that is taken out
+//! again — and only that: an entry is removed only when it runs one of the
+//! names Atelier itself wrote, so the project's own hooks, and every other key
+//! in those files, are left exactly as they were.
+//!
+//! `doing` is the exception. It is not a board gate: it tells the screen a
+//! Claude chat this program does not drive is compacting or waiting on a
+//! permission prompt, and it still works, so a project that has it keeps it.
+//!
+//! Until a project has been tidied, its stale entries still run, and
+//! `rules::hook` answers every retired name with a silent allow.
 
-use crate::project_manifest::ProjectManifest;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const MANAGED: &[&str] = &[
+/// Every hook name an Atelier version ever wrote into a project, except
+/// `doing`, which still runs.
+const RETIRED: &[&str] = &[
     "workflow-gate", "board-actor", "board-merge-gate", "board-status-gate",
     "wait-gate", "board-touch", "board-prime", "board-push", "completion-gate",
     "board-gate", "landing-gate",
     "workflow-gate.py", "board-actor.py", "board-merge-gate.py",
     "board-status-gate.py", "wait-gate.py", "board-touch.py",
     "board-prime.py", "board-push.py", "completion-gate.py", "board-gate.py",
+    "landing-gate.py",
     "report-gate.py", "publish-gate.py", "plan-doc-lint.py", "picture-gate.py",
     "agent-fence.py", "slice-gate.py", "helper-proof.py", "habit-reading.py",
-    // What a chat says it is doing, for chats this program does not drive.
-    // Registered here rather than in the reader's global settings, which is
-    // one file for every project on the computer (bw-t26l.20).
-    "doing",
 ];
 
-const CLAUDE: &[(&str, &str, &[&str])] = &[
-    ("PreToolUse", "Bash|Edit|Write|MultiEdit|NotebookEdit", &["workflow-gate"]),
-    ("PreToolUse", "Bash", &["board-actor", "board-merge-gate", "board-status-gate"]),
-    ("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|Agent|Task|Monitor|TaskCreate|SendMessage", &["board-touch"]),
-    ("SubagentStop", "", &["board-touch"]),
-    ("SessionStart", "", &["board-prime"]),
-    ("SessionEnd", "", &["board-push"]),
-    ("Stop", "", &["board-gate"]),
-    // The two events the `doing` gate needs that no other gate here wants. A
-    // chat this program only watches cannot say from its record that it is
-    // compacting or stopped on a permission prompt; these say it. There is one
-    // per state and nothing else: the reader ends a claim when the
-    // conversation writes its next line, so the events that used to take a
-    // claim back are not asked for (`doing::EVENTS`, bw-t26l.20).
-    ("PreCompact", "", &["doing"]),
-    ("Notification", "", &["doing"]),
-];
+/// The one line Beads itself added to Codex beside Atelier's gates, which
+/// Atelier always took out with them.
+const BD_CODEX_HOOK: &str = "bd codex-hook UserPromptSubmit";
 
-/// Codex carries the same gates as Claude, on the events Codex actually fires.
-///
-/// The two providers share one hook contract — a command fed the event as
-/// snake_case JSON on standard input, answering on standard output — so the
-/// gates below are the same binary and the same words. Only the tool names in
-/// the matchers differ, because only the tool names differ.
-///
-/// The three session events used to be missing here, and the gap was not a
-/// judgement: a Codex session started without being told what it was standing
-/// in, ended without pushing the board it had moved, and could finish a turn
-/// the board says is not finished. Codex fires `SessionStart`, `SessionEnd`
-/// and `Stop`, and honours the same answers — `hookSpecificOutput` with
-/// `additionalContext` for the first, and `{"decision":"block","reason":…}`
-/// for the last (bw-3tkl.4).
-///
-/// `doing` is not here, and that is the judgement. It writes a marker into the
-/// reader's `~/.claude/sessions`, and the only thing that reads that marker is
-/// the screen for Claude chats this program does not drive
-/// (`workbench::external`). Registering it for Codex would leave files named
-/// after Codex sessions in Claude's directory for nothing to read.
-const CODEX: &[(&str, &str, &[&str])] = &[
-    ("PreToolUse", "Bash|exec_command|shell_command|functions.exec_command|apply_patch|functions.apply_patch|Edit|Write", &["workflow-gate"]),
-    ("PreToolUse", "Bash|exec_command|shell_command|functions.exec_command", &["board-actor", "board-merge-gate", "board-status-gate"]),
-    ("PostToolUse", "Bash|exec_command|shell_command|functions.exec_command|apply_patch|functions.apply_patch|Edit|Write", &["board-touch"]),
-    ("SubagentStop", "", &["board-touch"]),
-    ("SessionStart", "", &["board-prime"]),
-    // Codex allows this one a second, where every other event gets ten
-    // minutes, which is why the push detaches and answers immediately rather
-    // than waiting on a remote (`board_push::start`).
-    ("SessionEnd", "", &["board-push"]),
-    ("Stop", "", &["board-gate"]),
-];
-
-/// The gates a local-model session carries, on the events Goose fires.
-///
-/// Goose names its tools after the extension that owns them, so the matchers
-/// are `developer__*` where Claude's are `Bash|Edit|Write`. `lifecycle` maps
-/// those three names onto the ones every gate already reasons about, so the
-/// gates themselves do not know which agent ran them.
-///
-/// What is deliberately absent:
-///
-///   * `SessionStart`. Goose lets only `PreToolUse` and `Stop` change what
-///     happens; every other event is observation. Whether it reads back
-///     `additionalContext` is not settled by its documentation, and Atelier
-///     already hands a Goose session its policy over the wire
-///     (`_goose/unstable/session/system-prompt/set`), so `board-prime` would
-///     be claiming to do something unproven. The actor still reaches the
-///     session, because `board-actor` rewrites the `bd` line itself.
-///   * `SubagentStop`. Goose accepts a registration for it and never emits
-///     it, so `board-touch` would sit on an event that does not arrive.
-const GOOSE: &[(&str, &str, &[&str])] = &[
-    ("PreToolUse", "developer__shell|developer__write|developer__edit", &["workflow-gate"]),
-    ("PreToolUse", "developer__shell", &["board-actor", "board-merge-gate", "board-status-gate"]),
-    ("PostToolUse", "developer__shell|developer__write|developer__edit", &["board-touch"]),
-    ("SessionEnd", "", &["board-push"]),
-    ("Stop", "", &["board-gate"]),
-];
+/// The first lines of the Git guard Atelier installed.
+const GUARD_MARK: &str = "# Atelier landing guard";
 
 /// Where Goose looks for a plugin of its own, given the home Atelier gives it.
-///
-/// Goose reads project plugins from `<project>/.agents/plugins`, but resolves
-/// `<project>` from the working directory of its own process — captured once,
-/// when the agent is built — and the ACP session's `cwd` never reaches that
-/// lookup. A session Atelier drives is spawned from Atelier's directory, not
-/// the person's repository, so a hooks file written into the repository beside
-/// `.claude` and `.codex` would never be read.
-///
-/// Its user-scope plugins are read from its home, and Atelier already tells it
-/// that home is `<data_dir>/goose` (`acp::adapter`). So the plugin goes there:
-/// loaded by every Goose session this program starts, and invisible to a
-/// `goose` the person runs themselves (bw-lbkg.1).
 pub fn goose_plugin_dir(path_root: &Path) -> PathBuf {
     path_root.join(".agents").join("plugins").join("atelier")
 }
 
-/// Put the plugin in place, or say why it could not be.
-///
-/// Goose loads a plugin's hooks only when a `plugin.json` sits beside them,
-/// so both files are written. `wire` leaves anything it did not put there
-/// alone and takes its own entries out first, so running this at every launch
-/// converges rather than accumulating.
-pub fn goose_plugin(path_root: &Path) -> Result<(), String> {
+/// Take the retired gates out of a project: its Claude and Codex hook files,
+/// and the Git guard. Nothing is written when nothing needs to change.
+pub fn tidy(root: &Path) -> Result<(), String> {
+    let mut errors = Vec::new();
+    for path in [root.join(".claude/settings.json"), root.join(".codex/hooks.json")] {
+        if let Err(error) = strip(&path) {
+            errors.push(error);
+        }
+    }
+    if let Err(error) = remove_guard(root) {
+        errors.push(error);
+    }
+    if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
+}
+
+/// Take the retired gates out of the Goose plugin under `path_root`, and the
+/// plugin itself when nothing else is left in it.
+pub fn tidy_goose_plugin(path_root: &Path) -> Result<(), String> {
     let plugin = goose_plugin_dir(path_root);
-    let hooks = plugin.join("hooks");
-    std::fs::create_dir_all(&hooks)
-        .map_err(|error| format!("could not create {}: {error}", hooks.display()))?;
-    let manifest = json!({
-        "name": "atelier",
-        "version": env!("CARGO_PKG_VERSION"),
-        "description": "Atelier's board lifecycle gates.",
-    });
-    write(&plugin.join("plugin.json"), &manifest)?;
-    wire(&hooks.join("hooks.json"), GOOSE)
-}
-
-const GUARD_MARK: &str = "# Atelier landing guard";
-
-pub fn install(root: &Path, manifest: &ProjectManifest) -> Result<(), String> {
-    let bd = crate::routes::find_bd().ok_or_else(|| crate::routes::BD_MISSING.to_string())?;
-    if !root.join(".beads").is_dir() {
-        let status = Command::new(&bd).args(["init", "--prefix", &manifest.beads.issue_id_prefix])
-            .current_dir(root).status().map_err(|error| format!("could not start bd: {error}"))?;
-        if !status.success() { return Err("bd init did not complete".to_string()); }
+    let hooks_dir = plugin.join("hooks");
+    let hooks = hooks_dir.join("hooks.json");
+    if !plugin.exists() {
+        return Ok(());
     }
-    if let Some(git) = crate::routes::find_git() {
-        let _ = Command::new(git).args(["config", "beads.role", "maintainer"]).current_dir(root).status();
+    strip(&hooks)?;
+    let empty = match std::fs::read(&hooks) {
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes).ok().is_some_and(|value| {
+            value.as_object().is_some_and(|object| {
+                object.iter().all(|(key, value)| key == "hooks" && value.as_object().is_some_and(|events| events.is_empty()))
+            })
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => false,
+    };
+    if !empty {
+        return Ok(());
     }
-    wire(&root.join(".claude/settings.json"), CLAUDE)?;
-    wire(&root.join(".codex/hooks.json"), CODEX)?;
-    guard(root)?;
+    let ours = std::fs::read(plugin.join("plugin.json")).ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .is_none_or(|manifest| manifest["name"] == "atelier");
+    if !ours {
+        return Ok(());
+    }
+    for file in [hooks.clone(), plugin.join("plugin.json")] {
+        match std::fs::remove_file(&file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("could not remove {}: {error}", file.display())),
+        }
+    }
+    let _ = std::fs::remove_dir(&hooks_dir);
+    let _ = std::fs::remove_dir(&plugin);
     Ok(())
 }
 
-pub fn remove(root: &Path) -> Result<(), String> {
-    strip(&root.join(".claude/settings.json"))?;
-    strip(&root.join(".codex/hooks.json"))?;
-    let hook = git_hook(root);
-    if std::fs::read_to_string(&hook).is_ok_and(|text| text.lines().take(2).any(|line| line == GUARD_MARK)) {
-        std::fs::remove_file(&hook).map_err(|error| format!("could not remove {}: {error}", hook.display()))?;
-    }
-    Ok(())
-}
-
-fn command_for(name: &str) -> String { format!("atelier hook {name}") }
 fn runs(command: &Value, name: &str) -> bool {
     command.as_str().is_some_and(|command| command.split_whitespace().any(|word|
         Path::new(word).file_name().is_some_and(|file| file == name)))
 }
 
-fn read(path: &Path) -> Result<Value, String> {
-    match std::fs::read(path) {
-        Ok(bytes) => {
-            let value: Value = serde_json::from_slice(&bytes)
-                .map_err(|error| format!("kept {} unchanged because it does not parse: {error}", path.display()))?;
-            if !value.is_object() { return Err(format!("kept {} unchanged because it is not an object", path.display())); }
-            Ok(value)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
-        Err(error) => Err(format!("could not read {}: {error}", path.display())),
-    }
+fn retired(hook: &Value) -> bool {
+    RETIRED.iter().any(|name| runs(&hook["command"], name))
+        || hook["command"].as_str() == Some(BD_CODEX_HOOK)
 }
 
 fn strip_value(value: &mut Value) {
     let Some(events) = value.get_mut("hooks").and_then(Value::as_object_mut) else { return; };
     for blocks in events.values_mut().filter_map(Value::as_array_mut) {
-        for block in blocks.iter_mut().filter_map(Value::as_object_mut) {
-            if let Some(hooks) = block.get_mut("hooks").and_then(Value::as_array_mut) {
-                hooks.retain(|hook| !MANAGED.iter().any(|name| runs(&hook["command"], name)) &&
-                    hook["command"].as_str() != Some("bd codex-hook UserPromptSubmit"));
+        let mut emptied = Vec::new();
+        for (at, block) in blocks.iter_mut().enumerate() {
+            let Some(hooks) = block.get_mut("hooks").and_then(Value::as_array_mut) else { continue; };
+            let before = hooks.len();
+            hooks.retain(|hook| !retired(hook));
+            if hooks.is_empty() && before > 0 {
+                emptied.push(at);
             }
         }
-        blocks.retain(|block| block["hooks"].as_array().is_some_and(|hooks| !hooks.is_empty()));
+        // Only a block this took the last entry out of goes; one the project
+        // left empty itself is the project's business.
+        for at in emptied.into_iter().rev() {
+            blocks.remove(at);
+        }
     }
+    events.retain(|_, blocks| blocks.as_array().is_none_or(|blocks| !blocks.is_empty()));
 }
 
 fn strip(path: &Path) -> Result<(), String> {
-    if !path.is_file() { return Ok(()); }
-    let mut value = read(path)?;
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("could not read {}: {error}", path.display())),
+    };
+    let mut value: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("kept {} unchanged because it does not parse: {error}", path.display()))?;
+    if !value.is_object() {
+        return Ok(());
+    }
     let before = value.clone();
     strip_value(&mut value);
     if value != before { write(path, &value)?; }
     Ok(())
 }
 
-fn wire(path: &Path, table: &[(&str, &str, &[&str])]) -> Result<(), String> {
-    let mut value = read(path)?;
-    wire_value(&mut value, table, path.ends_with("settings.json"));
-    write(path, &value)
-}
-
-fn wire_value(value: &mut Value, table: &[(&str, &str, &[&str])], claude: bool) {
-    strip_value(value);
-    if !value["hooks"].is_object() { value["hooks"] = json!({}); }
-    for (event, matcher, names) in table {
-        if !value["hooks"][event].is_array() { value["hooks"][event] = json!([]); }
-        let blocks = value["hooks"][event].as_array_mut().unwrap();
-        let at = blocks.iter().position(|block| block["matcher"].as_str().unwrap_or("") == *matcher)
-            .unwrap_or_else(|| { blocks.push(if matcher.is_empty() { json!({"hooks":[]}) } else { json!({"matcher":matcher,"hooks":[]}) }); blocks.len() - 1 });
-        if !blocks[at]["hooks"].is_array() { blocks[at]["hooks"] = json!([]); }
-        let hooks = blocks[at]["hooks"].as_array_mut().unwrap();
-        for name in *names { hooks.push(json!({"type":"command","command":command_for(name)})); }
-    }
-    if claude {
-        value.as_object_mut().unwrap().entry("autoCompactWindow").or_insert(json!(200000));
-    }
-}
-
 fn write(path: &Path, value: &Value) -> Result<(), String> {
     let parent = path.parent().ok_or_else(|| format!("{} has no parent", path.display()))?;
-    std::fs::create_dir_all(parent).map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     let bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     let temporary = path.with_extension("atelier-new");
+    std::fs::create_dir_all(parent).map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     std::fs::write(&temporary, [bytes, b"\n".to_vec()].concat())
         .map_err(|error| format!("could not write {}: {error}", temporary.display()))?;
     std::fs::rename(&temporary, path).map_err(|error| format!("could not replace {}: {error}", path.display()))
 }
 
-fn git_hook(root: &Path) -> PathBuf {
+fn git_hook(root: &Path) -> Option<PathBuf> {
+    if !root.join(".git").exists() {
+        return None;
+    }
     let output = crate::routes::find_git().and_then(|git| Command::new(git)
         .args(["rev-parse", "--git-path", "hooks/reference-transaction"])
         .current_dir(root).output().ok());
-    output.filter(|output| output.status.success())
+    Some(output.filter(|output| output.status.success())
         .map(|output| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
         .map(|path| if path.is_absolute() { path } else { root.join(path) })
-        .unwrap_or_else(|| root.join(".git/hooks/reference-transaction"))
+        .unwrap_or_else(|| root.join(".git/hooks/reference-transaction")))
 }
 
-fn guard(root: &Path) -> Result<(), String> {
-    let path = git_hook(root);
-    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        if !existing.lines().take(2).any(|line| line == GUARD_MARK) {
-            return Err(format!("kept {} unchanged because it is a project-owned Git hook", path.display()));
-        }
-    }
-    let body = format!("#!/bin/sh\n{GUARD_MARK}\ncase \"$1\" in prepared|committed) ;; *) exit 0 ;; esac\ncommand -v atelier >/dev/null 2>&1 || {{ echo 'Atelier landing guard is unavailable' >&2; exit 1; }}\nexec atelier hook landing-gate \"$@\"\n");
-    std::fs::write(&path, body).map_err(|error| format!("could not write {}: {error}", path.display()))?;
-    #[cfg(unix)] {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(&path).map_err(|error| error.to_string())?.permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&path, permissions).map_err(|error| error.to_string())?;
+fn remove_guard(root: &Path) -> Result<(), String> {
+    let Some(hook) = git_hook(root) else { return Ok(()); };
+    if std::fs::read_to_string(&hook).is_ok_and(|text| text.lines().take(2).any(|line| line == GUARD_MARK)) {
+        std::fs::remove_file(&hook).map_err(|error| format!("could not remove {}: {error}", hook.display()))?;
     }
     Ok(())
+}
+
+/// Tidy every project this computer has registered, in the background, once
+/// per start. A project that cannot be read is skipped; it is tidied the next
+/// time it is set up or the app starts.
+pub fn tidy_registered(db: std::sync::Arc<crate::db::Database>) {
+    std::thread::spawn(move || {
+        let Ok(projects) = db.get_projects_filtered(true, false) else { return; };
+        for project in projects {
+            let raw = project.local_path.as_deref().unwrap_or(&project.path);
+            let root = Path::new(raw);
+            if !root.is_dir() {
+                continue;
+            }
+            if let Err(error) = tidy(root) {
+                tracing::warn!(project = %project.name, %error, "could not take retired board hooks out");
+            }
+        }
+        if let Some(goose) = crate::identity::data_dir().map(|dir| dir.join("goose")) {
+            if let Err(error) = tidy_goose_plugin(&goose) {
+                tracing::warn!(%error, "could not take the retired Goose gate plugin out");
+            }
+        }
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    #[test]
-    fn native_machinery_hook_wiring_preserves_neighboring_commands() {
-        let mut value = json!({"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
-            {"type":"command","command":"my-project-hook"},
-            {"type":"command","command":"python3 /old/machinery/hooks/board-status-gate.py"}
-        ]}]}});
-        strip_value(&mut value);
-        let commands = value["hooks"]["PreToolUse"][0]["hooks"].as_array().unwrap();
-        assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0]["command"], "my-project-hook");
-    }
-
-    fn pretool(value: &Value) -> Vec<&str> {
-        value["hooks"]["PreToolUse"].as_array().into_iter().flatten()
-            .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
-            .filter_map(|hook| hook["command"].as_str()).collect()
-    }
-
-    /// Every event the `doing` gate answers to is registered by joining a
-    /// project, and stripped by leaving one. It used to be written into the
-    /// reader's global settings at every startup instead — one file for every
-    /// project on the computer, edited by a program they only started
-    /// (bw-t26l.20).
-    #[test]
-    fn a_joined_project_wires_what_a_chat_says_it_is_doing_and_leaving_takes_it_out() {
-        let mut claude = json!({});
-        wire_value(&mut claude, CLAUDE, true);
-        for (event, _) in crate::doing::EVENTS {
-            let commands = claude["hooks"][event]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
-                .filter_map(|hook| hook["command"].as_str())
-                .collect::<Vec<_>>();
-            assert!(
-                commands.contains(&"atelier hook doing"),
-                "{event} does not run the gate: {commands:?}"
-            );
-        }
-
-        strip_value(&mut claude);
-        let left = serde_json::to_string(&claude).unwrap();
-        assert!(!left.contains("hook doing"), "leaving left it behind: {left}");
-    }
-
-    #[test]
-    fn native_machinery_provider_wiring_has_equivalent_repository_gates() {
-        let mut claude = json!({});
-        let mut codex = json!({});
-        wire_value(&mut claude, CLAUDE, true);
-        wire_value(&mut codex, CODEX, false);
-        let required = ["atelier hook workflow-gate", "atelier hook board-actor",
-            "atelier hook board-merge-gate", "atelier hook board-status-gate"];
-        for command in required {
-            assert!(pretool(&claude).contains(&command), "Claude lacks {command}");
-            assert!(pretool(&codex).contains(&command), "Codex lacks {command}");
-        }
-    }
-
-    fn on(value: &Value, event: &str) -> Vec<String> {
-        value["hooks"][event].as_array().into_iter().flatten()
+    fn commands(value: &Value) -> Vec<String> {
+        value["hooks"].as_object().into_iter().flatten()
+            .flat_map(|(_, blocks)| blocks.as_array().into_iter().flatten())
             .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
             .filter_map(|hook| hook["command"].as_str().map(str::to_string)).collect()
     }
 
-    /// Both providers fire these three, and both honour the answers, so a gap
-    /// on one of them is a gap and not a judgement. A Codex session used to
-    /// start without being told what it stood in, end without pushing the
-    /// board it had moved, and finish a turn the board says is unfinished
-    /// (bw-3tkl.4).
-    #[test]
-    fn native_machinery_both_providers_carry_the_session_gates() {
-        let mut claude = json!({});
-        let mut codex = json!({});
-        wire_value(&mut claude, CLAUDE, true);
-        wire_value(&mut codex, CODEX, false);
-        for (event, gate) in [
-            ("SessionStart", "atelier hook board-prime"),
-            ("SessionEnd", "atelier hook board-push"),
-            ("Stop", "atelier hook board-gate"),
-        ] {
-            assert!(on(&claude, event).contains(&gate.to_string()), "Claude {event}");
-            assert!(on(&codex, event).contains(&gate.to_string()), "Codex {event}");
-        }
-    }
-
-    /// Every gate Claude is given is given to Codex too, except the one whose
-    /// output only a Claude screen reads. Keeping this as a difference of
-    /// events rather than of gates is what stops the two tables drifting.
-    #[test]
-    fn native_machinery_codex_lacks_only_the_gate_that_writes_for_a_claude_screen() {
-        let claude: std::collections::BTreeSet<&str> =
-            CLAUDE.iter().flat_map(|(_, _, gates)| gates.iter().copied()).collect();
-        let codex: std::collections::BTreeSet<&str> =
-            CODEX.iter().flat_map(|(_, _, gates)| gates.iter().copied()).collect();
-        assert_eq!(
-            claude.difference(&codex).copied().collect::<Vec<_>>(),
-            vec![crate::doing::GATE],
-        );
-        assert!(codex.difference(&claude).next().is_none(), "Codex has a gate Claude has not");
-    }
-
-    /// Codex allows a second for this one where every other event gets ten
-    /// minutes, so the gate on it must be one that answers without waiting.
-    #[test]
-    fn native_machinery_the_codex_second_is_only_spent_on_a_gate_that_detaches() {
-        let on_end: Vec<&str> = CODEX.iter()
-            .filter(|(event, _, _)| *event == "SessionEnd")
-            .flat_map(|(_, _, gates)| gates.iter().copied())
-            .collect();
-        assert_eq!(on_end, vec![crate::board_push::GATE]);
-    }
-
-    /// The plugin goes where a Goose session Atelier drives will look, and
-    /// nowhere a Goose the person runs themselves would (bw-lbkg.1).
-    #[test]
-    fn native_machinery_the_goose_plugin_lands_under_the_home_atelier_gives_it() {
-        let root = tempfile::tempdir().unwrap();
-        goose_plugin(root.path()).unwrap();
-
-        let plugin = root.path().join(".agents/plugins/atelier");
-        let manifest: Value =
-            serde_json::from_str(&std::fs::read_to_string(plugin.join("plugin.json")).unwrap())
-                .unwrap();
-        assert_eq!(manifest["name"], "atelier");
-        assert!(manifest["version"].as_str().is_some_and(|v| !v.is_empty()));
-
-        let hooks: Value =
-            serde_json::from_str(&std::fs::read_to_string(plugin.join("hooks/hooks.json")).unwrap())
-                .unwrap();
-        for (event, gate) in [
-            ("PreToolUse", "atelier hook workflow-gate"),
-            ("PostToolUse", "atelier hook board-touch"),
-            ("SessionEnd", "atelier hook board-push"),
-            ("Stop", "atelier hook board-gate"),
-        ] {
-            assert!(on(&hooks, event).contains(&gate.to_string()), "{event}: {hooks}");
-        }
-        // Goose accepts a SubagentStop registration and never fires it, so
-        // nothing may be parked there.
-        assert!(on(&hooks, "SubagentStop").is_empty(), "{hooks}");
-    }
-
-    /// Running it twice is running it once. A session is launched often, and
-    /// the plugin is written at every launch.
-    #[test]
-    fn native_machinery_installing_the_goose_plugin_twice_changes_nothing() {
-        let root = tempfile::tempdir().unwrap();
-        goose_plugin(root.path()).unwrap();
-        let once = std::fs::read_to_string(
-            root.path().join(".agents/plugins/atelier/hooks/hooks.json")).unwrap();
-        goose_plugin(root.path()).unwrap();
-        let twice = std::fs::read_to_string(
-            root.path().join(".agents/plugins/atelier/hooks/hooks.json")).unwrap();
-        assert_eq!(once, twice);
-    }
-
-    /// Every matcher names tools Goose actually has. A matcher naming Claude's
-    /// `Bash` would match nothing, and a gate that matches nothing is a gate
-    /// that is not there.
-    #[test]
-    fn native_machinery_the_goose_matchers_name_goose_tools() {
-        for (event, matcher, gates) in GOOSE {
-            for name in matcher.split('|').filter(|name| !name.is_empty()) {
-                assert!(
-                    matches!(name, "developer__shell" | "developer__write" | "developer__edit"),
-                    "{event} matches {name}, which Goose does not have: {gates:?}"
-                );
+    /// What `atelier init` wrote into a Beads project, beside the project's own.
+    fn old_settings() -> Value {
+        json!({
+            "permissions": {"allow": ["Bash(npm test)"]},
+            "autoCompactWindow": 200000,
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit", "hooks": [
+                        {"type": "command", "command": "atelier hook workflow-gate"}]},
+                    {"matcher": "Bash", "hooks": [
+                        {"type": "command", "command": "my-project-hook"},
+                        {"type": "command", "command": "atelier hook board-actor"},
+                        {"type": "command", "command": "atelier hook board-merge-gate"},
+                        {"type": "command", "command": "python3 /old/machinery/hooks/board-status-gate.py"}]}
+                ],
+                "SessionStart": [{"hooks": [{"type": "command", "command": "atelier hook board-prime"}]}],
+                "Stop": [{"hooks": [{"type": "command", "command": "atelier hook board-gate"}]}],
+                "PreCompact": [{"hooks": [{"type": "command", "command": "atelier hook doing"}]}],
+                "Notification": [{"hooks": [{"type": "command", "command": "atelier hook doing"}]}],
+                "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "bd codex-hook UserPromptSubmit"}]}]
             }
-        }
+        })
     }
 
     #[test]
-    fn native_machinery_wiring_preserves_neighboring_user_hooks() {
-        for (table, claude) in [(CLAUDE, true), (CODEX, false)] {
-            let mut value = json!({"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[
-                {"type":"command","command":"my-project-hook"}
-            ]}]}});
-            wire_value(&mut value, table, claude);
-            assert!(pretool(&value).contains(&"my-project-hook"));
-        }
+    fn tidying_takes_out_only_the_retired_gates() {
+        let mut value = old_settings();
+        strip_value(&mut value);
+        let mut left = commands(&value);
+        left.sort();
+        assert_eq!(left, vec!["atelier hook doing", "atelier hook doing", "my-project-hook"]);
+        assert_eq!(value["permissions"]["allow"][0], "Bash(npm test)");
+        assert_eq!(value["autoCompactWindow"], 200000);
+        assert!(value["hooks"].get("SessionStart").is_none());
+        assert!(value["hooks"].get("Stop").is_none());
+        assert_eq!(value["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
     }
 
     #[test]
-    fn native_machinery_guard_refuses_to_overwrite_a_project_hook() {
+    fn a_tidy_project_file_is_not_rewritten() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join(".git")).unwrap();
-        let hooks = root.path().join(".git/hooks");
-        std::fs::create_dir_all(&hooks).unwrap();
-        let path = hooks.join("reference-transaction");
+        let path = root.path().join(".claude/settings.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let text = "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"mine\"}]}]}}";
+        std::fs::write(&path, text).unwrap();
+        tidy(root.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn tidying_a_project_cleans_both_providers_and_the_guard() {
+        let root = tempfile::tempdir().unwrap();
+        Command::new("git").arg("init").arg("-q").arg(root.path()).status().unwrap();
+        for file in [".claude/settings.json", ".codex/hooks.json"] {
+            let path = root.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, serde_json::to_string(&old_settings()).unwrap()).unwrap();
+        }
+        let guard = root.path().join(".git/hooks/reference-transaction");
+        std::fs::write(&guard, format!("#!/bin/sh\n{GUARD_MARK}\nexec atelier hook landing-gate \"$@\"\n")).unwrap();
+        tidy(root.path()).unwrap();
+        for file in [".claude/settings.json", ".codex/hooks.json"] {
+            let value: Value = serde_json::from_str(&std::fs::read_to_string(root.path().join(file)).unwrap()).unwrap();
+            assert!(commands(&value).iter().all(|command| !command.contains("board") && !command.contains("workflow")));
+        }
+        assert!(!guard.exists());
+    }
+
+    #[test]
+    fn a_project_owned_git_hook_is_left_alone() {
+        let root = tempfile::tempdir().unwrap();
+        Command::new("git").arg("init").arg("-q").arg(root.path()).status().unwrap();
+        let path = root.path().join(".git/hooks/reference-transaction");
         std::fs::write(&path, "#!/bin/sh\necho project\n").unwrap();
-        let error = guard(root.path()).unwrap_err();
-        assert!(error.contains("project-owned"));
+        tidy(root.path()).unwrap();
         assert_eq!(std::fs::read_to_string(path).unwrap(), "#!/bin/sh\necho project\n");
     }
-    #[test]
-    fn checked_in_codex_hooks_match_generated_lifecycle_commands() {
-        let checked: Value = serde_json::from_str(include_str!("../../.codex/hooks.json")).unwrap();
-        let mut generated = json!({});
-        wire_value(&mut generated, CODEX, false);
-        for event in ["PreToolUse", "PostToolUse", "SessionStart", "SessionEnd", "Stop"] {
-            let mut actual = on(&checked, event); actual.sort();
-            let mut expected = on(&generated, event); expected.sort();
-            assert_eq!(actual, expected, "{event} drifted from installed config");
-        }
-    }
 
     #[test]
-    fn generated_guard_installs_twice_with_a_valid_shebang() {
+    fn a_file_that_does_not_parse_is_kept_unchanged() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir(root.path().join(".git")).unwrap();
-        guard(root.path()).unwrap(); guard(root.path()).unwrap();
-        assert!(std::fs::read_to_string(git_hook(root.path())).unwrap().starts_with("#!/bin/sh\n"));
+        let path = root.path().join(".claude/settings.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(tidy(root.path()).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "{ not json");
     }
 
+    #[test]
+    fn the_goose_plugin_goes_when_only_retired_gates_were_in_it() {
+        let root = tempfile::tempdir().unwrap();
+        let plugin = goose_plugin_dir(root.path());
+        std::fs::create_dir_all(plugin.join("hooks")).unwrap();
+        std::fs::write(plugin.join("plugin.json"), r#"{"name":"atelier","version":"1"}"#).unwrap();
+        std::fs::write(plugin.join("hooks/hooks.json"), serde_json::to_string(&json!({"hooks":{
+            "PreToolUse":[{"matcher":"developer__shell","hooks":[{"type":"command","command":"atelier hook workflow-gate"}]}],
+            "Stop":[{"hooks":[{"type":"command","command":"atelier hook board-gate"}]}]
+        }})).unwrap()).unwrap();
+        tidy_goose_plugin(root.path()).unwrap();
+        assert!(!plugin.exists());
+        // And twice is once.
+        tidy_goose_plugin(root.path()).unwrap();
+    }
 }

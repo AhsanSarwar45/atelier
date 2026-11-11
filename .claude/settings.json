@@ -1,70 +1,12 @@
 {
   "autoCompactWindow": 250000,
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "atelier hook workflow-gate"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "atelier hook board-actor"
-          },
-          {
-            "type": "command",
-            "command": "atelier hook board-merge-gate"
-          },
-          {
-            "type": "command",
-            "command": "atelier hook board-status-gate"
-          }
-        ]
-      }
-    ],
     "PostToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|Agent|Task|Monitor|TaskCreate|SendMessage",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "atelier hook board-touch"
-          }
-        ]
-      },
       {
         "hooks": [
           {
             "type": "command",
             "command": "atelier hook doing"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "atelier hook board-prime"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "atelier hook board-touch"
           }
         ]
       }
@@ -84,10 +26,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "atelier hook board-push"
-          },
-          {
-            "type": "command",
             "command": "atelier hook doing"
           }
         ]
@@ -96,10 +34,6 @@
     "Stop": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "atelier hook board-gate"
-          },
           {
             "type": "command",
             "command": "atelier hook doing"

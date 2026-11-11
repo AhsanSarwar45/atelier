@@ -2,35 +2,34 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-fn preflight(path: &Path) -> BTreeSet<String> {
+fn commands(path: &Path) -> BTreeSet<String> {
     let settings: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-    settings["hooks"]["PreToolUse"]
-        .as_array()
-        .unwrap()
-        .iter()
+    settings["hooks"]
+        .as_object()
+        .into_iter()
+        .flat_map(|events| events.values())
+        .filter_map(Value::as_array)
+        .flatten()
         .flat_map(|block| block["hooks"].as_array().into_iter().flatten())
         .filter_map(|hook| hook["command"].as_str())
-        .filter_map(|command| command.split_whitespace().last())
         .map(str::to_string)
         .collect()
 }
 
+/// The board, its landing and its checks are gone, and this repository's own
+/// provider wiring runs none of their gates any more.
 #[test]
-fn native_machinery_keeps_provider_preflight_invariants_equivalent() {
+fn this_repository_runs_none_of_the_retired_board_gates() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let required = BTreeSet::from([
-        "workflow-gate".to_string(),
-        "board-actor".to_string(),
-        "board-merge-gate".to_string(),
-        "board-status-gate".to_string(),
-    ]);
     for file in [".claude/settings.json", ".codex/hooks.json"] {
-        let found = preflight(&root.join(file));
-        assert!(
-            required.is_subset(&found),
-            "{file} is missing native preflight gates: {:?}",
-            required.difference(&found).collect::<Vec<_>>()
-        );
+        let found = commands(&root.join(file));
+        let left: Vec<&String> = found
+            .iter()
+            .filter(|command| {
+                command.starts_with("atelier hook ") && command.as_str() != "atelier hook doing"
+            })
+            .collect();
+        assert!(left.is_empty(), "{file} still runs retired gates: {left:?}");
     }
 }
 
