@@ -129,7 +129,16 @@ export function widget(value: unknown): ChatWidget | null {
  */
 function taskWidget(value: Record<string, unknown>): TaskWidget | null {
   const task = value.task;
-  if (!text(value.event) || !object(task)) return null;
+  if (!text(value.event)) return null;
+  if (value.event === 'propose') {
+    const proposal = value.proposal;
+    if (!object(proposal) || task !== undefined) return null;
+    if (typeof proposal.projectId !== 'string' || !Number.isInteger(proposal.id) || Number(proposal.id) < 1) return null;
+    if (typeof proposal.type !== 'string' || typeof proposal.title !== 'string' || !proposal.title.trim()) return null;
+    if (!object(proposal.plan)) return null;
+    return value as unknown as TaskWidget;
+  }
+  if (!object(task) || value.proposal !== undefined) return null;
   if (typeof task.projectId !== 'string' || !Number.isInteger(task.number) || Number(task.number) < 1) return null;
   if (typeof task.type !== 'string' || typeof task.title !== 'string' || !task.title.trim()) return null;
   if (!(TASK_STATUSES as readonly unknown[]).includes(task.status)) return null;
@@ -149,7 +158,7 @@ const TOP_LEVEL_FIELDS: Record<ChatWidget['type'], Set<string>> = {
   image_compare: new Set(['type', 'title', 'mode', 'before', 'after']),
   artifact: new Set(['type', 'title', 'kind', 'asset']),
   explainer: new Set(['type', 'layout', 'title', 'summary', 'nodes', 'edges', 'steps', 'evidence']),
-  task: new Set(['type', 'title', 'event', 'task']),
+  task: new Set(['type', 'title', 'event', 'task', 'proposal']),
 };
 
 const fieldsAre = (value: Record<string, unknown>, allowed: Set<string>) =>

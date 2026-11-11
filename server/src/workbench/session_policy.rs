@@ -63,6 +63,16 @@ pub fn build_with_library(cwd: &Path, snapshot: &super::library::Snapshot) -> St
     format!("<!-- {MARKER} -->\n\n{project}\n\n{}", snapshot.guidance())
 }
 
+/// The guidance with the chat's open tasks after it (`tasks::open_section`),
+/// or unchanged when it holds none.
+pub fn with_open_tasks(guidance: String, open_tasks: &str) -> String {
+    if open_tasks.trim().is_empty() {
+        guidance
+    } else {
+        format!("{guidance}\n\n{open_tasks}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

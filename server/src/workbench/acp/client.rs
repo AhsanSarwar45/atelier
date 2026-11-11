@@ -1073,6 +1073,19 @@ fn session_servers(
     Ok(servers)
 }
 
+/// What `session_policy::with_open_tasks` adds for this chat: its open tasks
+/// and pending proposals, or nothing (`tasks::open_section`).
+async fn open_tasks_section(database: &ChatDb, session_id: &str) -> String {
+    let session_id = session_id.to_string();
+    database
+        .read_tasks(move |store| crate::workbench::tasks::open_section(store.connection(), &session_id))
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "a chat's open tasks could not be read for its guidance");
+            String::new()
+        })
+}
+
 fn session_meta(brand: &str, policy: &str) -> Meta {
     let mut meta = Meta::new();
     meta.insert("atelier".into(), json!({"sessionPolicy": policy}));
@@ -2506,7 +2519,13 @@ impl AcpDriver {
             other => return Err(format!("ACP adapter is not configured for {other}")),
         };
         let shared_library = super::super::library::snapshot(Path::new(&session.cwd))?;
-        let task_policy = session_policy::build_with_library(Path::new(&session.cwd), &shared_library);
+        // The chat's open tasks, read now: each connection is told them
+        // afresh, so a chat picked up again knows what it still holds.
+        let open_tasks = open_tasks_section(&database, &session.id).await;
+        let task_policy = session_policy::with_open_tasks(
+            session_policy::build_with_library(Path::new(&session.cwd), &shared_library),
+            &open_tasks,
+        );
         let shared_servers = session_servers(&shared_library, Path::new(&session.cwd))?;
         // Switching accounts deliberately clears the old provider id: that id
         // belongs to the old account's record directory. The local chat stays
@@ -3456,7 +3475,8 @@ impl AcpDriver {
             // it into a new one as well spent its length a second time, and
             // made it the first thing the provider read as the person's
             // words, which is what it named the chat after (bw-8yln.1).
-            pending_guidance: (!create_remote).then(|| shared_library.guidance()),
+            pending_guidance: (!create_remote)
+                .then(|| session_policy::with_open_tasks(shared_library.guidance(), &open_tasks)),
             shared_library,
             brand,
             database,
@@ -3521,6 +3541,10 @@ impl AcpDriver {
                 .ok()
                 .flatten();
             looked.tasks.push((id, task));
+        }
+        if found.iter().any(|reference| reference.kind == Kind::Merge && !reference.run) {
+            let facts = crate::workbench::tasks::git::merge_facts(Path::new(&self.session.cwd)).await;
+            looked.merge = Some(crate::workbench::tasks::git::merge_instructions(&facts));
         }
         references::block(&found, &looked, &self.shared_library)
     }

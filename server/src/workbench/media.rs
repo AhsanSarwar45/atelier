@@ -607,7 +607,7 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
         "explainer" => &[
             "type", "layout", "title", "summary", "nodes", "edges", "steps", "evidence",
         ][..],
-        "task" => &["type", "event", "task"][..],
+        "task" => &["type", "event", "task", "proposal"][..],
         other => {
             return Err(format!(
                 "{other} is not a widget type: use metrics, chart, progress, timeline, table, video, image, image_compare, artifact, explainer or task"
@@ -814,6 +814,33 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
             ]
             .concat();
             one_of(object, "event", &events, true)?;
+            // A proposal's card carries the draft, not a task: it has no
+            // number until the owner says Create task.
+            if object.get("event").and_then(Value::as_str) == Some("propose") {
+                if object.contains_key("task") {
+                    return Err("a propose card carries proposal, not task".into());
+                }
+                let proposal = object
+                    .get("proposal")
+                    .and_then(Value::as_object)
+                    .ok_or("proposal is required and is an object")?;
+                required_string(proposal, "projectId", 400)?;
+                if !proposal.get("id").and_then(Value::as_i64).is_some_and(|n| n >= 1) {
+                    return Err("proposal.id is a whole number from 1 upwards".into());
+                }
+                let kind = required_string(proposal, "type", 40)?;
+                if crate::workbench::tasks::types::find(kind).is_none() {
+                    return Err(format!("proposal.type {kind} is not a task type"));
+                }
+                required_string(proposal, "title", 480)?;
+                return Ok(format!(
+                    "```atelier-widget\n{}\n```\n",
+                    serde_json::to_string(&ordered(value)).unwrap()
+                ));
+            }
+            if object.contains_key("proposal") {
+                return Err("only a propose card carries proposal".into());
+            }
             let task = object
                 .get("task")
                 .and_then(Value::as_object)

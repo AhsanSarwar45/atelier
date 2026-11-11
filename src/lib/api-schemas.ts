@@ -79,3 +79,19 @@ export const TaskDetailSchema = schema(object({
 }));
 
 export const TaskActionResponseSchema = schema(object({ task, widget: nullish(string) }));
+
+/** A proposal (docs/tasks.md, "Proposals"). */
+const proposal = object({
+  projectId: string,
+  id: number,
+  sessionId: string,
+  type: string,
+  title: string,
+  status: string,
+  taskNumber: nullish(number),
+  plan: nullish(object({})),
+});
+
+export const ProposalResponseSchema = schema(object({ proposal }));
+
+export const ProposalAnswerSchema = schema(object({ proposal, task: nullish(task) }));

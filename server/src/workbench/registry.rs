@@ -2631,7 +2631,7 @@ impl WorkbenchRegistry {
 
     /// Whether an attached chat is in the middle of a turn a message would
     /// land in (`status::is_mid_turn`).
-    async fn mid_turn(&self, session_id: &str) -> Result<bool, String> {
+    pub(crate) async fn mid_turn(&self, session_id: &str) -> Result<bool, String> {
         if !self.has_driver(session_id).await {
             return Ok(false);
         }

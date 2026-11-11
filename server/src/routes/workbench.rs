@@ -1175,6 +1175,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/tasks/:project/:number", get(tasks::detail))
         .route("/task-types", get(tasks::kinds))
         .route("/task", post(tasks::act))
+        .route("/task-proposals/:project/:id", get(tasks::proposal))
         // A prompt carries its pictures inline, as base64 inside the JSON, and
         // there is no ceiling on how many a person may attach to one message.
         // Axum otherwise buffers every body under a 2 MiB default nobody here

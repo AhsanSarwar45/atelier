@@ -52,14 +52,19 @@ pub(super) async fn list(
     let everything = matches!(query.all.as_deref(), Some("1" | "true" | "yes"));
     let session = if everything { None } else { query.session.clone() };
     let listed_project = project.clone();
-    let tasks = state
+    let mut tasks = state
         .database()
         .read_tasks(move |store| {
             let rows = tasks::list(store.connection(), Some(&listed_project), session.as_deref())?;
-            Ok(rows.iter().map(|row| tasks::to_json(store, row)).collect::<Vec<_>>())
+            Ok(rows.iter().map(|row| (tasks::to_json(store, row), folder_of(store, row))).collect::<Vec<_>>())
         })
         .await
         .map_err(failed)?;
+    let fallback = project_folder(&state, &project);
+    for (task, folder) in &mut tasks {
+        with_merged(task, folder.as_deref().or(fallback.as_deref())).await;
+    }
+    let tasks: Vec<Value> = tasks.into_iter().map(|(task, _)| task).collect();
     Ok(Json(json!({"projectId": project, "tasks": tasks})))
 }
 
@@ -68,6 +73,7 @@ pub(super) async fn detail(
     State(state): State<WorkbenchState>,
     Path((project, number)): Path<(String, i64)>,
 ) -> Result<Json<Value>, ApiError> {
+    let fallback = project_folder(&state, &project);
     let found = state
         .database()
         .read_tasks(move |store| {
@@ -75,13 +81,60 @@ pub(super) async fn detail(
                 return Ok(None);
             };
             let events = tasks::events(store.connection(), &project, number)?;
-            Ok(Some(json!({"task": tasks::to_json(store, &row), "events": events})))
+            Ok(Some((tasks::to_json(store, &row), folder_of(store, &row), events)))
         })
         .await
         .map_err(failed)?;
+    let (mut task, folder, events) =
+        found.ok_or_else(|| ApiError::not_found(format!("there is no task #{number} in this project")))?;
+    with_merged(&mut task, folder.as_deref().or(fallback.as_deref())).await;
+    Ok(Json(json!({"task": task, "events": events})))
+}
+
+/// GET /api/workbench/task-proposals/:project/:id
+pub(super) async fn proposal(
+    State(state): State<WorkbenchState>,
+    Path((project, id)): Path<(String, i64)>,
+) -> Result<Json<Value>, ApiError> {
+    let found = state
+        .database()
+        .read_tasks(move |store| Ok(tasks::get_proposal(store.connection(), &project, id)?.map(|p| tasks::proposal_json(&p))))
+        .await
+        .map_err(failed)?;
     found
-        .map(Json)
-        .ok_or_else(|| ApiError::not_found(format!("there is no task #{number} in this project")))
+        .map(|proposal| Json(json!({"proposal": proposal})))
+        .ok_or_else(|| ApiError::not_found(format!("there is no proposal {id} in this project")))
+}
+
+/// The folder a task's commits are looked for in: its holding session's.
+fn folder_of(store: &crate::workbench::store::Store, task: &tasks::TaskRow) -> Option<String> {
+    let session = task.session_id.as_ref().or(task.created_by.as_ref())?;
+    store.get_session(session).ok().flatten().map(|session| session.cwd)
+}
+
+/// The project's own folder, for a task whose session is gone.
+fn project_folder(state: &WorkbenchState, project: &str) -> Option<String> {
+    let found = state.projects.as_ref()?.get_project(project).ok()?;
+    Some(found.local_path.filter(|path| !path.is_empty()).unwrap_or(found.path))
+}
+
+/// `merged`: for a done task with commits, whether every one is in the base
+/// branch (`tasks::git::merged`); null when there is nothing to say.
+async fn with_merged(task: &mut Value, folder: Option<&str>) {
+    let commits: Vec<String> = task["result"]["commits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect();
+    let merged = match folder {
+        Some(folder) if task["status"] == "done" && !commits.is_empty() && std::path::Path::new(folder).is_dir() => {
+            tasks::git::merged(std::path::Path::new(folder), &commits).await
+        }
+        _ => None,
+    };
+    task["merged"] = json!(merged);
 }
 
 /// GET /api/workbench/task-types
@@ -186,6 +239,50 @@ pub(super) async fn act(
         ),
         other => return Err(format!("actor must be agent or owner, not \"{other}\"").into()),
     };
+    if request.action == "propose" && request.actor == "agent" {
+        let session = session.unwrap_or_default();
+        let payload = request.payload;
+        let now = chrono::Utc::now().timestamp_millis();
+        let asked_project = project.clone();
+        let outcome = state
+            .database()
+            .write_tasks(move |store| {
+                tasks::propose(store, &asked_project, &session, &payload, now)
+                    .map(|(proposal, summary)| (tasks::proposal_json(&proposal), summary))
+            })
+            .await
+            .map_err(failed)?;
+        let (proposal, summary) = refused_or(outcome)?;
+        let widget = tasks::proposal_widget(&proposal).map_err(failed)?;
+        announce(&state, &proposal["projectId"], &Value::Null);
+        return Ok(Json(json!({"proposal": proposal, "widget": widget, "summary": summary})));
+    }
+    if request.action == "answer_proposal" && request.actor == "owner" {
+        let id = request.number.ok_or_else(|| "number is required: the proposal's id".to_string())?;
+        let choice = request.payload["choice"]
+            .as_str()
+            .ok_or_else(|| format!("choice is required: one of {}", tasks::PROPOSAL_CHOICES.join(", ")))?
+            .to_string();
+        let now = chrono::Utc::now().timestamp_millis();
+        let outcome = state
+            .database()
+            .write_tasks(move |store| {
+                tasks::answer_proposal(store, &project, id, &choice, now).map(|(proposal, task)| {
+                    let prompt = tasks::answer_prompt(&proposal);
+                    (tasks::proposal_json(&proposal), task.map(|task| tasks::to_json(store, &task)), prompt, proposal.session_id)
+                })
+            })
+            .await
+            .map_err(failed)?;
+        let (proposal, task, prompt, session) = refused_or(outcome)?;
+        announce(&state, &proposal["projectId"], task.as_ref().map_or(&Value::Null, |task| &task["number"]));
+        // The agent stopped to wait for this; it hears the answer as its
+        // next message, queued behind a turn still running.
+        let telling = state.clone();
+        let said = prompt.clone();
+        tokio::spawn(async move { tell_chat(&telling, &session, said).await });
+        return Ok(Json(json!({"proposal": proposal, "task": task, "summary": prompt})));
+    }
     let mut payload = request.payload;
     let mut missing = HashSet::new();
     if request.action == "done" && request.actor == "agent" {
@@ -224,15 +321,49 @@ pub(super) async fn act(
         })
         .await
         .map_err(failed)?;
-    let (task, summary) = match outcome {
-        Ok(done) => done,
-        Err(TaskError::Refused(message)) => return Err(message.into()),
-        Err(TaskError::Failed(message)) => return Err(failed(message)),
-    };
+    let (task, summary) = refused_or(outcome)?;
     let widget = tasks::widget(&action, &task).map_err(failed)?;
+    announce(&state, &task["projectId"], &task["number"]);
+    Ok(Json(json!({"task": task, "widget": widget, "summary": summary})))
+}
+
+fn refused_or<T>(outcome: Result<T, TaskError>) -> Result<T, ApiError> {
+    match outcome {
+        Ok(done) => Ok(done),
+        Err(TaskError::Refused(message)) => Err(message.into()),
+        Err(TaskError::Failed(message)) => Err(failed(message)),
+    }
+}
+
+/// Tell every screen the project's tasks changed.
+fn announce(state: &WorkbenchState, project: &Value, number: &Value) {
     let _ = state.watch_polls.send(json!({
         "type": "tasks.changed", "kind": "tasks.changed",
-        "projectId": task["projectId"], "number": task["number"],
+        "projectId": project, "number": number,
     }));
-    Ok(Json(json!({"task": task, "widget": widget, "summary": summary})))
+}
+
+/// Send a line into a chat as the owner's next message: now when the chat is
+/// between turns (waking it if it sleeps), held for the end of the turn when
+/// it is in one — the same queue a message the owner holds waits in. A send
+/// the chat refuses is held instead, so the answer is never lost.
+async fn tell_chat(state: &WorkbenchState, session: &str, text: String) {
+    use crate::workbench::protocol::{Command, CommandKind};
+    let command = |kind| Command {
+        kind,
+        fields: serde_json::Map::from_iter([
+            ("sessionId".into(), json!(session)),
+            ("text".into(), json!(text)),
+            ("images".into(), json!([])),
+        ]),
+    };
+    let busy = state.registry.mid_turn(session).await.unwrap_or(false);
+    let first = if busy { CommandKind::PromptHold } else { CommandKind::PromptSend };
+    let Err(error) = state.registry.execute(&command(first)).await else { return };
+    tracing::warn!(chat = session, %error, "a proposal's answer could not be sent to its chat");
+    if first == CommandKind::PromptSend {
+        if let Err(error) = state.registry.execute(&command(CommandKind::PromptHold)).await {
+            tracing::warn!(chat = session, %error, "a proposal's answer could not be held for its chat either");
+        }
+    }
 }

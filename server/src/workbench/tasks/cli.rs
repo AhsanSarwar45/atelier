@@ -14,7 +14,8 @@ use std::collections::BTreeMap;
 pub const USAGE: &str = "\
 usage: atelier task <command>
   types [TYPE]                 list types, or print one type's create and done payloads
-  create                       {type, title, why, plan} on stdin or --input FILE
+  propose                      {type, title, why, plan} on stdin or --input FILE: ask the owner first
+  create                       {type, title, why, plan}; only when the owner's message says @task
   start N
   block N --cause TEXT --needs TEXT
   unblock N
@@ -214,11 +215,11 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             Ok(0)
         }
         "types" => print_types(rest),
-        "create" => {
+        "create" | "propose" => {
             only_flags(rest, &["--input"])?;
             let session = session()?;
             let payload = payload(rest, "{type, title, why, plan}")?;
-            post(json!({"action": "create", "actor": "agent", "session": session, "payload": payload})).await
+            post(json!({"action": command, "actor": "agent", "session": session, "payload": payload})).await
         }
         "start" | "unblock" | "take" => {
             let number = number(rest.first(), command)?;

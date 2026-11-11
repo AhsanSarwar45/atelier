@@ -8,6 +8,7 @@
 //! uploaded — and hand it in.
 
 pub mod cli;
+pub mod git;
 pub mod types;
 
 use super::store::Store;
@@ -51,10 +52,27 @@ CREATE TABLE IF NOT EXISTS task_event (
   payload TEXT,
   PRIMARY KEY (project_id, number, seq)
 );
+CREATE TABLE IF NOT EXISTS task_proposal (
+  project_id TEXT NOT NULL,
+  id INTEGER NOT NULL,
+  session_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  why TEXT NOT NULL,
+  plan TEXT NOT NULL,
+  status TEXT NOT NULL,
+  task_number INTEGER,
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER,
+  PRIMARY KEY (project_id, id)
+);
+CREATE INDEX IF NOT EXISTS task_proposal_by_session ON task_proposal(session_id, status);
 "#;
 
-pub const AGENT_ACTIONS: &[&str] = &["create", "start", "block", "unblock", "amend", "done", "cancel", "take"];
-pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend", "cancel", "release"];
+pub const AGENT_ACTIONS: &[&str] = &["create", "propose", "start", "block", "unblock", "amend", "done", "cancel", "take"];
+pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend", "cancel", "release", "answer_proposal"];
+/// The owner's three answers to a proposal (`propose`).
+pub const PROPOSAL_CHOICES: &[&str] = &["create", "just_do_it", "cancel"];
 pub const STATUSES: &[&str] = &["todo", "in_progress", "blocked", "review", "done", "cancelled"];
 
 /// When a session is deleted its open tasks become unassigned, each with a
@@ -76,6 +94,12 @@ pub fn release_session(connection: &Connection, session_id: &str, now: i64) -> r
         append_event(connection, project, *number, now, "released", Some(session_id), "owner",
             &json!({"from": session_id, "reason": "session deleted"}))?;
     }
+    // A proposal waits on the chat that made it; with the chat gone nobody
+    // would hear the owner's answer.
+    connection.execute(
+        "UPDATE task_proposal SET status = 'cancelled', decided_at = ?2 WHERE session_id = ?1 AND status = 'pending'",
+        params![session_id, now],
+    )?;
     Ok(open)
 }
 
@@ -406,6 +430,284 @@ fn check_done(task: &TaskRow, request: &Request) -> Result<(Value, Vec<String>),
     Ok((stored, unmet))
 }
 
+/// A checked `{type, title, why, plan}`: what `create` and `propose` take.
+pub struct Draft {
+    pub kind: String,
+    pub title: String,
+    pub why: String,
+    pub plan: Value,
+}
+
+fn check_draft(payload: &Value, action: &str) -> Result<Draft, TaskError> {
+    let object = payload.as_object().ok_or_else(|| {
+        TaskError::Refused(format!("the {action} payload must be an object: {{type, title, why, plan}}"))
+    })?;
+    if let Some(unknown) = object.keys().find(|key| !["type", "title", "why", "plan"].contains(&key.as_str())) {
+        return refuse(format!("{unknown} is not a {action} field (allowed: type, title, why, plan)"));
+    }
+    let kind = payload_text(payload, "type", &format!("one of {}", types::names()))?;
+    if types::find(kind).is_none() {
+        return refuse(format!("type \"{kind}\" is not a task type (types: {})", types::names()));
+    }
+    let title = payload_text(payload, "title", "a short title, up to 120 characters")?;
+    types::check_title(title, "title")?;
+    let why = payload_text(payload, "why", "one line, up to 300 characters")?;
+    types::check_why(why, "why")?;
+    let plan = object.get("plan").filter(|v| !v.is_null()).ok_or_else(|| {
+        TaskError::Refused(format!(
+            "plan is required: the {kind} plan is {} (see `atelier task types {kind}`)",
+            types::find(kind).unwrap().plan
+        ))
+    })?;
+    types::check_plan(kind, plan)?;
+    Ok(Draft { kind: kind.to_string(), title: title.trim().to_string(), why: why.trim().to_string(), plan: plan.clone() })
+}
+
+fn insert_task(
+    connection: &Connection,
+    project: &str,
+    session: Option<&str>,
+    draft: &Draft,
+    now: i64,
+    actor: &str,
+    mut payload: Value,
+) -> Result<TaskRow, TaskError> {
+    let number: i64 = connection.query_row(
+        "SELECT COALESCE(MAX(number), 0) + 1 FROM task WHERE project_id = ?1",
+        [project],
+        |row| row.get(0),
+    )?;
+    let task = TaskRow {
+        project_id: project.to_string(),
+        number,
+        kind: draft.kind.clone(),
+        title: draft.title.clone(),
+        why: draft.why.clone(),
+        status: "todo".into(),
+        session_id: session.map(str::to_string),
+        created_by: session.map(str::to_string),
+        plan: draft.plan.clone(),
+        result: None,
+        shortfalls: false,
+        blocked: None,
+        cancel_reason: None,
+        pending_amend: None,
+        created_at: now,
+        updated_at: now,
+        started_at: None,
+        finished_at: None,
+    };
+    save(connection, &task)?;
+    payload["type"] = json!(task.kind);
+    payload["title"] = json!(task.title);
+    append_event(connection, project, number, now, "created", session, actor, &payload)?;
+    Ok(task)
+}
+
+/// Whether the owner's latest message in this chat asks for a task with a
+/// bare `@task`. Only then may an agent create one; otherwise it proposes.
+pub fn owner_asked_for_a_task(connection: &Connection, session: &str) -> rusqlite::Result<bool> {
+    let latest: Option<String> = connection
+        .query_row(
+            "SELECT text FROM message WHERE session_id = ?1 AND role = 'user'
+              ORDER BY at DESC, rowid DESC LIMIT 1",
+            [session],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(latest.is_some_and(|text| {
+        let words = super::metadata::persons_words(&text);
+        super::references::find(&words)
+            .iter()
+            .any(|found| found.kind == super::references::Kind::Task && found.id.is_empty() && !found.run)
+    }))
+}
+
+/* ------------------------------------------------------------------ proposals */
+
+/// A task an agent asked the owner about (`atelier task propose`). It is not a
+/// task: it has no number and is in no list until the owner says Create task.
+#[derive(Clone, Debug)]
+pub struct ProposalRow {
+    pub project_id: String,
+    pub id: i64,
+    pub session_id: String,
+    pub kind: String,
+    pub title: String,
+    pub why: String,
+    pub plan: Value,
+    /// `pending`, then `created`, `just_do_it` or `cancelled`.
+    pub status: String,
+    pub task_number: Option<i64>,
+    pub created_at: i64,
+    pub decided_at: Option<i64>,
+}
+
+const PROPOSAL_COLUMNS: &str =
+    "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at";
+
+fn proposal_row(row: &Row) -> rusqlite::Result<ProposalRow> {
+    Ok(ProposalRow {
+        project_id: row.get(0)?,
+        id: row.get(1)?,
+        session_id: row.get(2)?,
+        kind: row.get(3)?,
+        title: row.get(4)?,
+        why: row.get(5)?,
+        plan: json_column(row, 6)?.unwrap_or(Value::Null),
+        status: row.get(7)?,
+        task_number: row.get(8)?,
+        created_at: row.get(9)?,
+        decided_at: row.get(10)?,
+    })
+}
+
+pub fn get_proposal(connection: &Connection, project: &str, id: i64) -> rusqlite::Result<Option<ProposalRow>> {
+    connection
+        .query_row(
+            &format!("SELECT {PROPOSAL_COLUMNS} FROM task_proposal WHERE project_id = ?1 AND id = ?2"),
+            params![project, id],
+            proposal_row,
+        )
+        .optional()
+}
+
+/// A chat's proposals still waiting for the owner, oldest first.
+pub fn pending_proposals(connection: &Connection, session: &str) -> rusqlite::Result<Vec<ProposalRow>> {
+    let mut statement = connection.prepare(&format!(
+        "SELECT {PROPOSAL_COLUMNS} FROM task_proposal WHERE session_id = ?1 AND status = 'pending' ORDER BY id"
+    ))?;
+    let rows = statement.query_map([session], proposal_row)?.collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+pub fn proposal_json(proposal: &ProposalRow) -> Value {
+    json!({
+        "projectId": proposal.project_id, "id": proposal.id, "sessionId": proposal.session_id,
+        "type": proposal.kind, "title": proposal.title, "why": proposal.why, "plan": proposal.plan,
+        "status": proposal.status, "taskNumber": proposal.task_number,
+        "createdAt": proposal.created_at, "decidedAt": proposal.decided_at,
+    })
+}
+
+/// The card `atelier task propose` prints: the draft and the owner's three buttons.
+pub fn proposal_widget(proposal: &Value) -> Result<String, String> {
+    super::media::widget_block(&json!({"type": "task", "event": "propose", "proposal": proposal}))
+}
+
+/// Store a proposal. The same checks as `create`; nothing else changes.
+pub fn propose(store: &Store, project: &str, session: &str, payload: &Value, now: i64) -> Result<(ProposalRow, String), TaskError> {
+    let draft = check_draft(payload, "propose")?;
+    let connection = store.connection();
+    let id: i64 = connection.query_row(
+        "SELECT COALESCE(MAX(id), 0) + 1 FROM task_proposal WHERE project_id = ?1",
+        [project],
+        |row| row.get(0),
+    )?;
+    let proposal = ProposalRow {
+        project_id: project.to_string(),
+        id,
+        session_id: session.to_string(),
+        kind: draft.kind,
+        title: draft.title,
+        why: draft.why,
+        plan: draft.plan,
+        status: "pending".into(),
+        task_number: None,
+        created_at: now,
+        decided_at: None,
+    };
+    connection.execute(
+        &format!("INSERT INTO task_proposal ({PROPOSAL_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
+        params![
+            proposal.project_id, proposal.id, proposal.session_id, proposal.kind, proposal.title,
+            proposal.why, proposal.plan.to_string(), proposal.status, proposal.task_number,
+            proposal.created_at, proposal.decided_at,
+        ],
+    )?;
+    let summary = "Proposed a task; the owner answers on the card with Create task, Just do it or Cancel. \
+        Stop here and end your turn without starting the work. The owner's answer arrives as your next message."
+        .to_string();
+    Ok((proposal, summary))
+}
+
+/// The owner's answer to a proposal. `create` makes it a todo task in the
+/// chat that proposed it; `just_do_it` and `cancel` discard it.
+pub fn answer_proposal(
+    store: &Store,
+    project: &str,
+    id: i64,
+    choice: &str,
+    now: i64,
+) -> Result<(ProposalRow, Option<TaskRow>), TaskError> {
+    if !PROPOSAL_CHOICES.contains(&choice) {
+        return refuse(format!("choice must be one of {}, not \"{choice}\"", PROPOSAL_CHOICES.join(", ")));
+    }
+    let connection = store.connection();
+    let transaction = connection.unchecked_transaction()?;
+    let mut proposal = get_proposal(&transaction, project, id)?
+        .ok_or_else(|| TaskError::Refused(format!("there is no proposal {id} in this project")))?;
+    if proposal.status != "pending" {
+        return refuse(format!("this proposal is already answered ({})", proposal.status.replace('_', " ")));
+    }
+    let task = if choice == "create" {
+        let draft = Draft {
+            kind: proposal.kind.clone(),
+            title: proposal.title.clone(),
+            why: proposal.why.clone(),
+            plan: proposal.plan.clone(),
+        };
+        let task = insert_task(&transaction, project, Some(&proposal.session_id), &draft, now, "owner",
+            json!({"proposal": id}))?;
+        proposal.task_number = Some(task.number);
+        proposal.status = "created".into();
+        Some(task)
+    } else {
+        proposal.status = if choice == "cancel" { "cancelled" } else { "just_do_it" }.into();
+        None
+    };
+    proposal.decided_at = Some(now);
+    transaction.execute(
+        "UPDATE task_proposal SET status = ?3, task_number = ?4, decided_at = ?5 WHERE project_id = ?1 AND id = ?2",
+        params![project, id, proposal.status, proposal.task_number, proposal.decided_at],
+    )?;
+    transaction.commit()?;
+    Ok((proposal, task))
+}
+
+/// What the proposing chat's agent is told of the owner's answer.
+pub fn answer_prompt(proposal: &ProposalRow) -> String {
+    match (proposal.status.as_str(), proposal.task_number) {
+        ("created", Some(number)) => format!(
+            "Owner chose Create task for proposal \"{}\": task #{number} created. Start it with `atelier task start {number}` and do the work.",
+            proposal.title
+        ),
+        ("just_do_it", _) => format!(
+            "Owner chose Just do it for proposal \"{}\": do the work without a task.",
+            proposal.title
+        ),
+        _ => format!("Owner chose Cancel for proposal \"{}\": don't do this work.", proposal.title),
+    }
+}
+
+/// What a chat is told of its open tasks when its agent is connected: one line
+/// each, or nothing when there are none.
+pub fn open_section(connection: &Connection, session: &str) -> rusqlite::Result<String> {
+    let mut lines = Vec::new();
+    for task in list(connection, None, Some(session))?.iter().rev() {
+        if ["todo", "in_progress", "blocked", "review"].contains(&task.status.as_str()) {
+            lines.push(format!("#{} [{}] {}: {}", task.number, task.status, task.kind, task.title));
+        }
+    }
+    for proposal in pending_proposals(connection, session)? {
+        lines.push(format!("proposal [awaiting the owner's answer] {}: {}", proposal.kind, proposal.title));
+    }
+    if lines.is_empty() {
+        return Ok(String::new());
+    }
+    Ok(format!("Your open tasks in this chat:\n{}", lines.join("\n")))
+}
+
 /// Apply one action. Runs inside a transaction; nothing is written on refusal.
 pub fn apply(store: &Store, request: &Request) -> Result<Outcome, TaskError> {
     let connection = store.connection();
@@ -440,60 +742,24 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
     let actor = request.actor.as_str();
 
     if action == "create" {
-        let payload = request.payload.as_object().ok_or_else(|| {
-            TaskError::Refused("the create payload must be an object: {type, title, why, plan}".into())
-        })?;
-        if let Some(unknown) = payload.keys().find(|key| !["type", "title", "why", "plan"].contains(&key.as_str())) {
-            return refuse(format!("{unknown} is not a create field (allowed: type, title, why, plan)"));
+        let draft = check_draft(&request.payload, "create")?;
+        if !owner && !owner_asked_for_a_task(connection, caller.unwrap())? {
+            return refuse(
+                "the owner has not asked for a task: their latest message has no @task. Do not create one yourself. \
+                 Run `atelier task propose` with this same payload and stop; the owner answers Create task, Just do it or \
+                 Cancel, and the answer comes back to you as a message",
+            );
         }
-        let kind = payload_text(&request.payload, "type", &format!("one of {}", types::names()))?;
-        if types::find(kind).is_none() {
-            return refuse(format!("type \"{kind}\" is not a task type (types: {})", types::names()));
-        }
-        let title = payload_text(&request.payload, "title", "a short title, up to 120 characters")?;
-        types::check_title(title, "title")?;
-        let why = payload_text(&request.payload, "why", "one line, up to 300 characters")?;
-        types::check_why(why, "why")?;
-        let plan = payload.get("plan").filter(|v| !v.is_null()).ok_or_else(|| {
-            TaskError::Refused(format!(
-                "plan is required: the {kind} plan is {} (see `atelier task types {kind}`)",
-                types::find(kind).unwrap().plan
-            ))
-        })?;
-        types::check_plan(kind, plan)?;
-        let number: i64 = connection.query_row(
-            "SELECT COALESCE(MAX(number), 0) + 1 FROM task WHERE project_id = ?1",
-            [&request.project],
-            |row| row.get(0),
-        )?;
-        let task = TaskRow {
-            project_id: request.project.clone(),
-            number,
-            kind: kind.to_string(),
-            title: title.trim().to_string(),
-            why: why.trim().to_string(),
-            status: "todo".into(),
-            session_id: caller.map(str::to_string),
-            created_by: caller.map(str::to_string),
-            plan: plan.clone(),
-            result: None,
-            shortfalls: false,
-            blocked: None,
-            cancel_reason: None,
-            pending_amend: None,
-            created_at: now,
-            updated_at: now,
-            started_at: None,
-            finished_at: None,
-        };
-        save(connection, &task)?;
-        append_event(connection, &task.project_id, number, now, "created", caller, actor,
-            &json!({"type": task.kind, "title": task.title}))?;
+        let task = insert_task(connection, &request.project, caller, &draft, now, actor, json!({}))?;
+        let number = task.number;
         let summary = format!(
             "Created #{number} ({}): {} — todo. Start it with `atelier task start {number}`.",
             task.kind, task.title
         );
         return Ok(Outcome { task, summary });
+    }
+    if action == "propose" || action == "answer_proposal" {
+        return refuse(format!("{action} is answered by its own route, not as a task change"));
     }
 
     let number = request
@@ -736,7 +1002,21 @@ mod tests {
         }
     }
 
+    /// The owner sends a message in a chat.
+    fn owner_says(store: &Store, session: &str, text: &str) {
+        let count: i64 = store.connection().query_row("SELECT COUNT(*) FROM message", [], |row| row.get(0)).unwrap();
+        let id = format!("m{count}");
+        store.open_message(session, &id, "user", &format!("2026-01-01T00:{:02}:{:02}Z", count / 60, count % 60)).unwrap();
+        store.grow_message(session, &id, text).unwrap();
+    }
+
+    fn draft(kind: &str) -> Value {
+        let plan = types::example(kind).unwrap()["create"]["plan"].clone();
+        json!({"type": kind, "title": "T", "why": "W", "plan": plan})
+    }
+
     fn create(store: &Store, session: &str, kind: &str) -> i64 {
+        owner_says(store, session, "@task do it");
         let plan = types::example(kind).unwrap()["create"]["plan"].clone();
         agent(store, session, "create", None, json!({"type": kind, "title": "T", "why": "W", "plan": plan}))
             .unwrap()
@@ -897,6 +1177,95 @@ mod tests {
         assert!(refused(agent(&store, "s1", "create", None, json!({"type": "chore", "title": "t", "why": "w"}))).starts_with("plan is required"));
         assert_eq!(refused(agent(&store, "s1", "create", None, json!({"type": "chore", "title": "t", "why": "w", "plan": {"steps": [{"id": "a"}]}}))),
             "plan.steps[0] (id \"a\"): text is required (text)");
+    }
+
+    #[test]
+    fn an_agent_creates_a_task_only_when_the_owners_latest_message_says_task() {
+        let (_d, store) = store();
+        let message = refused(agent(&store, "s1", "create", None, draft("chore")));
+        assert!(message.contains("atelier task propose") && message.contains("@task"), "{message}");
+        owner_says(&store, "s1", "please fix the login, it loops");
+        assert!(refused(agent(&store, "s1", "create", None, draft("chore"))).contains("atelier task propose"));
+        owner_says(&store, "s1", "write `@task` in code, it is not a request");
+        assert!(refused(agent(&store, "s1", "create", None, draft("chore"))).contains("atelier task propose"));
+        owner_says(&store, "s1", "@task fix the login loop");
+        agent(&store, "s1", "create", None, draft("chore")).unwrap();
+        // Only the latest message counts, and only in this chat.
+        assert!(refused(agent(&store, "s2", "create", None, draft("chore"))).contains("atelier task propose"));
+        owner_says(&store, "s1", "thanks, now the other thing");
+        assert!(refused(agent(&store, "s1", "create", None, draft("chore"))).contains("atelier task propose"));
+        // What Atelier added after the owner's words is not the owner asking.
+        owner_says(&store, "s1", &format!("hello{}", crate::workbench::metadata::added_by_atelier(
+            crate::workbench::metadata::REFERENCES, "@task — The owner asks you to create a task")));
+        assert!(refused(agent(&store, "s1", "create", None, draft("chore"))).contains("atelier task propose"));
+    }
+
+    #[test]
+    fn a_proposal_waits_for_the_owner_and_create_makes_it_a_task_in_that_chat() {
+        let (_d, store) = store();
+        assert!(refused_proposal(propose(&store, "p", "s1", &json!({"type": "epic"}), 1)).contains("not a task type"));
+        let (proposal, summary) = propose(&store, "p", "s1", &draft("feature"), 1).unwrap();
+        assert_eq!((proposal.id, proposal.status.as_str()), (1, "pending"));
+        assert!(summary.contains("Stop here"), "{summary}");
+        assert!(list(store.connection(), Some("p"), None).unwrap().is_empty(), "a proposal is not a task");
+        let block = proposal_widget(&proposal_json(&proposal)).unwrap();
+        assert_eq!(super::super::media::widget_specs(&block)[0]["proposal"]["id"], 1);
+
+        let (answered, task) = answer_proposal(&store, "p", 1, "create", 2).unwrap();
+        let task = task.unwrap();
+        assert_eq!((task.number, task.status.as_str(), task.session_id.as_deref()), (1, "todo", Some("s1")));
+        assert_eq!((answered.status.as_str(), answered.task_number), ("created", Some(1)));
+        assert!(answer_prompt(&answered).starts_with("Owner chose Create task for proposal \"T\": task #1 created"));
+        assert_eq!(events(store.connection(), "p", 1).unwrap()[0]["actor"], "owner");
+        assert!(refused_proposal(answer_proposal(&store, "p", 1, "cancel", 3)).contains("already answered"));
+        // The new task is the chat's like any other.
+        agent(&store, "s1", "start", Some(1), json!({})).unwrap();
+    }
+
+    #[test]
+    fn just_do_it_and_cancel_discard_a_proposal() {
+        let (_d, store) = store();
+        propose(&store, "p", "s1", &draft("chore"), 1).unwrap();
+        propose(&store, "p", "s1", &draft("chore"), 1).unwrap();
+        assert!(refused_proposal(answer_proposal(&store, "p", 1, "maybe", 2)).contains("choice must be one of"));
+        let (one, task) = answer_proposal(&store, "p", 1, "just_do_it", 2).unwrap();
+        assert!(task.is_none());
+        assert_eq!(answer_prompt(&one), "Owner chose Just do it for proposal \"T\": do the work without a task.");
+        let (two, task) = answer_proposal(&store, "p", 2, "cancel", 2).unwrap();
+        assert!(task.is_none());
+        assert_eq!(answer_prompt(&two), "Owner chose Cancel for proposal \"T\": don't do this work.");
+        assert!(list(store.connection(), Some("p"), None).unwrap().is_empty());
+        assert!(pending_proposals(store.connection(), "s1").unwrap().is_empty());
+        assert!(refused_proposal(answer_proposal(&store, "p", 9, "create", 2)).contains("no proposal 9"));
+    }
+
+    #[test]
+    fn a_reconnected_chat_is_told_its_open_tasks_and_pending_proposals() {
+        let (_d, store) = store();
+        assert_eq!(open_section(store.connection(), "s1").unwrap(), "");
+        let one = create(&store, "s1", "chore");
+        let two = create(&store, "s1", "bug");
+        let three = create(&store, "s1", "chore");
+        create(&store, "s2", "chore");
+        agent(&store, "s1", "start", Some(two), json!({})).unwrap();
+        agent(&store, "s1", "cancel", Some(three), json!({"reason": "r"})).unwrap();
+        propose(&store, "p", "s1", &draft("docs"), 1).unwrap();
+        let section = open_section(store.connection(), "s1").unwrap();
+        assert_eq!(
+            section,
+            format!("Your open tasks in this chat:\n#{one} [todo] chore: T\n#{two} [in_progress] bug: T\nproposal [awaiting the owner's answer] docs: T")
+        );
+        let guidance = crate::workbench::session_policy::with_open_tasks("RULES".into(), &section);
+        assert!(guidance.starts_with("RULES\n\nYour open tasks in this chat:"), "{guidance}");
+        assert_eq!(crate::workbench::session_policy::with_open_tasks("RULES".into(), ""), "RULES");
+    }
+
+    fn refused_proposal<T>(result: Result<T, TaskError>) -> String {
+        match result {
+            Err(TaskError::Refused(message)) => message,
+            Err(TaskError::Failed(message)) => panic!("failed, not refused: {message}"),
+            Ok(_) => panic!("accepted"),
+        }
     }
 
     #[test]

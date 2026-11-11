@@ -95,6 +95,37 @@ export interface Task {
   updatedAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+  /**
+   * For a done task with commits: whether every commit is in the base branch
+   * (docs/tasks.md, "Merging"). Null when there is nothing to say; absent on
+   * a card printed by the CLI.
+   */
+  merged?: boolean | null;
+}
+
+/** Where a proposal stands: waiting, or the owner's answer. */
+export type ProposalStatus = 'pending' | 'created' | 'just_do_it' | 'cancelled';
+
+/** The owner's three answers to a proposal. */
+export type ProposalChoice = 'create' | 'just_do_it' | 'cancel';
+
+/**
+ * A task an agent asked the owner about (`atelier task propose`). Not a task:
+ * it has no number until the owner says Create task.
+ */
+export interface TaskProposal {
+  projectId: string;
+  id: number;
+  sessionId: string;
+  type: TaskType | string;
+  title: string;
+  why: string;
+  plan: Record<string, unknown>;
+  status: ProposalStatus;
+  /** The task it became, once the owner said Create task. */
+  taskNumber: number | null;
+  createdAt: number;
+  decidedAt: number | null;
 }
 
 export type TaskEventKind =
@@ -114,8 +145,13 @@ export interface TaskTypeInfo { name: string; code: boolean; review: boolean; pl
 
 export type OwnerAction = 'approve' | 'reopen' | 'approve_amend' | 'reject_amend' | 'cancel' | 'release';
 
-/** The `task` chat widget: the card printed by every `atelier task` change. */
-export interface TaskWidget { type: 'task'; title?: string; event: string; task: Task }
+/**
+ * The `task` chat widget: the card printed by every `atelier task` change, or
+ * by `atelier task propose` the draft with the owner's three buttons.
+ */
+export type TaskWidget =
+  | { type: 'task'; title?: string; event: string; task: Task; proposal?: undefined }
+  | { type: 'task'; title?: string; event: 'propose'; proposal: TaskProposal; task?: undefined };
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   todo: 'Todo',

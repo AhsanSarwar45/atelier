@@ -5,9 +5,9 @@
 
 import { apiUrl } from '@/lib/api-base';
 import { onFolder, onRepository } from '@/workbench/live-wire';
-import { TaskActionResponseSchema, TaskDetailSchema, TasksResponseSchema } from '@/lib/api-schemas';
+import { ProposalAnswerSchema, ProposalResponseSchema, TaskActionResponseSchema, TaskDetailSchema, TasksResponseSchema } from '@/lib/api-schemas';
 import type { Project, Tag } from '@/types';
-import type { OwnerAction, Task, TaskEvent, TaskTypeInfo } from '@/workbench/tasks/types';
+import type { OwnerAction, ProposalChoice, Task, TaskEvent, TaskProposal, TaskTypeInfo } from '@/workbench/tasks/types';
 
 /**
  * Input for creating a new project
@@ -1638,5 +1638,20 @@ export const tasks = {
       body: JSON.stringify({ action, actor: 'owner', project: projectId, number, ...(payload ? { payload } : {}) }),
     });
     return TaskActionResponseSchema.parse(answer);
+  },
+  /** A proposal as it stands now. */
+  proposal: async (projectId: string, id: number) => {
+    const answer = await fetchApi<{ proposal: TaskProposal }>(
+      `/api/workbench/task-proposals/${encodeURIComponent(projectId)}/${id}`,
+    );
+    return ProposalResponseSchema.parse(answer).proposal;
+  },
+  /** The owner's answer to a proposal; the chat that made it is told. */
+  answerProposal: async (projectId: string, id: number, choice: ProposalChoice) => {
+    const answer = await fetchApi<{ proposal: TaskProposal; task: Task | null; summary?: string }>('/api/workbench/task', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'answer_proposal', actor: 'owner', project: projectId, number: id, payload: { choice } }),
+    });
+    return ProposalAnswerSchema.parse(answer);
   },
 };

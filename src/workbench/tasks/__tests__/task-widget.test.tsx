@@ -181,7 +181,7 @@ describe('task card rendering', () => {
   });
 
   it('draws only the plan before the task is finished', () => {
-    render(<ChatWidgetView widget={card({ type: 'feature', plan: feature.task.plan })} />);
+    render(<ChatWidgetView widget={card({ type: 'feature', plan: feature.task!.plan })} />);
     expect(screen.getByText('Exports markdown')).toBeVisible();
     expect(screen.queryByTestId('task-check')).toBeNull();
   });

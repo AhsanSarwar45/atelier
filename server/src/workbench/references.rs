@@ -20,6 +20,10 @@
 //!   number, type, status, title, why, holder and plan. A bare `@task` is the
 //!   owner asking for a new task from the message, and its entry says so
 //!   (docs/tasks.md). It is found with an empty id.
+//! - a merge: a bare `@merge` is the owner asking the agent to merge the
+//!   chat's branch into the base branch. Its entry carries what git says about
+//!   the chat's folder (`tasks::git::merge_instructions`). Like a bare `@task`
+//!   it has an empty id, and `@merge:…` is nothing.
 //!
 //! The grammar is the composer's (`src/workbench/references.ts`), and both
 //! sides are held to one list of cases (`atelier-references.cases.json`).
@@ -39,6 +43,7 @@ pub enum Kind {
     Skill,
     Diff,
     Task,
+    Merge,
 }
 
 impl Kind {
@@ -48,6 +53,7 @@ impl Kind {
             Kind::Skill => "skill",
             Kind::Diff => "diff",
             Kind::Task => "task",
+            Kind::Merge => "merge",
         }
     }
 }
@@ -234,6 +240,10 @@ fn reference_at(text: &str, at: usize) -> Option<Found> {
     if rest.starts_with("task") && rest[4..].chars().next().is_none_or(char::is_whitespace) {
         return Some(Found { kind: Kind::Task, id: String::new(), start: at, end: at + 5, run: false });
     }
+    // A bare `@merge`: the owner asking the agent to merge this branch.
+    if rest.starts_with("merge") && rest[5..].chars().next().is_none_or(char::is_whitespace) {
+        return Some(Found { kind: Kind::Merge, id: String::new(), start: at, end: at + 6, run: false });
+    }
     None
 }
 
@@ -333,6 +343,9 @@ pub struct Looked {
     /// Each task as the HTTP API has it (`tasks::to_json`); None when the
     /// project has no such task.
     pub tasks: Vec<(String, Option<serde_json::Value>)>,
+    /// What a bare `@merge` tells the agent, worked out from git in the
+    /// chat's folder (`tasks::git::merge_instructions`).
+    pub merge: Option<String>,
 }
 
 /// How much of a task's long text is carried, so a task with an essay in it
@@ -495,6 +508,9 @@ pub fn block(found: &[Found], looked: &Looked, library: &Snapshot) -> Option<Str
                 &reference.id,
                 looked.tasks.iter().find(|(id, _)| *id == reference.id).and_then(|(_, t)| t.as_ref()),
             ),
+            Kind::Merge => looked.merge.clone().unwrap_or_else(|| {
+                "@merge — The owner asks you to merge this chat's branch into the base branch, but Atelier could not read git here. Tell the owner so.".to_string()
+            }),
         });
     }
     if entries.is_empty() {
@@ -618,6 +634,19 @@ mod tests {
         let block = block(&found, &looked, &Snapshot::default()).unwrap();
         assert!(block.contains("-one\n+uno") && block.contains("+more"), "{block}");
         assert!(block.contains("there is no commit abc1234's change to gone.ts"), "{block}");
+    }
+
+    #[test]
+    fn a_bare_merge_carries_what_git_said_about_the_chats_folder() {
+        let found = find("done, @merge please");
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].kind, found[0].id.as_str(), found[0].start, found[0].end), (Kind::Merge, "", 6, 12));
+        let looked = Looked { merge: Some("@merge — base branch: main".into()), ..Default::default() };
+        let block = block(&found, &looked, &Snapshot::default()).unwrap();
+        assert!(block.contains("@merge — base branch: main"), "{block}");
+        let unknown = super::block(&found, &Looked::default(), &Snapshot::default()).unwrap();
+        assert!(unknown.contains("could not read git"), "{unknown}");
+        assert!(find("@merged @merge:main").is_empty());
     }
 
     #[test]

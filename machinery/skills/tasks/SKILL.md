@@ -16,11 +16,15 @@ a task.
 - Any other change to files needs a task: anything that edits two or more
   files, or one file in more than one place for different reasons. If the
   owner asks for such work and no task in this chat covers it, stop before
-  editing anything and ask with a choice: **Create task**, **Just do it**, or
-  **Cancel**. Create the task only after **Create task**; after **Just do
-  it**, do the work without one.
+  editing anything: draft the task, run `atelier task propose` with it, and
+  stop. Continue when the owner's choice arrives as a message: **Create
+  task** (the task is made for you; start it), **Just do it** (do the work
+  without a task) or **Cancel** (don't do it).
 - `@task TEXT` from the owner means: pick the type, draft the plan, and run
-  `atelier task create`. Do not ask again.
+  `atelier task create`. Do not ask again. `create` is refused unless the
+  owner's latest message has `@task`; otherwise propose.
+- `@merge` from the owner comes with what git says about this folder and the
+  steps to merge its branch into the base branch. Follow them exactly.
 - Never create a task on your own to put work off. Suggest it as a follow-up
   on a result instead.
 
@@ -33,6 +37,7 @@ and result shape of a type, and copy it.
 atelier task list [--all]
 atelier task show N
 atelier task create            <<< '{"type":…,"title":…,"why":…,"plan":{…}}'
+atelier task propose           <<< '{"type":…,"title":…,"why":…,"plan":{…}}'
 atelier task start N
 atelier task block N --cause TEXT --needs TEXT
 atelier task unblock N

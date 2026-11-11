@@ -7,9 +7,9 @@
  * The same card is the `task` chat widget and the body of the Tasks tab's
  * detail panel.
  */
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
-import { AlertTriangle, Ban, Check, Circle, CircleDot, Pause, Plus } from 'lucide-react';
+import { AlertTriangle, Ban, Check, Circle, CircleDot, GitMerge, Pause, Plus } from 'lucide-react';
 
 import { MarkdownBody } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { mediaUrl, presentationAssetUrl } from '@/workbench/attachment-store';
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { useLiveSessions } from '@/workbench/live';
+import { onWorkbench } from '@/workbench/live-wire';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import type { LookableImage, SessionState } from '@/workbench/protocol';
 import { useComposerPrefill } from '@/workbench/tasks/composer-prefill';
@@ -36,11 +37,13 @@ import {
   type OptimizationOutcome,
   type OptimizationTarget,
   type OwnerAction,
+  type ProposalChoice,
   type ReviewFinding,
   type Task,
+  type TaskProposal,
   type TaskStatus,
 } from '@/workbench/tasks/types';
-import { useLiveTask } from '@/workbench/tasks/use-tasks';
+import { tasksChangedFor, useLiveTask } from '@/workbench/tasks/use-tasks';
 
 /* ------------------------------------------------------------------ reading */
 
@@ -76,6 +79,22 @@ export function TaskStatusChip({ status, className }: { status: ShownStatus; cla
     <Badge data-testid="task-status" data-status={status} variant={chip.variant} appearance="light" size="sm" className={className}>
       <Icon aria-hidden />
       <span>{chip.label}</span>
+    </Badge>
+  );
+}
+
+/**
+ * Whether a done task's commits have reached the base branch (docs/tasks.md,
+ * "Merging"). Drawn only for a done task with commits whose answer is known.
+ */
+export function MergeBadge({ task, className }: { task: Pick<Task, 'status' | 'merged' | 'result'>; className?: string }) {
+  const commits = Array.isArray(task.result?.commits) ? task.result.commits : [];
+  if (task.status !== 'done' || commits.length === 0 || typeof task.merged !== 'boolean') return null;
+  return (
+    <Badge data-testid="task-merged" data-merged={task.merged ? 'yes' : 'no'} variant={task.merged ? 'success' : 'secondary'}
+      appearance="light" size="sm" className={className}>
+      <GitMerge aria-hidden />
+      <span>{task.merged ? 'Merged' : 'Not merged'}</span>
     </Badge>
   );
 }
@@ -738,6 +757,7 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
             <div className="flex flex-wrap items-center gap-1.5">
               <Label>Commits</Label>
               {commits.map((sha) => <Badge key={sha} variant="outline" size="sm"><span className="font-mono">{sha.slice(0, 10)}</span></Badge>)}
+              <MergeBadge task={task} />
             </div>
           )}
           <Followups label="Follow-ups" items={followups as Followup[]} />
@@ -749,6 +769,80 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
       {reviewing && (
         <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve' || a === 'reopen')} onChanged={setActed} />
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ proposal */
+
+const ANSWERED: Record<Exclude<TaskProposal['status'], 'pending'>, (proposal: TaskProposal) => string> = {
+  created: (p) => (p.taskNumber ? `Task #${p.taskNumber} created` : 'Task created'),
+  just_do_it: () => 'Just doing it, without a task',
+  cancelled: () => 'Cancelled',
+};
+
+/**
+ * A task an agent asked to make (`atelier task propose`): the draft, and the
+ * owner's three answers. Create task makes it a task in the chat that asked;
+ * Just do it and Cancel drop it. Whichever is chosen, the chat's agent is
+ * told as its next message (docs/tasks.md, "Proposals").
+ */
+export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal }) {
+  const [proposal, setProposal] = useState<TaskProposal>(snapshot);
+  const [busy, setBusy] = useState<ProposalChoice | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pending = proposal.status === 'pending';
+  const { projectId, id } = snapshot;
+
+  // A card printed long ago may have been answered since, here or elsewhere:
+  // read it while it is still waiting, and again whenever tasks change.
+  useEffect(() => {
+    if (!pending) return;
+    let alive = true;
+    const read = () => {
+      tasksApi.proposal(projectId, id)
+        .then((now) => { if (alive) setProposal(now); })
+        .catch(() => {});
+    };
+    read();
+    const off = onWorkbench({ frame: (data) => { if (tasksChangedFor(data, projectId)) read(); }, dropped: () => {} });
+    return () => { alive = false; off(); };
+  }, [pending, projectId, id]);
+
+  const answer = async (choice: ProposalChoice) => {
+    setBusy(choice);
+    setError(null);
+    try {
+      const answered = await tasksApi.answerProposal(projectId, id, choice);
+      setProposal(answered.proposal);
+    } catch (e) {
+      setError(failure(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div data-testid="task-proposal" data-proposal-status={proposal.status} className="space-y-3">
+      <header className="space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Proposed task</span>
+          <Badge variant="secondary" size="sm"><span>{typeLabel(proposal.type)}</span></Badge>
+        </div>
+        <h4 className={cn('text-sm font-semibold text-foreground', proposal.status === 'cancelled' && 'text-muted-foreground line-through')}>{proposal.title}</h4>
+        {proposal.why && <p className="text-xs text-muted-foreground">{proposal.why}</p>}
+      </header>
+      <Section label="Plan"><PlanView type={proposal.type} plan={proposal.plan} /></Section>
+      {pending ? (
+        <div className="flex flex-wrap gap-2" data-testid="proposal-actions">
+          <Button type="button" size="sm" disabled={busy !== null} loading={busy === 'create'} onClick={() => void answer('create')}>Create task</Button>
+          <Button type="button" size="sm" variant="outline" disabled={busy !== null} loading={busy === 'just_do_it'} onClick={() => void answer('just_do_it')}>Just do it</Button>
+          <Button type="button" size="sm" variant="ghost" disabled={busy !== null} loading={busy === 'cancel'} onClick={() => void answer('cancel')}>Cancel</Button>
+        </div>
+      ) : (
+        <p data-testid="proposal-answer" className="text-xs text-muted-foreground">{proposal.status === 'pending' ? '' : ANSWERED[proposal.status](proposal)}</p>
+      )}
+      {error && <div role="alert" className="text-xs text-destructive">{`Couldn't answer. ${error}`}</div>}
     </div>
   );
 }
