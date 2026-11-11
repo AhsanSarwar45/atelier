@@ -457,7 +457,7 @@ test.describe('the chat draws everything the agent does', () => {
   test('a command row opens onto what it ran and what it printed', async ({ page, request }) => {
     await freshChat(request, page);
     await letItRun(page);
-    await say(page, 'Run exactly this in the shell and say nothing else: echo beads-web-was-here');
+    await say(page, 'Run exactly this in the shell and say nothing else: echo atelier-was-here');
 
     const row = page.getByTestId('tool-row').filter({ hasText: 'Bash' }).first();
     await row.waitFor({ timeout: TURN_MS });
@@ -468,8 +468,8 @@ test.describe('the chat draws everything the agent does', () => {
     await expect(row).toHaveAttribute('data-open', 'true');
     // What it was asked to do, and what came back — the half the browser used
     // to throw away (bw-1u1).
-    await expect(row.getByTestId('tool-input')).toContainText('echo beads-web-was-here');
-    await expect(row.getByTestId('tool-output')).toContainText('beads-web-was-here');
+    await expect(row.getByTestId('tool-input')).toContainText('echo atelier-was-here');
+    await expect(row.getByTestId('tool-output')).toContainText('atelier-was-here');
   });
 
   test('one control opens everything, and it is remembered', async ({ page, request }) => {

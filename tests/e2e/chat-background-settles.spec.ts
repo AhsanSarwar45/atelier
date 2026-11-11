@@ -15,9 +15,7 @@ test.skip(!run || process.env.CHAT_HELD_BACKGROUND_FIXTURE !== '1', 'requires th
 test('a finished reply reads Background working while its command runs, then Ready with nothing left running', async ({ page, request }) => {
   test.setTimeout(90_000);
   const projectPath = resolve(run!, `background-settles-${Date.now()}`);
-  mkdirSync(resolve(projectPath, '.beads'), { recursive: true });
-  writeFileSync(resolve(projectPath, '.beads/metadata.json'), JSON.stringify({ database: 'fixture.db', backend: 'sqlite' }));
-  writeFileSync(resolve(projectPath, '.beads/issues.jsonl'), '');
+  mkdirSync(projectPath, { recursive: true });
   const made = await request.post('/api/projects', { data: { name: 'Background settles', path: projectPath } });
   expect(made.ok(), await made.text()).toBe(true);
   const project = await made.json();

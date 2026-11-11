@@ -39,7 +39,7 @@ test('a plugin is found by shelf and by name, and installed in one click', async
   await page.getByTestId('marketplace-add').click();
   await page.getByTestId('marketplace-add-input').fill(marketplace);
   await page.getByTestId('marketplace-add-submit').click();
-  await expect(page.getByTestId('extension-marketplaces-beads-web-fixture')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('extension-marketplaces-atelier-fixture')).toBeVisible({ timeout: 60_000 });
 
   // What it offers is listed, with what each plugin is for and where it is from.
   await page.getByTestId('plugin-browse').click();
@@ -52,11 +52,11 @@ test('a plugin is found by shelf and by name, and installed in one click', async
   await expect(list).toBeVisible({ timeout: 30_000 });
   const total = Number(await list.getAttribute('data-count'));
   await search.fill('tidy notes');
-  const tidy = page.getByTestId('plugin-entry-tidy-notes@beads-web-fixture');
+  const tidy = page.getByTestId('plugin-entry-tidy-notes@atelier-fixture');
   await expect(tidy).toBeVisible({ timeout: 30_000 });
   await expect(tidy).toContainText('Tidy Notes');
   await expect(tidy).toContainText('Productivity');
-  await expect(tidy).toContainText('beads-web-fixture');
+  await expect(tidy).toContainText('atelier-fixture');
   await page.screenshot({ path: join(results, 'catalogue.png') });
 
   // A shelf narrows it to its own…
@@ -66,22 +66,22 @@ test('a plugin is found by shelf and by name, and installed in one click', async
 
   // …and a search is across everything, whatever shelf was ticked before it.
   await page.getByTestId('plugin-catalogue-search').fill('loud logs');
-  await expect(page.getByTestId('plugin-entry-loud-logs@beads-web-fixture')).toBeVisible();
+  await expect(page.getByTestId('plugin-entry-loud-logs@atelier-fixture')).toBeVisible();
   await expect(tidy).toHaveCount(0);
   await page.screenshot({ path: join(results, 'searched.png') });
 
   // One click installs it, and it is on the account, switched on.
-  await page.getByTestId('plugin-catalogue-install-loud-logs@beads-web-fixture').click();
+  await page.getByTestId('plugin-catalogue-install-loud-logs@atelier-fixture').click();
   await expect(sheet).toHaveCount(0, { timeout: 60_000 });
-  const installed = page.getByTestId('extension-plugins-loud-logs@beads-web-fixture');
+  const installed = page.getByTestId('extension-plugins-loud-logs@atelier-fixture');
   await expect(installed).toBeVisible();
-  await expect(page.getByTestId('plugin-enabled-loud-logs@beads-web-fixture')).toBeChecked();
+  await expect(page.getByTestId('plugin-enabled-loud-logs@atelier-fixture')).toBeChecked();
   await page.screenshot({ path: join(results, 'installed.png') });
 
   // Opened again, the catalogue says so rather than offering it twice.
   await page.getByTestId('plugin-browse').click();
-  await expect(page.getByTestId('plugin-catalogue-install-loud-logs@beads-web-fixture')).toContainText('Installed', { timeout: 30_000 });
-  await expect(page.getByTestId('plugin-catalogue-install-loud-logs@beads-web-fixture')).toBeDisabled();
+  await expect(page.getByTestId('plugin-catalogue-install-loud-logs@atelier-fixture')).toContainText('Installed', { timeout: 30_000 });
+  await expect(page.getByTestId('plugin-catalogue-install-loud-logs@atelier-fixture')).toBeDisabled();
 });
 
 test('on a phone the plugin catalogue is a sheet on the bottom edge', async ({ page }) => {
@@ -102,7 +102,7 @@ test('on a phone the plugin catalogue is a sheet on the bottom edge', async ({ p
   expect(box.x).toBe(0);
   expect(box.width).toBe(390);
   await page.getByTestId('plugin-catalogue-search').fill('tidy notes');
-  await expect(page.getByTestId('plugin-entry-tidy-notes@beads-web-fixture')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('plugin-entry-tidy-notes@atelier-fixture')).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: join(results, 'phone.png') });
 });
 
@@ -118,14 +118,14 @@ test('a marketplace of thousands opens with only the rows in view drawn, and typ
     keywords: ['bulk', `n${i}`],
     source: `./plugins/bulk-${i}`,
   }));
-  writeFileSync(join(big, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'beads-web-bulk', owner: { name: 'Beads Web' }, plugins }));
+  writeFileSync(join(big, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'atelier-bulk', owner: { name: 'Atelier' }, plugins }));
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/settings?section=claude&tab=plugins&account=system');
   await page.getByTestId('marketplace-add').click();
   await page.getByTestId('marketplace-add-input').fill(big);
   await page.getByTestId('marketplace-add-submit').click();
-  await expect(page.getByTestId('extension-marketplaces-beads-web-bulk')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('extension-marketplaces-atelier-bulk')).toBeVisible({ timeout: 60_000 });
 
   await page.getByTestId('plugin-browse').click();
   const list = page.getByTestId('plugin-catalogue-list');
@@ -141,7 +141,7 @@ test('a marketplace of thousands opens with only the rows in view drawn, and typ
   await page.keyboard.type('bulk-2999', { delay: 0 });
   await expect(search).toHaveValue('bulk-2999');
   expect(Date.now() - started).toBeLessThan(3000);
-  await expect(page.getByTestId('plugin-entry-bulk-2999@beads-web-bulk')).toBeVisible();
+  await expect(page.getByTestId('plugin-entry-bulk-2999@atelier-bulk')).toBeVisible();
 
   // Scrolled to the end of the full list, the last rows are drawn there.
   await search.fill('');

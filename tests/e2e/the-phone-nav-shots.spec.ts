@@ -44,14 +44,13 @@ function seedRepository(): void {
       '',
       '[project]',
       'display_name = "phone-nav"',
-      'use_beads = false',
       '',
       '[git]',
       'completed_work_branch = "main"',
       '',
     ].join('\n'),
   );
-  writeFileSync(join(REPO, '.gitignore'), ['.beads/', '.worktrees/', 'node_modules/', ''].join('\n'));
+  writeFileSync(join(REPO, '.gitignore'), ['.worktrees/', 'node_modules/', ''].join('\n'));
   const body = (tag: string) => Array.from({ length: 30 }, (_, at) => `${tag} line ${at + 1}`).join('\n') + '\n';
   writeFileSync(join(REPO, 'alpha.txt'), body('old'));
   writeFileSync(join(REPO, 'beta.txt'), body('old'));

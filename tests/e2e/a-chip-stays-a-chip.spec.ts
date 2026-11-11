@@ -13,8 +13,8 @@ import type { WbpEvent } from '../../src/workbench/protocol';
  * The owner reported it off the running app — "badges are far too tall on
  * mobile" — and it is ours: bw-e3dw.6 raised the coarse-pointer floor to 44px
  * on `button`, on `a[href]` and on the `role=` list, and a chip that is
- * clickable is drawn as exactly those elements (`<Badge asChild><Button>` for a
- * card, `<Badge asChild><a href>` for a file or a site). So the same chip was
+ * clickable is drawn as exactly those elements (`<Badge asChild><a href>` for a
+ * file or a site). So the same chip was
  * painted at two different heights depending only on whether it happened to be
  * clickable.
  *
@@ -39,8 +39,6 @@ const STAGE = process.env.CHIP_STAGE ?? 'now';
 const SHOTS = `tests/results/a-chip-stays-a-chip/${STAGE}`;
 const WAIT = 60_000;
 const CHAT = 'a-chip-stays-a-chip';
-/** Two cards for the rail to draw as chips. The board need not have them. */
-const CARDS = ['wl-chip1', 'wl-chip2'];
 
 const PHONE = { width: 390, height: 844 };
 /** The floor a control is held to on a screen you touch. */
@@ -231,9 +229,8 @@ test('a chip keeps its own height on a phone and still answers a thumb', async (
 
   const base = { sessionId: CHAT, at: new Date(0).toISOString() };
   // One message carrying every kind of chip the app draws: a file named in
-  // prose (a span), a markdown link to a file and to a site (both `a[href]`),
-  // and a card mentioned by id (a `button`). The point of the case is that all
-  // of them are the same height.
+  // prose (a span), and a markdown link to a file and to a site (both `a[href]`).
+  // The point of the case is that all of them are the same height.
   const said =
     'Read src/main.ts and then src/lib/deep.ts.\n\n' +
     `A link to [the deep one](${join(fixture, 'src', 'lib', 'later.ts')}) and one to [the docs](https://example.com/docs).\n`;
@@ -281,9 +278,6 @@ test('a chip keeps its own height on a phone and still answers a thumb', async (
         held: null,
         title: 'A chat read on a phone',
         cwd: fixture,
-        // Two cards, so the rail draws the OTHER clickable chip the app has:
-        // `<Badge asChild><Button>`, a chip that is a real `button` element.
-        beads: CARDS,
       },
     }),
   );
@@ -311,20 +305,7 @@ test('a chip keeps its own height on a phone and still answers a thumb', async (
     await shoot(page, '01-a-chat-of-chips');
     const stolen = await stealing(page, '[data-testid="transcript"]');
 
-    // The rail is a sheet on a phone and lies over the chat, so it is read
-    // separately rather than through it: a card there is drawn as the app's
-    // OTHER clickable chip, `<Badge asChild><Button>`, a real `button`.
-    const rail = page.getByTestId('chat-right-rail');
-    if ((await rail.getAttribute('data-open')) !== 'true') await page.getByTestId('chat-right-rail-toggle').click();
-    await expect(page.getByTestId('rail-cards')).toBeVisible({ timeout: WAIT });
-    await page.waitForTimeout(800);
-    const inTheRail = await chips(page, TAP);
-    note('the rail:');
-    for (const chip of inTheRail) note(`  ${say(chip)}`);
-    await shoot(page, '02-the-rail-of-chips');
-    stolen.push(...(await stealing(page, '[data-testid="chat-right-rail"]')));
-
-    const seen = [...inTheChat, ...inTheRail];
+    const seen = inTheChat;
 
     // ---- The question the owner asked. A chip is one height, whatever it is
     // made of. The chips that are not clickable are the app's own answer for

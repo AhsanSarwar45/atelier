@@ -25,9 +25,7 @@ test('a turn Claude starts by itself reads as working until it ends', async ({ p
   const stage = baseline ? 'before' : 'after';
   const projectPath = resolve(run!, `wake-project-${stage}`);
   rmSync(projectPath, { recursive: true, force: true });
-  mkdirSync(resolve(projectPath, '.beads'), { recursive: true });
-  writeFileSync(resolve(projectPath, '.beads/metadata.json'), JSON.stringify({ database: 'fixture.db', backend: 'sqlite' }));
-  writeFileSync(resolve(projectPath, '.beads/issues.jsonl'), '');
+  mkdirSync(projectPath, { recursive: true });
   const made = await request.post('/api/projects', { data: { name: 'Claude wakes by itself', path: projectPath } });
   expect(made.ok(), await made.text()).toBe(true);
   const project = await made.json();

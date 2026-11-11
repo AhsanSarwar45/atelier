@@ -47,7 +47,7 @@ function seedRepository(): void {
   git(REPO, 'config', '--local', 'core.hooksPath', join(FIXTURE, 'no-hooks'));
   writeFileSync(
     join(REPO, '.atelier', 'project.toml'),
-    ['schema_version = 1', '', '[project]', `display_name = "${PROJECT}"`, 'use_beads = false', '', '[git]', 'completed_work_branch = "main"', ''].join('\n'),
+    ['schema_version = 1', '', '[project]', `display_name = "${PROJECT}"`, '', '[git]', 'completed_work_branch = "main"', ''].join('\n'),
   );
   writeFileSync(join(REPO, 'alpha.txt'), 'start\n');
   git(REPO, 'add', '-A');

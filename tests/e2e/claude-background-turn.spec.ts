@@ -11,13 +11,11 @@ test('the real Claude adapter exposes helper work and settles completion and Sto
   test.setTimeout(90_000);
   const projectPath = resolve(run!, baseline ? 'background-project' : 'background-project-after');
   rmSync(projectPath, { recursive: true, force: true });
+  mkdirSync(projectPath, { recursive: true });
   const existing = await (await request.get('/api/projects')).json();
   for (const project of existing.filter((p: { path: string }) => p.path === projectPath)) {
     await request.delete(`/api/projects/${project.id}`);
   }
-  mkdirSync(resolve(projectPath, '.beads'), { recursive: true });
-  writeFileSync(resolve(projectPath, '.beads/metadata.json'), JSON.stringify({ database: 'fixture.db', backend: 'sqlite' }));
-  writeFileSync(resolve(projectPath, '.beads/issues.jsonl'), '');
   const made = await request.post('/api/projects', { data: { name: 'Claude background completion', path: projectPath } });
   expect(made.ok(), await made.text()).toBe(true);
   const project = await made.json();

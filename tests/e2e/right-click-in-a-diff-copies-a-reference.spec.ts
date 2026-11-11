@@ -73,17 +73,13 @@ function seedRepository(): void {
       '',
       '[project]',
       'display_name = "copy-a-reference"',
-      'use_beads = true',
       '',
       '[git]',
       'completed_work_branch = "main"',
       '',
-      '[beads]',
-      'issue_id_prefix = "cr"',
-      '',
     ].join('\n'),
   );
-  writeFileSync(join(REPO, '.gitignore'), ['.beads/', '.worktrees/', 'node_modules/', ''].join('\n'));
+  writeFileSync(join(REPO, '.gitignore'), ['.worktrees/', 'node_modules/', ''].join('\n'));
 
   writeFileSync(join(REPO, 'src', 'a.ts'), twentyLines());
   writeFileSync(join(REPO, 'src', 'b.ts'), twentyLines());

@@ -84,19 +84,15 @@ function seedRepository(): void {
       '',
       '[project]',
       'display_name = "diff-stands-in"',
-      'use_beads = true',
       '',
       '[git]',
       'completed_work_branch = "main"',
-      '',
-      '[beads]',
-      'issue_id_prefix = "ds"',
       '',
     ].join('\n'),
   );
   // Anything the app itself might leave in a project it has been pointed at is
   // not one of this case's six changes, and must not be counted as one.
-  writeFileSync(join(REPO, '.gitignore'), ['.beads/', '.worktrees/', 'node_modules/', ''].join('\n'));
+  writeFileSync(join(REPO, '.gitignore'), ['.worktrees/', 'node_modules/', ''].join('\n'));
 
   writeFileSync(join(REPO, 'edited.txt'), EDITED_FIRST);
   writeFileSync(join(REPO, 'gone.txt'), 'this line is about to be deleted\n');

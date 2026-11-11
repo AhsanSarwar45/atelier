@@ -751,9 +751,9 @@ test.describe('the agents a chat sends off', () => {
    * reaches for that file at all, and draws what it finds where a reader
    * expects it.
    *
-   * The board is real. The helper runs `bd show` on a card of the fixture's
-   * own, and the chat's own turns never name it, so a chip for it on the chat
-   * can have come from nowhere but the helper.
+   * The helper reads a note of the fixture's own, and the chat's own turns
+   * never name it, so anything naming it on the chat can have come from
+   * nowhere but the helper.
    */
   test('a chat read back from the record keeps its agents apart', async ({ page, request }) => {
     // The panel lives in the right column, which is shut on a narrow screen.
@@ -822,7 +822,7 @@ test.describe('the agents a chat sends off', () => {
       await expect(pane).toHaveAttribute('data-agent', HELPER_AGENT);
       const said = (await page.getByTestId('agent-view-said').innerText()).trim();
       expect(said, 'the helper’s own sentence is not in its pane').toContain(HELPER_SAID);
-      expect(said, 'what the helper DID is not in its pane').toContain(`bd show ${PARENT_CARD}`);
+      expect(said, 'what the helper DID is not in its pane').toContain(`cat notes/${PARENT_CARD}.md`);
       await expect(page.getByTestId('agent-view-result')).toContainText(HELPER_ANSWERED);
       await page.screenshot({ path: `${SHOTS}/chat-agents-read-back-opened.png`, fullPage: false });
     } finally {

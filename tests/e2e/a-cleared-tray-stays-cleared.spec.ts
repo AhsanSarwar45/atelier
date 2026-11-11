@@ -49,14 +49,13 @@ function seedRepository(): void {
       '',
       '[project]',
       'display_name = "cleared-tray"',
-      'use_beads = false',
       '',
       '[git]',
       'completed_work_branch = "main"',
       '',
     ].join('\n'),
   );
-  writeFileSync(join(REPO, '.gitignore'), ['.beads/', '.worktrees/', 'node_modules/', ''].join('\n'));
+  writeFileSync(join(REPO, '.gitignore'), ['.worktrees/', 'node_modules/', ''].join('\n'));
   writeFileSync(join(REPO, 'alpha.txt'), 'start\n');
   git(REPO, 'add', '-A');
   git(REPO, 'commit', '-m', 'start');

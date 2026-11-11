@@ -74,16 +74,9 @@ function seedRepository(): void {
       '',
       '[project]',
       'display_name = "git-follows"',
-      'use_beads = true',
       '',
-      // Both of these are insisted on for a project that says it uses beads;
-      // a manifest without them is refused, and the project comes back as one
-      // of the chat-only kind, whose chat has no bar and so no way into Git.
       '[git]',
       'completed_work_branch = "main"',
-      '',
-      '[beads]',
-      'issue_id_prefix = "gf"',
       '',
     ].join('\n'),
   );

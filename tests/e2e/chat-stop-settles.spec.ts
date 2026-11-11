@@ -11,9 +11,7 @@ test.describe.configure({ mode: 'serial', timeout: 60_000 });
 for (const brand of ['codex', 'claude']) {
   test(`${brand}: Stop settles a silent provider, survives reload, and resumes immediately`, async ({ page, request }) => {
     const projectPath = resolve(run!, `project-${brand}`);
-    mkdirSync(resolve(projectPath, '.beads'), { recursive: true });
-    writeFileSync(resolve(projectPath, '.beads/metadata.json'), JSON.stringify({ database: 'fixture.db', backend: 'sqlite' }));
-    writeFileSync(resolve(projectPath, '.beads/issues.jsonl'), '');
+    mkdirSync(projectPath, { recursive: true });
     const existing = await (await request.get('/api/projects')).json();
     for (const project of existing.filter((p: { path: string }) => p.path === projectPath)) {
       await request.delete(`/api/projects/${project.id}`);
@@ -32,7 +30,7 @@ for (const brand of ['codex', 'claude']) {
     await send('Run the claim command, then wait.');
     await page.goto(`/project?id=${project.id}&tab=chat&chat=${session.id}`);
     await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
-    await expect(row).toContainText('Claiming bw-105s.1');
+    await expect(row).toContainText('Checking the working tree');
     const providerPid = Number(readFileSync(resolve(projectPath, 'lifecycle-pids'), 'utf8').trim().split('\n').at(-1));
     const response = page.waitForResponse(r => r.url().endsWith('/api/workbench/command') && r.request().postDataJSON()?.type === 'session.stop');
     await page.getByTestId('stop-button').click();
@@ -43,7 +41,7 @@ for (const brand of ['codex', 'claude']) {
     await expect.poll(() => { try { process.kill(providerPid, 0); return false; } catch { return true; } }).toBe(true);
     await page.reload();
     await expect(row).toContainText('Stopped');
-    await expect(row).not.toContainText('Claiming');
+    await expect(row).not.toContainText('Checking the working tree');
     await command({ type: 'session.stop', sessionId: session.id }); // idempotent without a driver
     await send('Please complete the next turn.');
     await expect(page.getByTestId('chat-tab')).toContainText('The new turn completed.');
@@ -69,7 +67,7 @@ for (const brand of ['codex', 'claude']) {
     }
     await send('crash the fixture transport');
     await expect(row).toHaveAttribute('data-state', 'errored');
-    await expect(row).not.toContainText('Claiming');
+    await expect(row).not.toContainText('Checking the working tree');
     await expect(page.getByTestId('stop-button')).toHaveCount(0);
     await page.reload();
     await expect(row).toHaveAttribute('data-state', 'errored');

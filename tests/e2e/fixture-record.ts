@@ -29,16 +29,16 @@ export const SENT_OFF_CALL = 'toolu_01FixtureSentItOff';
 export const HELPER_AGENT = 'fixture-helper-1';
 
 /** What the helper was asked to do, in the sender's own words. */
-export const HELPER_BRIEF = 'Count the cards on the board';
+export const HELPER_BRIEF = 'Count the notes in the project';
 
 /** The sentence the helper writes before it starts. Its own, never the chat's. */
-export const HELPER_SAID = 'Reading the board now.';
+export const HELPER_SAID = 'Reading the notes now.';
 
 /** The helper's last word, which is what its row shows once it is over. */
-export const HELPER_ANSWERED = 'Three cards, one of them closed.';
+export const HELPER_ANSWERED = 'Three notes, one of them done.';
 
 /** The chat's own answer, which no helper said. */
-export const CHAT_SAID = 'Three cards on the board.';
+export const CHAT_SAID = 'Three notes in the project.';
 
 /**
  * What a helper that came back red said last, and what its call came back with.
@@ -47,7 +47,7 @@ export const CHAT_SAID = 'Three cards on the board.';
  * answer is on the call that sent it, which comes back marked in error
  * (bw-7ks.22.28).
  */
-export const HELPER_FAILED = 'I could not read the board: bd is not on the path.';
+export const HELPER_FAILED = 'I could not read the notes: the folder is not there.';
 
 /** What one turn cost, so a row has a spend to draw. */
 const SPENT = {
@@ -171,9 +171,9 @@ export interface WrittenRecord {
 /**
  * Writes one chat that sent one helper away, and returns what it wrote.
  *
- * `card` is a card on the fixture's own board that ONLY the helper touches —
- * the chat's own turns never name it — so a chip for it on the chat can have
- * come from nowhere else.
+ * `card` names a note that ONLY the helper reads — the chat's own turns never
+ * name it — so anything on the chat that names it can have come from nowhere
+ * else.
  */
 export function writeChatWithHelper(opts: {
   cwd: string;
@@ -291,7 +291,7 @@ export function writeChatWithHelper(opts: {
   );
 
   // Each helper's own conversation, in its own file: what it was told, a
-  // sentence of its own, the command it ran — which names the card nothing
+  // sentence of its own, the command it ran — which names the note nothing
   // else in this chat names — and what it answered.
   const asLines = (rows: Record<string, unknown>[]): string => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
   for (let n = 0; n < many; n++) {
@@ -336,7 +336,7 @@ export function writeChatWithHelper(opts: {
             role: 'assistant',
             usage: spentBy(n),
             content: [
-              { type: 'tool_use', id: `toolu_fixtureHelperRan${n}`, name: 'Bash', input: { command: `bd show ${card}` } },
+              { type: 'tool_use', id: `toolu_fixtureHelperRan${n}`, name: 'Bash', input: { command: `cat notes/${card}.md` } },
             ],
           },
         },

@@ -166,7 +166,7 @@ function seedRepository(): void {
   mkdirSync(join(REPO, '.atelier'), { recursive: true });
   writeFileSync(
     join(REPO, '.atelier', 'project.toml'),
-    ['schema_version = 1', '', '[project]', 'display_name = "git-key"', 'use_beads = true', ''].join('\n'),
+    ['schema_version = 1', '', '[project]', 'display_name = "git-key"', ''].join('\n'),
   );
   git(REPO, 'add', '-A');
   git(REPO, 'commit', '-m', 'the files this project starts with');

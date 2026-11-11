@@ -3,6 +3,14 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
+/** A project skill with a pinned supporting file, written into a fixture project. */
+function writeProjectSkill(root: string): void {
+  const folder = join(root, '.atelier/skills/release-notes');
+  mkdirSync(join(folder, 'agents'), { recursive: true });
+  writeFileSync(join(folder, 'SKILL.md'), '---\nname: release-notes\ndescription: Write release notes for this project\n---\nWrite release notes from the merged work.\n');
+  writeFileSync(join(folder, 'agents/openai.yaml'), 'interface:\n  short_description: "Release notes from merged work"\n');
+}
+
 test('project switches preserve shared and local skills across reloads', async ({ page, request }) => {
   test.setTimeout(process.env.ATELIER_BROWSER_INSPECT ? 180_000 : 120_000);
   const run = process.env.WORKBENCH_E2E_RUN!;
@@ -126,7 +134,7 @@ test('migrated project guidance is discovered without native provider files', as
   mkdirSync(join(root, '.atelier'), { recursive: true });
   writeFileSync(join(root, '.atelier/project.toml'), 'schema_version = 1\n[project]\ndisplay_name = "Migrated project guidance"\n');
   cpSync('.atelier/instructions.md', join(root, '.atelier/instructions.md'));
-  cpSync('.atelier/skills', join(root, '.atelier/skills'), { recursive: true });
+  writeProjectSkill(root);
   const project = await (await request.post('/api/projects', { data: { name: 'Migrated project guidance', path: root } })).json();
   try {
     const instructions = readFileSync('.atelier/instructions.md', 'utf8').trim();
@@ -134,16 +142,15 @@ test('migrated project guidance is discovered without native provider files', as
     expect(settings.instructions).toBe(instructions);
     for (const native of ['AGENTS.md', 'CLAUDE.md', '.agents', '.claude', '.codex']) expect(existsSync(join(root, native))).toBe(false);
     const held = await (await request.get(`/api/settings/library?path=${encodeURIComponent(root)}`)).json();
-    const beads = held.resolved.items.find((row: { item: { id: string } }) => row.item.id === 'beads');
-    expect(beads.source).toBe('project');
-    expect(beads.state).toBe('available');
-    expect(beads.item.content).toContain('Beads');
-    expect(readFileSync(join(root, '.atelier/skills/beads/agents/openai.yaml'), 'utf8')).toBe(readFileSync('.atelier/skills/beads/agents/openai.yaml', 'utf8'));
+    const skill = held.resolved.items.find((row: { item: { id: string } }) => row.item.id === 'release-notes');
+    expect(skill.source).toBe('project');
+    expect(skill.state).toBe('available');
+    expect(skill.item.content).toContain('release notes');
     await page.goto(`/project?id=${project.id}&settings=library`);
     await expect(page.getByRole('textbox', { name: 'Project instructions', exact: true })).toHaveValue(instructions);
     await page.getByRole('radio', { name: 'Skills', exact: true }).click();
-    await expect(page.getByTestId('library-item-beads')).toContainText('Available');
-    await page.getByTestId('library-item-beads').getByRole('button').first().click();
+    await expect(page.getByTestId('library-item-release-notes')).toContainText('Available');
+    await page.getByTestId('library-item-release-notes').getByRole('button').first().click();
     await expect(page.getByTestId('library-detail').getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
     await page.screenshot({ path: 'tests/results/project-skill-enablement/migrated-project.png', animations: 'disabled' });
   } finally {

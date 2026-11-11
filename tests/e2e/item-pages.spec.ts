@@ -15,7 +15,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const results = 'tests/results/item-pages';
 const marketplace = resolve('tests/fixtures/plugin-marketplace');
-const TIDY = 'tidy-notes@beads-web-fixture';
+const TIDY = 'tidy-notes@atelier-fixture';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -36,7 +36,7 @@ test('a catalogue plugin opens its page, is installed from it, and the installed
   await page.getByTestId('marketplace-add').click();
   await page.getByTestId('marketplace-add-input').fill(marketplace);
   await page.getByTestId('marketplace-add-submit').click();
-  await expect(page.getByTestId('extension-marketplaces-beads-web-fixture')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('extension-marketplaces-atelier-fixture')).toBeVisible({ timeout: 60_000 });
 
   // In the catalogue, a row opens the plugin's page in place of the list.
   await page.getByTestId('plugin-browse').click();
@@ -72,7 +72,7 @@ test('a catalogue plugin opens its page, is installed from it, and the installed
   await expect(page.getByTestId('plugin-dialog').getByTestId('plugin-page')).toBeVisible();
   await expect(page.getByTestId(`extension-plugins-${TIDY}`)).toBeAttached();
   await expect(page.getByTestId('item-back')).toHaveCount(0);
-  await expect(page).toHaveURL(/item=tidy-notes%40beads-web-fixture/);
+  await expect(page).toHaveURL(/item=tidy-notes%40atelier-fixture/);
   await expect(page.getByTestId('plugin-page-readme')).toContainText('Sorts your notes by date');
   const on = page.getByTestId(`plugin-page-enabled-${TIDY}`);
   await expect(on).toBeChecked();
@@ -105,7 +105,7 @@ test('a catalogue plugin opens its page, is installed from it, and the installed
   await page.getByTestId(`plugin-open-${TIDY}`).click();
   await page.getByTestId(`plugin-page-remove-${TIDY}`).click();
   await expect(page.getByTestId(`extension-plugins-${TIDY}`)).toHaveCount(0, { timeout: 60_000 });
-  await page.getByTestId('extension-remove-beads-web-fixture').click();
+  await page.getByTestId('extension-remove-atelier-fixture').click();
 });
 
 test('a catalogue server and an added server each open a page that says how they run', async ({ page }) => {
@@ -152,7 +152,7 @@ test('Codex gets the same pages, and a server that comes with a Codex plugin is 
   await page.getByTestId('marketplace-add').click();
   await page.getByTestId('marketplace-add-input').fill(marketplace);
   await page.getByTestId('marketplace-add-submit').click();
-  await expect(page.getByTestId('extension-marketplaces-beads-web-fixture')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('extension-marketplaces-atelier-fixture')).toBeVisible({ timeout: 60_000 });
 
   // The catalogue row opens the same page Claude's does, and installs from it.
   await page.getByTestId('plugin-browse').click();
@@ -193,5 +193,5 @@ test('Codex gets the same pages, and a server that comes with a Codex plugin is 
   await page.goto('/settings?section=codex&tab=plugins&account=system');
   await page.getByTestId(`extension-remove-${TIDY}`).click();
   await expect(page.getByTestId(`extension-plugins-${TIDY}`)).toHaveCount(0, { timeout: 60_000 });
-  await page.getByTestId('extension-remove-beads-web-fixture').click();
+  await page.getByTestId('extension-remove-atelier-fixture').click();
 });

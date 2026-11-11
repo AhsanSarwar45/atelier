@@ -10,14 +10,13 @@ import type { WbpEvent } from '../../src/workbench/protocol';
 /**
  * The shape of the checklist on an opened chat.
  *
- * A long epic used to arrive unfolded and as tall as it liked, so opening the
- * chat meant reading a wall of card titles before the conversation. This drives
+ * A long checklist used to arrive unfolded and as tall as it liked, so opening
+ * the chat meant reading a wall of item titles before the conversation. This drives
  * a thirteen-row checklist on a real screen and photographs both states
  * (bw-i7pg.1).
  */
 
 const CHAT = 'checklist-shape-fixture';
-const EPIC = 'cl-epic';
 const SHOT = process.env.CHECKLIST_SHOT_DIR || 'tests/results/checklist-shape';
 
 test.setTimeout(120_000);
@@ -38,7 +37,7 @@ const TITLES = [
   'A local runtime that is not reachable is said plainly, and the chat recovers when it comes back',
 ];
 
-const STATUS = (i: number) => (i === 0 || i === 2 || i === 5 || i === 10 ? 'closed' : i === 12 ? 'in_progress' : 'open');
+const STATUS = (i: number) => (i === 0 || i === 2 || i === 5 || i === 10 ? 'completed' : i === 12 ? 'in_progress' : 'pending');
 
 function fixtureProject(dir: string): string {
   rmSync(dir, { recursive: true, force: true });
@@ -54,14 +53,10 @@ function fixtureProject(dir: string): string {
       '',
       '[project]',
       `display_name = "${basename(dir)}"`,
-      'use_beads = true',
       'summary = ""',
       '',
       '[git]',
       'completed_work_branch = "master"',
-      '',
-      '[beads]',
-      'issue_id_prefix = "cl"',
       '',
     ].join('\n'),
   );
@@ -89,35 +84,10 @@ test('a long checklist opens folded and scrolls when it is opened', async ({ pag
     { ...base, seq: 2, type: 'message.started', messageId: 'answer', role: 'assistant' },
     { ...base, seq: 3, type: 'text.delta', messageId: 'answer', text: 'The local model work is under way.' },
     { ...base, seq: 4, type: 'message.completed', messageId: 'answer' },
-    { ...base, seq: 5, type: 'todo', items: [{ id: 'epic-row', text: EPIC, status: 'in_progress' }] },
+    { ...base, seq: 5, type: 'todo', items: TITLES.map((text, i) => ({ id: `item-${i + 1}`, text, status: STATUS(i) })) },
     { ...base, seq: 6, type: 'session.state', state: 'idle', label: 'Ready' },
   ];
   const snapshot = foldAll(events);
-
-  const beads = [
-    {
-      id: EPIC,
-      title: 'Local models',
-      status: 'in_progress',
-      issue_type: 'epic',
-      priority: 0,
-      owner: '',
-      created_at: new Date(0).toISOString(),
-      updated_at: new Date(0).toISOString(),
-      children: TITLES.map((_, i) => `${EPIC}.${i + 1}`),
-    },
-    ...TITLES.map((title, i) => ({
-      id: `${EPIC}.${i + 1}`,
-      title,
-      status: STATUS(i),
-      issue_type: 'task',
-      priority: 0,
-      owner: '',
-      parent_id: EPIC,
-      created_at: new Date(0).toISOString(),
-      updated_at: new Date(0).toISOString(),
-    })),
-  ];
 
   await page.addInitScript(({ chat, view }) => {
     class FixtureSocket {
@@ -151,11 +121,6 @@ test('a long checklist opens folded and scrolls when it is opened', async ({ pag
     url.searchParams.set('include_test', 'true');
     await route.continue({ url: url.toString() });
   });
-  // The board this checklist is a view of, answered without a real database:
-  // what is being photographed is the panel's shape, not bd.
-  await page.route(/\/api\/beads(\?.*)?$/, (route) =>
-    route.request().method() === 'GET' ? route.fulfill({ json: { beads } }) : route.continue(),
-  );
   const row = {
     sessionId: CHAT,
     externalId: 'fixture',
@@ -166,7 +131,6 @@ test('a long checklist opens folded and scrolls when it is opened', async ({ pag
     cwdHint: projectPath,
     runningElsewhere: false,
     held: null,
-    beads: [EPIC],
   };
   await page.route(/\/api\/workbench\/restore(?:\?.*)?$/, (route) => route.fulfill({ json: [row] }));
   await page.route(new RegExp(`/api/workbench/session/${CHAT}$`), (route) =>

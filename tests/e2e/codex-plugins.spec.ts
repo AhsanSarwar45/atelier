@@ -31,20 +31,20 @@ test('a Codex account browses, installs, switches off and removes a plugin', asy
   await page.getByTestId('marketplace-add').click();
   await page.getByTestId('marketplace-add-input').fill(marketplace);
   await page.getByTestId('marketplace-add-submit').click();
-  await expect(page.getByTestId('extension-marketplaces-beads-web-fixture')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('extension-marketplaces-atelier-fixture')).toBeVisible({ timeout: 60_000 });
 
   await page.getByTestId('plugin-browse').click();
   // Codex's store lists thousands and only the rows in view are drawn, so the
   // fixture's row is found by name.
   await page.getByTestId('plugin-catalogue-search').fill('tidy');
-  const tidy = page.getByTestId('plugin-entry-tidy-notes@beads-web-fixture');
+  const tidy = page.getByTestId('plugin-entry-tidy-notes@atelier-fixture');
   await expect(tidy).toBeVisible({ timeout: 30_000 });
-  await expect(tidy).toContainText('beads-web-fixture');
+  await expect(tidy).toContainText('atelier-fixture');
   await page.screenshot({ path: join(results, 'catalogue.png') });
 
-  await page.getByTestId('plugin-catalogue-install-tidy-notes@beads-web-fixture').click();
+  await page.getByTestId('plugin-catalogue-install-tidy-notes@atelier-fixture').click();
   await expect(page.getByTestId('plugin-catalogue')).toHaveCount(0, { timeout: 60_000 });
-  const enabled = page.getByTestId('plugin-enabled-tidy-notes@beads-web-fixture');
+  const enabled = page.getByTestId('plugin-enabled-tidy-notes@atelier-fixture');
   await expect(enabled).toBeChecked();
   await page.screenshot({ path: join(results, 'installed.png') });
 
@@ -52,10 +52,10 @@ test('a Codex account browses, installs, switches off and removes a plugin', asy
   await enabled.click();
   await expect(enabled).not.toBeChecked();
   await page.reload();
-  await expect(page.getByTestId('plugin-enabled-tidy-notes@beads-web-fixture')).not.toBeChecked({ timeout: 30_000 });
+  await expect(page.getByTestId('plugin-enabled-tidy-notes@atelier-fixture')).not.toBeChecked({ timeout: 30_000 });
 
-  await page.getByTestId('extension-remove-tidy-notes@beads-web-fixture').click();
-  await expect(page.getByTestId('extension-plugins-tidy-notes@beads-web-fixture')).toHaveCount(0, { timeout: 60_000 });
+  await page.getByTestId('extension-remove-tidy-notes@atelier-fixture').click();
+  await expect(page.getByTestId('extension-plugins-tidy-notes@atelier-fixture')).toHaveCount(0, { timeout: 60_000 });
 });
 
 test('the Codex account settings have a Plugins tab', async ({ page }) => {

@@ -74,14 +74,14 @@ test('a plugin and a marketplace each carry a mark of their kind', async ({ page
   await page.getByTestId('marketplace-add').click();
   await page.getByTestId('marketplace-add-input').fill(process.cwd() + '/tests/fixtures/plugin-marketplace');
   await page.getByTestId('marketplace-add-submit').click();
-  const market = page.getByTestId('extension-marketplaces-beads-web-fixture');
+  const market = page.getByTestId('extension-marketplaces-atelier-fixture');
   await expect(market).toBeVisible({ timeout: 60_000 });
   await expect(market.locator('svg').first()).toBeVisible();
 
   await page.getByTestId('plugin-browse').click();
   await page.getByTestId('plugin-catalogue-search').fill('tidy');
-  await page.getByTestId('plugin-catalogue-install-tidy-notes@beads-web-fixture').click();
-  const plugin = page.getByTestId('extension-plugins-tidy-notes@beads-web-fixture');
+  await page.getByTestId('plugin-catalogue-install-tidy-notes@atelier-fixture').click();
+  const plugin = page.getByTestId('extension-plugins-tidy-notes@atelier-fixture');
   await expect(plugin).toBeVisible({ timeout: 60_000 });
   await expect(plugin.locator('svg').first()).toBeVisible();
   await page.screenshot({ path: join(results, 'plugin-rows.png') });

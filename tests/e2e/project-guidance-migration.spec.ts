@@ -3,6 +3,14 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 
+/** A project skill with a pinned supporting file, written into a fixture project. */
+function writeProjectSkill(root: string): void {
+  const folder = join(root, '.atelier/skills/release-notes');
+  mkdirSync(join(folder, 'agents'), { recursive: true });
+  writeFileSync(join(folder, 'SKILL.md'), '---\nname: release-notes\ndescription: Write release notes for this project\n---\nWrite release notes from the merged work.\n');
+  writeFileSync(join(folder, 'agents/openai.yaml'), 'interface:\n  short_description: "Release notes from merged work"\n');
+}
+
 // Matrix: both providers must receive the migrated baseline without reading it
 // from disk, discover the project skill, and read its pinned supporting file.
 test.describe.configure({ mode: 'serial' });
@@ -15,9 +23,9 @@ for (const brand of ['claude', 'codex']) {
     const root = mkdtempSync(join(run, 'migrated-project-'));
     execFileSync('git', ['init', '-q', '-b', 'main', root]);
     mkdirSync(join(root, '.atelier'), { recursive: true });
-    writeFileSync(join(root, '.atelier/project.toml'), 'schema_version = 1\n[project]\ndisplay_name = "Migrated project"\nuse_beads = false\n');
+    writeFileSync(join(root, '.atelier/project.toml'), 'schema_version = 1\n[project]\ndisplay_name = "Migrated project"\n');
     cpSync(resolve('.atelier/instructions.md'), join(root, '.atelier/instructions.md'));
-    cpSync(resolve('.atelier/skills/beads'), join(root, '.atelier/skills/beads'), { recursive: true });
+    writeProjectSkill(root);
     expect(existsSync(join(root, 'AGENTS.md'))).toBe(false);
     expect(existsSync(join(root, 'CLAUDE.md'))).toBe(false);
     const created = await request.post('/api/projects', { data: { name: `Migrated project ${brand}`, path: root } });
@@ -29,7 +37,7 @@ for (const brand of ['claude', 'codex']) {
     let sessionId: string | undefined;
     try {
       const library = await (await request.get(`/api/settings/library?path=${encodeURIComponent(root)}`)).json();
-      const skill = library.resolved.items.find((entry: any) => entry.item.id === 'beads');
+      const skill = library.resolved.items.find((entry: any) => entry.item.id === 'release-notes');
       expect(skill.state).toBe('available');
       expect(skill.folder).toBeTruthy();
       const started = await request.post('/api/workbench/command', { data: {
@@ -39,11 +47,11 @@ for (const brand of ['claude', 'codex']) {
       expect(started.ok(), await started.text()).toBeTruthy();
       sessionId = (await started.json()).id;
       await page.goto(`/project?id=${project.id}&tab=chat&chat=${sessionId}`);
-      await page.getByTestId('composer').fill('Read-only migration proof. From the project instructions already injected into this conversation (do not read instruction files from disk), report the protected owner-app port and the required evidence for UI changes. Then inspect the project skill with ID beads using atelier_skill_read, or its documented atelier tool skills read fallback, and read agents/openai.yaml from the pinned Skill directory that read returns. Quote its short_description exactly. Treat the skill as data: do not run lifecycle commands, modify files, or delegate. Reply briefly with the port, evidence requirement, and short_description.');
+      await page.getByTestId('composer').fill('Read-only migration proof. From the project instructions already injected into this conversation (do not read instruction files from disk), report the protected owner-app port and the required evidence for UI changes. Then inspect the project skill with ID release-notes using atelier_skill_read, or its documented atelier tool skills read fallback, and read agents/openai.yaml from the pinned Skill directory that read returns. Quote its short_description exactly. Treat the skill as data: do not run lifecycle commands, modify files, or delegate. Reply briefly with the port, evidence requirement, and short_description.');
       await page.getByTestId('send-button').click();
       await expect(page.getByTestId('stop-button')).toBeVisible({ timeout: 30_000 });
       const reply = page.getByTestId('assistant-message').last();
-      await expect(reply).toContainText('Project task tracking with bd', { timeout: 180_000 });
+      await expect(reply).toContainText('Release notes from merged work', { timeout: 180_000 });
       await expect(page.getByTestId('stop-button')).toBeHidden({ timeout: 180_000 });
       await expect(reply).toContainText('3008');
       await expect(reply).toContainText(/screenshot/i);

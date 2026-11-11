@@ -44,7 +44,7 @@ for line in sys.stdin:
         result = {"sessionId": session}
     elif method == "session/prompt":
         turn += 1
-        update({"sessionUpdate": "tool_call", "toolCallId": "call-" + str(turn), "title": "Claim the card", "kind": "execute", "status": "in_progress", "rawInput": {"command": "bd update bw-105s.1 --claim"}, "_meta": {"codex": {"toolName": "Bash"}, "claudeCode": {"toolName": "Bash"}}})
+        update({"sessionUpdate": "tool_call", "toolCallId": "call-" + str(turn), "title": "Check the working tree", "kind": "execute", "status": "in_progress", "rawInput": {"command": "git status"}, "_meta": {"codex": {"toolName": "Bash"}, "claudeCode": {"toolName": "Bash"}}})
         words = " ".join(part.get("text", "") for part in request.get("params", {}).get("prompt", []))
         if "child-idle" in words:
             child = session + "-child"

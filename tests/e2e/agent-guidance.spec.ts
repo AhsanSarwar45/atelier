@@ -141,7 +141,7 @@ for (const brand of ['claude', 'codex'] as const) test(`${brand} chat guidance h
   const events: WbpEvent[] = [
     { ...base, seq: 1, type: 'session.started', brand, externalId: 'fixture', model: 'fixture', cwd: project.path, permissionMode: 'on-request' },
     { ...base, seq: 2, type: 'session.menu', sharedLibrary: { revision: 'diagnostic-revision-only', items: [
-      { id: 'beads', name: 'Beads workflow', source: 'built-in', state: 'available', kind: 'instruction' },
+      { id: 'workflow', name: 'Team workflow', source: 'built-in', state: 'available', kind: 'instruction' },
       { id: 'atelier', name: 'Atelier', source: 'built-in', state: 'available', kind: 'instruction' },
       { id: 'review', name: 'Code review', source: 'global', state: 'available', kind: 'skill', automatic: true },
       { id: 'release', name: 'Release audit', source: 'project', state: 'available', kind: 'skill', automatic: false },

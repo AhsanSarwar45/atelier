@@ -16,12 +16,9 @@ test.describe.configure({ mode: 'serial', timeout: 60_000 });
 for (const brand of ['codex', 'claude']) {
   test(`${brand}: child completion cannot end the parent turn`, async ({ page, request }, info) => {
     const projectPath = resolve(run!, `child-idle-${brand}`);
-    mkdirSync(resolve(projectPath, '.beads'), { recursive: true });
     execFileSync('git', ['init', '--quiet', projectPath]);
     mkdirSync(resolve(projectPath, '.atelier'), { recursive: true });
-    writeFileSync(resolve(projectPath, '.beads/metadata.json'), JSON.stringify({ database: 'fixture.db', backend: 'sqlite' }));
-    writeFileSync(resolve(projectPath, '.beads/issues.jsonl'), '');
-    writeFileSync(resolve(projectPath, '.atelier/project.toml'), `schema_version = 1\n[project]\ndisplay_name = "Child completion ${brand}"\nuse_beads = true\n[git]\ncompleted_work_branch = "main"\n[beads]\nissue_id_prefix = "fixture"\n`);
+    writeFileSync(resolve(projectPath, '.atelier/project.toml'), `schema_version = 1\n[project]\ndisplay_name = "Child completion ${brand}"\n[git]\ncompleted_work_branch = "main"\n`);
     const created = await request.post('/api/projects', { data: { name: `Child completion ${brand}`, path: projectPath } });
     expect(created.ok(), await created.text()).toBe(true);
     const project = await created.json();

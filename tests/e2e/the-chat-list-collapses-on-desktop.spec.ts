@@ -38,7 +38,6 @@ function seedRepository(): void {
       '',
       '[project]',
       'display_name = "chat-list-collapse"',
-      'use_beads = false',
       '',
       '[git]',
       'completed_work_branch = "main"',

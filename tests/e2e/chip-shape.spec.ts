@@ -21,9 +21,9 @@ const SHOT = process.env.CHIP_SHAPE_DIR || 'tests/results/chip-shape';
 const DSF = Number(process.env.CHIP_DSF || 4);
 test.use({ deviceScaleFactor: DSF });
 
-// `bd init` writes a Dolt database and installs four sets of hooks before the
-// browser is opened at all, and on a busy machine that alone spends the default
-// deadline (tests/e2e/fixture-project.ts).
+// The fixture project is made before the browser is opened at all, and on a
+// busy machine that alone spends the default deadline
+// (tests/e2e/fixture-project.ts).
 test.setTimeout(240_000);
 
 test('every chip in the app draws the same box', async ({ page, request }) => {
@@ -33,19 +33,19 @@ test('every chip in the app draws the same box', async ({ page, request }) => {
   const text = [
     'Two independent hook problems are now fixed.',
     '',
-    '- [board-actor.py](</home/ahsan/dev/beads-web/scripts/hooks/board-actor.py:96>) now returns updatedInput.',
+    '- [tool-guard.py](</home/ahsan/dev/beads-web/scripts/hooks/tool-guard.py:96>) now returns updatedInput.',
     '- [.codex/hooks.json](</home/ahsan/dev/beads-web/.codex/hooks.json:51>) no longer loads twice.',
     '',
-    '- In code: [`board-actor.py`](</home/ahsan/dev/beads-web/scripts/hooks/board-actor.py:96>) now returns updatedInput.',
+    '- In code: [`tool-guard.py`](</home/ahsan/dev/beads-web/scripts/hooks/tool-guard.py:96>) now returns updatedInput.',
     '  - Nested under it: [`.codex/hooks.json`](</home/ahsan/dev/beads-web/.codex/hooks.json:51>) no longer loads twice.',
     '',
-    '> Quoted: [board-actor.py](</home/ahsan/dev/beads-web/scripts/hooks/board-actor.py:96>) still.',
+    '> Quoted: [tool-guard.py](</home/ahsan/dev/beads-web/scripts/hooks/tool-guard.py:96>) still.',
     '',
-    '**Bold around it: [board-actor.py](</home/ahsan/dev/beads-web/scripts/hooks/board-actor.py:96>) still.**',
+    '**Bold around it: [tool-guard.py](</home/ahsan/dev/beads-web/scripts/hooks/tool-guard.py:96>) still.**',
     '',
     'In a heading:',
     '',
-    '### [board-actor.py](</home/ahsan/dev/beads-web/scripts/hooks/board-actor.py:96>)',
+    '### [tool-guard.py](</home/ahsan/dev/beads-web/scripts/hooks/tool-guard.py:96>)',
   ].join('\n');
   const base = { sessionId: CHAT, at: new Date(0).toISOString() };
   const events: WbpEvent[] = [

@@ -3,7 +3,7 @@
 
 -- the project list (/)
    * scrolls sideways inside itself: [project-path] holds 570px in 208px
-   * under 44px to a thumb: open-terminal 40x40, Settings 40x40, Add tag 40x40, Project settings 40x40, Open in external application 40x40, Atelier 86x40, Beads CLI 108x40, Show archived 139x40, Claude Protocol orchestr 200x33, Add Project 342x40
+   * under 44px to a thumb: open-terminal 40x40, Settings 40x40, Add tag 40x40, Project settings 40x40, Open in external application 40x40, Atelier 86x40, Show archived 139x40, Claude Protocol orchestr 200x33, Add Project 342x40
 -- the chat tab, no chat open
    * the chat list starts shut: its first row sits from x=-288 to x=-1, off the left edge, and only the [chat-rail-toggle] brings it back
 -- the chat tab, the list shut

@@ -1,7 +1,7 @@
 {
-  "name": "beads-web-fixture",
+  "name": "atelier-fixture",
   "description": "Two plugins that exist only so the catalogue has something it can install without a network (bw-6ecp.7).",
-  "owner": { "name": "Beads Web tests" },
+  "owner": { "name": "Atelier tests" },
   "plugins": [
     {
       "name": "tidy-notes",

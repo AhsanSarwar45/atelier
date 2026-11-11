@@ -8,8 +8,8 @@ import { basename, dirname, join } from 'node:path';
  */
 
 /**
- * A card id from the retired board. Nothing seeds it any more; it only appears
- * as words in recorded chats, the way older transcripts still name cards.
+ * A short id that appears only as words in recorded chats, so anything that
+ * names it can be traced to the chat that said it.
  */
 export const PARENT_CARD = 'wl-demo1';
 export const REPORT_PROJECT = 'linkdemo';

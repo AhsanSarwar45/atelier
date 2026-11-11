@@ -12,9 +12,7 @@ test.skip(!run || !process.env.CLAUDE_ACP_TEST_SOURCE, 'requires the isolated ac
 test('runtime reconciliation repairs missed status updates on open, send and a periodic sweep', async ({ page, request }) => {
   test.setTimeout(60_000);
   const projectPath = resolve(run!, `reconcile-project-${Date.now()}`);
-  mkdirSync(resolve(projectPath, '.beads'), { recursive: true });
-  writeFileSync(resolve(projectPath, '.beads/metadata.json'), JSON.stringify({ database: 'fixture.db', backend: 'sqlite' }));
-  writeFileSync(resolve(projectPath, '.beads/issues.jsonl'), '');
+  mkdirSync(projectPath, { recursive: true });
   const made = await request.post('/api/projects', { data: { name: 'Runtime status reconciliation', path: projectPath } });
   expect(made.ok(), await made.text()).toBe(true);
   const project = await made.json();
