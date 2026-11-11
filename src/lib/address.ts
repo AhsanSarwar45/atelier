@@ -188,8 +188,12 @@ export function stepsOut(leaves: (url: URL) => boolean, counted: number): number
  * Shows a task's detail, or closes it, in place: the address is rewritten
  * rather than pushed, so picking through the list does not fill the history,
  * and Back leaves the Tasks tab the way it leaves any other. Next follows the
- * native history, so the screen reads the new address like any other.
+ * native history, so the screen reads the new address like any other — but
+ * only for a call that does not hand it Next's own entry state: given that
+ * (`window.history.state`), Next takes the call for its own and leaves
+ * `useSearchParams` on the old address, so the detail never opened. `null`
+ * is the state Next keeps its own entry under and follows.
  */
 export function showTask(params: URLSearchParams, task: number | null): void {
-  window.history.replaceState(window.history.state, '', addressWith(params, { tab: 'tasks', task }));
+  window.history.replaceState(null, '', addressWith(params, { tab: 'tasks', task }));
 }

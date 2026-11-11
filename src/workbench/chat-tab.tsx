@@ -1530,7 +1530,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     if (askedNewChat !== 'task') return;
     taskInNewChat.current = true;
     newChat();
-    window.history.replaceState(window.history.state, '', addressWith(params, { newchat: null }));
+    // `null`, not `window.history.state`: Next ignores a replace carrying its
+    // own state, so the screen would keep reading `newchat=task`, the chat
+    // started next would be pushed with it, and the dialog would open again.
+    window.history.replaceState(null, '', addressWith(params, { newchat: null }));
   }, [askedNewChat, newChat, params]);
   /** Open the dialog on the first other agent a chat can move to. */
   const switchProvider = useCallback((chat: { sessionId: string; brand: Brand }) => {

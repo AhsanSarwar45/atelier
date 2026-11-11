@@ -344,7 +344,9 @@ export default function TasksTab({ projectId, selected: shown, onSelect, onOpenC
                 {groups.map((group) => (
                   <Collapsible
                     key={group.status}
-                    open={open[group.status] ?? !FOLDED.has(group.status)}
+                    // A folded group opens when it holds the open task, so a
+                    // link to a done task shows its row as well as its detail.
+                    open={open[group.status] ?? (!FOLDED.has(group.status) || group.tasks.some((task) => task.number === selected))}
                     onOpenChange={(next) => setOpen((was) => ({ ...was, [group.status]: next }))}
                     data-testid="task-group"
                     data-status={group.status}

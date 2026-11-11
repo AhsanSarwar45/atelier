@@ -64,6 +64,17 @@ describe('the task in the address', () => {
     expect(window.location.search).toBe('?id=p1&tab=tasks');
     expect(window.history.length).toBe(before);
   });
+
+  it('hands Next no entry state of its own, so the screen follows the change', () => {
+    // Next's history integration skips a replace whose state carries its own
+    // `__NA` mark: `useSearchParams` would keep the old address and the detail
+    // would never open.
+    window.history.replaceState({ __NA: true }, '', '/project?id=p1&tab=tasks');
+    const replace = vi.spyOn(window.history, 'replaceState');
+    showTask(new URLSearchParams(window.location.search), 5);
+    expect(replace).toHaveBeenLastCalledWith(null, '', '/project?id=p1&tab=tasks&task=5');
+    replace.mockRestore();
+  });
 });
 
 describe('the Tasks tab told which task is open', () => {
@@ -80,6 +91,14 @@ describe('the Tasks tab told which task is open', () => {
     expect(onSelect).toHaveBeenLastCalledWith(3);
     fireEvent.click(within(screen.getByTestId('task-detail')).getByRole('button', { name: 'Close' }));
     expect(onSelect).toHaveBeenLastCalledWith(null);
+  });
+
+  it('unfolds the folded group that holds it, so its row shows too', async () => {
+    list.mockResolvedValue([...tasks, makeTask({ number: 4, title: 'Fourth', status: 'done', updatedAt: Date.now() })]);
+    render(<TasksTab projectId="p1" selected={4} onSelect={() => {}} />);
+    await screen.findByTestId('task-detail');
+    const done = screen.getAllByTestId('task-group').find((group) => group.dataset.status === 'done')!;
+    expect(within(done).getByText('Fourth')).toBeVisible();
   });
 
   it('follows the address when Back or Forward changes it', async () => {

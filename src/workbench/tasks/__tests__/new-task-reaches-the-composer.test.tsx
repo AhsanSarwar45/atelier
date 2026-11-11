@@ -96,13 +96,19 @@ describe('New task in a chat that exists', () => {
 
 describe('New task in a new chat', () => {
   it('opens the New chat dialog, and the chat it starts has `@task ` waiting', async () => {
-    window.history.replaceState(null, '', '/project?id=p1&tab=chat&newchat=task');
+    window.history.replaceState({ __NA: true }, '', '/project?id=p1&tab=chat&newchat=task');
     address.search = 'id=p1&tab=chat&newchat=task';
+    const replace = vi.spyOn(window.history, 'replaceState');
     render(<ChatTab projectId={PROJECT} projectPath={PATH} openSessionId={null} />);
     await act(async () => {});
     expect(await screen.findByTestId('new-chat-provider-dialog')).toBeVisible();
     // The ask is let go of, so a reload or Back does not open the dialog again.
     expect(window.location.search).toBe('?id=p1&tab=chat');
+    // With no state of Next's own, so Next follows it and the screen stops
+    // reading the ask; carrying Next's state, the chat started next was pushed
+    // with `newchat=task` still on it and the dialog opened a second time.
+    expect(replace).toHaveBeenCalledWith(null, '', '/project?id=p1&tab=chat');
+    replace.mockRestore();
     const start = screen.getByTestId('new-chat-start');
     await waitFor(() => expect(start).toBeEnabled());
     await act(async () => { fireEvent.click(start); });
