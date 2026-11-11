@@ -11,12 +11,14 @@ a task.
 
 ## When a task is needed
 
-- Questions, explanations and one small edit never need a task. Just answer
-  or do it.
-- Work that changes several files or takes several steps needs a task. If the
-  owner asks for such work and it is not already a task, ask first with a
-  choice: **Create task**, **Just do it**, or **Cancel**. Create the task only
-  after **Create task**.
+- Questions, explanations and a small edit to one file never need a task.
+  Just answer or do it.
+- Any other change to files needs a task: anything that edits two or more
+  files, or one file in more than one place for different reasons. If the
+  owner asks for such work and no task in this chat covers it, stop before
+  editing anything and ask with a choice: **Create task**, **Just do it**, or
+  **Cancel**. Create the task only after **Create task**; after **Just do
+  it**, do the work without one.
 - `@task TEXT` from the owner means: pick the type, draft the plan, and run
   `atelier task create`. Do not ask again.
 - Never create a task on your own to put work off. Suggest it as a follow-up
