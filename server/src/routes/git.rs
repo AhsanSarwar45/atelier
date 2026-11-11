@@ -2717,7 +2717,7 @@ fn read_show_record(record: &str) -> Option<CommitDetail> {
 //
 // A project's checkouts, by name and by nothing else. The older
 // `/api/git/worktree*` routes above answer only about a card — they build
-// `.worktrees/bd-<card>` and take a card id where a name belongs — so a person
+// a worktree from a card id where a name belongs — so a person
 // choosing where a chat will work could not be served by them at all. These
 // take the name the person typed, and the plain word for the thing was already
 // spoken for, which is why they are `trees` (bw-ov7a.1).

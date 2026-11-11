@@ -103,7 +103,7 @@ impl Crowding {
 }
 
 /// The least share of what the service holds, file cache aside, that a chat
-/// must hold to be stopped for it. When the memory is somewhere else — a Dolt
+/// must hold to be stopped for it. When the memory is somewhere else — a stray
 /// server left running, or the server itself — stopping chats would not free
 /// it, and the watcher would stop one after another for nothing.
 const SHARE_TO_STOP: u64 = 8;

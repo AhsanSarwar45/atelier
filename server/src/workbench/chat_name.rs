@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn a_key_that_is_not_there_takes_its_separator_with_it() {
         assert_eq!(
-            render(&key_then_title(), Some("Fix the tray"), &worktree("beads-web")).as_deref(),
+            render(&key_then_title(), Some("Fix the tray"), &worktree("keystone")).as_deref(),
             Some("Fix the tray")
         );
     }

@@ -115,7 +115,7 @@ impl ClaudeTransportConfig {
             args: options.command_args(),
             cwd: options.cwd.clone(),
             environment: vec![
-                ("CLAUDE_CODE_ENTRYPOINT".into(), "beads-workbench".into()),
+                ("CLAUDE_CODE_ENTRYPOINT".into(), "atelier".into()),
                 (
                     "CLAUDE_AGENT_SDK_VERSION".into(),
                     env!("CARGO_PKG_VERSION").into(),

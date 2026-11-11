@@ -275,7 +275,7 @@ impl Condition {
     pub fn evaluate(&self, root: Option<&Path>) -> Evaluation {
         match self {
             Self::Always => Evaluation::answer(true, "Always available".into()),
-            Self::ProjectBeads => Evaluation::answer(false, "Beads is no longer part of Atelier".into()),
+            Self::ProjectBeads => Evaluation::answer(false, "This condition was retired".into()),
             Self::All { conditions } | Self::Any { conditions } => {
                 let children: Vec<_> = conditions.iter().map(|c| c.evaluate(root)).collect();
                 let all = matches!(self, Self::All { .. });

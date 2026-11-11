@@ -690,7 +690,7 @@ impl Database {
     /// Looks up a project by its `path` column.
     ///
     /// Returns `Ok(None)` when no project matches (not an error — the caller
-    /// may be handling a `dolt://` path or a path unknown to the local DB).
+    /// may be handling a path unknown to the local DB).
     ///
     /// On Windows the `projects` table may hold paths with backslashes while
     /// a handler may normalize incoming paths to forward slashes,
@@ -1204,7 +1204,7 @@ mod tests {
     fn test_get_project_by_path_matches_windows_backslash_variant() {
         // Project created with backslashes (as Windows frontends might send)
         // should still match when the caller passes the forward-slash variant
-        // that `/api/beads` normalizes to before looking up.
+        // that a handler normalizes to before looking up.
         let db = Database::new_in_memory().unwrap();
         let created = db
             .create_project(CreateProjectInput {

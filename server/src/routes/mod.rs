@@ -74,10 +74,10 @@ pub async fn health() -> impl IntoResponse {
 
 /// Every answer the search has given, one to a tool name.
 ///
-/// This was a single `OnceLock` holding the one answer about `bd`, so the first
-/// "not on this computer" outlived the install that fixed it: a reader who
-/// installed the tool while Atelier was up had to restart it before their
-/// boards would load (bw-oxrg). An answer kept here can be dropped.
+/// This was a single `OnceLock` holding one answer, so the first "not on this
+/// computer" outlived the install that fixed it: a reader who installed the
+/// tool while Atelier was up had to restart it (bw-oxrg). An answer kept here
+/// can be dropped.
 static TOOLS: OnceLock<Mutex<HashMap<String, Option<PathBuf>>>> = OnceLock::new();
 static TOOL_OVERRIDES: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
 
@@ -110,7 +110,7 @@ pub fn forget_tools() {
 ///
 /// The same case as `forget_tools` for a caller that knows which one it just
 /// installed. Clearing everything would be correct too, but it would throw
-/// away answers about `git`, `bd` and the agents that nothing has invalidated
+/// away answers about `git` and the agents that nothing has invalidated
 /// — and the caller here is a poll, so it would throw them away repeatedly.
 pub fn forget_tool(name: &str) {
     if let Some(tools) = TOOLS.get() {
@@ -625,7 +625,7 @@ mod tests {
     ///
     /// The caller that wants this is a poll — the settings screen asking every
     /// time it is opened whether Tailscale has arrived yet. Clearing the whole
-    /// memo there would send the next lookup of git, bd and each agent back to
+    /// memo there would send the next lookup of git and each agent back to
     /// the disk, over and over, for a question that was only ever about one
     /// program (bw-l70z).
     #[test]
@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn an_empty_place_finds_nothing() {
         let place = tempfile::tempdir().expect("a directory of our own");
-        assert_eq!(search_in(&here_endings(), &[place.path().to_path_buf()], &["bd"]), None);
+        assert_eq!(search_in(&here_endings(), &[place.path().to_path_buf()], &["git"]), None);
     }
 
     /// A computer whose list of places is empty still has its tools on it.

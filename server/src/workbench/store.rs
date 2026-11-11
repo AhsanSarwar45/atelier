@@ -5560,7 +5560,7 @@ mod tests {
                 42_i64,
                 "2026-08-20T00:00:00.000Z",
                 "report.available",
-                r#"{"type":"report.available","sessionId":"legacy-chat","project":"beads-web","slug":"review"}"#,
+                r#"{"type":"report.available","sessionId":"legacy-chat","project":"keystone","slug":"review"}"#,
             ],
         ).unwrap();
 

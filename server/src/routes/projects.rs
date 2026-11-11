@@ -483,6 +483,5 @@ mod tests {
         assert!(json.contains("\"lastOpened\":\"2026-04-22T10:00:00Z\""));
         assert!(json.contains("\"localPath\":null"));
         assert!(!json.contains("cachedCounts"));
-        assert!(!json.contains("usesBeads"));
     }
 }

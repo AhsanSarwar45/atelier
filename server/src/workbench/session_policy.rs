@@ -84,19 +84,8 @@ mod tests {
             .join("machinery/skills")
     }
 
-    /// The skill every session gets names no Beads concept, so a chat-only
-    /// project is not handed board vocabulary and then told to ignore it
-    /// (bw-3tkl.3).
-    #[test]
-    fn the_always_injected_skill_says_nothing_about_beads() {
-        let text = body(&bundled_skills().join("atelier/SKILL.md")).unwrap();
-        let lowered = text.to_lowercase();
-        assert!(!lowered.contains("beads"), "atelier/SKILL.md still names Beads:\n{text}");
-        assert!(!lowered.contains(" epic"), "atelier/SKILL.md still names epics:\n{text}");
-    }
-
     /// The task rules are in every session's guidance, whatever the project
-    /// and whether or not it uses Beads (docs/tasks.md).
+    /// (docs/tasks.md).
     #[test]
     fn every_session_is_given_the_task_rules() {
         let data = tempfile::tempdir().unwrap();
@@ -147,7 +136,7 @@ mod tests {
         }
     }
 
-    /// Beads, landing and external review are gone, and a session is told
+    /// The board, landing and external review are gone, and a session is told
     /// nothing about any of them — not even that they are absent.
     #[test]
     fn a_session_hears_nothing_of_the_board_landing_or_review() {
@@ -155,7 +144,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let snapshot = super::super::library::resolve(data.path(), Some(root.path())).unwrap();
         let policy = build_with_library(root.path(), &snapshot).to_lowercase();
-        for word in ["beads", "bd ", "board", "landing", "completed work branch", "external review", "reviewer"] {
+        for word in ["board", "landing", "completed work branch", "external review", "reviewer"] {
             assert!(!policy.contains(word), "the session policy says {word:?}:\n{policy}");
         }
     }

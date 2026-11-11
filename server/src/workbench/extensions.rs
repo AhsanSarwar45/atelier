@@ -829,7 +829,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         write(
             &codex.path().join("rules/default.rules"),
-            "prefix_rule(pattern=[\"bd\"], decision=\"allow\")\n",
+            "prefix_rule(pattern=[\"git\"], decision=\"allow\")\n",
         );
         write(&project.path().join(".codex/hooks.json"), r#"{"hooks":{}}"#);
         assert_eq!(list("codex", &account(), codex.path()).unwrap(), []);

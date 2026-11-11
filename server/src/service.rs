@@ -113,11 +113,10 @@ pub fn carried_settings() -> Vec<(String, String)> {
 /// The names that travel, in the order they are written down.
 ///
 /// `PATH` is one of them because this program is a front onto command-line
-/// tools it does not carry: providers and `bd` are bare names looked up on a
-/// list of places.
+/// tools it does not carry: git and the providers are bare names looked up on
+/// a list of places.
 /// A service is started by something that never read the reader's shell, so
-/// with the list left behind the board comes up with a dead chat and no boards
-/// on it (bw-w5zs). It is carried exactly as the reader had it when they
+/// with the list left behind the app comes up with a dead chat (bw-w5zs). It is carried exactly as the reader had it when they
 /// registered, because that is the list their own tools were found on.
 const CARRIED: [&str; 2] = ["ATELIER_DATA_DIR", "PATH"];
 

@@ -102,8 +102,8 @@ pub struct ServiceMemory {
     /// Share of the last ten seconds every process in the group spent
     /// stalled waiting for memory, in percent. `systemd-oomd` kills on this.
     pub pressure: f64,
-    /// Programs in the group this app did not start, such as a Dolt server
-    /// `bd` left running: the kernel charges them to the app all the same.
+    /// Programs in the group this app did not start, such as a database server
+    /// a tool left running: the kernel charges them to the app all the same.
     pub others: Vec<OtherProcess>,
 }
 
@@ -284,7 +284,7 @@ fn group_is_ours(path: &str, all_ours: bool) -> bool {
 
 /// The group's own account, which is what the kernel and `systemd-oomd` hold
 /// the app to. It used to be dropped whenever the group held one process the
-/// app had not started — a Dolt server `bd` left behind is one — so the badge
+/// app had not started — a server some tool left behind, say — so the badge
 /// showed the app's own 2.6 GB while the service was killed at 16 GB with no
 /// sign of it (bw-xeeqg.16).
 #[cfg(target_os = "linux")]
@@ -1015,7 +1015,7 @@ mod tests {
         assert_eq!(cgroup_path("12:memory:/legacy\n"), None);
     }
 
-    /// The app's service is reported even with a Dolt server `bd` left in it;
+    /// The app's service is reported even with a stray server left in it;
     /// a terminal's scope only when nothing else runs there (bw-xeeqg.16).
     #[test]
     fn a_service_is_reported_with_programs_it_did_not_start() {

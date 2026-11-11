@@ -5230,8 +5230,8 @@ mod tests {
                 let mut normalizer = AcpNormalizer::default();
                 normalizer.begin_local_prompt();
                 normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
-                    "sessionUpdate":"tool_call","toolCallId":"old-call","title":"Claim the card",
-                    "kind":"execute","rawInput":{"command":"bd update bw-105s.1 --claim"}
+                    "sessionUpdate":"tool_call","toolCallId":"old-call","title":"Check the tree",
+                    "kind":"execute","rawInput":{"command":"git status"}
                 }}));
                 normalizer.finish_turn("local", provider, &json!({"stopReason":reason}));
                 let late = normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
@@ -5240,7 +5240,7 @@ mod tests {
                 assert!(late.iter().all(|event| event.kind != EventKind::SessionState));
                 let late_call = normalizer.update("local", provider, &json!({"sessionId":"remote","update":{
                     "sessionUpdate":"tool_call_update","toolCallId":"old-call", "status":"in_progress",
-                    "title":"Claim the card", "rawInput":{"command":"bd update bw-105s.1 --claim"}
+                    "title":"Check the tree", "rawInput":{"command":"git status"}
                 }}));
                 assert!(late_call.iter().all(|event| event.kind != EventKind::SessionState));
                 normalizer.begin_local_prompt();

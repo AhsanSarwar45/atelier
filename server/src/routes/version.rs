@@ -919,7 +919,7 @@ fn generate_unix_update_script(
     pid: u32,
     port: &str,
 ) -> Result<PathBuf, String> {
-    let script_path = dir.join("beads-update.sh");
+    let script_path = dir.join("atelier-update.sh");
     let exe_name = current_exe
         .file_name()
         .and_then(|n| n.to_str())
@@ -954,8 +954,8 @@ PORT=$PORT ./{exe_name} &
 NEW_PID=$!
 
 # Health check: poll once per second for up to 30 attempts.
-# The new server needs ~3-4s to bind its port (a ~2s Dolt-detection
-# timeout at startup dominates), so a single check would lose the race.
+# The new server takes a few seconds to bind its port, so a single check
+# would lose the race.
 healthy=0
 i=0
 while [ $i -lt 30 ]; do
@@ -980,7 +980,7 @@ else
 fi
 
 # Self-delete
-rm -f "$SCRIPT_DIR/beads-update.sh"
+rm -f "$SCRIPT_DIR/atelier-update.sh"
 "#
     );
 
@@ -1006,7 +1006,7 @@ fn generate_windows_update_script(
     pid: u32,
     port: &str,
 ) -> Result<PathBuf, String> {
-    let script_path = dir.join("beads-update.bat");
+    let script_path = dir.join("atelier-update.bat");
     let exe_name = current_exe
         .file_name()
         .and_then(|n| n.to_str())
@@ -1045,8 +1045,8 @@ set PORT=%PORT%
 start /B "" "{exe_name}"
 
 rem Health check: poll once per second for up to 30 attempts.
-rem The new server needs ~3-4s to bind its port (a ~2s Dolt-detection
-rem timeout at startup dominates), so a single check would lose the race.
+rem The new server takes a few seconds to bind its port, so a single check
+rem would lose the race.
 set /a tries=0
 :health_loop
 timeout /t 1 /nobreak >nul

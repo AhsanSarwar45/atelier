@@ -94,8 +94,8 @@ fn own_names() -> &'static [String] {
             .or_else(|_| std::fs::read_to_string("/etc/hostname"))
             .ok()
             .or_else(|| {
-                // macOS has neither file. The server already shells out for git
-                // and for `bd`, so one more at startup is in keeping.
+                // macOS has neither file. The server already shells out for git,
+                // so one more at startup is in keeping.
                 std::process::Command::new("hostname")
                     .output()
                     .ok()

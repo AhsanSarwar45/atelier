@@ -467,9 +467,9 @@ mod tests {
             &claude.join("output-styles").join("manager.md"),
         );
 
-        // The three provider skills, into both homes. atelier/beads still have
-        // live sources; external-review's was retired, so its link is broken —
-        // both are owned and removed.
+        // The three provider skills, into both homes. atelier still has a live
+        // source; the other two were retired, so their links are broken — all
+        // are owned and removed.
         for name in PROVIDER_SKILLS {
             link(
                 &machinery.join("skills").join(name),

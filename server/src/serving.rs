@@ -207,7 +207,6 @@ mod tests {
     fn every_answer_about_the_work_is_one() {
         for asked in [
             "/api/health",
-            "/api/beads",
             "/api/projects",
             "/api/workbench/chats",
             "/api",

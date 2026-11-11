@@ -158,8 +158,8 @@ impl CodexTransport {
                 "initialize",
                 json!({
                     "clientInfo": {
-                        "name": "beads-workbench",
-                        "title": "Beads Workbench",
+                        "name": "atelier",
+                        "title": "Atelier",
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "capabilities": { "experimentalApi": true, "requestAttestation": false }
@@ -412,7 +412,7 @@ mod tests {
                     json!({"data":[{"model":"gpt-5","displayName":"GPT-5","description":"Model","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"high"}],"defaultReasoningEffort":"high"}]})
                 }
                 "skills/list" => {
-                    json!({"data":[{"skills":[{"name":"beads","description":"Use beads","path":"/skills/beads","enabled":true}]}]})
+                    json!({"data":[{"skills":[{"name":"notes","description":"Use notes","path":"/skills/notes","enabled":true}]}]})
                 }
                 "collaborationMode/list" => json!({"data":[{"mode":"plan","name":"Plan"}]}),
                 "fail" => {
@@ -548,7 +548,7 @@ mod tests {
         assert_eq!(capabilities["models"][1]["value"], "gpt-5");
         assert_eq!(capabilities["efforts"][0]["value"], "high");
         assert_eq!(capabilities["collaborationModes"][0]["value"], "plan");
-        assert_eq!(capabilities["skills"], json!(["beads"]));
+        assert_eq!(capabilities["skills"], json!(["notes"]));
         transport.close().await;
     }
 

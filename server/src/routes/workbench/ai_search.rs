@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn an_ask_made_inside_a_project_searches_that_project_whatever_its_agent_asks_for() {
-        let here = ("p-1".to_string(), "beads-web".to_string());
+        let here = ("p-1".to_string(), "keystone".to_string());
         // The agent named another project; it is searched here all the same.
         assert_eq!(
             searched_in(Some(&here), vec!["p-2".to_string()]),
@@ -308,11 +308,11 @@ mod tests {
         let chats = Chats {
             index,
             projects: None,
-            here: Some(("p-1".to_string(), "beads-web".to_string())),
+            here: Some(("p-1".to_string(), "keystone".to_string())),
             fixed: String::new(),
         };
         let tools = chats.tools();
         let said = tools[0]["description"].as_str().unwrap().to_string();
-        assert!(said.starts_with("Search the chats of the beads-web project"), "{said}");
+        assert!(said.starts_with("Search the chats of the keystone project"), "{said}");
     }
 }
