@@ -11,114 +11,8 @@ way.
 
 ## Screen checks
 
-Both need a screen already serving (`atelier`, 127.0.0.1:3008 by default), a
+They need a screen already serving (`atelier`, 127.0.0.1:3008 by default), a
 `google-chrome` on the path, and `websocket-client` in the Python running them.
-
-## `board-columns-agree.py <project-path>`
-
-Asks `bd` where every card belongs, opens the project screen, reads back which
-card each column drew, and names any card in the wrong place.
-
-The rule it encodes, which is the screen's and not `bd`'s: **a job is one card,
-put where the pieces directly under it put it** — the manager's ruling, corsetta
-`docs/board.md#3a1`. A step is not a card of its own; the goal it belongs to
-stands in for it and lists it inside. Nothing below that one level is read, so a
-card and the list of pieces printed under it cannot say different things — the
-mismatch that made an untouched job read as waiting on a reader. A card the
-board itself placed — read, waiting on the manager, closed — keeps that place.
-
-Several sessions work one board at once, so the board is read either side of the
-screen and only the cards that sat still across both are compared; it says how
-many it left out.
-
-Two more rules ride along with the columns:
-
-- **the heading counts the cards its own column drew**, so a column scrolled
-  past its first screenful still says how much is in it
-- **the manager's column is the oldest job first**, so nothing waits in it
-  quietly while newer work lands on top. That is when each job was opened, not
-  how long it has waited on him — corsetta `cor-lxwb`. It needs two cards
-  waiting before it can say anything; with fewer,
-  `src/lib/__tests__/board-agreement.test.ts` is what holds that rule.
-
-A second rule rides along, because it needs the same loaded screen: **a card's
-report is drawn inside the card.** It walks up from every "Manager report" on
-the page looking for a card frame around it, so a report parked beside a card
-is caught rather than counted as that card's own.
-
-## `board-counts-agree.py <project-path>`
-
-Asks `bd` what each job holds, opens the project screen, and reads the fraction,
-the percentage and the dropped note off every job card.
-
-The rule it encodes: **dropped work is not part of a job** — the manager's
-ruling, 2026-08-17. A job of sixteen pieces with five dropped is a job of
-eleven; it reads 11/11 and 100% once those eleven are done, and says "5 dropped"
-beside them. Counting the dropped ones in the total is what left a job with
-nothing left to do sitting at 69% with the sign-off button withheld, and no test
-that stops at the code could see it: the screen looked calm and drew the wrong
-number.
-
-Two rules ride along, because they are the same disagreement one step further
-out:
-
-- **the percentage is the fraction it is drawn beside**, not some other reading
-  of the same job
-- **the list of pieces says the same two numbers the count above it does**, so a
-  bar counting eleven never sits over a list of sixteen
-
-`--count-dropped` puts the old rule back on the check's side, which is how it is
-shown to bite: against a screen that is right it must name every job that
-dropped anything. It also fails when no job on the board has dropped work, since
-then it compared nothing.
-
-The numbers come off the progress bar's own label and the block around it, never
-off the card's whole text — a job whose title says "reads 100% on the board"
-would otherwise be measured against its own description.
-
-## `finish-button-shows.py`
-
-Builds a throwaway board in a temp directory, registers it with the running app
-as a project, opens it in a browser and looks at the button that finishes a job.
-
-The rule it encodes: **the manager is offered the finish on his own column, and
-nowhere else.** A job whose every counted piece is finished — with some of its
-pieces dropped — reads 100% and draws `Mark Done` in Manager Review; the same
-job in Agent Review draws nothing, because a job nobody has read yet has been
-signed by nobody, and a finish offered there is how unsigned work reaches Done.
-
-It builds its own board because it has to: the Manager Review column on the real
-board is usually empty, so waiting for such a job to turn up is not a check.
-The two jobs it pours are identical apart from the column they sit in, which is
-what makes the contrast a real one rather than two separate readings.
-
-The board lives under `~/.cache/atelier-checks` and the project is removed on
-the way out, pass or fail — the server refuses to read a board from outside the
-home directory, which is why it is not in the system temp directory. `--keep`
-leaves both standing to be looked at.
-
-## `panel-drawers-agree.py <project-path>`
-
-Opens each side panel and samples it 120 ms later, while it should still be
-moving. Two rules about the drawer itself:
-
-- **every drawer slides** — one already in place at that moment never animated,
-  and one still fully off-screen never started
-- **no drawer takes more than half the screen** — what is behind it is what the
-  reader came back to
-
-Their widths need not match: a drawer holding a document is not the same thing
-as a drawer holding a card's details.
-
-Then it opens a card's report, scrolls it to the end, and reads three more rules
-about the page the drawer holds:
-
-- **the report is inset from the drawer's edges** — 12 px is the least that
-  reads as a margin rather than as the drawer's own wallpaper
-- **its contents list is still on screen at the bottom of the page** — the rail
-  is only sticky on a wide screen, and a drawer is not one
-- **the page never reaches wider than the drawer** — a sideways scrollbar means
-  the right-hand column of every table is off the screen
 
 ## `chat-shows-its-work.mjs`
 
@@ -148,7 +42,7 @@ cannot see this one — what must not happen is a process starting — so it dri
 the sidecar and reads back the session row either side.
 
 It starts a real chat and spends one small turn on it, twice, so it wants a
-sidecar with its own data and never the one serving the owner's board:
+sidecar with its own data and never the one serving the owner's app:
 
 ```
 XDG_DATA_HOME=<a copy of ~/.local/share> BEADS_WORKBENCH_PORT=3019 \
@@ -373,21 +267,6 @@ BEADS_E2E_URL=http://127.0.0.1:3032 node scripts/chat-open-cost.mjs <sessionId>
 
 Against the four longest chats on this machine: 3.77MB arriving in 361ms became
 0.09MB in 67ms, and 3.65MB and 1.83MB became 0.11MB and 0.14MB.
-
-## `board-open-cost.mjs`
-
-Every request the app makes between clicking a project and the board's first
-card, in order, with what each one cost. Anything in that list nobody asked
-for is a wait the reader pays for on every board open.
-
-```
-node scripts/board-open-cost.mjs http://127.0.0.1:3032
-```
-
-Run it against a built instance. It is how the memory panel was caught reading
-what the project remembers before anyone had opened it — a `bd` run of its own,
-a seventh of a second, for an empty list (bw-uiyz.14).
-
 
 ## The Files tab's cost — `files-*.mjs`, `files-perf-stack.sh`
 

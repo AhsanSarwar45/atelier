@@ -5,9 +5,6 @@ import { presentableWidget } from '../../src/workbench/chat-widgets';
 const instructions = [readFileSync('machinery/skills/atelier/SKILL.md', 'utf8')];
 // Schemas and examples are read on demand, not carried by every session.
 const reference = readFileSync('machinery/skills/atelier-reference/SKILL.md', 'utf8');
-// The checklist is a board view, so its rules live in the skill only a Beads
-// project is given. A chat-only session is never handed them (bw-3tkl.3).
-const beads = readFileSync('machinery/skills/beads/SKILL.md', 'utf8');
 
 describe('agent chat widget instructions', () => {
   it.each(instructions)('teaches both when to use widgets and when prose is better', (text) => {
@@ -36,31 +33,11 @@ describe('agent chat widget instructions', () => {
     expect(reference).toMatch(/semantic accent colors automatically/i);
   });
 
-  it('makes the live checklist an epic-backed view instead of agent-maintained state', () => {
-    expect(beads).toMatch(/checklist is a view of an epic/i);
-    expect(beads).toMatch(/epic's ID as the\s+single item/i);
-    expect(beads).toMatch(/reads every title and status from Beads/i);
-    expect(beads).toMatch(/never[\s\S]*update .*checklist statuses by hand/i);
-    expect(beads).toMatch(/standalone ticket.*do not publish a checklist/i);
-  });
-
-  it('says a failing suite never blocks landing, in every copy of the rules', () => {
-    expect(beads).toMatch(/board\/land` fails when a declared check fails/);
-    expect(beads).toMatch(/caused the failures, fix them/);
-    expect(beads).toContain("board/land CARD-ID --checks-unrelated 'REASON'");
-    expect(beads).toMatch(/failing suite is never a reason to mark work blocked/);
-    expect(beads).toMatch(/Always run\s+`board\/land` and read its output\. Never predict what it will do\./);
-    const body = (text: string) => text.slice(text.indexOf('# Atelier and Beads'));
-    const skill = body(beads);
-    expect(body(readFileSync('.atelier/skills/beads/SKILL.md', 'utf8'))).toBe(skill);
-    expect(body(readFileSync('docs/board-lifecycle.md', 'utf8')).startsWith(skill.trimEnd())).toBe(true);
-  });
-
   it('keeps how to save a memory where the short text sends agents', () => {
     for (const want of ['atelier tool memory add', '--scope', 'One fact per memory']) expect(reference).toContain(want);
   });
 
-  it('keeps the checklist rules out of the skill every session gets', () => {
+  it('keeps the retired board out of the skill every session gets', () => {
     for (const text of [instructions[0], reference]) {
       expect(text).not.toMatch(/checklist/i);
       expect(text).not.toMatch(/beads/i);
