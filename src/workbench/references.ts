@@ -340,10 +340,15 @@ export function resolveReference(ref: Reference, root: string | Rooted): string 
  * change to a file, or with a commit in front, `@diff:abc1234:src/a.ts:-30`,
  * what that commit did to it. Its id is a path and lines, so it has a grammar
  * of its own (`parseDiffId`), read the same way on the server (bw-v79ny.1).
+ *
+ * `@task:12` is task #12 of the chat's project; its id is the number alone. A
+ * bare `@task`, a word of its own, is the owner asking the agent to make a new
+ * task of the message (docs/tasks.md). It is found with an empty id, so it is
+ * drawn as a badge and written back as `@task`.
  */
-export type AtelierKind = 'bead' | 'chat' | 'skill' | 'diff';
+export type AtelierKind = 'bead' | 'chat' | 'skill' | 'diff' | 'task';
 
-export const ATELIER_KINDS: readonly AtelierKind[] = ['bead', 'chat', 'skill', 'diff'];
+export const ATELIER_KINDS: readonly AtelierKind[] = ['bead', 'chat', 'skill', 'diff', 'task'];
 
 /** An Atelier reference found inside a larger text, and where in it it sits. */
 export interface FoundAtelierReference {
@@ -372,6 +377,10 @@ const ATELIER_AT = new RegExp('@(' + ID_KINDS.join('|') + '):(' + ATELIER_ID + '
  */
 const DIFF_AT = /@diff:([A-Za-z0-9._/~][A-Za-z0-9._/~@+:-]*)/y;
 const LEADING_SKILL = new RegExp(`^/skill:(${ATELIER_ID})(?![A-Za-z0-9_])`);
+/** A task's number: digits, not starting with 0. */
+const TASK_NUMBER = /^[1-9][0-9]*$/;
+/** A bare `@task`: the word alone, ended by whitespace or the text. */
+const NEW_TASK_AT = /@task(?=\s|$)/y;
 
 function atelierAt(text: string, at: number): FoundAtelierReference | null {
   DIFF_AT.lastIndex = at;
@@ -383,8 +392,14 @@ function atelierAt(text: string, at: number): FoundAtelierReference | null {
   }
   ATELIER_AT.lastIndex = at;
   const m = ATELIER_AT.exec(text);
-  if (!m) return null;
-  return { kind: m[1] as AtelierKind, id: m[2]!, start: at, end: at + m[0].length, run: false };
+  if (m) {
+    if (m[1] === 'task' && !TASK_NUMBER.test(m[2]!)) return null;
+    return { kind: m[1] as AtelierKind, id: m[2]!, start: at, end: at + m[0].length, run: false };
+  }
+  // `@task:` with no number after it is not a task, nor a bare `@task`.
+  NEW_TASK_AT.lastIndex = at;
+  if (NEW_TASK_AT.test(text)) return { kind: 'task', id: '', start: at, end: at + '@task'.length, run: false };
+  return null;
 }
 
 /**
@@ -406,10 +421,13 @@ export function findAtelierReferences(text: string): FoundAtelierReference[] {
   return found;
 }
 
-/** The one form this app writes an Atelier reference in. */
+/** The one form this app writes an Atelier reference in. A bare `@task` has no id. */
 export function formatAtelierReference(kind: AtelierKind, id: string): string {
-  return `@${kind}:${id}`;
+  return id ? `@${kind}:${id}` : `@${kind}`;
 }
+
+/** What the `@` menu's "New task" line writes: a bare `@task` and a space. */
+export const NEW_TASK = '@task ';
 
 /**
  * The reference a pasted address of this app stands for (bw-mi3s.5).

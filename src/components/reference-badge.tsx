@@ -22,7 +22,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { CircleDot, FileDiff, MessageSquare, Sparkles } from 'lucide-react';
+import { CircleDot, FileDiff, ListChecks, ListPlus, MessageSquare, Sparkles } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { addressWith, cardWasPushed } from '@/lib/address';
 import { classesFor } from '@/lib/state-styles';
 import { cn } from '@/lib/utils';
-import type { BeadStatus } from '@/types';
+import { FINISHED, UNTOUCHED, WORKING, type BeadStatus } from '@/types';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import type { Brand } from '@/workbench/protocol';
 import { parseDiffId, type DiffReference } from '@/workbench/references';
@@ -62,7 +62,28 @@ export type Reference =
       diff: DiffReference | null;
       /** What happened to the file, when the `@` menu knew. */
       status?: string;
+    }
+  | {
+      kind: 'task';
+      /** The task's number in its project, or '' for a bare `@task`: a new one. */
+      id: string;
+      /** The task's title, or null while it is not known yet. */
+      title?: string | null;
+      /** The task's status (docs/tasks.md), when it is known. */
+      status?: string;
     };
+
+/**
+ * A task's status, in the colour of the board state most like it. A blocked
+ * task has no such state and is drawn muted.
+ */
+const TASK_TONE: Record<string, BeadStatus> = {
+  todo: UNTOUCHED,
+  in_progress: WORKING,
+  done: FINISHED,
+  review: 'inreview',
+  cancelled: 'cancelled',
+};
 
 /** The badge for a diff reference's id. */
 export function diffBadge(id: string, status?: string): Reference {
@@ -96,6 +117,7 @@ export function referenceLabel(ref: Reference): string {
     const name = ref.diff.path.split('/').pop() || ref.diff.path;
     return `${ref.diff.commit ? `${ref.diff.commit.slice(0, 7)} ` : ''}${name}${diffLines(ref.diff)}`;
   }
+  if (ref.kind === 'task') return ref.id ? `#${ref.id}${ref.title ? ` ${ref.title}` : ''}` : 'New task';
   return ref.name || ref.id;
 }
 
@@ -106,6 +128,10 @@ export function referenceTitle(ref: Reference): string {
   if (ref.kind === 'diff') {
     const what = ref.diff?.commit ? `Commit ${ref.diff.commit.slice(0, 7)}` : 'Uncommitted changes';
     return `Open diff · ${what} · ${ref.diff?.path ?? ref.id}`;
+  }
+  if (ref.kind === 'task') {
+    if (!ref.id) return 'Asks the agent to make a task of this message';
+    return `Open tasks · #${ref.id}${ref.status ? ` · ${ref.status.replace('_', ' ')}` : ''}`;
   }
   return ref.description ? `Skill · ${ref.description}` : 'Skill';
 }
@@ -121,6 +147,7 @@ function referenceClass(ref: Reference): string {
   if (ref.kind === 'bead') return cn(ONE_LINE, classesFor(ref.status).badge);
   if (ref.kind === 'chat') return cn(ONE_LINE, ref.brand ? BRAND_COLOR[ref.brand] : classesFor(undefined).badge);
   if (ref.kind === 'diff') return cn(ONE_LINE, DIFF_COLOR);
+  if (ref.kind === 'task') return cn(ONE_LINE, classesFor(ref.status ? TASK_TONE[ref.status] : undefined).badge);
   return cn(ONE_LINE, SKILL_COLOR);
 }
 
@@ -131,6 +158,7 @@ function referenceMarks(ref: Reference): Record<string, string> {
     'data-reference-id': ref.id,
     ...(ref.kind === 'bead' ? { 'data-bead-id': ref.id, ...(ref.status ? { 'data-bead-status': ref.status } : {}) } : {}),
     ...(ref.kind === 'chat' && ref.brand ? { 'data-brand': ref.brand } : {}),
+    ...(ref.kind === 'task' && ref.status ? { 'data-task-status': ref.status } : {}),
   };
 }
 
@@ -141,6 +169,12 @@ export function ReferenceFace({ reference }: { reference: Reference }) {
       <CircleDot className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
     ) : reference.kind === 'diff' ? (
       <FileDiff className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+    ) : reference.kind === 'task' ? (
+      reference.id ? (
+        <ListChecks className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+      ) : (
+        <ListPlus className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+      )
     ) : reference.kind === 'chat' ? (
       reference.brand ? (
         <BrandIcon brand={reference.brand} className="mr-0.5 size-3" />
@@ -217,6 +251,9 @@ export function ReferenceBadge({
       // the diff is what was asked for.
       const tab = params.get('tab') === 'files' ? 'files' : 'chat';
       router.push(addressWith(params, { id: projectId, tab, diff: reference.id, card: null }));
+    } else if (reference.kind === 'task') {
+      // A bare `@task` names no task yet; there is nothing to open.
+      if (reference.id) router.push(addressWith(params, { id: projectId, tab: 'tasks', card: null }));
     } else if (reference.kind === 'chat') {
       router.push(addressWith(params, { id: reference.projectId ?? projectId, tab: 'chat', chat: reference.id, card: null }));
     } else {

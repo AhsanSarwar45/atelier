@@ -407,7 +407,8 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>, inCode: boolean): HastN
       type: 'element',
       tagName: 'span',
       properties: { 'data-reference-mention': piece.ref, 'data-reference-id': piece.id, 'data-copy': formatAtelierReference(piece.ref, piece.id) },
-      children: [{ type: 'text', value: piece.id }],
+      // A bare `@task` has no id to stand in for it.
+      children: [{ type: 'text', value: piece.id || formatAtelierReference(piece.ref, piece.id) }],
     };
   }
   const name = piece.id;

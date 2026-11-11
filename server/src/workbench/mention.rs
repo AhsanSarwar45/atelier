@@ -1,5 +1,5 @@
-//! What the composer's `@` offers besides files: cards, chats and skills
-//! (bw-mi3s.4).
+//! What the composer's `@` offers besides files: cards, tasks, chats and
+//! skills (bw-mi3s.4).
 //!
 //! One question, one answer. The menu asks `GET /api/workbench/mention` once per
 //! keystroke and draws what comes back, grouped by kind, in the order it comes.
@@ -29,10 +29,11 @@ pub enum Kind {
     Chat,
     Skill,
     Diff,
+    Task,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [Kind::File, Kind::Diff, Kind::Bead, Kind::Chat, Kind::Skill];
+    pub const ALL: [Kind; 6] = [Kind::File, Kind::Diff, Kind::Bead, Kind::Task, Kind::Chat, Kind::Skill];
 
     pub fn parse(word: &str) -> Option<Kind> {
         match word {
@@ -41,6 +42,7 @@ impl Kind {
             "chat" => Some(Kind::Chat),
             "skill" => Some(Kind::Skill),
             "diff" => Some(Kind::Diff),
+            "task" => Some(Kind::Task),
             _ => None,
         }
     }
@@ -54,6 +56,7 @@ impl Kind {
             Kind::Chat => 5,
             Kind::Skill => 5,
             Kind::Diff => 4,
+            Kind::Task => 6,
         }
     }
 }
@@ -166,6 +169,35 @@ pub fn cards(board: &[Bead], wanted: &str, limit: usize) -> Vec<Offer> {
     offers.into_iter().take(limit).map(|(offer, _)| offer).collect()
 }
 
+/// The project's tasks that answer `wanted`, by number (`12` or `#12`) or by
+/// title. With nothing typed, the ones in progress first, then the ones still
+/// open, newest first; a finished or cancelled task is only offered when it
+/// is asked for.
+pub fn tasks(tasks: &[crate::workbench::tasks::TaskRow], wanted: &str, limit: usize) -> Vec<Offer> {
+    let wanted = wanted.to_lowercase();
+    let wanted = wanted.strip_prefix('#').unwrap_or(&wanted);
+    let lively = |status: &str| match status {
+        "in_progress" => 2,
+        "done" | "cancelled" => 0,
+        _ => 1,
+    };
+    let mut offers = tasks
+        .iter()
+        .filter(|task| !wanted.is_empty() || lively(&task.status) > 0)
+        .filter_map(|task| {
+            let number = task.number.to_string();
+            let score = best_fit(&[&number, &task.title], wanted)?;
+            let mut offer = Offer::new(Kind::Task, number, task.title.clone(), score * 4 + lively(&task.status));
+            offer.detail = task.status.replace('_', " ");
+            offer.status = Some(task.status.clone());
+            offer.project_id = Some(task.project_id.clone());
+            Some((offer, task.number))
+        })
+        .collect::<Vec<_>>();
+    offers.sort_by(|a, b| b.0.score.cmp(&a.0.score).then_with(|| b.1.cmp(&a.1)));
+    offers.into_iter().take(limit).map(|(offer, _)| offer).collect()
+}
+
 /// The chats that answer `wanted`, by name or by id. The chat asking is not
 /// offered to itself. Chats of the project being worked in come first among
 /// equals, then the most recently active.
@@ -260,7 +292,7 @@ pub fn in_order(mut groups: Vec<(Kind, Vec<Offer>)>, typed: bool) -> Vec<Offer> 
         let top = |offers: &[Offer]| offers.iter().map(|o| o.score).max().unwrap_or(i32::MIN);
         let ranked = |kind: Kind, offers: &[Offer]| match kind {
             // Undo the tie-breaking multipliers so every kind is on one scale.
-            Kind::Bead => top(offers) / 4,
+            Kind::Bead | Kind::Task => top(offers) / 4,
             Kind::Chat => top(offers) / 2,
             _ => top(offers),
         };
@@ -270,11 +302,11 @@ pub fn in_order(mut groups: Vec<(Kind, Vec<Offer>)>, typed: bool) -> Vec<Offer> 
 }
 
 /// What the word after the composer's `@` asks for: a kind named with
-/// `bead:`, `chat:`, `skill:` or `diff:` narrows the menu to it, and the rest is the
+/// `bead:`, `task:`, `chat:`, `skill:` or `diff:` narrows the menu to it, and the rest is the
 /// word to look for.
 pub fn scoped(typed: &str) -> (Option<Kind>, &str) {
     if let Some((word, rest)) = typed.split_once(':') {
-        if let Some(kind @ (Kind::Bead | Kind::Chat | Kind::Skill | Kind::Diff)) = Kind::parse(word) {
+        if let Some(kind @ (Kind::Bead | Kind::Task | Kind::Chat | Kind::Skill | Kind::Diff)) = Kind::parse(word) {
             return (Some(kind), rest);
         }
     }
@@ -346,6 +378,33 @@ mod tests {
         assert_eq!(scoped("bead:"), (Some(Kind::Bead), ""));
         assert_eq!(scoped("src/a:b"), (None, "src/a:b"));
         assert_eq!(scoped("file:x"), (None, "file:x"));
+    }
+
+    fn task(number: i64, title: &str, status: &str) -> crate::workbench::tasks::TaskRow {
+        crate::workbench::tasks::TaskRow {
+            project_id: "p".into(), number, kind: "bug".into(), title: title.into(), why: String::new(),
+            status: status.into(), session_id: None, created_by: None, plan: Value::Null, result: None,
+            shortfalls: false, blocked: None, cancel_reason: None, pending_amend: None,
+            created_at: 0, updated_at: 0, started_at: None, finished_at: None,
+        }
+    }
+
+    #[test]
+    fn a_task_answers_to_its_number_and_its_title_and_a_finished_one_only_when_asked() {
+        let tasks_here = [
+            task(1, "Fix the login page", "done"),
+            task(2, "Draw the badge", "todo"),
+            task(3, "Search for chats", "in_progress"),
+            task(12, "Speed up the board", "blocked"),
+        ];
+        let ids = |offers: Vec<Offer>| offers.into_iter().map(|o| o.id).collect::<Vec<_>>();
+        assert_eq!(ids(tasks(&tasks_here, "", 10)), ["3", "12", "2"]);
+        assert_eq!(ids(tasks(&tasks_here, "login", 10)), ["1"]);
+        assert_eq!(ids(tasks(&tasks_here, "12", 10))[0], "12");
+        assert_eq!(ids(tasks(&tasks_here, "#1", 10))[0], "1");
+        let found = tasks(&tasks_here, "badge", 10);
+        assert_eq!((found[0].label.as_str(), found[0].status.as_deref(), found[0].detail.as_str()), ("Draw the badge", Some("todo"), "todo"));
+        assert_eq!(scoped("task:12"), (Some(Kind::Task), "12"));
     }
 
     #[test]

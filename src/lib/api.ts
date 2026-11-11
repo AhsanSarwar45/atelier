@@ -447,10 +447,10 @@ export const projects = {
 
 /** One line of the composer's `@` menu (bw-mi3s.4). */
 export interface MentionOffer {
-  kind: 'file' | 'bead' | 'chat' | 'skill' | 'diff';
+  kind: 'file' | 'bead' | 'chat' | 'skill' | 'diff' | 'task';
   /** What goes after `@kind:` — or, for a file, after `@`. A diff's is its path. */
   id: string;
-  /** A file's name, a card's title, a chat's or a skill's name. */
+  /** A file's name, a card's or a task's title, a chat's or a skill's name. */
   label: string;
   /** Read after it, dimmed: a file's folder, a card's id, a chat's last activity, a skill's description. */
   detail?: string;

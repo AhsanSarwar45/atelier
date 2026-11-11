@@ -17,7 +17,11 @@
 //! - a diff: the change it points at, as the hunks that cover the lines it
 //!   names. `@diff:src/a.ts:+12-14` is the uncommitted change, lines 12 to 14
 //!   of the new version; `@diff:abc1234:src/a.ts:-30` is line 30 of the old
-//!   version in what commit abc1234 did (bw-v79ny.1).
+//!   version in what commit abc1234 did (bw-v79ny.1);
+//! - a task: `@task:12` is task #12 of the chat's project, described by its
+//!   number, type, status, title, why, holder and plan. A bare `@task` is the
+//!   owner asking for a new task from the message, and its entry says so
+//!   (docs/tasks.md). It is found with an empty id.
 //!
 //! The grammar is the composer's (`src/workbench/references.ts`), and both
 //! sides are held to one list of cases (`atelier-references.cases.json`).
@@ -35,6 +39,7 @@ pub enum Kind {
     Chat,
     Skill,
     Diff,
+    Task,
 }
 
 impl Kind {
@@ -44,6 +49,7 @@ impl Kind {
             Kind::Chat => "chat",
             Kind::Skill => "skill",
             Kind::Diff => "diff",
+            Kind::Task => "task",
         }
     }
 }
@@ -205,15 +211,30 @@ fn id_at(text: &str, from: usize) -> Option<usize> {
     })
 }
 
+/// A task's number: digits, not starting with 0.
+pub fn task_number(id: &str) -> Option<i64> {
+    (!id.starts_with('0') && !id.is_empty() && id.bytes().all(|c| c.is_ascii_digit()))
+        .then(|| id.parse().ok())
+        .flatten()
+}
+
 fn reference_at(text: &str, at: usize) -> Option<Found> {
     let rest = &text[at + 1..];
-    for kind in [Kind::Bead, Kind::Chat, Kind::Skill, Kind::Diff] {
+    for kind in [Kind::Bead, Kind::Chat, Kind::Skill, Kind::Diff, Kind::Task] {
         let prefix = format!("{}:", kind.word());
         if rest.starts_with(&prefix) {
             let from = at + 1 + prefix.len();
             let end = if kind == Kind::Diff { diff_id_at(text, from)? } else { id_at(text, from)? };
-            return Some(Found { kind, id: text[from..end].to_string(), start: at, end, run: false });
+            let id = &text[from..end];
+            if kind == Kind::Task && task_number(id).is_none() {
+                return None;
+            }
+            return Some(Found { kind, id: id.to_string(), start: at, end, run: false });
         }
+    }
+    // A bare `@task`, as a word of its own: the owner asking for a new task.
+    if rest.starts_with("task") && rest[4..].chars().next().is_none_or(char::is_whitespace) {
+        return Some(Found { kind: Kind::Task, id: String::new(), start: at, end: at + 5, run: false });
     }
     None
 }
@@ -314,6 +335,9 @@ pub struct Looked {
     pub chats: Vec<(String, Option<(String, String)>)>,
     /// Each diff's patch for its file; None when there is no such change.
     pub diffs: Vec<(String, Option<DiffFile>)>,
+    /// Each task as the HTTP API has it (`tasks::to_json`); None when the
+    /// project has no such task.
+    pub tasks: Vec<(String, Option<serde_json::Value>)>,
 }
 
 /// How much of a card's long text is carried, so a card with an essay in it
@@ -436,6 +460,39 @@ fn diff_entry(id: &str, file: Option<&DiffFile>) -> String {
     entry
 }
 
+/// What a bare `@task` asks of the agent.
+const NEW_TASK: &str = "@task — The owner asks you to create a task from this message. Pick the type, draft the plan and run `atelier task create` (`atelier task types TYPE` prints the payload); do not ask for confirmation first.";
+
+fn task_entry(id: &str, task: Option<&serde_json::Value>) -> String {
+    if id.is_empty() {
+        return NEW_TASK.to_string();
+    }
+    let Some(task) = task else {
+        return format!("@task:{id} is not a task in this project.");
+    };
+    let text = |key: &str| task.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
+    let holder = match (text("sessionId"), text("sessionTitle")) {
+        (Some(session), Some(title)) => format!("held by chat \"{title}\" ({session})"),
+        (Some(session), None) => format!("held by chat {session}"),
+        _ => "unassigned".to_string(),
+    };
+    let mut lines = vec![
+        format!("@task:{id} — task #{id} \"{}\"", text("title").unwrap_or("")),
+        format!(
+            "type {}, status {}, {holder}",
+            text("type").unwrap_or("unknown"),
+            text("status").unwrap_or("unknown")
+        ),
+    ];
+    if let Some(why) = text("why") {
+        lines.push(format!("Why: {why}"));
+    }
+    let plan = task.get("plan").map(|plan| plan.to_string()).unwrap_or_else(|| "{}".into());
+    lines.push(format!("Plan: {}", clipped(&plan, CARD_TEXT)));
+    lines.push(format!("Run `atelier task show {id}` for its result and history."));
+    lines.join("\n")
+}
+
 fn skill_entry(id: &str, library: &Snapshot) -> String {
     match library.skill_text(id) {
         Ok((name, text)) => format!(
@@ -470,6 +527,10 @@ pub fn block(found: &[Found], looked: &Looked, library: &Snapshot) -> Option<Str
                 &reference.id,
                 looked.diffs.iter().find(|(id, _)| *id == reference.id).and_then(|(_, d)| d.as_ref()),
             ),
+            Kind::Task => task_entry(
+                &reference.id,
+                looked.tasks.iter().find(|(id, _)| *id == reference.id).and_then(|(_, t)| t.as_ref()),
+            ),
         });
     }
     if entries.is_empty() {
@@ -484,10 +545,11 @@ pub fn block(found: &[Found], looked: &Looked, library: &Snapshot) -> Option<Str
     ))
 }
 
-/// The ids a message's cards and chats are to be looked up by.
+/// The ids a message's cards and chats are to be looked up by. A bare
+/// `@task` names nothing to look up.
 pub fn wanted(found: &[Found], kind: Kind) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
-    for reference in found.iter().filter(|r| r.kind == kind && !r.run) {
+    for reference in found.iter().filter(|r| r.kind == kind && !r.run && !r.id.is_empty()) {
         if !ids.contains(&reference.id) {
             ids.push(reference.id.clone());
         }
@@ -603,6 +665,46 @@ mod tests {
         let block = block(&found, &looked, &Snapshot::default()).unwrap();
         assert!(block.contains("-one\n+uno") && block.contains("+more"), "{block}");
         assert!(block.contains("there is no commit abc1234's change to gone.ts"), "{block}");
+    }
+
+    #[test]
+    fn a_bare_task_asks_the_agent_to_create_one_without_asking_again() {
+        let found = find("@task fix the login redirect");
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].kind, found[0].id.as_str(), found[0].end), (Kind::Task, "", 5));
+        assert!(wanted(&found, Kind::Task).is_empty());
+        let block = block(&found, &Looked::default(), &Snapshot::default()).unwrap();
+        for want in ["create a task from this message", "atelier task create", "atelier task types TYPE", "do not ask for confirmation"] {
+            assert!(block.contains(want), "{want} missing from {block}");
+        }
+        assert!(find("@tasks are fun").is_empty());
+        assert!(find("@task.").is_empty());
+    }
+
+    #[test]
+    fn a_task_carries_its_number_type_status_title_why_holder_and_plan() {
+        let found = find("look at @task:12 and @task:12.");
+        assert_eq!(wanted(&found, Kind::Task), ["12"]);
+        let task = serde_json::json!({
+            "number": 12, "type": "bug", "status": "in_progress", "title": "Login loops",
+            "why": "Nobody can sign in", "sessionId": "s-1", "sessionTitle": "Auth chat",
+            "plan": {"symptom": "loops", "repro_steps": ["open /login"]},
+        });
+        let looked = Looked { tasks: vec![("12".into(), Some(task))], ..Default::default() };
+        let block = block(&found, &looked, &Snapshot::default()).unwrap();
+        assert_eq!(block.matches("@task:12 —").count(), 1, "{block}");
+        for want in [
+            "task #12 \"Login loops\"",
+            "type bug, status in_progress, held by chat \"Auth chat\" (s-1)",
+            "Why: Nobody can sign in",
+            r#"Plan: {"symptom":"loops","repro_steps":["open /login"]}"#,
+            "atelier task show 12",
+        ] {
+            assert!(block.contains(want), "{want} missing from {block}");
+        }
+        let missing = super::block(&find("@task:9"), &Looked::default(), &Snapshot::default()).unwrap();
+        assert!(missing.contains("@task:9 is not a task in this project"), "{missing}");
+        assert!(find("@task:0 @task:x1").is_empty());
     }
 
     #[test]

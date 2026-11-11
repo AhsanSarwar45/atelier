@@ -54,7 +54,7 @@ import {
 import { Prec, StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, keymap, tooltips, type ViewUpdate } from '@codemirror/view';
 import { formatDistanceToNow } from 'date-fns';
-import { AtSign, CircleDot, File, FileDiff, MessageSquare, Sparkles, type LucideIcon } from 'lucide-react';
+import { AtSign, CircleDot, File, FileDiff, ListChecks, MessageSquare, Sparkles, type LucideIcon } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { iconForFile, iconForFolder } from '@/components/file-icon';
@@ -67,8 +67,8 @@ import type { BeadStatus } from '@/types';
 import type { Brand, CommandInfo } from '@/workbench/protocol';
 import { resolvePath } from '@/workbench/paths';
 import { knownReal } from '@/workbench/paths-on-disk';
-import { learnChat, learnSkill, setReferenceAsker } from '@/workbench/reference-names';
-import { canBeginReference, formatAtelierReference, formatReference, type AtelierKind } from '@/workbench/references';
+import { learnChat, learnSkill, learnTask, setReferenceAsker } from '@/workbench/reference-names';
+import { canBeginReference, formatAtelierReference, formatReference, NEW_TASK, type AtelierKind } from '@/workbench/references';
 
 /** How many the menu ever shows. Past this nobody is reading, he is typing. */
 const MOST_OFFERED = 20;
@@ -120,6 +120,7 @@ const HEADINGS: Record<MentionOffer['kind'], string> = {
   file: 'Files',
   diff: 'Changes',
   bead: 'Cards',
+  task: 'Tasks',
   chat: 'Chats',
   skill: 'Skills',
 };
@@ -133,9 +134,9 @@ const HEADINGS: Record<MentionOffer['kind'], string> = {
  * and narrows the menu by asking the server for that kind (bw-mydas.1).
  */
 type Scope = 'all' | MentionOffer['kind'];
-const SCOPES: readonly Scope[] = ['all', 'file', 'diff', 'bead', 'chat', 'skill'];
+const SCOPES: readonly Scope[] = ['all', 'file', 'diff', 'bead', 'task', 'chat', 'skill'];
 const SCOPE_NAMES: Record<Scope, string> = { all: 'All', ...HEADINGS };
-const TYPED_KIND = /^@(bead|chat|skill|diff):/;
+const TYPED_KIND = /^@(bead|task|chat|skill|diff):/;
 
 const setScope = StateEffect.define<Scope>();
 
@@ -199,6 +200,7 @@ const SCOPE_ICONS: Record<Scope, LucideIcon> = {
   file: File,
   diff: FileDiff,
   bead: CircleDot,
+  task: ListChecks,
   chat: MessageSquare,
   skill: Sparkles,
 };
@@ -358,6 +360,7 @@ function referenceOf(found: MentionOffer): Reference {
   const kind = found.kind as AtelierKind;
   if (kind === 'bead') return { kind, id: found.id, status: found.status as BeadStatus | undefined };
   if (kind === 'diff') return diffBadge(found.id, found.status);
+  if (kind === 'task') return { kind, id: found.id, title: found.label, status: found.status };
   if (kind === 'chat') {
     return { kind, id: found.id, name: found.label, brand: found.brand as Brand | undefined, projectId: found.projectId ?? null };
   }
@@ -370,6 +373,8 @@ function learn(found: MentionOffer): void {
     learnChat(found.id, { name: found.label, brand: found.brand as Brand, projectId: found.projectId ?? null });
   } else if (found.kind === 'skill') {
     learnSkill(found.id, { name: found.label, description: found.detail || undefined });
+  } else if (found.kind === 'task') {
+    learnTask(found.id, { title: found.label, ...(found.status ? { status: found.status } : {}) });
   }
 }
 
@@ -396,7 +401,7 @@ function atelierOffer(found: MentionOffer, rank: number): Completion {
     // A card's badge says only its id, so its title is the line's words. A
     // chat's and a skill's badge already say their name.
     displayLabel: kind === 'bead' ? found.label : ' ',
-    detail: kind === 'skill' || kind === 'diff' ? found.detail : kind === 'chat' ? chatDetail(found) : '',
+    detail: kind === 'skill' || kind === 'diff' || kind === 'task' ? found.detail : kind === 'chat' ? chatDetail(found) : '',
     type: kind,
     section: { name: HEADINGS[kind], rank },
     apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
@@ -406,6 +411,28 @@ function atelierOffer(found: MentionOffer, rank: number): Completion {
       view.dispatch({ changes: { from, to, insert: written }, selection: { anchor: from + written.length } });
     },
   };
+}
+
+/**
+ * The menu's first line while what is typed could still be `@task`: a new
+ * task, made by the agent from the message (docs/tasks.md). It writes a bare
+ * `@task ` and is drawn as the badge that becomes.
+ */
+function newTask(): Completion {
+  return {
+    label: NEW_TASK.trimEnd(),
+    displayLabel: ' ',
+    detail: 'Ask the agent to make a task of this message',
+    type: 'new-task',
+    apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+      view.dispatch({ changes: { from, to, insert: NEW_TASK }, selection: { anchor: from + NEW_TASK.length } });
+    },
+  };
+}
+
+/** Whether the word after the `@` could still be `task`, and the tab lets a task in. */
+export function offersNewTask(typed: string, scope: Scope): boolean {
+  return (scope === 'all' || scope === 'task') && 'task'.startsWith(typed.toLowerCase());
 }
 
 /** The one line of a menu that found nothing; picking it changes nothing. */
@@ -457,13 +484,16 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
     const stale = new AbortController();
     context.addEventListener('abort', () => stale.abort(), { onDocChange: true });
     const picked = TYPED_KIND.test(token.text) ? 'all' : context.state.field(pickedScope, false) ?? 'all';
+    const fresh = offersNewTask(token.text.slice(1), picked) ? newTask() : null;
+    if (fresh) drawnBadges.set(fresh, { kind: 'task', id: '' });
     let found;
     try {
       found = await mention.search(place, token.text.slice(1), MOST_OFFERED, stale.signal, picked === 'all' ? undefined : picked);
     } catch {
       // A checkout that has gone away, or a server that is restarting: the
-      // right answer is no menu, not a red line under what he is writing.
-      return null;
+      // right answer is no menu, not a red line under what he is writing —
+      // unless a new task is on offer, which needs nothing from the server.
+      return fresh && !context.aborted ? { from: token.from, options: [fresh], filter: false } : null;
     }
     if (context.aborted) return null;
 
@@ -471,6 +501,8 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
     found.items.forEach((one, at) => {
       if (one.kind !== 'file') drawnBadges.set(options[at]!, referenceOf(one));
     });
+    // Unsectioned, so CodeMirror draws it above every group.
+    if (fresh) options.unshift(fresh);
     // A tab with nothing in it still shows its tabs, or there would be no way
     // back from it but deleting what was typed.
     if (!options.length) options.push(nothingFound(scopeOf(context.state)));
@@ -875,8 +907,8 @@ const menuTheme = EditorView.theme({
     color: 'hsl(var(--secondary-foreground))',
   },
   '.cm-commandPending': { fontSize: '12px', opacity: '0.6' },
-  // A chat's and a skill's badge is its name, so the line has no words of its own.
-  '.cm-completion-chat .cm-completionLabel, .cm-completion-skill .cm-completionLabel': { display: 'none' },
+  // A chat's, a skill's and a task's badge is its name, so the line has no words of its own.
+  '.cm-completion-chat .cm-completionLabel, .cm-completion-skill .cm-completionLabel, .cm-completion-task .cm-completionLabel, .cm-completion-new-task .cm-completionLabel': { display: 'none' },
   // `> ul >` to outrank CodeMirror's own heading rule, which underlines it;
   // the tabs above already rule the list off.
   '.cm-tooltip.cm-tooltip-autocomplete > ul > completion-section': {
@@ -906,7 +938,7 @@ const menuTheme = EditorView.theme({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  '.cm-completion-bead .cm-completionDetail, .cm-completion-chat .cm-completionDetail, .cm-completion-skill .cm-completionDetail': {
+  '.cm-completion-bead .cm-completionDetail, .cm-completion-chat .cm-completionDetail, .cm-completion-skill .cm-completionDetail, .cm-completion-task .cm-completionDetail, .cm-completion-new-task .cm-completionDetail': {
     direction: 'ltr',
     textAlign: 'left',
     marginLeft: '0',

@@ -3482,8 +3482,8 @@ impl AcpDriver {
             .map_err(|_| "ACP adapter stopped before replying".to_string())?
     }
 
-    /// What the cards, chats, skills and diffs a message names are, looked up
-    /// now (`references.rs`). Cards come from the board already held for this
+    /// What the cards, chats, skills, diffs and tasks a message names are,
+    /// looked up now (`references.rs`). Cards come from the board already held for this
     /// chat's project; chats from this app's own store; diffs from git in the
     /// chat's own checkout.
     async fn references_block(&self, text: &str) -> Option<String> {
@@ -3512,6 +3512,20 @@ impl AcpDriver {
                 None => None,
             };
             looked.diffs.push((id, file));
+        }
+        for id in references::wanted(&found, Kind::Task) {
+            let Some(number) = references::task_number(&id) else { continue };
+            let project = self.session.project_id.clone();
+            let task = self
+                .database
+                .read_tasks(move |store| {
+                    Ok(crate::workbench::tasks::get(store.connection(), &project, number)?
+                        .map(|row| crate::workbench::tasks::to_json(store, &row)))
+                })
+                .await
+                .ok()
+                .flatten();
+            looked.tasks.push((id, task));
         }
         references::block(&found, &looked, &self.shared_library)
     }

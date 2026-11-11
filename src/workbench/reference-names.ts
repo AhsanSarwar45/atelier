@@ -33,8 +33,15 @@ export interface SkillName {
   description?: string;
 }
 
+export interface TaskName {
+  title: string;
+  status?: string;
+}
+
 const chats = new Map<string, ChatName>();
 const skills = new Map<string, SkillName>();
+/** By number: the `@` menu only offers the tasks of the project it is in. */
+const tasks = new Map<string, TaskName>();
 const listeners = new Set<() => void>();
 let version = 0;
 
@@ -56,6 +63,14 @@ export function learnSkill(id: string, name: SkillName): void {
   const had = skills.get(id);
   if (had && had.name === name.name && had.description === name.description) return;
   skills.set(id, name);
+  changed();
+}
+
+/** Remember a task's title and status, from anything that has seen it. */
+export function learnTask(id: string, name: TaskName): void {
+  const had = tasks.get(id);
+  if (had && had.title === name.title && had.status === name.status) return;
+  tasks.set(id, name);
   changed();
 }
 
@@ -83,6 +98,7 @@ function subscribe(listener: () => void): () => void {
 export function forgetReferenceNames(): void {
   chats.clear();
   skills.clear();
+  tasks.clear();
   asked.clear();
   changed();
 }
@@ -108,6 +124,13 @@ export function useDescribeReference(
     return (kind, id) => {
       if (kind === 'bead') return { kind, id, status: statuses.get(id) };
       if (kind === 'diff') return diffBadge(id);
+      if (kind === 'task') {
+        if (!id) return { kind, id };
+        const known = tasks.get(id);
+        if (known) return { kind, id, ...known };
+        askAbout(kind, id);
+        return { kind, id, title: null };
+      }
       if (kind === 'chat') {
         const session = live.get(id);
         if (session) {

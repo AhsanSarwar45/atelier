@@ -2935,8 +2935,21 @@ async fn mention_changes(cwd: &str) -> Arc<Vec<(String, String)>> {
     MENTION_CHANGES.put(cwd, changed)
 }
 
+/// A project's tasks, for the `@` menu. Read fresh: one indexed query on a
+/// small table.
+async fn mention_tasks(
+    database: &crate::workbench::actor::ChatDb,
+    project_id: Option<&str>,
+) -> Vec<crate::workbench::tasks::TaskRow> {
+    let Some(project) = project_id.map(str::to_string) else { return Vec::new() };
+    database
+        .read_tasks(move |store| crate::workbench::tasks::list(store.connection(), Some(&project), None))
+        .await
+        .unwrap_or_default()
+}
+
 /// What the composer's `@` offers for what was typed after it: files, cards,
-/// chats and skills together, grouped by kind, best group first (bw-mi3s.4).
+/// tasks, chats and skills together, grouped by kind, best group first (bw-mi3s.4).
 /// See `workbench::mention` for how each kind is ranked.
 async fn mention(
     State(state): State<WorkbenchState>,
@@ -2956,6 +2969,9 @@ async fn mention(
                     .into_iter()
                     .find(|offer| offer.id == id),
                 Some(Kind::Skill) => mention::skills(&mention_skills(&cwd).await, "", usize::MAX)
+                    .into_iter()
+                    .find(|offer| offer.id == id),
+                Some(Kind::Task) => mention::tasks(&mention_tasks(&database, query.project_id.as_deref()).await, id, usize::MAX)
                     .into_iter()
                     .find(|offer| offer.id == id),
                 _ => None,
@@ -2987,6 +3003,11 @@ async fn mention(
                     .unwrap_or_default(),
                 None => Vec::new(),
             },
+            Kind::Task => mention::tasks(
+                &mention_tasks(&database, query.project_id.as_deref()).await,
+                wanted,
+                share(kind),
+            ),
             Kind::Chat => mention::chats(
                 &mention_chats(&database).await?,
                 wanted,

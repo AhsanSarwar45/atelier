@@ -108,7 +108,8 @@ function chipFor(marks: Record<string, string | undefined>, children: ReactNode,
   if (card && mentions) return mentions.card(card);
   const referenced = marks['data-reference-mention'];
   const referencedId = marks['data-reference-id'];
-  if (referenced && referencedId) {
+  // A bare `@task` is a reference with an empty id.
+  if (referenced && referencedId !== undefined) {
     if (mentions?.reference) return mentions.reference(referenced as AtelierKind, referencedId);
     if (referenced === 'bead' && mentions) return mentions.card(referencedId);
   }

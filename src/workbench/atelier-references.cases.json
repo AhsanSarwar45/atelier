@@ -17,5 +17,15 @@
   {"text": "@diff:.github/ci.yml: here", "found": [{"kind": "diff", "id": ".github/ci.yml", "start": 0, "end": 20, "run": false}]},
   {"text": "@diff: nothing", "found": []},
   {"text": "me@diff:a.ts", "found": []},
-  {"text": "`@diff:a.ts`", "found": []}
+  {"text": "`@diff:a.ts`", "found": []},
+  {"text": "@task fix the login redirect", "found": [{"kind": "task", "id": "", "start": 0, "end": 5, "run": false}]},
+  {"text": "please @task", "found": [{"kind": "task", "id": "", "start": 7, "end": 12, "run": false}]},
+  {"text": "see @task:12.", "found": [{"kind": "task", "id": "12", "start": 4, "end": 12, "run": false}]},
+  {"text": "(@task:3) and @task\nnext", "found": [{"kind": "task", "id": "3", "start": 1, "end": 8, "run": false}, {"kind": "task", "id": "", "start": 14, "end": 19, "run": false}]},
+  {"text": "@task:0 and @task:x1 and @task:12abc", "found": []},
+  {"text": "@tasks are fun", "found": []},
+  {"text": "@task: nothing", "found": []},
+  {"text": "@task.", "found": []},
+  {"text": "me@task now", "found": []},
+  {"text": "`@task` and `@task:2`", "found": []}
 ]
