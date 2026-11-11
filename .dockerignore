@@ -1,6 +1,5 @@
 node_modules
 .git
-.beads
 .worktrees
 .claude/worktrees
 out
@@ -9,4 +8,3 @@ server/target
 !README.md
 screenshots
 logo
-beads_*-backup-*

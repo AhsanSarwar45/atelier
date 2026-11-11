@@ -55,31 +55,9 @@ Atelier управляет агентом, которого вы уже уста
 
 ## Темы
 
-<details>
-<summary>Посмотреть все темы</summary>
-
-**Default Dark**
-![Default Dark](screenshots/kanban-default.png)
-
-**Glassmorphism**
-![Glassmorphism](screenshots/kanban-glassmorphism.png)
-
-**Neo-Brutalist**
-![Neo-Brutalist](screenshots/kanban-neo-brutalist.png)
-
-**Linear Minimal**
-![Linear Minimal](screenshots/kanban-linear-minimal.png)
-
-**Notion Warm**
-![Notion Warm](screenshots/kanban-notion-warm.png)
-
-**GitHub Clean**
-![GitHub Clean](screenshots/kanban-github-clean.png)
-
-**Catppuccin**
-Latte, Frappe, Macchiato и Mocha доступны в переключателе тем.
-
-</details>
+Default Dark, Glassmorphism, Neo-Brutalist, Linear Minimal, Notion Warm,
+GitHub Clean, Soft Light и четыре варианта Catppuccin (Latte, Frappe,
+Macchiato, Mocha) доступны в переключателе тем.
 
 ## Технологии
 
@@ -290,7 +268,7 @@ npm run dev:live       # http://127.0.0.1:3007, данные из Atelier на :
 ```
 
 Ничего не собирается, не устанавливается и не перезапускается: изменение в
-этом клоне видно после обновления страницы. `BEADS_BOARD_URL` направляет его на
+этом клоне видно после обновления страницы. `ATELIER_URL` направляет его на
 Atelier в другом месте, `PORT` — на второй предпросмотр (например, из worktree).
 Он не запускается, если там не отвечает Atelier: предпросмотр без данных
 выглядит как сломанное приложение.
@@ -362,15 +340,12 @@ nix run github:AhsanSarwar45/atelier
 ## Происхождение
 
 Atelier начинался как форк
-[Beads-Kanban-UI](https://github.com/AvivK5498/Beads-Kanban-UI) от Aviv Kaplan —
-канбан-доски для Beads CLI. От той формы ничего не осталось: доски и Beads
-больше нет, а работа ведётся в собственных задачах Atelier. Полная история с
-обоснованиями: [docs/changelog.md](docs/changelog.md).
+[Beads-Kanban-UI](https://github.com/AvivK5498/Beads-Kanban-UI) от Aviv Kaplan.
+Полная история с обоснованиями: [docs/changelog.md](docs/changelog.md).
 
 ## Благодарности
 
 - [Beads-Kanban-UI](https://github.com/AvivK5498/Beads-Kanban-UI) от Aviv Kaplan — оригинальный проект
-- [beads](https://github.com/gastownhall/beads) от Steve Yegge — git-нативный трекинг задач, которым Atelier пользовался до появления своих задач
 - [Claude Protocol](https://github.com/weselow/claude-protocol) — фреймворк оркестрации (отлично работает в связке)
 
 ## Лицензия

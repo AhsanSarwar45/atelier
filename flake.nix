@@ -71,7 +71,7 @@
             '';
 
             meta = {
-              description = "Visual Kanban UI for Beads CLI";
+              description = "A workbench for AI coding agents";
               homepage = "https://github.com/AhsanSarwar45/atelier";
               license = pkgs.lib.licenses.mit;
               mainProgram = "atelier";

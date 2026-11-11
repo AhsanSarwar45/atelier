@@ -54,31 +54,9 @@ add, and no model charge from us.
 
 ## Themes
 
-<details>
-<summary>See all included themes</summary>
-
-**Default Dark**
-![Default Dark](screenshots/kanban-default.png)
-
-**Glassmorphism**
-![Glassmorphism](screenshots/kanban-glassmorphism.png)
-
-**Neo-Brutalist**
-![Neo-Brutalist](screenshots/kanban-neo-brutalist.png)
-
-**Linear Minimal**
-![Linear Minimal](screenshots/kanban-linear-minimal.png)
-
-**Notion Warm**
-![Notion Warm](screenshots/kanban-notion-warm.png)
-
-**GitHub Clean**
-![GitHub Clean](screenshots/kanban-github-clean.png)
-
-**Catppuccin**
-Latte, Frappe, Macchiato, and Mocha are available from the theme switcher.
-
-</details>
+Default Dark, Glassmorphism, Neo-Brutalist, Linear Minimal, Notion Warm,
+GitHub Clean, Soft Light, and the four Catppuccin flavours (Latte, Frappe,
+Macchiato, Mocha) are available from the theme switcher.
 
 ## Tech Stack
 
@@ -292,7 +270,7 @@ npm run dev:live       # http://127.0.0.1:3007, reading the Atelier on :3008
 ```
 
 Nothing is built, installed or restarted: a change in this checkout shows on
-the next refresh. `BEADS_BOARD_URL` points it at an Atelier elsewhere, `PORT`
+the next refresh. `ATELIER_URL` points it at an Atelier elsewhere, `PORT`
 at a second preview (a worktree's own, say). It refuses to start if no Atelier
 answers there, because a preview with no data behind it looks like a broken app.
 
@@ -362,15 +340,12 @@ browse to it.
 ## Origin
 
 Atelier began as a fork of
-[Beads-Kanban-UI](https://github.com/AvivK5498/Beads-Kanban-UI) by Aviv Kaplan,
-a kanban board for the Beads CLI. None of that shape remains: the board and
-Beads are gone, and work is tracked as Atelier's own tasks. Full history, with
-rationale: [docs/changelog.md](docs/changelog.md).
+[Beads-Kanban-UI](https://github.com/AvivK5498/Beads-Kanban-UI) by Aviv Kaplan.
+Full history, with rationale: [docs/changelog.md](docs/changelog.md).
 
 ## Credits
 
 - [Beads-Kanban-UI](https://github.com/AvivK5498/Beads-Kanban-UI) by Aviv Kaplan — original project
-- [beads](https://github.com/gastownhall/beads) by Steve Yegge — git-native task tracking, which Atelier used before it had its own tasks
 - [Claude Protocol](https://github.com/weselow/claude-protocol) — orchestration framework (works great together)
 
 ## License

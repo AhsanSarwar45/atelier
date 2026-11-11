@@ -42,13 +42,9 @@ next-env.d.ts
 # mcp config (user-specific)
 .mcp.json
 
-# beads orchestration (user-specific)
-.beads/
+# Agent guidance (user-specific)
 AGENTS.md
 CLAUDE.md
-
-# Stray bd auto-export files (bd v1.0.2 CWD bug — see beads-web-b9c)
-/issues.jsonl
 
 # spec and test files
 SPEC.md
@@ -81,12 +77,6 @@ agentform/
 # its own functions (scripts/store-perf-stack.sh).
 /server/target-sym/
 
-# Dolt server runtime files
-.dolt/
-.doltcfg/
-.dolt_dropped_databases/
-config.yaml
-beads_*/
 
 # Compiled binaries
 atelier-linux-*
@@ -113,10 +103,8 @@ __pycache__/
 
 worktrees/
 
-# Beads / Dolt files (added by bd init)
+# Local databases and lock files
 *.db
-.beads-credential-key
-.beads/proxieddb/
 *.gate.lock*
 
 # Optional legacy project registry. `machinery/join` migrates it once into
