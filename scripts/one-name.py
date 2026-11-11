@@ -51,7 +51,7 @@ named rule rather than by being quietly skipped:
   where it came from    this is a fork, and the repository it was forked from
                         is named in the record. A fact about the past is not a
                         name the product still answers to.
-  the checkout          the folder on disk and the project's name on the board
+  the checkout          the folder on disk and the project's name in the app
                         and in report paths. The project is not the product.
   what came before      the earlier data folder, the earlier switch names and
                         the earlier binary name, all still answered to on
@@ -131,9 +131,8 @@ ALLOWED = [
     (r"weselow/beads-web|Beads-Kanban-UI",
      "where this fork came from, which is a fact about the past"),
     (r"beads-web(-checks)?[/'\"`]|[/'\"(=]beads-web|cd beads-web|dev/beads-web"
-     r'|"Beads Web"|beads-web = ', "the checkout, or the project's name on the board"),
-    (r"beads-web-[0-9a-z]{2,}|beads-kanban-ui-[0-9a-z]+|bd-beads-web-",
-     "a card id, not the product"),
+     r'|"Beads Web"|beads-web = ', "the checkout, or the project's name in the app"),
+    (r"beads-web-[0-9a-z]{2,}", "a name derived from the checkout, not the product"),
     (r"BEADS_WEB_(HOST|PORT|OPEN_BROWSER)|BEADS_WORKBENCH",
      "an earlier switch name, still answered to"),
     (r"for exe in \S+ beads-web", "the earlier binary, still answered to"),
@@ -141,7 +140,6 @@ ALLOWED = [
      r'|earlier = _app_home', "the earlier data folder, migrated from"),
     (r"not\.toContain\(.kanban-ui.\)",
      "the earlier data folder, named to prove it is not used"),
-    (r"the Beads Web project", "the project's own persona on the board"),
     (r"AvivK5498/Beads-Kanban-UI|\[Beads-Kanban-UI\]",
      "the project this one was forked from"),
     (r"beads-web repository|Cloning beads-web", "the repository, named in prose"),
@@ -152,7 +150,7 @@ ALLOWED = [
 RECORD = ("docs/changelog.md", "docs/designs/")
 
 # Files nobody wrote by hand, regenerated from the ones that were.
-GENERATED = ("package-lock.json", "server/Cargo.lock", "docs/designs/templates/")
+GENERATED = ("package-lock.json", "server/Cargo.lock")
 
 SKIP_SUFFIX = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".pdf", ".woff", ".woff2")
 
