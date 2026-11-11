@@ -158,7 +158,7 @@ if [ "${BEADS_E2E_NO_NODE:-0}" = 1 ]; then
   SERVER_BIN="$RUN/runtime-bin"
   rm -rf "$SERVER_BIN"
   mkdir -p "$SERVER_BIN"
-  for tool in git bd dolt; do
+  for tool in git; do
     found="$(command -v "$tool" 2>/dev/null || true)"
     [ -n "$found" ] && ln -s "$found" "$SERVER_BIN/$tool"
   done

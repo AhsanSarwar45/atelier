@@ -21,8 +21,9 @@ govern presentation, not tool permissions or required response schemas.
 
 The condition builder supports all/any/not groups, file and folder existence,
 literal text, regular expressions, filename patterns, declared package
-dependencies, JSON pointers, TOML keys, YAML pointers, and the project's Beads
-setting. An absent file does not match; invalid or unreadable data is unknown,
+dependencies, JSON pointers, TOML keys and YAML pointers. A library saved while
+the project's Beads setting was a condition still loads; that condition never
+matches now. An absent file does not match; invalid or unreadable data is unknown,
 including under negation. Requirements are executable names, checked separately
 from applicability. A missing executable makes an applicable item unavailable.
 
@@ -203,7 +204,7 @@ library items; output styles remain library items.
 `atelier tool skills mcp REVISION` serves the same snapshot through stdio MCP.
 Read-only review workers receive shared project guidance and can read the pinned
 snapshot directly when their restricted tool set has neither MCP nor shell.
-Application-owned presentation and Beads guidance are visible built-ins. They
+Application-owned presentation and task guidance are visible built-ins. They
 cannot be overridden through the library; enforced workflow and permission rules
 remain enforced independently of editable text.
 
