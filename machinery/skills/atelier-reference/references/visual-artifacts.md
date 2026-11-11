@@ -115,3 +115,41 @@ selectable meshlets and conservative frustum/normal-cone culling. Read
 [the mesh model contract](mesh-models.md) and its torus and folded-facade
 examples. The overview and camera view share the same culling decisions;
 this is not an occlusion test or a GPU performance measurement.
+
+
+## Directed composition
+
+Use `composition` for a directed visual explanation, and `mesh` or `render`
+when the reader should explore parameters. Compose with existing Remotion and
+Three.js APIs. Do not build another timeline engine or substitute blinking
+boxes for geometric explanation.
+
+The repository authoring workflow and complete meshlet film are in
+[`examples/compositions/README.md`](../../../../examples/compositions/README.md).
+From an Atelier source checkout:
+
+```sh
+node scripts/compositions/build.mjs examples/compositions/meshlets.tsx /tmp/meshlets.json
+atelier tool present artifact --file /tmp/meshlets.json
+```
+
+The bundle carries `version: 1`, `kind: "composition"`, `title`, `width`,
+`height`, and `html`; optional `description` is accepted. Width is an integer
+160–4096 and height 90–4096. Title is at most 200 UTF-8 bytes, description at
+most 1000. The complete JSON file is at most 8 MiB. `html` contains the
+self-contained bundled player; no remote imports or external resources work.
+Larger finished films belong in the video widget.
+
+Playback uses an opaque-origin iframe with scripts enabled and a restrictive
+content policy. It cannot access Atelier's DOM or storage, load network
+resources, open popups or navigate the top page. The server stores the bundle;
+it never compiles or runs authored code. There is no parent-command bridge.
+An iframe can navigate itself; this is not an execution sandbox for hostile
+code outside the browser. Use trusted local dependencies during authoring.
+
+Plan the question, takeaway and shots before writing code. Show cause and
+consequence inside the animation, keep labels attached to the relevant
+objects, and allow time to read each conclusion. Derive visual state from
+Remotion's frame number so pause, replay and seek remain consistent. Inspect
+normal-speed playback and each chapter in Chrome before presenting; valid
+JSON alone does not prove a clear explanation.

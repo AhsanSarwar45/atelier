@@ -3034,6 +3034,17 @@
         "kind": "mesh",
         "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.artifact.json"
       }
+    },
+    {
+      "name": "composition envelope",
+      "payload": {
+        "type": "artifact",
+        "kind": "composition",
+        "title": "Meshlets",
+        "asset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.artifact.json"
+      },
+      "verdict": "accept",
+      "why": "Isolated composition"
     }
   ],
   "artifacts": [
@@ -13250,6 +13261,99 @@
         },
         "duration": 15
       }
+    },
+    {
+      "name": "self contained composition",
+      "payload": {
+        "version": 1,
+        "kind": "composition",
+        "title": "Meshlets",
+        "width": 1280,
+        "height": 720,
+        "html": "<div>Meshlets</div><script>document.body.dataset.ready=\"yes\"</script>"
+      },
+      "verdict": "accept",
+      "why": "Isolated composition contract"
+    },
+    {
+      "name": "composition unknown field",
+      "payload": {
+        "version": 1,
+        "kind": "composition",
+        "title": "Meshlets",
+        "width": 1280,
+        "height": 720,
+        "html": "<div>Meshlets</div><script>document.body.dataset.ready=\"yes\"</script>",
+        "src": "https://example.com"
+      },
+      "verdict": "refuse",
+      "why": "Isolated composition contract"
+    },
+    {
+      "name": "composition fractional width",
+      "payload": {
+        "version": 1,
+        "kind": "composition",
+        "title": "Meshlets",
+        "width": 160.5,
+        "height": 720,
+        "html": "<div>Meshlets</div><script>document.body.dataset.ready=\"yes\"</script>"
+      },
+      "verdict": "refuse",
+      "why": "Isolated composition contract"
+    },
+    {
+      "name": "composition too tall",
+      "payload": {
+        "version": 1,
+        "kind": "composition",
+        "title": "Meshlets",
+        "width": 1280,
+        "height": 4097,
+        "html": "<div>Meshlets</div><script>document.body.dataset.ready=\"yes\"</script>"
+      },
+      "verdict": "refuse",
+      "why": "Isolated composition contract"
+    },
+    {
+      "name": "composition empty HTML",
+      "payload": {
+        "version": 1,
+        "kind": "composition",
+        "title": "Meshlets",
+        "width": 1280,
+        "height": 720,
+        "html": " "
+      },
+      "verdict": "refuse",
+      "why": "Isolated composition contract"
+    },
+    {
+      "name": "composition null description",
+      "payload": {
+        "version": 1,
+        "kind": "composition",
+        "title": "Meshlets",
+        "width": 1280,
+        "height": 720,
+        "html": "<div>Meshlets</div><script>document.body.dataset.ready=\"yes\"</script>",
+        "description": null
+      },
+      "verdict": "refuse",
+      "why": "Isolated composition contract"
+    },
+    {
+      "name": "composition version two",
+      "payload": {
+        "version": 2,
+        "kind": "composition",
+        "title": "Meshlets",
+        "width": 1280,
+        "height": 720,
+        "html": "<div>Meshlets</div><script>document.body.dataset.ready=\"yes\"</script>"
+      },
+      "verdict": "refuse",
+      "why": "Isolated composition contract"
     }
   ]
 }

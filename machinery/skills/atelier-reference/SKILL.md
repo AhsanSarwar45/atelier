@@ -193,6 +193,11 @@ Use an artifact when no widget can carry the idea. Pick the smallest kind:
   a synchronized camera view, and computed frustum/normal-cone culling. Use when
   actual geometry and viewpoint explain rejection; read [mesh models](references/mesh-models.md)
   and its torus and folded-facade examples.
+- `composition`: a directed explanation with staged reveals, camera shots,
+  attached labels and synchronized captions or audio. Author with Remotion and
+  Three.js, then bundle a self-contained player; read the composition section
+  of [the artifact contract](references/visual-artifacts.md). Keep `mesh` and
+  `render` for exploration rather than forcing them into a film.
 - `mockup`: a clickable product idea with real inputs, buttons, cards, screens
   and toggles. It works inline and opens full-screen. Use it only when trying
   the interaction answers a real design or workflow question.
@@ -201,9 +206,11 @@ A small narrated explanation stays an `explainer`.
 
 Before writing one, read [the visual artifact contract](references/visual-artifacts.md)
 for its schema and a validated example. Write the JSON to a file and run
-`atelier tool present artifact --file FILE`. Artifacts cannot contain
+`atelier tool present artifact --file FILE`. Declarative artifacts cannot contain
 JavaScript, HTML, arbitrary style sheets, remote resources or package imports.
-Unknown fields, broken references and files over 1 MiB are rejected. The
+The separate `composition` kind contains bundled HTML and JavaScript, executed
+only inside an isolated iframe, with an 8 MiB file limit. Other artifacts stay
+limited to 1 MiB. Unknown fields and broken references are rejected. The
 libraries are built into Atelier, so an artifact renders the same for Codex,
 Claude, and other shell-capable agents.
 

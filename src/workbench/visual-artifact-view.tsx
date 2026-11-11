@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator';
 import dynamic from 'next/dynamic';
 const MeshView = dynamic(() => import('./mesh-view').then(m => m.MeshView), { ssr: false });
 
+import { CompositionView, CompositionPresentation } from './composition-view';
 import { SceneView } from './scene-player';
 import { RenderView } from './render-view';
 import { request } from '@/lib/api';
@@ -103,6 +104,7 @@ function MockupView({ artifact }: { artifact: MockupArtifact }) {
 }
 
 export function VisualArtifactContent({ artifact }: { artifact: VisualArtifact }) {
+  if (artifact.kind === 'composition') return <CompositionView artifact={artifact} />;
   if (artifact.kind === 'mermaid') return <MermaidView artifact={artifact} />;
   if (artifact.kind === 'flow') return <FlowView artifact={artifact} />;
   if (artifact.kind === 'mesh') return <MeshView artifact={artifact} />;
@@ -121,6 +123,7 @@ export function VisualArtifactView({ asset }: { asset: string }) {
   }, [expanded]);
   if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>;
   if (!artifact) return <div role="status" className="p-6 text-center text-sm text-muted-foreground">Loading visual…</div>;
+  if (artifact.kind === 'composition') return <CompositionPresentation artifact={artifact} />;
   // The library's full-screen window: Escape and focus are its, not this file's.
   const fullScreen = expanded ? (
     <Overlay label={artifact.title} onClose={() => setExpanded(false)} className="flex-col items-stretch justify-start overflow-hidden bg-background p-0 text-foreground sm:p-0">

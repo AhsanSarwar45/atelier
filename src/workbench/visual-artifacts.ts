@@ -1,8 +1,9 @@
+import { compositionArtifact, type CompositionArtifact } from './composition-artifact';
 import { meshArtifact, type MeshArtifact } from './mesh-artifact';
 import { renderArtifact, type RenderArtifact } from './render-model';
 export type { RenderArtifact } from './render-model';
 
-export type ArtifactKind = 'mesh' | 'mermaid' | 'flow' | 'scene' | 'mockup' | 'render';
+export type ArtifactKind = 'composition' | 'mesh' | 'mermaid' | 'flow' | 'scene' | 'mockup' | 'render';
 
 type BaseArtifact = { version: 1; kind: ArtifactKind; title: string; description?: string };
 export type MermaidArtifact = BaseArtifact & { kind: 'mermaid'; source: string };
@@ -34,7 +35,7 @@ export type MockupArtifact = BaseArtifact & {
   kind: 'mockup'; initialScreen: string; viewport?: { width: number; height: number };
   screens: Array<{ id: string; title: string; components: MockupComponent[] }>;
 };
-export type VisualArtifact = MermaidArtifact | FlowArtifact | SceneArtifact | MockupArtifact | RenderArtifact | MeshArtifact;
+export type VisualArtifact = CompositionArtifact | MermaidArtifact | FlowArtifact | SceneArtifact | MockupArtifact | RenderArtifact | MeshArtifact;
 
 const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const text = (value: unknown, max = 200): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
@@ -57,6 +58,7 @@ function validComponents(components: unknown, ids: Set<string>, depth = 0): comp
 }
 
 export function visualArtifact(value: unknown): VisualArtifact | null {
+  if (object(value) && value.kind === 'composition') return compositionArtifact(value);
   if (object(value) && value.kind === 'mesh') return meshArtifact(value);
   if (object(value) && value.kind === 'render') return renderArtifact(value);
   if (!object(value) || value.version !== 1 || !text(value.title) || !['mermaid', 'flow', 'scene', 'mockup'].includes(String(value.kind))

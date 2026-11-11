@@ -1,0 +1,14 @@
+{
+  "title": "Meshlets: reject whole groups, safely",
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "durationInFrames": 1800,
+  "chapters": [
+    {"frame": 0, "label": "Triangle groups"},
+    {"frame": 360, "label": "Bounding sphere"},
+    {"frame": 630, "label": "View bounds"},
+    {"frame": 1080, "label": "Normal cone"},
+    {"frame": 1500, "label": "Pipeline"}
+  ]
+}

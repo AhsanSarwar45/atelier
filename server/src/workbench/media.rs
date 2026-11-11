@@ -19,6 +19,7 @@ const IMAGE_LIMIT: usize = 25 * 1024 * 1024;
 /// a way to fill the owner's disk by dragging the wrong thing into a chat.
 pub const ATTACHMENT_LIMIT: usize = 100 * 1024 * 1024;
 const ARTIFACT_LIMIT: usize = 1024 * 1024;
+const COMPOSITION_LIMIT: usize = 8 * 1024 * 1024;
 const PNG_MAGIC: &[u8] = &[137, 80, 78, 71, 13, 10, 26, 10];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -255,7 +256,23 @@ fn mockup_components(
 /// Until this agreed, the presenter stored an artifact the reader could not
 /// draw, and the reader answered with "Stored artifact failed validation"
 /// after the agent had already said the diagram was there.
+fn composition(value: &Value) -> Result<(), String> {
+    let row = value.as_object().ok_or("composition is an object")?;
+    only_fields(row, &["version", "kind", "title", "description", "width", "height", "html"], "composition")?;
+    if row.get("version") != Some(&Value::from(1)) { return Err("version is required and is 1".into()); }
+    required_string(row, "title", 200)?;
+    optional_string(row, "description", 1000)?;
+    for (name, minimum) in [("width", 160.0), ("height", 90.0)] {
+        let n = row.get(name).and_then(Value::as_f64).ok_or_else(|| format!("{name} is required"))?;
+        if !n.is_finite() || n.fract() != 0.0 || n < minimum || n > 4096.0 { return Err(format!("{name} is an integer from {minimum} to 4096")); }
+    }
+    let html = required_string(row, "html", COMPOSITION_LIMIT)?;
+    if html.len() > COMPOSITION_LIMIT { return Err("composition HTML is larger than 8 MiB".into()); }
+    Ok(())
+}
+
 pub fn artifact(value: &Value) -> Result<(), String> {
+    if value.get("kind").and_then(Value::as_str) == Some("composition") { return composition(value); }
     if value.get("kind").and_then(Value::as_str) == Some("mesh") { return super::mesh_model::validate(value); }
     if value.get("kind").and_then(Value::as_str) == Some("render") { return super::render_model::validate(value); }
     let object = value.as_object().ok_or("an artifact is a JSON object")?;
@@ -267,7 +284,7 @@ pub fn artifact(value: &Value) -> Result<(), String> {
     let kind = object
         .get("kind")
         .and_then(Value::as_str)
-        .ok_or("kind is required and is mermaid, flow, scene, mockup, render or mesh")?;
+        .ok_or("kind is required and is mermaid, flow, scene, mockup, render, mesh or composition")?;
     let shared = ["version", "kind", "title", "description"];
     let with = |extra: &[&str]| -> Vec<String> {
         shared
@@ -283,7 +300,7 @@ pub fn artifact(value: &Value) -> Result<(), String> {
         "mockup" => with(&["initialScreen", "viewport", "screens"]),
         other => {
             return Err(format!(
-                "{other} is not an artifact kind: use mermaid, flow, scene, mockup, render or mesh"
+                "{other} is not an artifact kind: use mermaid, flow, scene, mockup, render, mesh or composition"
             ))
         }
     };
@@ -566,11 +583,12 @@ pub fn import_artifact(
     label: &str,
     directory: &Path,
 ) -> Result<(String, String, String), String> {
-    if bytes.len() > ARTIFACT_LIMIT {
-        return Err(format!("{label} is larger than 1 MiB"));
-    }
+    if bytes.len() > COMPOSITION_LIMIT { return Err(format!("{label} is larger than 8 MiB")); }
     let value: Value =
         serde_json::from_slice(bytes).map_err(|e| format!("artifact is not valid JSON: {e}"))?;
+    if value.get("kind").and_then(Value::as_str) != Some("composition") && bytes.len() > ARTIFACT_LIMIT {
+        return Err(format!("{label} is larger than 1 MiB"));
+    }
     artifact(&value)?;
     let mut canonical = serde_json::to_vec(&ordered(&value)).map_err(|e| e.to_string())?;
     canonical.push(b'\n');
@@ -638,7 +656,7 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
             if !asset_name(object.get("asset").unwrap_or(&Value::Null), true) {
                 return Err("asset must name a stored artifact, as <64 hex characters>.artifact.json".into());
             }
-            one_of(object, "kind", &["mermaid", "flow", "scene", "mockup", "render", "mesh"], true)?;
+            one_of(object, "kind", &["mermaid", "flow", "scene", "mockup", "render", "mesh", "composition"], true)?;
         }
         "metrics" => {
             for item in list(object, "items", 1, 6)? {
@@ -1415,6 +1433,19 @@ pub fn compare_png(before: &[u8], after: &[u8], threshold: f64) -> PixelComparis
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn composition_import_has_its_own_bounded_budget() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut value = serde_json::json!({"version":1,"kind":"composition","title":"Directed explanation","width":1280,"height":720,"html":"x".repeat(1024*1024)});
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let (asset, _, kind) = super::import_artifact(&bytes, "composition", directory.path()).unwrap();
+        assert_eq!(kind, "composition");
+        assert!(directory.path().join(asset).is_file());
+        value["html"] = serde_json::Value::String("x".repeat(super::COMPOSITION_LIMIT));
+        assert!(super::import_artifact(&serde_json::to_vec(&value).unwrap(), "large", directory.path()).is_err());
+        let other = serde_json::json!({"version":1,"kind":"mermaid","title":"Graph","source":"x".repeat(1024*1024)});
+        assert!(super::import_artifact(&serde_json::to_vec(&other).unwrap(), "other", directory.path()).unwrap_err().contains("1 MiB"));
+    }
     use super::*;
 
     /// An attachment is kept by its content, under a name read off its own.

@@ -1,0 +1,1 @@
+{"title":"Why a cache makes the second request faster","width":1280,"height":720,"fps":30,"durationInFrames":720,"inputProps":{"databaseMs":120,"cacheMs":4},"chapters":[{"frame":0,"label":"Cache miss"},{"frame":360,"label":"Cache hit"}]}
