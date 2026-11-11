@@ -40,6 +40,10 @@ atelier task cancel N --reason TEXT
 atelier task take N
 ```
 
+Run each `atelier task` command as its own command and leave its output
+alone. It prints the task card the owner sees in the chat. Never send it to
+`/dev/null`, pipe it away, or bundle it into one command with the work.
+
 Types: `bug`, `feature`, `ui_change`, `optimization`, `plan`,
 `investigation`, `refactor`, `tests`, `review`, `qa`, `docs`, `chore`,
 `general`. Use `general` only when no other type fits.
