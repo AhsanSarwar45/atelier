@@ -9,12 +9,12 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 
-import { AlertTriangle, Ban, Check, Circle, CircleDot, GitMerge, Pause, Plus } from 'lucide-react';
+import { AlertTriangle, Ban, Check, ChevronRight, Circle, CircleDot, GitMerge, Pause, Plus } from 'lucide-react';
 
 import { MarkdownBody } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger, CollapsibleTriggerRow } from '@/components/ui/collapsible';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
 import { tasks as tasksApi } from '@/lib/api';
@@ -680,6 +680,17 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
+ * Whether a chat card starts open: a new task, and a card that waits on the
+ * owner (a review, a proposed plan change, a block). Any other status update
+ * starts folded to its header, so a chat is not a stack of repeated plans.
+ * Read from the task as printed, so the card keeps its first look.
+ */
+export function opensByDefault(event: string, task: Task): boolean {
+  if (event === 'create' || event === 'amend' || event === 'block') return true;
+  return event === 'done' && task.status === 'review';
+}
+
+/**
  * The task card. Draws the task as it stands now where the screen knows it
  * (`LiveTasksContext`), and otherwise the snapshot it was given.
  */
@@ -691,6 +702,7 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
   actions?: OwnerAction[];
 }) {
   const live = useLiveTask(snapshot);
+  const [open, setOpen] = useState(() => (event ? opensByDefault(event, snapshot) : true));
   const [acted, setActed] = useState<Task | null>(null);
   // What an owner button answered, until the feed catches up. Only for this
   // task: the detail panel reuses the card when another task is chosen.
@@ -705,9 +717,8 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
   const followups = Array.isArray(result?.followups) ? result.followups : [];
   const commits = Array.isArray(result?.commits) ? result.commits.filter((c): c is string => typeof c === 'string') : [];
 
-  return (
-    <div data-testid="task-card" data-task-type={task.type} data-task-status={status} className="space-y-3">
-      <header className="space-y-1">
+  const header = (
+    <header className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-xs text-muted-foreground">#{task.number}</span>
           <Badge variant="secondary" size="sm"><span>{typeLabel(task.type)}</span></Badge>
@@ -716,7 +727,11 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
         </div>
         <h4 className={cn('text-sm font-semibold text-foreground', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</h4>
         {task.why && <p className="text-xs text-muted-foreground">{task.why}</p>}
-      </header>
+    </header>
+  );
+
+  const body = (
+    <>
 
       {task.status === 'blocked' && task.blocked && (
         <Panel tone="attention" inset="sm" data-testid="task-blocked" className="space-y-1">
@@ -769,7 +784,37 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
       {reviewing && (
         <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve' || a === 'reopen')} onChanged={setActed} />
       )}
+    </>
+  );
+
+  // The Tasks tab's detail panel always shows the whole card.
+  if (!event) return (
+    <div data-testid="task-card" data-task-type={task.type} data-task-status={status} className="space-y-3">
+      {header}
+      {body}
     </div>
+  );
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      data-testid="task-card"
+      data-task-type={task.type}
+      data-task-status={status}
+    >
+      <CollapsibleTrigger
+        data-testid="task-card-toggle"
+        className="group/collapsible flex w-full cursor-pointer items-start gap-2 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/collapsible:rotate-90"
+        />
+        {header}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-3 pt-3">{body}</CollapsibleContent>
+    </Collapsible>
   );
 }
 

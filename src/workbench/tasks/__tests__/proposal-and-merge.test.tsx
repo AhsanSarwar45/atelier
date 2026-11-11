@@ -110,6 +110,7 @@ describe('the merged badge', () => {
 
   it('is drawn in the card of a done task', () => {
     render(<ChatWidgetView widget={{ type: 'task', event: 'done', task: makeTask({ ...done, merged: false }) }} />);
+    fireEvent.click(screen.getByTestId('task-card-toggle'));
     expect(screen.getByTestId('task-merged')).toHaveTextContent('Not merged');
   });
 });
