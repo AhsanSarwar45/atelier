@@ -7,8 +7,8 @@ describe('activity belongs to an active chat', () => {
     (state) => {
       const current = chatState({
         state,
-        call: { name: 'Bash', input: { command: 'bd update bw-105s.1 --claim' } },
-        detail: 'bd update bw-105s.1 --claim',
+        call: { name: 'Bash', input: { command: 'git status' } },
+        detail: 'git status',
         since: 1000,
         turnSince: 500,
       });

@@ -4,9 +4,9 @@ import { controlsOf, suggestionsFor, taking, tokens, withFilter, withScopes } fr
 
 describe('the search box and the controls beside it', () => {
   it('reads the words a control owns, and only those', () => {
-    expect(controlsOf('in:title,me project:"beads web" provider:codex from:terminal after:7d loader')).toEqual({
+    expect(controlsOf('in:title,me project:"my app" provider:codex from:terminal after:7d loader')).toEqual({
       scopes: ['title', 'me'],
-      project: 'beads web',
+      project: 'my app',
       provider: 'codex',
       from: 'terminal',
       after: '7d',
@@ -19,7 +19,7 @@ describe('the search box and the controls beside it', () => {
     expect(withFilter('loader cra', 'provider', 'claude')).toBe('provider:claude loader cra');
     expect(withFilter('provider:claude loader cra', 'provider', 'codex')).toBe('provider:codex loader cra');
     expect(withFilter('provider:claude loader ', 'provider', null)).toBe('loader ');
-    expect(withFilter('', 'project', 'beads web')).toBe('project:"beads web" ');
+    expect(withFilter('', 'project', 'my app')).toBe('project:"my app" ');
     expect(withScopes('in:tool loader', ['title', 'agent'])).toBe('in:title,agent loader');
     expect(withScopes('in:tool loader', [])).toBe('loader');
   });
@@ -34,8 +34,8 @@ describe('the search box and the controls beside it', () => {
   it('offers the keys a word starts, and the values a key takes', () => {
     expect(suggestionsFor('loader ti', [])?.items.map((s) => s.label)).toEqual(['title:']);
     expect(suggestionsFor('provider:c', [])?.items.map((s) => s.label)).toEqual(['claude', 'codex']);
-    expect(suggestionsFor('project:be', ['beads web', 'aspen'])?.items.map((s) => s.insert)).toEqual([
-      'project:"beads web"',
+    expect(suggestionsFor('project:my', ['my app', 'aspen'])?.items.map((s) => s.insert)).toEqual([
+      'project:"my app"',
     ]);
     expect(suggestionsFor('loader ', [])).toBeNull();
     const at = suggestionsFor('-from:t', [])!;

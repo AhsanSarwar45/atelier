@@ -61,7 +61,7 @@
     --chart-5: 27 87% 67%;
     --radius: 0.5rem;
 
-    /* ===== Beads Semantic Colors (HSL values) ===== */
+    /* ===== Semantic Colors (HSL values) ===== */
 
     /* Surface: backgrounds for layered UI */
     --surface-base: 0 0% 4%;         /* deepest bg: body, panels */
@@ -191,7 +191,7 @@
     /* ===== Priority bar ===== */
     --priority-bar-w: 0px;         /* priority bar width (0 = hidden) */
 
-    /* Legacy Beads vars (kept for compatibility) */
+    /* Older status vars (kept for compatibility) */
     --status-in_progress: 38 92% 50%;
     --status-inreview: 271 81% 56%;
     --blocked: 0 84% 60%;

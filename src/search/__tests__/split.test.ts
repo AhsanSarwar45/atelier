@@ -5,8 +5,8 @@ import { CHAT_GRAMMAR } from '@/workbench/search-syntax';
 
 describe('a question for the AI and the filters it is held to', () => {
   it('splits the box into the keys it sets and the words it asks', () => {
-    expect(split('project:"beads web" the loader -provider:codex in:title,me crash std::fs', CHAT_GRAMMAR)).toEqual({
-      filters: 'project:"beads web" -provider:codex in:title,me',
+    expect(split('project:"my app" the loader -provider:codex in:title,me crash std::fs', CHAT_GRAMMAR)).toEqual({
+      filters: 'project:"my app" -provider:codex in:title,me',
       words: 'the loader crash std::fs',
     });
     expect(split('where we fixed it', CHAT_GRAMMAR)).toEqual({ filters: '', words: 'where we fixed it' });

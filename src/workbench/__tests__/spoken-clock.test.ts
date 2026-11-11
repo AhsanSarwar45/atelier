@@ -55,7 +55,6 @@ function summary(over: Record<string, unknown> = {}) {
     lastActiveAt: SPOKE,
     lastSpokeAt: SPOKE,
     activity: 'Answering',
-    beads: [],
     ...over,
   };
 }

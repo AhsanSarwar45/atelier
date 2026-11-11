@@ -57,7 +57,7 @@ describe('what has the shape of an address', () => {
   });
 
   it('leaves a web address alone', () => {
-    expect(raws('see https://github.com/gastownhall/beads/blob/main/docs/x.md for it')).toEqual([]);
+    expect(raws('see https://github.com/example/project/blob/main/docs/x.md for it')).toEqual([]);
   });
 
   it('does not cut a rooted address out of the middle of a word', () => {

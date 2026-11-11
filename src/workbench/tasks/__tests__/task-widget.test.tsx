@@ -67,7 +67,7 @@ const plan = card({
   type: 'plan',
   title: 'Plan tasks',
   status: 'review',
-  plan: { question: 'How should tasks work?', scope: 'App only', constraints: ['No Beads'] },
+  plan: { question: 'How should tasks work?', scope: 'App only', constraints: ['No new dependencies'] },
   result: {
     summary: 'Wrote it',
     document: '# The design\n\nTasks live in the app.',

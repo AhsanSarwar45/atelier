@@ -31,7 +31,7 @@ interface MemoryReport {
   /** The kernel's account of the app's own control group, absent outside one. */
   service?: {
     totalBytes: number; cacheBytes: number; pressure: number;
-    /** Programs in the service the app did not start, such as a Dolt server; absent from an older server. */
+    /** Programs in the service the app did not start, such as a database server; absent from an older server. */
     others?: Array<{ pid: number; name: string; bytes: number }>;
   } | null;
   /** Running Docker containers, each charged to the chat that started it when one did. */

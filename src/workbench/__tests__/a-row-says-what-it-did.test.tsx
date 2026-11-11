@@ -3,9 +3,9 @@
  * for the kind of thing it was, and the shell text is only there once the
  * reader has opened it.
  *
- * What this replaces: every row was the raw line, so `bd close bw-7dqe.1` and
- * `bd show bw-7dqe.1` were the same shape at a glance and an `rm -rf` two links
- * into a chain was the same shape as both (bw-7ks.24).
+ * What this replaces: every row was the raw line, so `git show` and `git push`
+ * were the same shape at a glance and an `rm -rf` two links into a chain was
+ * the same shape as both (bw-7ks.24).
  */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -39,7 +39,6 @@ describe('the row says it in English', () => {
   it('holds no shell text on the line the reader sees', () => {
     // One per family, so this is not one command's good luck.
     const named: [string, string][] = [
-      ['bd close bw-7dqe.1', 'Closed bw-7dqe.1'],
       ['git commit -m "fix the thing"', 'Committed'],
       ['rg -n "toolTitle" src', 'Searched for toolTitle in src'],
       ['npm test', 'Ran the tests'],
@@ -56,10 +55,10 @@ describe('the row says it in English', () => {
   });
 
   it('gives the reader the command itself the moment he opens the row', () => {
-    const { line } = shell('bd close bw-7dqe.1');
+    const { line } = shell('npm test');
     expect(screen.queryByTestId('tool-input')).toBeNull();
     fireEvent.click(line);
-    expect(screen.getByTestId('tool-input').textContent).toContain('bd close bw-7dqe.1');
+    expect(screen.getByTestId('tool-input').textContent).toContain('npm test');
   });
 
   it('leaves a command no rule knows in the words it was typed in', () => {
@@ -103,7 +102,7 @@ describe('the mark says what kind of thing it was', () => {
     expect(screen.getByTestId('tool-row')).toHaveAttribute('data-ran-band', 'looking');
     unmount();
 
-    render(<ToolRow item={call('Bash', { command: 'bd close bw-7dqe.1' })} nested={false} />);
+    render(<ToolRow item={call('Bash', { command: 'report new' })} nested={false} />);
     const board = screen.getByTestId('tool-mark').outerHTML;
     expect(screen.getByTestId('tool-row')).toHaveAttribute('data-ran-band', 'board');
     // Both the shape and the colour, because either alone can go stale.

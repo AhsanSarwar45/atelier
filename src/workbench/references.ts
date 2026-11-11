@@ -351,8 +351,8 @@ export function resolveReference(ref: Reference, root: string | Rooted): string 
  * about the chat's folder (docs/tasks.md, "Merging"). It has an empty id, and
  * `@merge:…` is nothing.
  *
- * `@bead:…` named a card on the retired Beads board. It is no longer a kind, so
- * an old transcript that wrote one shows it as the words it was.
+ * Any other `@word:…`, such as one an older transcript wrote, is not a kind and
+ * shows as the words it was.
  */
 export type AtelierKind = 'chat' | 'skill' | 'diff' | 'task' | 'merge';
 

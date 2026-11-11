@@ -18,13 +18,11 @@ export type CommandLabelVerdict =
 export type ExplicitIntent = 'help' | 'version' | 'dry-run' | 'destructive' | 'board' | 'git' | 'runtime' | 'family' | 'plumbing';
 
 const SUBCOMMAND_TOOLS = new Set([
-  'bd', 'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'job', 'kubectl', 'npm',
+  'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'kubectl', 'npm',
   'npx', 'pnpm', 'report', 'systemctl', 'yarn', 'atelier',
 ]);
 
 const SAFE_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
-  bd: new Set(['blocked', 'children', 'close', 'comments', 'create', 'doctor', 'dolt', 'gate', 'help', 'label', 'list', 'merge-slot', 'note', 'prime', 'ready', 'reclaim', 'remember', 'search', 'set-state', 'show', 'stats', 'supersede', 'unclaim', 'update']),
-  job: new Set(['cancel', 'epic', 'find', 'new', 'start', 'under', 'upgrade']),
   report: new Set(['list', 'new']),
   atelier: new Set(['run', 'init', 'project', 'tool', 'hook', 'where', 'service']),
 };
@@ -37,8 +35,8 @@ const BEHAVIOR_FLAGS = new Set([
 ]);
 
 const CLI_WITH_SHORT_HELP = new Set([
-  'bd', 'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'job', 'kubectl', 'land',
-  'make', 'npm', 'npx', 'pnpm', 'report', 'review', 'yarn', 'check',
+  'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'kubectl',
+  'make', 'npm', 'npx', 'pnpm', 'report', 'yarn', 'check',
 ]);
 
 const SAYS_DESTRUCTION = /delet|kill|remov|shred|truncat|threw away|formatted|wiped|force-push/i;
@@ -182,7 +180,7 @@ export function commandLabelProfile(command: string, ran: Ran | null): string | 
   let sub = SUBCOMMAND_TOOLS.has(head) && argv[at] && !argv[at]!.startsWith('-') ? argv[at]! : '-';
   const safe = SAFE_SUBCOMMANDS[head];
   if (safe && sub !== '-' && !safe.has(sub)) sub = 'other';
-  if ((head === 'docker' && sub === 'compose') || (head === 'bd' && sub === 'dolt')) {
+  if (head === 'docker' && sub === 'compose') {
     const nested = argv.slice(at + 1).find((word) => !word.startsWith('-'));
     if (nested) sub += `/${nested}`;
   }
@@ -197,11 +195,7 @@ export function commandLabelProfile(command: string, ran: Ran | null): string | 
       if (tool === 'present') {
         const form = argv[at + 2] ?? '';
         sub = `tool/present/${['widget', 'image', 'compare', 'artifact'].includes(form) ? form : 'other'}`;
-      } else if (tool === 'board/job') {
-        const action = argv[at + 2] ?? '';
-        sub = `tool/board/job/${['new', 'under', 'epic', 'cancel', 'upgrade'].includes(action) ? action : 'other'}`;
-      } else if (tool === 'board/land') sub = 'tool/board/land';
-      else if (tool === 'checks') sub = 'tool/checks';
+      } else if (tool === 'checks') sub = 'tool/checks';
       else sub = 'tool/other';
     }
   }
@@ -332,8 +326,8 @@ const FAMILY_EXPECTATIONS: Record<string, ExpectedLabel> = {
   tsx: family(['run', 'test'], ['Ran']), deno: family(['run', 'test'], ['Ran']), bun: family(['run', 'test'], ['Ran']),
   bash: family(['run', 'script', 'grave'], ['Ran', 'Deleted', 'Killed']), sh: family(['run', 'script', 'grave'], ['Ran', 'Deleted', 'Killed']),
   zsh: family(['run', 'script', 'grave'], ['Ran', 'Deleted', 'Killed']), sleep: family(['wait'], ['Waited']),
-  atelier: family(['run', 'read', 'edit', 'system', 'script', 'agent', 'test', 'board'], ['Started', 'Read', 'Set', 'Checked', 'Stopped', 'Ran', 'Presented', 'Opened', 'Added', 'Dropped', 'Filled', 'Landed']), 'beads-server': family(['run'], ['Ran']), 'beads-web': family(['run'], ['Ran']),
-  claude: family(['agent'], ['Ran']), 'external-review': family(['agent'], ['Ran']),
+  atelier: family(['run', 'read', 'edit', 'system', 'script', 'agent', 'test'], ['Started', 'Read', 'Set', 'Checked', 'Stopped', 'Ran', 'Presented']), 'beads-web': family(['run'], ['Ran']),
+  claude: family(['agent'], ['Ran']),
   codex: family(['run', 'build'], ['Ran', 'Started', 'Generated']), docker: family(['system', 'run', 'build'], ['Asked', 'Listed', 'Read', 'Ran', 'Built', 'Started', 'Stopped', 'Worked', 'Pulled', 'Restarted']),
   kubectl: family(['system'], ['Asked', 'Listed', 'Read', 'Ran', 'Described', 'Applied']), man: family(['read'], ['Read']),
   'redis-cli': family(['data', 'grave'], ['Read', 'Changed', 'Deleted']),
@@ -385,23 +379,10 @@ function expectedLabel(command: string): ExpectedLabel | null {
       return family(['agent'], ['Presented']);
     }
     if (args[1] === 'checks') return family(['test'], ['Ran']);
-    if (args[1] === 'board/job' && args[2]) return family(['board'], ['Opened', 'Added', 'Dropped', 'Filled', 'Ran']);
-    if (args[1] === 'board/land') return family(['board'], ['Landed']);
     return null;
   }
 
-  if (head === 'bd') {
-    const sub = args[0] ?? '';
-    const verbs: Record<string, readonly string[]> = {
-      close: ['Closed'], show: ['Showed'], ready: ['Listed'], list: ['Listed'], blocked: ['Listed'],
-      prime: ['Read'], stats: ['Counted'], create: ['Created'], search: ['Searched'], label: ['Labeled', 'Removed'],
-      supersede: ['Superseded'], children: ['Listed'], doctor: ['Checked'], unclaim: ['Released'],
-      remember: ['Wrote'], update: ['Updated', 'Claimed', 'Wrote', 'Moved'],
-      comments: ['Commented', 'Read'], 'merge-slot': ['Took', 'Gave', 'Checked'],
-    };
-    return { intent: 'board', kinds: ['board'], grave: false, verbs: verbs[sub] };
-  }
-  if (['job', 'land', 'review', 'report', 'checks'].includes(head)) {
+  if (['report', 'checks'].includes(head)) {
     return { intent: 'board', kinds: [head === 'checks' ? 'test' : 'board'], grave: false };
   }
 

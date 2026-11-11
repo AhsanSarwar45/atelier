@@ -39,9 +39,9 @@ describe('the chats search opens where you are standing', () => {
   });
 
   it('quotes a project whose name has a space', async () => {
-    listed.mockResolvedValue([{ id: 'p1', name: 'beads web' }]);
+    listed.mockResolvedValue([{ id: 'p1', name: 'my app' }]);
     const box = await shown();
-    expect(box.value).toBe('project:"beads web" ');
+    expect(box.value).toBe('project:"my app" ');
   });
 
   it('falls back to the folder when the projects cannot be listed', async () => {

@@ -1,5 +1,5 @@
 /* ===== Theme Presets =====
- * Each theme overrides all ~45 beads semantic CSS variables.
+ * Each theme overrides all ~45 semantic CSS variables.
  * Light themes also override shadcn base variables for consistency.
  * Applied via data-theme attribute on <html>.
  *

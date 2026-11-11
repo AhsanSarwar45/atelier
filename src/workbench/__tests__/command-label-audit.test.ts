@@ -4,14 +4,14 @@ import { auditCommandLabel, commandLabelProfile, explicitCommandIntent } from '@
 
 describe('command label evidence', () => {
   it('does not mistake a friendly sentence for proof that it is correct', () => {
-    expect(auditCommandLabel('machinery/board/land --help', {
-      said: 'Landed the change', kind: 'board', grave: false,
+    expect(auditCommandLabel('scripts/deploy.sh --help', {
+      said: 'Deployed the change', kind: 'script', grave: false,
     })).toMatchObject({ status: 'contradiction', intent: 'help' });
   });
 
   it('verifies an explicit help intent only when the label says it read options', () => {
-    expect(auditCommandLabel('machinery/board/land --help', {
-      said: 'Read the land options', kind: 'read', grave: false,
+    expect(auditCommandLabel('scripts/deploy.sh --help', {
+      said: 'Read the deploy options', kind: 'read', grave: false,
     })).toEqual({ status: 'verified', intent: 'help' });
   });
 
@@ -27,7 +27,7 @@ describe('command label evidence', () => {
 
   it('does not read help-looking quoted data as invocation intent', () => {
     expect(explicitCommandIntent("rg '--help' src")).toBeNull();
-    expect(explicitCommandIntent('bd show bw-a\nmachinery/board/land --help')).toBeNull();
+    expect(explicitCommandIntent('git show HEAD\nscripts/deploy.sh --help')).toBeNull();
   });
 
   it('recognises dry runs and destructive commands independently', () => {
@@ -60,9 +60,9 @@ describe('command label evidence', () => {
     expect(commandLabelProfile("rg 'private phrase' /private/repo", {
       said: 'Searched for private phrase', kind: 'search', grave: false,
     })).toBe('rg|-|-|Searched|search|ordinary');
-    expect(commandLabelProfile('bd update private --notes "--dry"', {
-      said: 'Updated private', kind: 'board', grave: false,
-    })).toBe('bd|update|value:--dry|Updated|board|ordinary');
+    expect(commandLabelProfile('git commit -m "--dry"', {
+      said: 'Committed', kind: 'vcs', grave: false,
+    })).toBe('git|commit|value:--dry|Committed|vcs|ordinary');
     expect(commandLabelProfile('rtk proxy git -C /private/repo status', {
       said: 'Checked the working tree', kind: 'vcs', grave: false,
     })).toBe('git|status|-|Checked|vcs|ordinary');

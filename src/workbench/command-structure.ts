@@ -215,8 +215,8 @@ function shellSyntax(command: string): string {
 const OMIT = new Set(['', 'cd', 'echo', 'printf', 'export', 'set', 'true', 'false', 'env', 'pwd', 'source', '.', ':']);
 const TRIM = new Set(['head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'tr', 'jq', 'column', 'tee', 'less', 'more', 'nl', 'rev', 'tac', 'awk', 'sed', 'grep', 'rg']);
 const KNOWN = new Set([
-  'awk', 'bash', 'bd', 'bun', 'cargo', 'cat', 'chmod', 'chown', 'claude', 'codex', 'cp', 'curl',
-  'deno', 'docker', 'find', 'git', 'go', 'grep', 'head', 'job', 'jq', 'kill', 'kubectl', 'land',
+  'awk', 'bash', 'bun', 'cargo', 'cat', 'chmod', 'chown', 'claude', 'codex', 'cp', 'curl',
+  'deno', 'docker', 'find', 'git', 'go', 'grep', 'head', 'jq', 'kill', 'kubectl',
   'ln', 'ls', 'make', 'mkdir', 'mv', 'next', 'node', 'npm', 'npx', 'perl', 'php', 'playwright',
   'pnpm', 'ps', 'psql', 'pytest', 'python', 'python3', 'rg', 'rm', 'rsync', 'ruby', 'sed', 'sh',
   'sleep', 'sqlite3', 'ssh', 'stat', 'systemctl', 'tail', 'tar', 'tee', 'test', 'touch', 'tsc',

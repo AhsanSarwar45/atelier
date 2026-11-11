@@ -57,7 +57,7 @@ describe('memory badge', () => {
       totalBytes: 2 * 1024 ** 3, swapBytes: 0, metric: 'heldPssWithSwap', processCount: 1,
       chats: [], processDetails: [],
       service: { totalBytes: 9.5 * 1024 ** 3, cacheBytes: 6 * 1024 ** 3, pressure: 77.2,
-        others: [{ pid: 30, name: 'dolt', bytes: 512 * 1024 ** 2 }, { pid: 31, name: 'dolt', bytes: 512 * 1024 ** 2 }] },
+        others: [{ pid: 30, name: 'postgres', bytes: 512 * 1024 ** 2 }, { pid: 31, name: 'postgres', bytes: 512 * 1024 ** 2 }] },
     }) });
     render(<MemoryBadge />);
     expect(await screen.findByTestId('memory-badge')).toHaveTextContent('9.5 GB');
@@ -66,7 +66,7 @@ describe('memory badge', () => {
     // The entries above count the processes; the lines below are the rest,
     // and all of it adds up to the total (bw-xeeqg.21).
     expect(service).not.toHaveTextContent('Processes');
-    expect(screen.getByTestId('memory-others')).toHaveTextContent('Other programs (dolt)1.0 GB');
+    expect(screen.getByTestId('memory-others')).toHaveTextContent('Other programs (postgres)1.0 GB');
     expect(service).toHaveTextContent('Disk cache6.0 GB');
     expect(screen.getByTestId('memory-kernel')).toHaveTextContent('Kernel512 MB');
     expect(screen.getByTestId('memory-pressure')).toHaveTextContent('Memory pressure77%');

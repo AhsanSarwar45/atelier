@@ -61,69 +61,29 @@ const said = (command: string) => whatACommandDid(command)?.said ?? null;
 
 /** One command per rule, and the sentence that rule owes the reader. */
 const RULES: Array<[string, string]> = [
-  // The board this repo runs on. Every card id is kept exactly as written, so
-  // the chip that turns it into a link still finds it (split-paths.tsx).
-  ['bd close bw-7dqe.1', 'Closed bw-7dqe.1'],
-  ['bd show bw-7ks.24', 'Showed bw-7ks.24'],
-  ['bd ready', 'Listed the work that is ready'],
-  ['bd list', 'Listed the board'],
-  ['bd blocked', 'Listed what is blocked'],
-  ['bd prime', 'Read the board rules'],
-  ['bd stats', 'Counted the board'],
-  ['bd create "a card"', 'Created a card'],
-  ['bd search "something"', 'Searched the board'],
-  ['bd label add bw-7ks.24 bug', 'Labeled bw-7ks.24'],
-  ['bd supersede bw-old --with bw-new', 'Superseded bw-old'],
-  ['bd children bw-7ks.24', 'Listed the child cards'],
-  ['bd doctor', 'Checked the board health'],
-  ['bd unclaim bw-7ks.24', 'Released bw-7ks.24'],
-  ['bd note bw-7ks.24 "done"', 'Wrote a note on bw-7ks.24'],
-  ['bd set-state bw-7ks.24 patrol=active', 'Set the state of bw-7ks.24'],
-  ['bd dolt start', 'Started the board database'],
-  ['bd update bw-7ks.24.2 --claim', 'Claimed bw-7ks.24.2'],
-  ['bd update bw-7ks.24.2 --status=in_progress', 'Moved bw-7ks.24.2'],
-  ['bd update bw-7ks.24.2 --append-notes "x"', 'Wrote a note on bw-7ks.24.2'],
-  ['bd comments add bw-7ks.24 "note"', 'Commented on bw-7ks.24'],
-  ['bd comments list bw-7ks.24', 'Read the comments on bw-7ks.24'],
-  ['bd dep relate bw-a bw-b', 'Linked bw-a and bw-b'],
-  ['bd merge-slot acquire', 'Took the merge slot'],
-  ['bd merge-slot release', 'Gave the merge slot back'],
-  ['bd remember "x"', 'Wrote a note to the board'],
   ['const r = await tools.exec_command({"cmd":"git status --short"}); text(r.output)', 'Checked the working tree'],
   ['const a = await tools.exec_command({"cmd":"npm test"}); const b = await tools.exec_command({"cmd":"git status --short"})', 'Ran the tests, then checked the working tree'],
   ['const r = await tools.write_stdin({"session_id":12,"chars":""}); text(r.output)', 'Waited for a running command'],
   ['const patch = "*** Begin Patch\\n*** Update File: /repo/src/a.ts\\n*** End Patch"; await tools.apply_patch(patch)', 'Changed src/a.ts'],
   ['const r = await tools.view_image({"path":"/tmp/screen.png"})', 'Looked at tmp/screen.png'],
   ['const r = await tools.web__run({"search_query":[{"q":"Codex docs"}]})', 'Searched the web'],
-  ["/bin/bash -lc 'bd ready'", 'Listed the work that is ready'],
-  ["/bin/bash -lc 'sed -n \"1,240p\" .agents/skills/beads/SKILL.md && bd prime'", 'Read part of beads/SKILL.md, then read the board rules'],
+  ["/bin/bash -lc 'git status'", 'Checked the working tree'],
+  ["/bin/bash -lc 'sed -n \"1,240p\" .agents/skills/tasks/SKILL.md && git status'", 'Read part of tasks/SKILL.md, then checked the working tree'],
   ['/bin/bash -lc "printf \'%s\' \'{\\"tool_name\\":\\"Bash\\"}\' | python3 machinery/hooks/workflow-gate.py"', 'Ran workflow-gate.py'],
   ["/bin/bash -lc \"git status --short; rg -n 'review|merge' AGENTS.md\"", 'Checked the working tree, then searched for review|merge in AGENTS.md'],
   ["docker exec app sh -lc 'npm test'", 'Ran the tests'],
-  ['machinery/board/job new --what x', 'Opened a job'],
-  ['machinery/board/job under bw-7ks.24 --do "what to do|how we know"', 'Added the work items'],
-  ['machinery/board/job find bw-7ks.24', 'Ran job find'],
-  ['machinery/board/land bw-7ks.24', 'Landed bw-7ks.24'],
-  ['machinery/board/land --help', 'Read the land options'],
-  ["/bin/bash -lc 'machinery/board/land --help'", 'Read the land options'],
   ["/bin/bash -lc 'atelier tool present widget --input /tmp/widget.json'", 'Presented a widget'],
   ['atelier tool present image --file screen.png --alt screen', 'Presented an image'],
   ['atelier tool present compare --before old.png --after new.png --before-alt old --after-alt new', 'Presented an image comparison'],
   ['atelier tool present artifact --file report.json', 'Presented a visual artifact'],
-  ['atelier tool board/job under bw-7ks.24 --do x', 'Added the work items'],
-  ['atelier tool board/land bw-7ks.24', 'Landed bw-7ks.24'],
   ['atelier tool checks', 'Ran the project checks'],
-  ['atelier init --beads .', 'Set up Atelier for a project'],
-  ['atelier project beads .', 'Checked whether project task tracking is enabled'],
+  ['atelier init .', 'Set up Atelier for a project'],
   ['atelier service install', 'Set Atelier to start at login'],
   ['atelier service uninstall', 'Stopped Atelier from starting at login'],
   ['atelier service status', 'Checked whether Atelier starts at login'],
   ['atelier where', 'Read the Atelier addresses'],
   ['atelier --data-dir', 'Read where Atelier keeps its data'],
   ['atelier run --no-browser', 'Started Atelier'],
-  ['machinery/board/land --dry', 'Checked what land would do'],
-  ['machinery/board/review bw-7ks.24', 'Reviewed bw-7ks.24'],
-  ['bd --help', 'Read the board options'],
   ['cargo --version', 'Checked the cargo version'],
 
   // Version control.
@@ -231,7 +191,7 @@ const RULES: Array<[string, string]> = [
   ['tail -n +1 output.log', 'Read the end of output.log'],
   ['sed -n "120,180p" src/x.ts', 'Read part of src/x.ts'],
   ['tsx scripts/check.ts', 'Ran check.ts'],
-  ['machinery/board/run.py --help; machinery/board/move --help', 'Read the run options, then read the move options'],
+  ['scripts/run.py --help; scripts/move.sh --help', 'Read the run options, then read the move options'],
 
   // Searching. The pattern is kept exactly as typed.
   ['grep -rn "toolTitle" workbench/src', 'Searched for toolTitle in workbench/src'],
@@ -275,9 +235,9 @@ const RULES: Array<[string, string]> = [
   ['ss -ltnp', 'Checked what is listening'],
   ['lsof -i :3008', 'Checked what is listening'],
   ['systemctl restart nginx', 'Restarted nginx'],
-  ['systemctl status beads-web', 'Checked beads-web'],
-  ['systemctl --user stop beads-web', 'Stopped beads-web'],
-  ['systemctl --user is-active beads-web', 'Checked beads-web'],
+  ['systemctl status atelier', 'Checked atelier'],
+  ['systemctl --user stop atelier', 'Stopped atelier'],
+  ['systemctl --user is-active atelier', 'Checked atelier'],
   ['docker ps', 'Listed the containers'],
   ['docker logs api', 'Read a container log'],
   ['docker compose up -d', 'Started the containers'],
@@ -290,7 +250,7 @@ const RULES: Array<[string, string]> = [
   ['date', 'Checked the time'],
 
   // Data, and waiting.
-  ['sqlite3 .beads/beads.db "select 1"', 'Queried beads.db'],
+  ['sqlite3 data/app.db "select 1"', 'Queried app.db'],
   ['psql -c "select 1"', 'Queried the database'],
   ['jq .name package.json', 'Picked fields out of some JSON'],
   ['sleep 5', 'Waited 5s'],
@@ -363,16 +323,14 @@ describe('a chain of commands', () => {
   });
 
   it('keeps a pipe inside quotes out of the chain', () => {
-    // Work reaches this repo's board as --do "what to do|how we know it is
-    // done". Splitting on every `|` cut his own sentence in half and reported
-    // the second half as another thing the command did.
-    expect(said('machinery/board/job under bw-7ks.24 --do "close the card|the run is green"'))
-      .toBe('Added the work items');
+    // Splitting on every `|` cut a quoted sentence in half and reported the
+    // second half as another thing the command did.
+    expect(said('git commit -m "close the card|the run is green"'))
+      .toBe('Committed');
   });
 
   it('keeps multiline quoted arguments out of shell-script detection', () => {
     expect(said("git commit -m 'First line\nthen more detail\nfinal line'")).toBe('Committed');
-    expect(said("bd close bw-7ks.24 --reason 'Done\nthen verified'")).toBe('Closed bw-7ks.24');
   });
 
   it('reads through a wrapper to the command underneath it', () => {
@@ -442,17 +400,14 @@ describe('a chain of commands', () => {
 
 describe('a delete is never hidden', () => {
   it('does not mistake quoted prose for a command', () => {
-    expect(whatACommandDid('bd close bw-7ks.24 --reason "remove obsolete wording"')).toMatchObject({
-      said: 'Closed bw-7ks.24', kind: 'board', grave: false,
+    expect(whatACommandDid('git commit -m "remove obsolete wording"')).toMatchObject({
+      said: 'Committed', kind: 'vcs', grave: false,
     });
     expect(whatACommandDid('node -e "console.log(\'rm is a command\')"')).toMatchObject({
       kind: 'run', grave: false,
     });
-    expect(whatACommandDid('bd close bw-7ks.24 --reason "--dry"')).toMatchObject({
-      said: 'Closed bw-7ks.24', kind: 'board', grave: false,
-    });
-    expect(whatACommandDid("bd update bw-7ks.24 --notes='ordinary prose --dry still prose'")).toMatchObject({
-      said: 'Updated bw-7ks.24', kind: 'board', grave: false,
+    expect(whatACommandDid("git commit -m 'ordinary prose --dry still prose'")).toMatchObject({
+      said: 'Committed', kind: 'vcs', grave: false,
     });
     expect(whatACommandDid('git commit -m "--dry"')).toMatchObject({
       said: 'Committed', kind: 'vcs', grave: false,
@@ -661,7 +616,7 @@ describe('a delete is never hidden', () => {
 describe('a script reads as a script', () => {
   it('says what it is written in and how long it is', () => {
     expect(said("python3 - <<'PY'\nimport os\nprint(os.getcwd())\nPY")).toBe('Ran a Python script (4 lines)');
-    expect(said('for f in *.ts; do bd close $f; done')).toBe('Ran a shell script');
+    expect(said('for f in *.ts; do git add $f; done')).toBe('Ran a shell script');
   });
 
   it('reads a here-document into a file as writing that file', () => {
@@ -680,7 +635,7 @@ describe('a script reads as a script', () => {
   });
 
   it('keeps data-language here-documents in their data-tool category', () => {
-    expect(whatACommandDid("sqlite3 beads.db <<'SQL'\nselect 1;\nSQL")).toMatchObject({ said: 'Queried beads.db', kind: 'data', grave: false });
+    expect(whatACommandDid("sqlite3 app.db <<'SQL'\nselect 1;\nSQL")).toMatchObject({ said: 'Queried app.db', kind: 'data', grave: false });
     expect(whatACommandDid("psql app <<'SQL'\nselect 1;\nSQL")).toMatchObject({ said: 'Queried the database', kind: 'data', grave: false });
   });
 

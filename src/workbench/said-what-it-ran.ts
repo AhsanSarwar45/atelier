@@ -148,11 +148,10 @@ const OBJECT = 44;
  * Where each link of a chain ends: at an unquoted `&&`, `||`, `;`, `|` or
  * newline.
  *
- * Walked a character at a time rather than split by a regex, and the reason is
- * this repo's own board: work reaches it as
- * `job under <goal> --do "what to do|how we know it is done"`, and a regex
- * split that straight down the middle of his sentence and reported the second
- * half as another thing the command did. A single `&` is left alone so `2>&1`
+ * Walked a character at a time rather than split by a regex: a quoted argument
+ * such as `--do "what to do|how we know it is done"` must stay whole, and a
+ * regex split it straight down the middle and reported the second half as
+ * another thing the command did. A single `&` is left alone so `2>&1`
  * stays part of the command it belongs to.
  */
 interface CommandLink {
@@ -647,68 +646,6 @@ interface Rule {
   say: (argv: string[]) => string | null;
 }
 
-/** `bd close bw-7dqe.1` reads as "Closed bw-7dqe.1", and so on down the tool. */
-const BD: Record<string, (argv: string[]) => string> = {
-  close: (a) => `Closed ${object(a, 2) || 'a card'}`,
-  show: (a) => `Showed ${object(a, 2) || 'a card'}`,
-  ready: () => 'Listed the work that is ready',
-  list: () => 'Listed the board',
-  blocked: () => 'Listed what is blocked',
-  prime: () => 'Read the board rules',
-  reclaim: () => 'Took work back',
-  remember: () => 'Wrote a note to the board',
-  stats: () => 'Counted the board',
-  create: () => 'Created a card',
-  search: () => 'Searched the board',
-  label: (a) => `${a[2] === 'remove' ? 'Removed' : 'Labeled'} ${object(a, 3) || object(a, 2) || 'a card'}`,
-  supersede: (a) => `Superseded ${object(a, 2) || 'a card'}`,
-  children: () => 'Listed the child cards',
-  doctor: () => 'Checked the board health',
-  unclaim: (a) => `Released ${object(a, 2) || 'a card'}`,
-  note: (a) => `Wrote a note on ${object(a, 2) || 'a card'}`,
-  'set-state': (a) => `Set the state of ${object(a, 2) || 'a card'}`,
-};
-
-function bdSaid(argv: string[]): string {
-  const sub = argv[1] ?? '';
-  if (sub === 'update') {
-    const card = object(argv, 2) || 'a card';
-    if (has(argv, '--claim')) return `Claimed ${card}`;
-    if (argv.some((w) => w.indexOf('--append-notes') === 0)) return `Wrote a note on ${card}`;
-    if (argv.some((w) => w.indexOf('--status') === 0)) return `Moved ${card}`;
-    return `Updated ${card}`;
-  }
-  if (sub === 'comments') {
-    const how = argv[2] ?? '';
-    const card = object(argv, 3) || 'a card';
-    if (how === 'add') return `Commented on ${card}`;
-    return `Read the comments on ${card}`;
-  }
-  if (sub === 'dep') {
-    const pair = objects(argv, 3);
-    return pair.length >= 2 ? `Linked ${pair[0]} and ${pair[1]}` : 'Linked two cards';
-  }
-  if (sub === 'merge-slot') {
-    const how = argv[2] ?? '';
-    if (how === 'acquire') return 'Took the merge slot';
-    if (how === 'release') return 'Gave the merge slot back';
-    return 'Checked the merge slot';
-  }
-  if (sub === 'dolt') {
-    const how = argv[2] ?? '';
-    if (how === 'start') return 'Started the board database';
-    if (how === 'stop') return 'Stopped the board database';
-    if (how === 'status' || how === 'show' || how === 'test') return 'Checked the board database';
-    if (how === 'commit') return 'Committed the board database';
-    if (how === 'push') return 'Pushed the board database';
-    if (how === 'pull') return 'Pulled the board database';
-    return how ? `Ran bd dolt ${brief(how)}` : 'Ran the board database tool';
-  }
-  const known = BD[sub];
-  if (known) return known(argv);
-  return sub ? `Asked the board to ${sub}` : 'Asked the board';
-}
-
 const GIT: Record<string, (argv: string[]) => string> = {
   status: () => 'Checked the working tree',
   log: () => 'Read the history',
@@ -1028,18 +965,14 @@ function redisCommand(argv: string[]): string {
 }
 
 /** Atelier is a launcher, not the work. Keep its public command contract here
- * so a shell-wrapped presentation, board action, or inspection is named for
+ * so a shell-wrapped presentation or inspection is named for
  * the action beneath the launcher. Unknown tools deliberately stay raw. */
 function atelierAction(argv: string[]): Stage | null {
   const command = argv[1] ?? '';
-  const projectTrackerCommand = ['be', 'ads'].join('');
   if (!command || command === 'run') return { text: 'Started Atelier', kind: 'run', grave: false };
   if (command === 'init') return { text: 'Set up Atelier for a project', kind: 'edit', grave: false };
   if (command === 'where') return { text: 'Read the Atelier addresses', kind: 'read', grave: false };
   if (command === '--data-dir') return { text: 'Read where Atelier keeps its data', kind: 'read', grave: false };
-  if (command === 'project' && argv[2] === projectTrackerCommand) {
-    return { text: 'Checked whether project task tracking is enabled', kind: 'read', grave: false };
-  }
   if (command === 'service') {
     const action = argv[2] ?? 'status';
     if (action === 'status') return { text: 'Checked whether Atelier starts at login', kind: 'system', grave: false };
@@ -1066,18 +999,6 @@ function atelierAction(argv: string[]): Stage | null {
     return presented[form] ? { text: presented[form]!, kind: 'agent', grave: false } : null;
   }
   if (tool === 'checks') return { text: 'Ran the project checks', kind: 'test', grave: false };
-  if (tool === 'board/job') {
-    const sub = argv[3] ?? '';
-    if (sub === 'new') return { text: 'Opened a job', kind: 'board', grave: false };
-    if (sub === 'under') return { text: 'Added the work items', kind: 'board', grave: false };
-    if (sub === 'epic') return { text: 'Opened a container', kind: 'board', grave: false };
-    if (sub === 'cancel') return { text: 'Dropped a card', kind: 'board', grave: false };
-    if (sub === 'upgrade') return { text: 'Filled in a placeholder', kind: 'board', grave: false };
-    return sub ? { text: `Ran job ${brief(sub)}`, kind: 'board', grave: false } : null;
-  }
-  if (tool === 'board/land') {
-    return { text: `Landed ${object(argv, 3) || 'the change'}`, kind: 'board', grave: false };
-  }
   return null;
 }
 
@@ -1087,22 +1008,7 @@ function atelierAction(argv: string[]): Stage | null {
  * null and draws as itself.
  */
 const HEADS: Record<string, Rule> = {
-  // The board and its own tools.
-  bd: { kind: 'board', say: bdSaid },
-  job: {
-    kind: 'board',
-    say: (a) => {
-      const sub = a[1] ?? '';
-      if (sub === 'new') return 'Opened a job';
-      if (sub === 'under') return 'Added the work items';
-      if (sub === 'epic') return 'Opened a container';
-      if (sub === 'cancel') return 'Dropped a card';
-      if (sub === 'upgrade') return 'Filled in a placeholder';
-      return sub ? `Ran job ${brief(sub)}` : 'Ran the job tool';
-    },
-  },
-  land: { kind: 'board', say: (a) => `Landed ${object(a, 1) || 'the change'}` },
-  review: { kind: 'board', say: (a) => `Reviewed ${object(a, 1) || 'a card'}` },
+  // The project's own tools.
   report: {
     kind: 'board',
     say: (a) => {
@@ -1346,10 +1252,8 @@ const HEADS: Record<string, Rule> = {
   uv: { kind: 'build', say: dependencySaid },
   poetry: { kind: 'build', say: dependencySaid },
   brew: { kind: 'build', say: dependencySaid },
-  'beads-server': { kind: 'run', say: () => 'Ran the board server' },
   'beads-web': { kind: 'run', say: () => 'Ran the workbench' },
   claude: { kind: 'agent', say: () => 'Ran Claude' },
-  'external-review': { kind: 'agent', say: () => 'Ran an external review' },
   'git-branch': { kind: 'run', say: () => 'Ran git-branch' },
   'git-worktree': { kind: 'vcs', say: () => 'Ran git-worktree' },
   check: { kind: 'test', say: () => 'Ran a check' },
@@ -1640,12 +1544,11 @@ function headOf(argv: string[]): string[] {
 }
 
 const SHORT_HELP = new Set([
-  'bd', 'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'job', 'kubectl', 'land',
-  'make', 'npm', 'npx', 'pnpm', 'report', 'review', 'yarn', 'check',
+  'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'kubectl',
+  'make', 'npm', 'npx', 'pnpm', 'report', 'yarn', 'check',
 ]);
 
 const COMMAND_NAME: Record<string, string> = {
-  bd: 'board',
   gh: 'GitHub',
   git: 'Git',
 };
@@ -1655,7 +1558,7 @@ const commandName = (head: string): string => COMMAND_NAME[head] ?? head
   .replaceAll('-', ' ');
 
 /** Options whose following word is data even when that data begins with `-`.
- * Without this distinction, a commit message or board reason equal to
+ * Without this distinction, a commit message or reason equal to
  * `--dry` was mistaken for an execution mode. */
 const TAKES_VALUE = new Set([
   '-m', '--message', '--reason', '--notes', '--append-notes', '--description',
@@ -1675,7 +1578,7 @@ function modeArgs(argv: string[]): string[] {
 
 /**
  * Modes that inspect the executable or preview work take precedence over its
- * action verb. `land --help` did not land, `git push --dry-run` did not push,
+ * action verb. `cargo --help` did not build, `git push --dry-run` did not push,
  * and `prettier --check` did not format anything.
  */
 function intentOnlyStage(head: string, argv: string[]): Stage | null {
@@ -1806,7 +1709,7 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
   if (!rule) {
     // Executable scripts are common in project tooling. Their filename is a
     // useful human label even when this app has never seen that script before.
-    if (/\.(?:py|mjs|cjs|js|ts|tsx|sh)$/.test(head) || argv[0]!.includes('machinery/board/')) {
+    if (/\.(?:py|mjs|cjs|js|ts|tsx|sh)$/.test(head)) {
       const stem = head.replace(/\.(?:py|mjs|cjs|js|ts|tsx|sh)$/, '').replaceAll('-', ' ');
       const text = has(argv, '--help', '-h') ? `Read the ${brief(stem)} options` : `Ran ${brief(stem)}`;
       const conventional = scriptAction(stem);
