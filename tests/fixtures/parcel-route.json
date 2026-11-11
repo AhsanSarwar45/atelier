@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "kind": "scene",
+  "title": "A parcel follows the delivery route",
+  "description": "The orange dot is one parcel. Scrub the timeline to follow the curved route.",
+  "viewBox": [
+    0,
+    0,
+    600,
+    250
+  ],
+  "elements": [
+    {
+      "id": "road",
+      "type": "path",
+      "d": "M60 180 C160 0 410 0 540 180",
+      "fill": "none",
+      "stroke": "#94a3b8",
+      "strokeWidth": 3
+    },
+    {
+      "id": "warehouse",
+      "type": "text",
+      "x": 15,
+      "y": 215,
+      "text": "Warehouse",
+      "fill": "#cbd5e1"
+    },
+    {
+      "id": "delivery",
+      "type": "text",
+      "x": 470,
+      "y": 215,
+      "text": "Destination",
+      "fill": "#cbd5e1"
+    },
+    {
+      "id": "legend",
+      "type": "text",
+      "x": 20,
+      "y": 25,
+      "text": "Orange dot = one parcel",
+      "fill": "#cbd5e1"
+    },
+    {
+      "id": "request",
+      "type": "circle",
+      "cx": 0,
+      "cy": 0,
+      "r": 10,
+      "fill": "#fb923c"
+    }
+  ],
+  "states": [
+    {
+      "id": "packed",
+      "label": "Ready at the warehouse",
+      "detail": "The parcel has been packed.",
+      "duration": 2,
+      "changes": [
+        {
+          "element": "request",
+          "along": "road",
+          "progress": 0
+        }
+      ]
+    },
+    {
+      "id": "transit",
+      "label": "Travel along the route",
+      "detail": "The parcel follows the road, including its curve.",
+      "duration": 2,
+      "changes": [
+        {
+          "element": "request",
+          "along": "road",
+          "progress": 0.5
+        }
+      ]
+    },
+    {
+      "id": "delivered",
+      "label": "Arrive at the destination",
+      "detail": "Delivery is complete.",
+      "duration": 2,
+      "changes": [
+        {
+          "element": "request",
+          "along": "road",
+          "progress": 1
+        }
+      ]
+    }
+  ]
+}

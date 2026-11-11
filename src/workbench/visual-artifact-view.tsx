@@ -5,7 +5,6 @@ import { Maximize2, RotateCcw, X } from 'lucide-react';
 import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/react';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import mermaid from 'mermaid';
-import { motion } from 'motion/react';
 import '@xyflow/react/dist/style.css';
 
 import { Badge } from '@/components/ui/badge';
@@ -14,9 +13,9 @@ import { Input } from '@/components/ui/input';
 import { Overlay } from '@/components/ui/overlay';
 import { Panel } from '@/components/ui/panel';
 import { Separator } from '@/components/ui/separator';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { SceneView } from './scene-player';
 import { request } from '@/lib/api';
-import type { FlowArtifact, MermaidArtifact, MockupArtifact, MockupComponent, SceneArtifact, SceneElement, VisualArtifact } from './visual-artifacts';
+import type { FlowArtifact, MermaidArtifact, MockupArtifact, MockupComponent, VisualArtifact } from './visual-artifacts';
 import { visualArtifact } from './visual-artifacts';
 
 const artifactUrl = (asset: string) => `/api/presentation-assets/${encodeURIComponent(asset)}`;
@@ -66,30 +65,6 @@ function FlowView({ artifact }: { artifact: FlowArtifact }) {
       .catch(() => undefined);
   }, [artifact]);
   return <div data-testid="flow-artifact" className="h-[32rem] min-h-80"><ReactFlow nodes={nodes} edges={edges} nodesDraggable={artifact.editable ?? true} nodesConnectable={false} fitView attributionPosition="bottom-left"><Background /><Controls /></ReactFlow></div>;
-}
-
-function AnimatedElement({ element, animate, duration }: { element: SceneElement; animate: Record<string, number>; duration: number }) {
-  const shared = { ...element, id: undefined, type: undefined, animate, transition: { duration, ease: 'easeInOut' as const }, vectorEffect: 'non-scaling-stroke' };
-  if (element.type === 'rect') return <motion.rect {...shared} />;
-  if (element.type === 'circle') return <motion.circle {...shared} />;
-  if (element.type === 'ellipse') return <motion.ellipse {...shared} />;
-  if (element.type === 'line') return <motion.line {...shared} />;
-  if (element.type === 'path') return <motion.path {...shared} />;
-  if (element.type === 'polygon') return <motion.polygon {...shared} />;
-  return <motion.text {...shared}>{element.text}</motion.text>;
-}
-
-function SceneView({ artifact }: { artifact: SceneArtifact }) {
-  const [step, setStep] = useState(0); const state = artifact.states[step]!;
-  const changes = new Map(state.changes.map(({ element, ...change }) => [element, change]));
-  return <div data-testid="scene-artifact" className="p-3">
-    <svg viewBox={artifact.viewBox.join(' ')} role="img" aria-label={`${artifact.title}: ${state.label}`} className="max-h-[36rem] w-full overflow-visible rounded-xl bg-gradient-to-br from-muted/30 to-primary/5">
-      {artifact.elements.map((element) => <AnimatedElement key={element.id} element={element} animate={changes.get(element.id) ?? {}} duration={state.duration ?? .7} />)}
-    </svg>
-    <ToggleGroup type="single" variant="outline" size="sm" className="mt-3 flex-wrap justify-center gap-2" aria-label="Animation states" value={String(step)} onValueChange={(index) => setStep(Number(index))}>
-      {artifact.states.map((item, index) => <ToggleGroupItem key={item.id} value={String(index)}>{item.label}</ToggleGroupItem>)}
-    </ToggleGroup>
-  </div>;
 }
 
 // A mock-up's tones, in the library's words: the chip's variant and the box's tone.

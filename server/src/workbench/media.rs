@@ -277,7 +277,7 @@ pub fn artifact(value: &Value) -> Result<(), String> {
     let allowed = match kind {
         "mermaid" => with(&["source"]),
         "flow" => with(&["direction", "editable", "nodes", "edges"]),
-        "scene" => with(&["viewBox", "elements", "states"]),
+        "scene" => with(&["viewBox", "elements", "states", "scenarios"]),
         "mockup" => with(&["initialScreen", "viewport", "screens"]),
         other => {
             return Err(format!(
@@ -343,13 +343,32 @@ pub fn artifact(value: &Value) -> Result<(), String> {
                 }
             }
             let mut ids = std::collections::BTreeSet::new();
+            let mut paths = std::collections::BTreeSet::new();
             for element in list(object, "elements", 1, 200)? {
                 let element = row(element, "elements")?;
                 only_fields(
                     element,
                     &[
-                        "id", "type", "x", "y", "x1", "y1", "x2", "y2", "width", "height", "cx",
-                        "cy", "r", "rx", "ry", "d", "points", "text", "fill", "stroke",
+                        "id",
+                        "type",
+                        "x",
+                        "y",
+                        "x1",
+                        "y1",
+                        "x2",
+                        "y2",
+                        "width",
+                        "height",
+                        "cx",
+                        "cy",
+                        "r",
+                        "rx",
+                        "ry",
+                        "d",
+                        "points",
+                        "text",
+                        "fill",
+                        "stroke",
                         "strokeWidth",
                     ],
                     "an element",
@@ -363,19 +382,34 @@ pub fn artifact(value: &Value) -> Result<(), String> {
                 one_of(
                     element,
                     "type",
-                    &["rect", "circle", "ellipse", "line", "path", "polygon", "text"],
+                    &[
+                        "rect", "circle", "ellipse", "line", "path", "polygon", "text",
+                    ],
                     true,
                 )?;
+                if element.get("type").and_then(Value::as_str) == Some("path")
+                    && element.contains_key("d")
+                {
+                    paths.insert(id);
+                }
                 scene_fields(
                     element,
                     "an element",
                     &["id", "type", "d", "points", "text", "fill", "stroke"],
                 )?;
             }
+            let mut state_ids = std::collections::BTreeSet::new();
             for state in list(object, "states", 1, 30)? {
                 let state = row(state, "states")?;
-                only_fields(state, &["id", "label", "duration", "changes"], "a state")?;
-                identifier(state.get("id"), "a state id")?;
+                only_fields(
+                    state,
+                    &["id", "label", "detail", "duration", "changes"],
+                    "a state",
+                )?;
+                if !state_ids.insert(identifier(state.get("id"), "a state id")?) {
+                    return Err("state ids must be unique".into());
+                }
+                optional_string(state, "detail", 1000)?;
                 required_string(state, "label", 200)?;
                 if let Some(duration) = state.get("duration") {
                     let seconds = number(Some(duration), "states[].duration")?;
@@ -397,7 +431,17 @@ pub fn artifact(value: &Value) -> Result<(), String> {
                     let change = row(change, "changes")?;
                     only_fields(
                         change,
-                        &["element", "opacity", "x", "y", "scale", "rotate", "pathLength"],
+                        &[
+                            "element",
+                            "opacity",
+                            "x",
+                            "y",
+                            "scale",
+                            "rotate",
+                            "pathLength",
+                            "along",
+                            "progress",
+                        ],
                         "a change",
                     )?;
                     let named = identifier(change.get("element"), "change.element")?;
@@ -406,7 +450,35 @@ pub fn artifact(value: &Value) -> Result<(), String> {
                             "a change moves {named}, and no element has that id"
                         ));
                     }
-                    scene_fields(change, "a change", &["element"])?;
+                    scene_fields(change, "a change", &["element", "along"])?;
+                    if change.contains_key("along") || change.contains_key("progress") {
+                        let path = identifier(change.get("along"), "change.along")?;
+                        let progress = number(change.get("progress"), "change.progress")?;
+                        if !paths.contains(&path)
+                            || path == named
+                            || !(0.0..=1.0).contains(&progress)
+                            || change.contains_key("x")
+                            || change.contains_key("y")
+                        {
+                            return Err("along must name another path with d; progress is 0 to 1; omit x and y".into());
+                        }
+                    }
+                }
+            }
+            if object.contains_key("scenarios") {
+                let mut scenario_ids = std::collections::BTreeSet::new();
+                for scenario in list(object, "scenarios", 1, 12)? {
+                    let scenario = row(scenario, "scenarios")?;
+                    only_fields(scenario, &["id", "label", "steps"], "a scenario")?;
+                    if !scenario_ids.insert(identifier(scenario.get("id"), "scenario.id")?) {
+                        return Err("scenario ids must be unique".into());
+                    }
+                    required_string(scenario, "label", 200)?;
+                    for step in list(scenario, "steps", 1, 30)? {
+                        if !state_ids.contains(&identifier(Some(step), "scenario.steps[]")?) {
+                            return Err("scenario steps must name existing state ids".into());
+                        }
+                    }
                 }
             }
         }

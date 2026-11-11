@@ -5065,6 +5065,3308 @@
         ],
         "theme": "dark"
       }
+    },
+    {
+      "name": "scene with narrated scenarios and routes",
+      "verdict": "accept",
+      "why": "scenarios reference states and objects follow paths",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "scene with curved route and default scenario",
+      "verdict": "accept",
+      "why": "scenarios are optional",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A parcel follows the delivery route",
+        "description": "The orange dot is one parcel. Scrub the timeline to follow the curved route.",
+        "viewBox": [
+          0,
+          0,
+          600,
+          250
+        ],
+        "elements": [
+          {
+            "id": "road",
+            "type": "path",
+            "d": "M60 180 C160 0 410 0 540 180",
+            "fill": "none",
+            "stroke": "#94a3b8",
+            "strokeWidth": 3
+          },
+          {
+            "id": "warehouse",
+            "type": "text",
+            "x": 15,
+            "y": 215,
+            "text": "Warehouse",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "delivery",
+            "type": "text",
+            "x": 470,
+            "y": 215,
+            "text": "Destination",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 20,
+            "y": 25,
+            "text": "Orange dot = one parcel",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 10,
+            "fill": "#fb923c"
+          }
+        ],
+        "states": [
+          {
+            "id": "packed",
+            "label": "Ready at the warehouse",
+            "detail": "The parcel has been packed.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "road",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "transit",
+            "label": "Travel along the route",
+            "detail": "The parcel follows the road, including its curve.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "road",
+                "progress": 0.5
+              }
+            ]
+          },
+          {
+            "id": "delivered",
+            "label": "Arrive at the destination",
+            "detail": "Delivery is complete.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "road",
+                "progress": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "scenario references missing state",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response",
+              "absent"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "scenario ids repeat",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          },
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "scenario steps cannot be empty",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": []
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "scene state ids repeat",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "scenario list cannot be empty",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": []
+      }
+    },
+    {
+      "name": "route must be a path",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "client",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "route cannot refer to self",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "hit",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "route needs progress",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit"
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress needs route",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress cannot exceed path",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1.1
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "progress cannot be negative",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": -0.1
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "route and x cannot coexist",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0,
+                "x": 3
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "route needs path data",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "A usable response is already in the cache.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "narration cannot be blank",
+      "verdict": "refuse",
+      "why": "invalid scene references or bounds",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A cache hit skips the database",
+        "description": "The white dot represents one request. Choose a scenario, then play or step through its route.",
+        "viewBox": [
+          0,
+          0,
+          640,
+          270
+        ],
+        "elements": [
+          {
+            "id": "hit",
+            "type": "path",
+            "d": "M70 100 L270 100 L550 100",
+            "fill": "none",
+            "stroke": "#34d399",
+            "strokeWidth": 3
+          },
+          {
+            "id": "miss",
+            "type": "path",
+            "d": "M70 100 L270 100 L400 205 L550 100",
+            "fill": "none",
+            "stroke": "#fbbf24",
+            "strokeWidth": 3
+          },
+          {
+            "id": "client",
+            "type": "text",
+            "x": 30,
+            "y": 65,
+            "text": "Client",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "cache",
+            "type": "text",
+            "x": 235,
+            "y": 65,
+            "text": "Cache",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "database",
+            "type": "text",
+            "x": 355,
+            "y": 240,
+            "text": "Database",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "response",
+            "type": "text",
+            "x": 510,
+            "y": 65,
+            "text": "Response",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "skip",
+            "type": "text",
+            "x": 345,
+            "y": 80,
+            "text": "Saved result",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 25,
+            "y": 25,
+            "text": "White dot = one request",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 9,
+            "fill": "#ffffff",
+            "stroke": "#0f172a",
+            "strokeWidth": 2
+          }
+        ],
+        "states": [
+          {
+            "id": "hit-start",
+            "label": "Request starts at the client",
+            "detail": "",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "hit-cache",
+            "label": "Check the cache",
+            "detail": "The cache contains the requested result.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 0.4166666666666667
+              }
+            ]
+          },
+          {
+            "id": "hit-response",
+            "label": "Return the saved result",
+            "detail": "The database is skipped.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "hit",
+                "progress": 1
+              }
+            ]
+          },
+          {
+            "id": "miss-start",
+            "label": "Request starts at the client",
+            "detail": "There is no usable cached response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "miss-cache",
+            "label": "Check the cache",
+            "detail": "The result is missing or expired.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.358
+              }
+            ]
+          },
+          {
+            "id": "miss-query",
+            "label": "Fetch from the database",
+            "detail": "The request takes the longer route to fetch fresh data.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 0.657
+              }
+            ]
+          },
+          {
+            "id": "miss-response",
+            "label": "Return the fresh result",
+            "detail": "The database was needed for this response.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "miss",
+                "progress": 1
+              }
+            ]
+          }
+        ],
+        "scenarios": [
+          {
+            "id": "hit",
+            "label": "Cache hit",
+            "steps": [
+              "hit-start",
+              "hit-cache",
+              "hit-response"
+            ]
+          },
+          {
+            "id": "miss",
+            "label": "Cache miss",
+            "steps": [
+              "miss-start",
+              "miss-cache",
+              "miss-query",
+              "miss-response"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "route path data may exceed a label length",
+      "verdict": "accept",
+      "why": "path data permits up to 10000 characters",
+      "payload": {
+        "version": 1,
+        "kind": "scene",
+        "title": "A parcel follows the delivery route",
+        "description": "The orange dot is one parcel. Scrub the timeline to follow the curved route.",
+        "viewBox": [
+          0,
+          0,
+          600,
+          250
+        ],
+        "elements": [
+          {
+            "id": "road",
+            "type": "path",
+            "d": "M0 0 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1 L1 1",
+            "fill": "none",
+            "stroke": "#94a3b8",
+            "strokeWidth": 3
+          },
+          {
+            "id": "warehouse",
+            "type": "text",
+            "x": 15,
+            "y": 215,
+            "text": "Warehouse",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "delivery",
+            "type": "text",
+            "x": 470,
+            "y": 215,
+            "text": "Destination",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "legend",
+            "type": "text",
+            "x": 20,
+            "y": 25,
+            "text": "Orange dot = one parcel",
+            "fill": "#cbd5e1"
+          },
+          {
+            "id": "request",
+            "type": "circle",
+            "cx": 0,
+            "cy": 0,
+            "r": 10,
+            "fill": "#fb923c"
+          }
+        ],
+        "states": [
+          {
+            "id": "packed",
+            "label": "Ready at the warehouse",
+            "detail": "The parcel has been packed.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "road",
+                "progress": 0
+              }
+            ]
+          },
+          {
+            "id": "transit",
+            "label": "Travel along the route",
+            "detail": "The parcel follows the road, including its curve.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "road",
+                "progress": 0.5
+              }
+            ]
+          },
+          {
+            "id": "delivered",
+            "label": "Arrive at the destination",
+            "detail": "Delivery is complete.",
+            "duration": 2,
+            "changes": [
+              {
+                "element": "request",
+                "along": "road",
+                "progress": 1
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

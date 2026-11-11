@@ -9,7 +9,7 @@ const reference = readFileSync('machinery/skills/atelier-reference/references/vi
 describe('visual artifact agent guidance', () => {
   it('routes agents among every rich visual mode', () => {
     const text = skill;
-    for (const term of ['Mermaid', 'React Flow', 'Motion', 'mockup', 'full-screen']) expect(text).toContain(term);
+    for (const term of ['Mermaid', 'React Flow', 'SVG playback', 'mockup', 'full-screen']) expect(text).toContain(term);
   });
   it('explains the decision boundary and provider-neutral presenter path', () => {
     for (const kind of ['`mermaid`', '`flow`', '`scene`', '`mockup`']) expect(skill).toContain(kind);
@@ -19,7 +19,7 @@ describe('visual artifact agent guidance', () => {
   });
   it('keeps every reference example valid against the actual contract', () => {
     const examples = [...reference.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1]!));
-    expect(examples).toHaveLength(4);
-    expect(examples.map((example) => visualArtifact(example)?.kind)).toEqual(['mermaid', 'flow', 'scene', 'mockup']);
+    expect(examples).toHaveLength(5);
+    expect(examples.map((example) => visualArtifact(example)?.kind)).toEqual(['mermaid', 'flow', 'scene', 'scene', 'mockup']);
   });
 });

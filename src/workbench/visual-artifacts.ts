@@ -15,9 +15,10 @@ export type SceneElement = {
 };
 export type SceneArtifact = BaseArtifact & {
   kind: 'scene'; viewBox: [number, number, number, number]; elements: SceneElement[];
-  states: Array<{ id: string; label: string; duration?: number; changes: Array<{
-    element: string; opacity?: number; x?: number; y?: number; scale?: number; rotate?: number; pathLength?: number;
+  states: Array<{ id: string; label: string; detail?: string; duration?: number; changes: Array<{
+    element: string; along?: string; progress?: number; opacity?: number; x?: number; y?: number; scale?: number; rotate?: number; pathLength?: number;
   }> }>;
+  scenarios?: Array<{ id: string; label: string; steps: string[] }>;
 };
 export type MockupAction = { type: 'navigate'; screen: string } | { type: 'toggle'; target: string };
 export type MockupComponent = {
@@ -72,7 +73,7 @@ export function visualArtifact(value: unknown): VisualArtifact | null {
     return value as FlowArtifact;
   }
   if (value.kind === 'scene') {
-    if (!fieldsAre(value, ['version', 'kind', 'title', 'description', 'viewBox', 'elements', 'states'])
+    if (!fieldsAre(value, ['version', 'kind', 'title', 'description', 'viewBox', 'elements', 'states', 'scenarios'])
       || !Array.isArray(value.viewBox) || value.viewBox.length !== 4 || !value.viewBox.every(finite)
       || !Array.isArray(value.elements) || value.elements.length < 1 || value.elements.length > 200) return null;
     const elementIds = new Set<string>();
@@ -80,12 +81,24 @@ export function visualArtifact(value: unknown): VisualArtifact | null {
     if (!value.elements.every((element) => object(element) && fieldsAre(element, elementFields) && id(element.id) && !elementIds.has(element.id)
       && (elementIds.add(element.id), true) && ['rect', 'circle', 'ellipse', 'line', 'path', 'polygon', 'text'].includes(String(element.type))
       && Object.entries(element).every(([key, entry]) => ['id', 'type', 'd', 'points', 'text', 'fill', 'stroke'].includes(key) ? text(entry, 10_000) : finite(entry)))) return null;
+    const paths = new Set(value.elements.filter((element) => element.type === 'path' && text(element.d, 10_000)).map((element) => element.id));
+    const stateIds = new Set<string>();
     if (!Array.isArray(value.states) || value.states.length < 1 || value.states.length > 30 || !value.states.every((state) => object(state)
-      && fieldsAre(state, ['id', 'label', 'duration', 'changes']) && id(state.id) && text(state.label)
+      && fieldsAre(state, ['id', 'label', 'detail', 'duration', 'changes']) && id(state.id) && !stateIds.has(state.id)
+      && (stateIds.add(state.id), true) && text(state.label) && (state.detail === undefined || text(state.detail, 1000))
       && (state.duration === undefined || (finite(state.duration) && state.duration >= 0 && state.duration <= 30))
       && Array.isArray(state.changes) && state.changes.length <= 200 && state.changes.every((change) => object(change)
-        && fieldsAre(change, ['element', 'opacity', 'x', 'y', 'scale', 'rotate', 'pathLength']) && id(change.element)
-        && elementIds.has(change.element as string) && Object.entries(change).every(([key, entry]) => key === 'element' ? true : finite(entry))))) return null;
+        && fieldsAre(change, ['element', 'opacity', 'x', 'y', 'scale', 'rotate', 'pathLength', 'along', 'progress']) && id(change.element)
+        && elementIds.has(change.element as string) && Object.entries(change).every(([key, entry]) => ['element', 'along'].includes(key) ? true : finite(entry))
+        && (change.along === undefined && change.progress === undefined || id(change.along) && paths.has(change.along)
+          && change.along !== change.element && finite(change.progress) && change.progress >= 0 && change.progress <= 1
+          && change.x === undefined && change.y === undefined)))) return null;
+    const scenarioIds = new Set<string>();
+    if (value.scenarios !== undefined && (!Array.isArray(value.scenarios) || value.scenarios.length < 1 || value.scenarios.length > 12
+      || !value.scenarios.every((scenario) => object(scenario) && fieldsAre(scenario, ['id', 'label', 'steps'])
+        && id(scenario.id) && !scenarioIds.has(scenario.id) && (scenarioIds.add(scenario.id), true) && text(scenario.label)
+        && Array.isArray(scenario.steps) && scenario.steps.length >= 1 && scenario.steps.length <= 30
+        && scenario.steps.every((step) => typeof step === 'string' && stateIds.has(step))))) return null;
     return value as SceneArtifact;
   }
   if (!fieldsAre(value, ['version', 'kind', 'title', 'description', 'initialScreen', 'viewport', 'screens']) || !id(value.initialScreen)

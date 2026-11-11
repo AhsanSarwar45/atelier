@@ -181,8 +181,10 @@ Use an artifact when no widget can carry the idea. Pick the smallest kind:
   most compact.
 - `flow` (React Flow, laid out by ELK): a large graph the reader pans, zooms or
   rearranges, such as dependencies, service maps or pipelines.
-- `scene` (Motion): a custom animated vector illustration that moves between
-  named states, such as an algorithm, data movement or a simulation.
+- `scene` (SVG playback with reduced-motion support): a vector illustration
+  with named scenarios, narrated steps, and objects following paths. Use it when
+  movement explains an algorithm or data flow. Atelier supplies Play/Pause,
+  Replay, a scenario selector and timeline; do not draw your own controls.
 - `mockup`: a clickable product idea with real inputs, buttons, cards, screens
   and toggles. It works inline and opens full-screen. Use it only when trying
   the interaction answers a real design or workflow question.

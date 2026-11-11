@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "kind": "scene",
+  "title": "Legacy movement",
+  "viewBox": [
+    0,
+    0,
+    400,
+    100
+  ],
+  "elements": [
+    {
+      "id": "dot",
+      "type": "circle",
+      "cx": 40,
+      "cy": 50,
+      "r": 10,
+      "fill": "#38bdf8"
+    }
+  ],
+  "states": [
+    {
+      "id": "start",
+      "label": "Start",
+      "changes": [
+        {
+          "element": "dot",
+          "x": 0
+        }
+      ]
+    },
+    {
+      "id": "finish",
+      "label": "Finish",
+      "changes": [
+        {
+          "element": "dot",
+          "x": 300
+        }
+      ]
+    }
+  ]
+}
