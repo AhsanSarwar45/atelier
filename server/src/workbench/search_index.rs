@@ -412,23 +412,6 @@ fn chat_conditions(args: &mut Vec<Sql>, query: &Query, project_ids: &[String]) -
             conditions += &format!(" AND {column} IN ({listed})");
         }
     }
-    if !query.cards.is_empty() {
-        // A card names its steps too: `card:bw-7ks` finds a chat that worked
-        // on bw-7ks.13.
-        let mut any = Vec::new();
-        for card in &query.cards {
-            let card = card.to_lowercase();
-            any.push(format!("lower(b.bead_id) = {}", bind(args, card.clone())));
-            any.push(format!(
-                "lower(b.bead_id) LIKE {} ESCAPE '\\'",
-                bind(args, format!("{}.%", like_escaped(&card)))
-            ));
-        }
-        conditions += &format!(
-            " AND EXISTS (SELECT 1 FROM chats.bead_link b WHERE b.session_id = s.id AND ({}))",
-            any.join(" OR ")
-        );
-    }
     for term in &query.none {
         conditions += &format!(
             " AND s.id NOT IN (SELECT d.session_id FROM doc_fts JOIN doc d ON d.id = doc_fts.rowid \
@@ -1985,9 +1968,6 @@ mod tests {
                 "at":"2026-09-01T10:02:00.000Z"}),
             ))
             .unwrap();
-        store
-            .remember_bead_link("chat-a", "bw-7ks.13", "tool", "2026-09-01T10:00:00.000Z")
-            .unwrap();
         let index = index(&place);
         index.refresh().unwrap();
         (place, index)
@@ -2035,7 +2015,7 @@ mod tests {
         let worktree = project.join("worktrees").join("feature-key-1870-feedback");
         std::fs::create_dir_all(&worktree).unwrap();
         std::fs::write(worktree.join(".git"), "gitdir: nowhere\n").unwrap();
-        let mut manifest = crate::project_manifest::infer_virtual("Keystone");
+        let mut manifest = crate::project_manifest::named("Keystone");
         manifest.chat_name.parts = vec![
             ChatNamePart::Extract { source: ChatNameSource::Worktree, pattern: r"key-\d+".into() },
             ChatNamePart::Text { text: ": ".into() },
@@ -2083,7 +2063,6 @@ mod tests {
         assert_eq!(chats(&index, "provider:codex periwinkle "), ["chat-b"]);
         assert_eq!(chats(&index, "project:other periwinkle "), ["chat-b"]);
         assert_eq!(chats(&index, "from:terminal "), ["chat-b"]);
-        assert_eq!(chats(&index, "card:bw-7ks "), ["chat-a"]);
         assert_eq!(chats(&index, "after:2026-09-05 periwinkle "), ["chat-b"]);
         assert_eq!(chats(&index, "before:2026-09-05 periwinkle "), ["chat-a"]);
         // Only narrowing, nothing to match: every chat that fits, newest first.

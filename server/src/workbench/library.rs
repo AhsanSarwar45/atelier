@@ -137,6 +137,8 @@ pub enum Condition {
         path: String,
         name: String,
     },
+    /// Retired with the board. A library written while it existed may still
+    /// name it, so it still reads, and it is never true.
     ProjectBeads,
 }
 
@@ -270,20 +272,12 @@ impl Condition {
         }
         Ok(())
     }
-    pub fn evaluate(&self, root: Option<&Path>, beads: bool) -> Evaluation {
+    pub fn evaluate(&self, root: Option<&Path>) -> Evaluation {
         match self {
             Self::Always => Evaluation::answer(true, "Always available".into()),
-            Self::ProjectBeads if root.is_some() => Evaluation::answer(
-                beads,
-                if beads {
-                    "Project uses Beads"
-                } else {
-                    "Project does not use Beads"
-                }
-                .into(),
-            ),
+            Self::ProjectBeads => Evaluation::answer(false, "Beads is no longer part of Atelier".into()),
             Self::All { conditions } | Self::Any { conditions } => {
-                let children: Vec<_> = conditions.iter().map(|c| c.evaluate(root, beads)).collect();
+                let children: Vec<_> = conditions.iter().map(|c| c.evaluate(root)).collect();
                 let all = matches!(self, Self::All { .. });
                 let matched = if children.iter().any(|c| c.matched == Some(!all)) {
                     Some(!all)
@@ -304,7 +298,7 @@ impl Condition {
                 }
             }
             Self::Not { condition } => {
-                let child = condition.evaluate(root, beads);
+                let child = condition.evaluate(root);
                 Evaluation {
                     matched: child.matched.map(|m| !m),
                     reason: "Not".into(),
@@ -353,7 +347,7 @@ impl Condition {
                     }
                     let evaluation = match self {
                         Self::Within { condition, .. } => {
-                            condition.evaluate(entry.path().parent(), beads)
+                            condition.evaluate(entry.path().parent())
                         }
                         _ => Evaluation::answer(
                             true,
@@ -608,7 +602,7 @@ mod tests {
             root.path(),
             data.path(),
             crate::project_manifest::ManifestStorage::Personal,
-            &crate::project_manifest::infer_virtual("Library test"),
+            &crate::project_manifest::named("Library test"),
         )
         .unwrap();
         (data, root)
@@ -701,22 +695,21 @@ mod tests {
             (Condition::YamlEquals { path: "config.yaml".into(), pointer: "/build/enabled".into(), value: json!(false) }, false),
             (Condition::JsonExists { path: "missing.json".into(), pointer: "/a".into() }, false),
             (Condition::Not { condition: Box::new(Condition::FileExists { path: "missing".into() }) }, true),
-            (Condition::All { conditions: vec![Condition::Always, Condition::ProjectBeads] }, true),
+            (Condition::All { conditions: vec![Condition::Always, Condition::ProjectBeads] }, false),
             (Condition::Any { conditions: vec![Condition::FileExists { path: "missing".into() }, Condition::Always] }, true),
-            (Condition::ProjectBeads, true),
+            (Condition::ProjectBeads, false),
         ];
         for (condition, expected) in cases {
             condition.validate(0).unwrap();
-            assert_eq!(condition.evaluate(Some(root.path()), true).matched, Some(expected), "{condition:?}");
+            assert_eq!(condition.evaluate(Some(root.path())).matched, Some(expected), "{condition:?}");
         }
-        assert_eq!(Condition::ProjectBeads.evaluate(Some(root.path()), false).matched, Some(false));
         for condition in [
             Condition::JsonExists { path: "src/index.ts".into(), pointer: "/x".into() },
             Condition::TomlEquals { path: "src/index.ts".into(), key: "x".into(), value: json!(1) },
             Condition::YamlEquals { path: "src".into(), pointer: "/x".into(), value: json!(1) },
         ] {
-            assert_eq!(condition.evaluate(Some(root.path()), false).matched, None);
-            assert_eq!(Condition::Not { condition: Box::new(condition) }.evaluate(Some(root.path()), false).matched, None);
+            assert_eq!(condition.evaluate(Some(root.path())).matched, None);
+            assert_eq!(Condition::Not { condition: Box::new(condition) }.evaluate(Some(root.path())).matched, None);
         }
     }
 
@@ -724,7 +717,7 @@ mod tests {
     fn projects_do_not_share_overrides_styles_or_private_skills() {
         let data = tempfile::tempdir().unwrap();
         let roots = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
-        for root in &roots { crate::project_manifest::create(root.path(), data.path(), crate::project_manifest::ManifestStorage::Personal, &crate::project_manifest::infer_virtual("Isolation")).unwrap(); }
+        for root in &roots { crate::project_manifest::create(root.path(), data.path(), crate::project_manifest::ManifestStorage::Personal, &crate::project_manifest::named("Isolation")).unwrap(); }
         let global = Library { items: vec![item("common", Kind::Skill, "global"), item("style", Kind::OutputStyle, "GLOBAL STYLE")], output_style: Some("style".into()), ..Default::default() };
         save(data.path(), None, &global);
         let mut alpha = Library { items: vec![item("alpha-only", Kind::Skill, "ALPHA SECRET")], output_style: Some(String::new()), ..Default::default() };
@@ -855,12 +848,12 @@ mod tests {
         let not = Condition::Not {
             condition: Box::new(dependency.clone()),
         };
-        assert_eq!(not.evaluate(Some(root.path()), false).matched, None);
+        assert_eq!(not.evaluate(Some(root.path())).matched, None);
         assert_eq!(
             Condition::All {
                 conditions: vec![Condition::Always, not]
             }
-            .evaluate(Some(root.path()), false)
+            .evaluate(Some(root.path()))
             .matched,
             None
         );
@@ -870,7 +863,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            dependency.evaluate(Some(root.path()), false).matched,
+            dependency.evaluate(Some(root.path())).matched,
             Some(true)
         );
         assert!(Condition::FileExists {
@@ -958,7 +951,7 @@ mod tests {
             Condition::FileExists {
                 path: "escape/missing".into()
             }
-            .evaluate(Some(root.path()), false)
+            .evaluate(Some(root.path()))
             .matched,
             None
         );
@@ -987,7 +980,7 @@ mod tests {
             }),
         };
         assert_eq!(
-            condition.evaluate(Some(root.path()), false).matched,
+            condition.evaluate(Some(root.path())).matched,
             Some(false)
         );
         fs::write(
@@ -996,7 +989,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            condition.evaluate(Some(root.path()), false).matched,
+            condition.evaluate(Some(root.path())).matched,
             Some(true)
         );
     }
@@ -1143,13 +1136,6 @@ fn builtins() -> Vec<Item> {
             Condition::Always,
             vec![],
         ),
-        (
-            "atelier-beads",
-            "Beads workflow",
-            include_str!("../../../machinery/skills/beads/SKILL.md"),
-            Condition::ProjectBeads,
-            vec!["bd".into()],
-        ),
     ]
     .into_iter()
     .map(|(id, name, text, when, requires)| Item {
@@ -1220,9 +1206,6 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
             }
         }
     }
-    let beads = located
-        .as_ref()
-        .is_some_and(|p| p.manifest.project.use_beads);
     let output_style = local
         .output_style
         .as_ref()
@@ -1299,7 +1282,7 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
         let mut evaluation = if conflicts.contains(&id) {
             Evaluation::unknown("This project item conflicts with a newly added global ID. Remove the project item and use Customize, or recreate it with a distinct ID.".into())
         } else {
-            item.when.evaluate(root, beads)
+            item.when.evaluate(root)
         };
         let missing: Vec<_> = item
             .requires

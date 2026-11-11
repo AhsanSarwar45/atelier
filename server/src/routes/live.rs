@@ -1,8 +1,7 @@
 //! One stream for a whole browser window.
 //!
 //! A window used to open a permanent connection per feed: the helper's own
-//! stream from the top bar, the project's board file wherever the card list
-//! was drawn, and the open chat. A browser allows six connections to one
+//! stream from the top bar and the open chat. A browser allows six connections to one
 //! address across every window it has, and a stream never ends — so two or
 //! three windows of the app spent the whole budget, and every ordinary read
 //! then queued behind streams that would never give a slot back. That is what
@@ -11,7 +10,7 @@
 //! (bw-zkh4).
 //!
 //! So the fanning-in happens here instead. This route takes what the window is
-//! watching, runs the board watcher itself, and reads the helper's two streams
+//! watching and reads the helper's two streams
 //! over its own connections — server to server, where no six-connection budget
 //! applies — handing the browser one stream with every event tagged by the
 //! feed it came from.
@@ -20,7 +19,6 @@
 //!
 //! | tag              | what it carries                                    |
 //! |------------------|----------------------------------------------------|
-//! | `board`          | this project's board file moved                    |
 //! | `workbench`      | one frame of the helper's all-sessions stream      |
 //! | `chat`           | one event in the open chat                         |
 //! | `chat.snapshot`  | the open chat's conversation as it stands          |
@@ -58,8 +56,6 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::environment::BootstrapBus;
 use super::workbench;
-use crate::db::Database;
-use crate::dolt::DoltManager;
 
 /// One thing a feed said, and which feed said it.
 ///
@@ -110,14 +106,10 @@ impl Tagged {
     }
 }
 
-/// What this window is watching. Everything is optional: a window drawing only
-/// the board asks for only the board, and pays for nothing else.
+/// What this window is watching. Everything is optional, and a window pays
+/// only for what it asks for.
 #[derive(Debug, Deserialize, Default)]
 pub struct LiveParams {
-    /// The projects whose board files to watch, joined by a newline. A
-    /// repeated key is the one thing a query string cannot say plainly, and a
-    /// project path never contains a newline (src/workbench/live-wire.ts).
-    pub board: Option<String>,
     /// The chat that is open, if one is.
     pub chat: Option<String>,
     /// The last chat event this window has already drawn, so a re-ask never
@@ -196,7 +188,6 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
                 }
                 if update.event.kind == crate::workbench::protocol::EventKind::SessionStarted {
                     if let Ok(Some(session)) = state.database().get_session(update.session_id.clone()).await {
-                        let beads = state.database().beads_for_session(update.session_id.clone()).await.unwrap_or_default();
                         let name = crate::workbench::chat_name::name_session(&session);
                         let frame = serde_json::json!({"kind":"opened","session":{
                             "name":name,
@@ -205,7 +196,7 @@ async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<T
                             "model":session.model,"permissionMode":session.permission_mode,"autoApprove":session.auto_approve,"effort":session.effort,
                             "collaborationMode":session.collaboration_mode,"title":session.title,"state":session.state,
                             "origin":session.origin,"createdAt":session.created_at,"lastActiveAt":session.last_active_at,
-                            "lastSpokeAt":session.last_spoke_at,"activity":"","busySince":serde_json::Value::Null,"beads":beads
+                            "lastSpokeAt":session.last_spoke_at,"activity":"","busySince":serde_json::Value::Null
                         }});
                         if tx.send(Tagged::new(Some("workbench"), frame.to_string())).await.is_err() { return; }
                     }
@@ -600,8 +591,6 @@ async fn relay_native_chat(
 
 /// One connection carrying every feed this window needs.
 pub async fn live(
-    Extension(dolt_manager): Extension<Arc<DoltManager>>,
-    Extension(db): Extension<Arc<Database>>,
     Extension(native): Extension<workbench::WorkbenchState>,
     Extension(bootstrap): Extension<BootstrapBus>,
     Extension(updating): Extension<crate::routes::update_run::UpdateWatch>,
@@ -635,16 +624,6 @@ pub async fn live(
     } else {
         None
     };
-
-    for board in boards(&params.board) {
-        let tx = tx.clone();
-        let dolt_manager = dolt_manager.clone();
-        let db = db.clone();
-        tokio::spawn(async move {
-            super::watch::watch_board(PathBuf::from(board), tx, Some("board"), dolt_manager, db)
-                .await;
-        });
-    }
 
     // The Git panel, while it is on screen: its repository's git directory
     // watched, so a commit or a push made in a terminal reaches the counts the
@@ -844,22 +823,6 @@ fn framed(text: String, gzip: bool) -> Message {
     }
 }
 
-/// The projects to watch, as the browser joined them.
-///
-/// Every one of them, never only the first: a window drawing two boards that
-/// silently watched one would show a card list that stopped following its file,
-/// which is the fault this whole route exists to end.
-fn boards(asked: &Option<String>) -> Vec<String> {
-    asked
-        .as_deref()
-        .unwrap_or("")
-        .split('\n')
-        .map(str::trim)
-        .filter(|b| !b.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -923,7 +886,6 @@ mod tests {
         let snapshot = rx.recv().await.expect("a snapshot").data;
         assert!(snapshot.contains("\"kind\":\"snapshot\""), "{snapshot}");
         assert!(snapshot.contains("chat-1"), "{snapshot}");
-        assert!(snapshot.contains("\"beads\":[]"), "{snapshot}");
         assert!(snapshot.contains("\"activity\":\"\""), "{snapshot}");
         let running = rx.recv().await.expect("who holds what").data;
         assert!(running.contains("\"kind\":\"running\""), "{running}");
@@ -962,14 +924,6 @@ mod tests {
         .await
         .unwrap_or(false);
         assert!(restated, "the feed fell behind and never restated its chats");
-    }
-
-    #[test]
-    fn native_live_splits_each_requested_board_without_empty_entries() {
-        assert_eq!(
-            boards(&Some("/one\n\n /two ".into())),
-            vec!["/one".to_string(), "/two".to_string()]
-        );
     }
 
     #[test]

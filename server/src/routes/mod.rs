@@ -3,10 +3,7 @@
 //! This module contains all HTTP route handlers.
 //! Additional handlers will be added as API endpoints are implemented.
 
-pub mod beads;
-pub mod cli;
 pub mod commit_message;
-pub mod dolt;
 pub mod environment;
 pub mod fs;
 pub mod fs_watch;
@@ -26,12 +23,9 @@ pub mod projects;
 pub mod update_run;
 pub mod update_settings;
 pub mod version;
-pub mod watch;
 pub mod workbench;
-pub mod worktree;
 
 pub use projects::project_routes;
-pub use watch::watch_beads;
 
 use axum::{response::IntoResponse, Json};
 use directories::UserDirs;
@@ -251,7 +245,6 @@ fn windows_dirs(home: Option<&Path>, told: &dyn Fn(&str) -> Option<PathBuf>) -> 
     if let Some(home) = home {
         dirs.push(home.join(".cargo").join("bin"));
         dirs.push(home.join(".local").join("bin"));
-        dirs.push(home.join(".beads").join("bin"));
         // Where npm puts what it installs for one person, and where Git for
         // Windows lands when it is installed without an administrator.
         dirs.push(home.join("AppData").join("Roaming").join("npm"));
@@ -288,7 +281,6 @@ fn unix_dirs(home: Option<&Path>, mac: bool) -> Vec<PathBuf> {
     if let Some(home) = home {
         dirs.push(home.join(".cargo").join("bin"));
         dirs.push(home.join(".local").join("bin"));
-        dirs.push(home.join(".beads").join("bin"));
     }
     if mac {
         // Homebrew on an Apple Silicon machine. On an Intel one it is
@@ -413,21 +405,9 @@ pub fn find_tool(name: &str, others: &[&str]) -> Option<PathBuf> {
     })
 }
 
-/// What to tell a reader whose computer has no `bd` on it.
-///
-/// One wording, because the two routes that write cards and the one that runs
-/// the tool outright all answer the same question when the answer is no.
-pub const BD_MISSING: &str =
-    "bd CLI not found. Install beads (https://github.com/gastownhall/beads) or add bd to PATH.";
-
-/// Where the `bd` CLI is, if this computer has it.
-pub fn find_bd() -> Option<PathBuf> {
-    find_tool("bd", &[])
-}
-
 /// What to tell a reader whose computer has no git on it.
 ///
-/// git is not optional the way `bd` is: the whole Git panel and every worktree
+/// git is not optional: the whole Git panel and every worktree
 /// is git and nothing else, so there is no reduced version of the answer to
 /// give. Saying so outright beats letting the bare "No such file or directory"
 /// of a failed start surface as the reason a push did not go (bw-oxrg.4).
@@ -485,11 +465,6 @@ pub async fn git_output(dir: impl AsRef<Path>, args: &[&str]) -> std::io::Result
 /// - `Ok(())` if the path is valid and within allowed directories
 /// - `Err(String)` with an error message if validation fails
 pub fn validate_path_security(path: &Path) -> Result<(), String> {
-    // Reject dolt:// virtual paths — these are not filesystem paths
-    if path.to_string_lossy().starts_with("dolt://") {
-        return Err("dolt:// paths cannot be used for filesystem operations".to_string());
-    }
-
     // Canonicalize paths for comparison (resolves symlinks and ..)
     let canonical_path = match path.canonicalize() {
         Ok(p) => p,

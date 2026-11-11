@@ -31,8 +31,6 @@ use super::store::{self as chat_store, ArchivedChat};
 
 pub const RULES: &str = "storage.cleanup.rules";
 pub const LAST_RUN: &str = "storage.cleanup.last-run";
-/// "false" when chats linked to open cards may be cleared too.
-pub const KEEP_LINKED: &str = "storage.cleanup.keep-linked";
 
 /// The most rules a list may hold. More than this is not a policy any person
 /// can read at a glance.
@@ -150,16 +148,6 @@ pub fn save_rules(settings: &crate::db::Database, rules: &[Rule]) -> Result<(), 
         .map_err(|e| e.to_string())
 }
 
-pub fn keep_linked(settings: &crate::db::Database) -> bool {
-    settings.setting(KEEP_LINKED).ok().flatten().as_deref() != Some("false")
-}
-
-pub fn save_keep_linked(settings: &crate::db::Database, keep: bool) -> Result<(), String> {
-    settings
-        .set_setting(KEEP_LINKED, (!keep).then_some("false"))
-        .map_err(|e| e.to_string())
-}
-
 /// What the last run did, for the screen.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,8 +188,6 @@ pub struct Chat {
     pub title: Option<String>,
     pub last_at: DateTime<Utc>,
     pub active: bool,
-    /// Linked to a card that is still open, and kept for it.
-    pub kept: bool,
 }
 
 /// What one rule would do.
@@ -263,7 +249,7 @@ fn applies(rule: &Rule, project: &str, last_at: DateTime<Utc>, now: DateTime<Utc
 pub fn plan(
     rules: &[Rule],
     chats: &[Chat],
-    archived: &[(ArchivedChat, bool)],
+    archived: &[ArchivedChat],
     indexed: &Indexed,
     sizes: &HashMap<String, u64>,
     now: DateTime<Utc>,
@@ -275,7 +261,7 @@ pub fn plan(
             ..Effect::default()
         })
         .collect();
-    let mut by_age: Vec<&Chat> = chats.iter().filter(|chat| !chat.active && !chat.kept).collect();
+    let mut by_age: Vec<&Chat> = chats.iter().filter(|chat| !chat.active).collect();
     by_age.sort_by_key(|chat| chat.last_at);
 
     // Chats whose files no longer count as shown: deleted ones and deleted
@@ -310,9 +296,9 @@ pub fn plan(
             first_touch.entry(r.asset.clone()).or_insert(at);
         }
     }
-    let mut old_archives: Vec<&(ArchivedChat, bool)> = archived.iter().filter(|(_, kept)| !kept).collect();
-    old_archives.sort_by(|a, b| a.0.last_at.cmp(&b.0.last_at));
-    for (archive, _) in old_archives {
+    let mut old_archives: Vec<&ArchivedChat> = archived.iter().collect();
+    old_archives.sort_by(|a, b| a.last_at.cmp(&b.last_at));
+    for archive in old_archives {
         let Some(last_at) = DateTime::parse_from_rfc3339(&archive.last_at).ok().map(|at| at.with_timezone(&Utc)) else {
             continue;
         };
@@ -394,8 +380,8 @@ pub struct Gathered {
     pub indexed: Indexed,
     /// The size of every stored file a chat or archive names.
     pub sizes: HashMap<String, u64>,
-    /// Archived chats, each with whether it is kept for an open card.
-    pub archived: Vec<(ArchivedChat, bool)>,
+    /// Archived chats.
+    pub archived: Vec<ArchivedChat>,
     /// The index was whole when read, so what it does not name is unused.
     pub complete: bool,
 }
@@ -413,7 +399,6 @@ pub struct BigChat {
     /// Pictures and files only it shows.
     pub media: u64,
     pub active: bool,
-    pub kept: bool,
 }
 
 /// Stored files no chat or archive of any copy shows.
@@ -480,16 +465,12 @@ impl Cleaner {
     /// `wait` holds until every chat is measured; without it a first fill is
     /// started in the background and what is measured so far is answered.
     pub(crate) async fn gather(&self, registry: &WorkbenchRegistry, wait: bool) -> Result<Gathered, String> {
-        self.gather_keeping(registry, wait, keep_linked(&self.settings)).await
-    }
-
-    async fn gather_keeping(&self, registry: &WorkbenchRegistry, wait: bool, keep: bool) -> Result<Gathered, String> {
         let index = self.index.clone();
         let chats_db = self.chats_db.clone();
         let media = self.media.clone();
         let archive = self.archive.clone();
         let active: HashSet<String> = registry.database().active_session_ids().await?.into_iter().collect();
-        let (mut chats, indexed, sizes, archived, links, complete) = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let (mut chats, indexed, sizes, archived, complete) = tokio::task::spawn_blocking(move || -> Result<_, String> {
             let refreshed = wait || index.filled();
             if refreshed {
                 index.refresh()?;
@@ -503,7 +484,6 @@ impl Cleaner {
                 shared_holders(&index, media, &mut indexed, refreshed)?;
             }
             let chats = read_chats(&chats_db)?;
-            let links = read_links(&chats_db)?;
             let mut sizes = HashMap::new();
             if let Some(media) = media {
                 let named = indexed.refs.iter().map(|r| &r.asset).chain(archived.iter().flat_map(|a| &a.assets));
@@ -519,47 +499,13 @@ impl Cleaner {
                     }
                 }
             }
-            Ok((chats, indexed, sizes, archived, links, refreshed))
+            Ok((chats, indexed, sizes, archived, refreshed))
         })
         .await
         .map_err(|e| e.to_string())??;
-        let open = if keep {
-            let mut paths: HashMap<&str, Vec<&str>> = HashMap::new();
-            for chat in chats.iter().filter(|chat| links.contains_key(&chat.id)) {
-                paths.entry(chat.project_path.as_str()).or_default().push(chat.id.as_str());
-            }
-            for archive in archived.iter().filter(|a| !a.cards.is_empty()) {
-                paths.entry(archive.project_path.as_str()).or_default();
-            }
-            let mut open: HashMap<String, Option<HashSet<String>>> = HashMap::new();
-            for path in paths.keys() {
-                open.insert(path.to_string(), open_cards(Path::new(path)).await);
-            }
-            Some(open)
-        } else {
-            None
-        };
-        // A chat is kept when one of its cards is open, or when its project's
-        // cards cannot be read: a guess never clears a chat.
-        let kept = |path: &str, cards: &[String]| match &open {
-            None => false,
-            Some(_) if cards.is_empty() => false,
-            Some(open) => match open.get(path).and_then(Option::as_ref) {
-                Some(open) => cards.iter().any(|card| open.contains(card)),
-                None => true,
-            },
-        };
         for chat in &mut chats {
             chat.active = chat.active || active.contains(&chat.id);
-            chat.kept = kept(&chat.project_path, links.get(&chat.id).map(Vec::as_slice).unwrap_or_default());
         }
-        let archived = archived
-            .into_iter()
-            .map(|archive| {
-                let keep = kept(&archive.project_path, &archive.cards);
-                (archive, keep)
-            })
-            .collect();
         Ok(Gathered {
             chats,
             indexed,
@@ -587,14 +533,8 @@ impl Cleaner {
     }
 
     pub async fn preview(&self, registry: &WorkbenchRegistry, rules: &[Rule]) -> Result<Vec<Effect>, String> {
-        self.preview_keeping(registry, rules, keep_linked(&self.settings)).await
-    }
-
-    /// The preview with the keep-linked switch as the screen has it, saved
-    /// or not.
-    pub async fn preview_keeping(&self, registry: &WorkbenchRegistry, rules: &[Rule], keep: bool) -> Result<Vec<Effect>, String> {
         check(rules)?;
-        let found = self.gather_keeping(registry, false, keep).await?;
+        let found = self.gather(registry, false).await?;
         Ok(plan(rules, &found.chats, &found.archived, &found.indexed, &found.sizes, Utc::now()).effects)
     }
 
@@ -960,7 +900,6 @@ impl Cleaner {
                 bytes: found.indexed.chats.get(&chat.id).map_or(0, |(bytes, _)| (*bytes).max(0) as u64),
                 media: media.get(chat.id.as_str()).copied().unwrap_or(0),
                 active: chat.active,
-                kept: chat.kept,
             })
             .collect();
         chats.sort_by_key(|chat| std::cmp::Reverse(chat.bytes + chat.media));
@@ -1034,27 +973,6 @@ async fn delete_chat(registry: &WorkbenchRegistry, id: &str) -> Result<(), Strin
         .map(|_: Value| ())
 }
 
-/// The cards that are not closed in one project, or `None` when its board
-/// can't be read.
-async fn open_cards(project: &Path) -> Option<HashSet<String>> {
-    if !project.is_dir() {
-        return None;
-    }
-    let out = super::beads_links::BdRunner::default()
-        .run(project, &["list", "--json", "--limit", "0", "--flat", "--brief", "--skip-labels"])
-        .await;
-    if !out.ok {
-        return None;
-    }
-    let rows: Vec<Value> = serde_json::from_str(&out.stdout).ok()?;
-    Some(
-        rows.iter()
-            .filter(|row| row["status"].as_str() != Some("closed"))
-            .filter_map(|row| row["id"].as_str().map(String::from))
-            .collect(),
-    )
-}
-
 fn open_read_only(path: &Path) -> Result<rusqlite::Connection, String> {
     let text = |e: rusqlite::Error| e.to_string();
     let connection = rusqlite::Connection::open_with_flags(
@@ -1064,26 +982,6 @@ fn open_read_only(path: &Path) -> Result<rusqlite::Connection, String> {
     .map_err(text)?;
     connection.busy_timeout(Duration::from_secs(10)).map_err(text)?;
     Ok(connection)
-}
-
-/// The cards each chat is linked to.
-fn read_links(path: &Path) -> Result<HashMap<String, Vec<String>>, String> {
-    if !path.exists() {
-        return Ok(HashMap::new());
-    }
-    let connection = open_read_only(path)?;
-    let mut links: HashMap<String, Vec<String>> = HashMap::new();
-    let mut statement = connection
-        .prepare("SELECT session_id, bead_id FROM bead_link")
-        .map_err(|e| e.to_string())?;
-    let rows = statement
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
-        .map_err(|e| e.to_string())?;
-    for row in rows {
-        let (session, card) = row.map_err(|e| e.to_string())?;
-        links.entry(session).or_default().push(card);
-    }
-    Ok(links)
 }
 
 pub(crate) fn read_chats(path: &Path) -> Result<Vec<Chat>, String> {
@@ -1128,7 +1026,6 @@ pub(crate) fn read_chats(path: &Path) -> Result<Vec<Chat>, String> {
                 title,
                 active: super::status::is_active(&state),
                 last_at,
-                kept: false,
             })
         })
         .collect())
@@ -1246,7 +1143,7 @@ mod tests {
             rule("delete", 365, Target::Chats, None),
             rule("archive", 30, Target::Archive, None),
         ];
-        let archived = vec![(archive("old", 400, &[B], now), false), (archive("young", 100, &[], now), false)];
+        let archived = vec![archive("old", 400, &[B], now), archive("young", 100, &[], now)];
         let plan = plan(&rules, &chats, &archived, &indexed, &sizes, now);
         assert_eq!(plan.archive, vec!["recent"]);
         assert!(plan.delete.is_empty());
@@ -1255,27 +1152,6 @@ mod tests {
         assert_eq!(plan.free, vec![B.to_string()]);
         assert_eq!(plan.effects[0], Effect { id: "delete".into(), chats: 1, items: 0, bytes: 27 });
         assert_eq!(plan.effects[1], Effect { id: "archive".into(), chats: 1, items: 0, bytes: 700 });
-    }
-
-    #[test]
-    fn a_chat_kept_for_an_open_card_is_left_whole() {
-        let now = Utc::now();
-        let mut kept = chat("kept", "p", 100, now);
-        kept.kept = true;
-        let mut indexed = Indexed::default();
-        indexed.trimmable.insert("kept".into(), (3, 900));
-        indexed.trimmable.insert("plain".into(), (2, 500));
-        let chats = vec![kept, chat("plain", "p", 100, now)];
-        let rules = vec![rule("trim", 30, Target::Output, None)];
-        let plan = plan(&rules, &chats, &[(archive("a", 900, &[], now), true)], &indexed, &HashMap::new(), now);
-        assert_eq!(plan.trim, vec!["plain"]);
-        assert_eq!(plan.effects[0], Effect { id: "trim".into(), chats: 1, items: 2, bytes: 500 });
-        let plan = plan_all(&[rule("all", 1, Target::Chats, None)], &chats, now);
-        assert_eq!(plan.delete, vec!["plain"]);
-    }
-
-    fn plan_all(rules: &[Rule], chats: &[Chat], now: DateTime<Utc>) -> Plan {
-        plan(rules, chats, &[], &Indexed::default(), &HashMap::new(), now)
     }
 
     #[test]

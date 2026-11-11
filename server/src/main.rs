@@ -4,7 +4,7 @@
 //! behind them. The one name the product answers to lives in `identity.rs`.
 
 use atelier::{
-    command_line, db, dolt, dolt_lifecycle, handover, identity, needs, reachable, remote, routes,
+    command_line, db, handover, identity, needs, reachable, remote, routes,
     rules, service, serving, terminal, workbench,
 };
 
@@ -14,7 +14,7 @@ use axum::{
     http::{header, HeaderValue, Request, Response, StatusCode},
     middleware::{self, Next},
     response::IntoResponse,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, post},
     Router,
 };
 use rust_embed::{Embed, EmbeddedFile};
@@ -227,13 +227,6 @@ async fn run() {
         // (bw-8um.3.6).
         command_line::Ask::Init(rest) => match rules::init(&rest) {
             Ok(code) => std::process::exit(code),
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        },
-        command_line::Ask::ProjectBeads(rest) => match rules::project_beads(&rest) {
-            Ok(mode) => println!("{mode}"),
             Err(e) => {
                 eprintln!("{e}");
                 std::process::exit(1);
@@ -457,7 +450,7 @@ async fn serve(open_browser: bool) {
 
     // Initialize the database
     let database = Arc::new(db::Database::new().expect("Failed to initialize database"));
-    for tool in ["git", "bd", "claude", "codex", "browser"] {
+    for tool in ["git", "claude", "codex", "browser"] {
         if let Ok(Some(path)) = database.setting(&format!("tool.{tool}.path")) {
             routes::set_tool_override(tool, Some(std::path::PathBuf::from(path)));
         }
@@ -617,49 +610,9 @@ async fn serve(open_browser: bool) {
         tokio::spawn(async move { registry.hand_back_the_orphaned().await });
     }
 
-    // Initialize Dolt connection manager. Local boards already backed by Dolt
-    // are brought up through bd before the read-ahead can fall back to stale
-    // JSONL, then checked for the rest of this process's lifetime.
-    let dolt_manager = Arc::new(dolt::DoltManager::new());
-    if dolt_manager.check_server().await {
-        info!("Dolt server is available on port 3307");
-    } else {
-        info!("Dolt server not detected — will use bd CLI / JSONL fallback");
-    }
-
-    // Check for bd CLI availability and compatibility
-    if let Some(bd) = routes::find_bd() {
-        info!("bd CLI found: {}", bd.display());
-        if let Ok(output) = std::process::Command::new(&bd).arg("--version").output() {
-            if output.status.success() {
-                let version = String::from_utf8_lossy(&output.stdout);
-                info!("bd version: {}", version.trim());
-            }
-        }
-        // Verify --json flag works (older bd versions output plain text)
-        let test_dir = std::env::temp_dir();
-        if let Ok(output) = std::process::Command::new(&bd)
-            .args(["list", "--json", "--limit", "1"])
-            .current_dir(&test_dir)
-            .output()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let trimmed = stdout.trim();
-            if !trimmed.is_empty() && !trimmed.starts_with('[') {
-                tracing::warn!("⚠ bd CLI does not support --json output");
-                tracing::warn!("  Beads will not load for filesystem projects");
-                tracing::warn!("  Update Beads from Settings → Dependencies or https://github.com/gastownhall/beads");
-            }
-        }
-    } else {
-        tracing::warn!(
-            "⚠ bd CLI not found — beads read/write will not work for filesystem projects"
-        );
-        tracing::warn!("  Install: https://github.com/gastownhall/beads");
-    }
-
-    let _dolt_supervisor =
-        routes::find_bd().map(|bd| dolt_lifecycle::supervise(database.clone(), bd.clone()));
+    // What older versions wired into registered projects for the board comes
+    // back out, once per start and off the request path (join.rs).
+    atelier::join::tidy_registered(database.clone());
 
     // Initialize version check cache
     let version_cache = routes::version::new_cache();
@@ -667,11 +620,6 @@ async fn serve(open_browser: bool) {
     // watching it (routes/update_run.rs).
     let update_watch = routes::update_run::new_watch();
     let bootstrap_bus = routes::environment::bootstrap_bus();
-
-    // The first read of a board costs a `bd` run, and the reader used to pay
-    // it on whichever board they opened first. It is paid here instead, with
-    // nobody waiting (bw-uiyz.18).
-    routes::beads::read_boards_ahead(dolt_manager.clone(), database.clone());
 
     // Empty at startup and filled by whoever opens a shell. It belongs to the
     // process rather than to a connection, which is the whole reason a build
@@ -691,10 +639,6 @@ async fn serve(open_browser: bool) {
         .route(
             "/api/environment/:tool",
             axum::routing::put(routes::environment::choose),
-        )
-        .route(
-            "/api/environment/bd/install",
-            post(routes::environment::install_bd),
         )
         .nest(
             "/api",
@@ -757,22 +701,6 @@ async fn serve(open_browser: bool) {
             "/api",
             routes::push::push_routes().with_state(database.clone()),
         )
-        .route("/api/beads", get(routes::beads::read_beads))
-        .route("/api/beads/card", get(routes::beads::read_card))
-        .route("/api/beads/search", get(routes::beads::search::search_cards))
-        .route("/api/beads/search/ask", post(routes::beads::search::ask))
-        .route(
-            "/api/beads/create",
-            post(routes::beads::create_bead_handler),
-        )
-        .route(
-            "/api/beads/update",
-            patch(routes::beads::update_bead_handler),
-        )
-        // Dolt endpoints
-        .route("/api/dolt/status", get(routes::dolt::dolt_status))
-        .route("/api/dolt/databases", get(routes::dolt::dolt_databases))
-        .route("/api/dolt/servers", get(routes::dolt::dolt_servers))
         .route("/api/fs/list", get(routes::fs::list_directory))
         .route("/api/fs/exists", get(routes::fs::path_exists).post(routes::fs::paths_exist))
         .route("/api/fs/media", get(routes::fs::media))
@@ -794,7 +722,6 @@ async fn serve(open_browser: bool) {
         )
         .route("/api/fs/roots", get(routes::fs::fs_roots))
         .route("/api/fs/open-external", post(routes::fs::open_external))
-        .route("/api/bd/command", post(routes::cli::bd_command))
         .route("/api/git/branch-status", get(routes::git::branch_status))
         // The Git panel's routes: the read ones answer straight away, the
         // mutating ones queue behind their repository's own lock (bw-8dp8).
@@ -826,24 +753,12 @@ async fn serve(open_browser: bool) {
         // can stand a diff in for its transcript (routes/git.rs, bw-rx1y.2).
         .route("/api/git/diff", get(routes::git::diff))
         .route("/api/git/show", get(routes::git::show))
-        // Worktree endpoints
-        .route(
-            "/api/git/worktree-status",
-            get(routes::worktree::worktree_status),
-        )
-        .route("/api/git/worktree", post(routes::worktree::create_worktree))
-        .route(
-            "/api/git/worktree",
-            delete(routes::worktree::delete_worktree),
-        )
-        .route("/api/git/worktrees", get(routes::worktree::list_worktrees))
         // A project's checkouts by name rather than by card: what the place a
         // chat will work in is chosen from (routes/git.rs, bw-ov7a.1).
         .route("/api/git/trees", get(routes::git::trees))
         .route("/api/git/trees", post(routes::git::new_tree))
         .route("/api/git/trees", delete(routes::git::drop_tree))
         // PR endpoints
-        .route("/api/watch/beads", get(routes::watch_beads))
         // One connection for a whole window: the board, the native chat feed and
         // the open chat, each event tagged (routes/live.rs, bw-zkh4).
         .route("/api/live", get(routes::live::live))
@@ -872,7 +787,6 @@ async fn serve(open_browser: bool) {
         .layer(Extension(update_watch))
         .layer(Extension(bootstrap_bus))
         .layer(Extension(database))
-        .layer(Extension(dolt_manager))
         // A board is megabytes of JSON; a device on the network should not
         // wait on it byte for byte (bw-fbzd.2). The screens are already carried
         // gzipped and say so, so this leaves them alone.

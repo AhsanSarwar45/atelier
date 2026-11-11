@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::db::{
-    CachedCounts, CreateProjectInput, CreateTagInput, Database, DbError, ProjectTagInput,
+    CreateProjectInput, CreateTagInput, Database, DbError, ProjectTagInput,
     ProjectWithTags, Tag, UpdateProjectInput,
 };
 use crate::project_manifest::{self, LocatedManifest, ManifestStorage, ProjectManifest};
@@ -45,10 +45,6 @@ pub struct ProjectProbe {
     pub existing: bool,
     pub storage: Option<ManifestStorage>,
     pub manifest_path: Option<String>,
-    /// Whether this computer has `bd` at all. A screen that cannot offer a
-    /// board does not ask about one: the checkbox is not drawn rather than
-    /// drawn and then refused on save (bw-3tkl.2).
-    pub beads_available: bool,
 }
 
 #[derive(Deserialize)]
@@ -68,8 +64,6 @@ pub struct InitializeProjectInput {
 pub struct ProjectSettingsAnswer {
     #[serde(flatten)]
     pub located: LocatedManifest,
-    /// See `ProjectProbe::beads_available`.
-    pub beads_available: bool,
 }
 
 #[derive(Deserialize)]
@@ -89,17 +83,12 @@ fn manifest_error(error: String) -> (StatusCode, Json<ErrorResponse>) {
 
 fn local_root(project: &crate::db::Project) -> Result<std::path::PathBuf, String> {
     let raw = project.local_path.as_deref().unwrap_or(&project.path);
-    if raw.starts_with("dolt://") { return Err("this project has no local repository".into()); }
     std::fs::canonicalize(raw).map_err(|error| format!("{raw} could not be read: {error}"))
 }
 
 fn located_for(path: &str, local_path: Option<&str>, data: &std::path::Path) -> Option<LocatedManifest> {
     let raw = local_path.unwrap_or(path);
-    if raw.starts_with("dolt://") {
-        project_manifest::locate_key(path, data)
-    } else {
-        std::fs::canonicalize(raw).ok().and_then(|root| project_manifest::locate(&root, data))
-    }
+    std::fs::canonicalize(raw).ok().and_then(|root| project_manifest::locate(&root, data))
 }
 
 /// The project's settings file, made from what its folder shows when it has none.
@@ -112,18 +101,11 @@ fn located_or_created(project: &crate::db::Project, data: &std::path::Path) -> R
     if let Some(found) = located_for(&project.path, project.local_path.as_deref(), data) {
         return Ok(found);
     }
-    let raw = project.local_path.as_deref().unwrap_or(&project.path);
-    if raw.starts_with("dolt://") {
-        let mut manifest = project_manifest::infer_virtual(&project.name);
-        manifest.project.display_name = project.name.clone();
-        project_manifest::create_key(&project.path, data, &manifest)?;
-    } else {
-        let root = local_root(project)?;
-        let mut manifest = project_manifest::infer(&root);
-        manifest.project.display_name = project.name.clone();
-        let path = project_manifest::create(&root, data, ManifestStorage::Personal, &manifest)?;
-        project_manifest::write_instructions(&path, &project_manifest::infer_instructions(&root))?;
-    }
+    let root = local_root(project)?;
+    let mut manifest = project_manifest::infer(&root);
+    manifest.project.display_name = project.name.clone();
+    let path = project_manifest::create(&root, data, ManifestStorage::Personal, &manifest)?;
+    project_manifest::write_instructions(&path, &project_manifest::infer_instructions(&root))?;
     located_for(&project.path, project.local_path.as_deref(), data)
         .ok_or_else(|| "the new settings file could not be read back".into())
 }
@@ -132,38 +114,18 @@ fn data_dir() -> Result<std::path::PathBuf, String> {
     crate::identity::data_dir().ok_or_else(|| "Atelier has no personal data directory".into())
 }
 
-fn board_has_issues(root: &std::path::Path) -> bool {
-    crate::routes::find_bd().and_then(|bd| std::process::Command::new(bd).arg("list").args(["--limit", "1", "--json"])
-        .current_dir(root).output().ok()).map(|out| out.status.success() && String::from_utf8_lossy(&out.stdout).trim() != "[]").unwrap_or(false)
-}
-
-fn has_linked_worktrees(root: &std::path::Path) -> bool {
-    std::process::Command::new("git").arg("-C").arg(root).args(["worktree", "list", "--porcelain"])
-        .output().ok().filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).lines().filter(|line| line.starts_with("worktree ")).count() > 1)
-        .unwrap_or(false)
-}
-
-fn apply_beads_mode(root: &std::path::Path, manifest: &ProjectManifest) -> Result<(), String> {
-    if manifest.project.use_beads { crate::join::install(root, manifest) }
-    else { crate::join::remove(root) }
+/// Take what older versions wired in for the board back out of a project, as
+/// it is set up or opened. Best effort: a settings file that does not parse is
+/// left as it is and said so in the log, never a reason to refuse the project.
+fn tidy(root: &std::path::Path) {
+    if let Err(error) = crate::join::tidy(root) {
+        tracing::warn!(root = %root.display(), %error, "could not take retired board hooks out");
+    }
 }
 
 pub async fn probe_project(
     Json(input): Json<ProbeProjectInput>,
 ) -> Result<Json<ProjectProbe>, (StatusCode, Json<ErrorResponse>)> {
-    let beads_available = crate::routes::find_bd().is_some();
-    if input.path.starts_with("dolt://") {
-        let data = data_dir().map_err(manifest_error)?;
-        if let Some(located) = project_manifest::locate_key(&input.path, &data) {
-            return Ok(Json(ProjectProbe { manifest: located.manifest, instructions: located.instructions, existing: true,
-                storage: Some(ManifestStorage::Personal), manifest_path: Some(located.path.to_string_lossy().to_string()),
-                beads_available }));
-        }
-        let name = input.path.trim_start_matches("dolt://").replace(['_', '-'], " ");
-        return Ok(Json(ProjectProbe { manifest: project_manifest::infer_virtual(&name), instructions: String::new(),
-            existing: false, storage: None, manifest_path: None, beads_available }));
-    }
     let root = std::fs::canonicalize(&input.path)
         .map_err(|error| manifest_error(format!("{} could not be read: {error}", input.path)))?;
     if let Some(located) = project_manifest::locate(&root, &data_dir().map_err(manifest_error)?) {
@@ -173,12 +135,11 @@ pub async fn probe_project(
             existing: true,
             storage: Some(located.storage),
             manifest_path: Some(located.path.to_string_lossy().to_string()),
-            beads_available,
         }));
     }
     Ok(Json(ProjectProbe { manifest: project_manifest::infer(&root),
         instructions: project_manifest::infer_instructions(&root),
-        existing: false, storage: None, manifest_path: None, beads_available }))
+        existing: false, storage: None, manifest_path: None }))
 }
 
 pub async fn initialize_project(
@@ -191,59 +152,29 @@ pub async fn initialize_project(
         return Err(db_error_response(DbError::ProjectPathAlreadyAdded(existing.name)));
     }
     let data = data_dir().map_err(manifest_error)?;
-    let virtual_project = input.path.starts_with("dolt://");
-    if virtual_project && input.storage != ManifestStorage::Personal {
-        return Err(manifest_error("A project without a local repository keeps its settings on this computer".into()));
-    }
-    let root = if virtual_project { None } else { Some(std::fs::canonicalize(&input.path)
-        .map_err(|error| manifest_error(format!("{} could not be read: {error}", input.path)))?) };
-    let existing = if virtual_project { project_manifest::locate_key(&input.path, &data) }
-        else { project_manifest::locate(root.as_ref().unwrap(), &data) };
-    if !virtual_project && input.manifest.project.use_beads
-        && !project_manifest::branch_exists(root.as_ref().unwrap(), &input.manifest.git.completed_work_branch) {
-        return Err(manifest_error("Completed-work branch must be an existing project branch".into()));
-    }
-    let (manifest, created_path, previous) = if let Some(existing) = existing {
-        if !virtual_project && existing.manifest.beads.issue_id_prefix != input.manifest.beads.issue_id_prefix
-            && board_has_issues(root.as_ref().unwrap()) {
-            return Err(manifest_error("Issue ID prefix cannot change after the board has issued IDs".into()));
-        }
-        if !virtual_project && existing.manifest.git.completed_work_branch != input.manifest.git.completed_work_branch
-            && has_linked_worktrees(root.as_ref().unwrap()) {
-            return Err(manifest_error("Completed-work branch cannot change while linked worktrees exist".into()));
-        }
-        let previous = Some((existing.manifest.clone(), existing.storage));
+    let root = std::fs::canonicalize(&input.path)
+        .map_err(|error| manifest_error(format!("{} could not be read: {error}", input.path)))?;
+    let existing = project_manifest::locate(&root, &data);
+    let manifest = if let Some(existing) = existing {
         project_manifest::write_atomic(&existing.path, &input.manifest).map_err(manifest_error)?;
-        if !virtual_project && existing.storage != input.storage {
-            if let Err(error) = project_manifest::move_to(root.as_ref().unwrap(), &data, input.storage) {
+        if existing.storage != input.storage {
+            if let Err(error) = project_manifest::move_to(&root, &data, input.storage) {
                 let _ = project_manifest::write_atomic(&existing.path, &existing.manifest);
                 return Err(manifest_error(error));
             }
         }
-        project_manifest::write_instructions(&existing.path, &input.instructions).map_err(manifest_error)?;
-        (input.manifest, None, previous)
+        let current = project_manifest::locate(&root, &data).map(|found| found.path).unwrap_or(existing.path);
+        project_manifest::write_instructions(&current, &input.instructions).map_err(manifest_error)?;
+        input.manifest
     } else {
-        let path = if virtual_project { project_manifest::create_key(&input.path, &data, &input.manifest) }
-            else { project_manifest::create(root.as_ref().unwrap(), &data, input.storage, &input.manifest) }
-            .map_err(manifest_error)?;
+        let path = project_manifest::create(&root, &data, input.storage, &input.manifest).map_err(manifest_error)?;
         project_manifest::write_instructions(&path, &input.instructions).map_err(manifest_error)?;
-        (input.manifest, Some(path), None)
+        input.manifest
     };
-    if !virtual_project {
-        if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), &manifest) {
-            if let Some(path) = created_path { let _ = std::fs::remove_file(path); }
-            if let Some((old, storage)) = previous {
-                if let Some(current) = project_manifest::locate(root.as_ref().unwrap(), &data) {
-                    let _ = project_manifest::write_atomic(&current.path, &old);
-                    if current.storage != storage { let _ = project_manifest::move_to(root.as_ref().unwrap(), &data, storage); }
-                }
-            }
-            return Err(manifest_error(error));
-        }
-    }
+    tidy(&root);
     let project = db.create_project(CreateProjectInput {
         name: manifest.project.display_name,
-        path: root.as_ref().map(|path| path.to_string_lossy().to_string()).unwrap_or(input.path),
+        path: root.to_string_lossy().to_string(),
         local_path: None,
         is_test: input.is_test,
     }).map_err(db_error_response)?;
@@ -259,7 +190,7 @@ pub async fn get_project_settings(
 ) -> Result<Json<ProjectSettingsAnswer>, (StatusCode, Json<ErrorResponse>)> {
     let project = db.get_project(&id).map_err(db_error_response)?;
     let located = located_or_created(&project, &data_dir().map_err(manifest_error)?).map_err(manifest_error)?;
-    Ok(Json(ProjectSettingsAnswer { located, beads_available: crate::routes::find_bd().is_some() }))
+    Ok(Json(ProjectSettingsAnswer { located }))
 }
 
 pub async fn update_project_settings(
@@ -267,52 +198,29 @@ pub async fn update_project_settings(
 ) -> Result<Json<ProjectSettingsAnswer>, (StatusCode, Json<ErrorResponse>)> {
     let UpdateSettingsInput { manifest, instructions } = input;
     let project = db.get_project(&id).map_err(db_error_response)?;
-    let virtual_project = project.local_path.is_none() && project.path.starts_with("dolt://");
-    let root = if virtual_project { None } else { Some(local_root(&project).map_err(manifest_error)?) };
     let located = located_or_created(&project, &data_dir().map_err(manifest_error)?).map_err(manifest_error)?;
-    if !virtual_project && manifest.project.use_beads
-        && !project_manifest::branch_exists(root.as_ref().unwrap(), &manifest.git.completed_work_branch) {
-        // The picker offers "New branch…", so a name the repo lacks is a branch to make, not a slip.
-        project_manifest::create_branch(root.as_ref().unwrap(), &manifest.git.completed_work_branch).map_err(manifest_error)?;
-    }
-    if !virtual_project && located.manifest.beads.issue_id_prefix != manifest.beads.issue_id_prefix && board_has_issues(root.as_ref().unwrap()) {
-        return Err(manifest_error("Issue ID prefix cannot change after the board has issued IDs".into()));
-    }
-    if !virtual_project && located.manifest.git.completed_work_branch != manifest.git.completed_work_branch && has_linked_worktrees(root.as_ref().unwrap()) {
-        return Err(manifest_error("Completed-work branch cannot change while linked worktrees exist".into()));
-    }
     crate::workbench::chat_name::check(&manifest.chat_name).map_err(manifest_error)?;
     project_manifest::write_atomic(&located.path, &manifest).map_err(manifest_error)?;
     project_manifest::write_instructions(&located.path, &instructions).map_err(manifest_error)?;
     // Every list names its chats by the template just written, not the one
     // read a moment ago (workbench::chat_name).
     crate::workbench::chat_name::forget();
-    if !virtual_project && located.manifest.project.use_beads != manifest.project.use_beads {
-        if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), &manifest) {
-            let _ = project_manifest::write_atomic(&located.path, &located.manifest);
-            return Err(manifest_error(error));
-        }
-    }
     if manifest.project.display_name != project.name {
         db.update_project(&id, UpdateProjectInput { name: Some(manifest.project.display_name.clone()), path: None, local_path: None })
             .map_err(db_error_response)?;
     }
-    Ok(Json(ProjectSettingsAnswer { located: LocatedManifest { manifest, instructions: instructions.trim().to_string(), ..located },
-        beads_available: crate::routes::find_bd().is_some() }))
+    Ok(Json(ProjectSettingsAnswer { located: LocatedManifest { manifest, instructions: instructions.trim().to_string(), ..located } }))
 }
 
 pub async fn move_project_manifest(
     State(db): State<AppState>, Path(id): Path<String>, Json(input): Json<MoveManifestInput>,
 ) -> Result<Json<ProjectSettingsAnswer>, (StatusCode, Json<ErrorResponse>)> {
     let project = db.get_project(&id).map_err(db_error_response)?;
-    if project.local_path.is_none() && project.path.starts_with("dolt://") {
-        return Err(manifest_error("Repository storage requires a local repository".into()));
-    }
     let root = local_root(&project).map_err(manifest_error)?;
     let path = project_manifest::move_to(&root, &data_dir().map_err(manifest_error)?, input.storage).map_err(manifest_error)?;
     let located = project_manifest::locate(&root, &data_dir().map_err(manifest_error)?)
         .ok_or_else(|| manifest_error(format!("{} was written but could not be read", path.display())))?;
-    Ok(Json(ProjectSettingsAnswer { located, beads_available: crate::routes::find_bd().is_some() }))
+    Ok(Json(ProjectSettingsAnswer { located }))
 }
 
 impl DbError {
@@ -348,24 +256,11 @@ pub struct ListProjectsParams {
     pub include_test: Option<bool>,
 }
 
-/// A project list entry — `ProjectWithTags` flattened with the cached
-/// bead counts attached. The `cachedCounts` field is `null` until
-/// `/api/beads` has been called for the project at least once.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectWithTagsAndCounts {
-    #[serde(flatten)]
-    pub project: ProjectWithTags,
-    pub cached_counts: Option<CachedCounts>,
-    /// Controls whether the project has board UI and card reads.
-    pub uses_beads: bool,
-}
-
-/// GET /api/projects - List all projects with their tags and cached bead counts
+/// GET /api/projects - List all projects with their tags
 pub async fn list_projects(
     State(db): State<AppState>,
     Query(params): Query<ListProjectsParams>,
-) -> Result<Json<Vec<ProjectWithTagsAndCounts>>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<Vec<ProjectWithTags>>, (StatusCode, Json<ErrorResponse>)> {
     let include_archived = params.include_archived.unwrap_or(false);
     let include_test = params.include_test.unwrap_or(false);
     let mut projects = db.get_projects_with_tags_filtered(include_archived, include_test).map_err(db_error_response)?;
@@ -376,39 +271,7 @@ pub async fn list_projects(
             p.local_path = Some(lp.replace('\\', "/"));
         }
     }
-
-    let beads_available = crate::routes::find_bd().is_some();
-    let mut result = Vec::with_capacity(projects.len());
-    for project in projects {
-        // Cache reads are best-effort — log and fall back to None on error
-        // so a single corrupt row can't block the whole projects list.
-        let cached_counts = match db.get_cached_counts(&project.id) {
-            Ok(counts) => counts,
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to read cached counts for project {}: {}",
-                    project.id,
-                    e
-                );
-                None
-            }
-        };
-        // A board this computer cannot read is not a board to draw. The
-        // manifest still says what the project is; `usesBeads` says what the
-        // screen can honestly show, so a machine with no `bd` gets the
-        // chat-only shape rather than a board tab whose every read is a 503
-        // (bw-3tkl.2).
-        let uses_beads = beads_available
-            && located_for(&project.path, project.local_path.as_deref(), &data_dir().map_err(manifest_error)?)
-                .map(|found| found.manifest.project.use_beads).unwrap_or(false);
-        result.push(ProjectWithTagsAndCounts {
-            uses_beads,
-            project,
-            cached_counts,
-        });
-    }
-
-    Ok(Json(result))
+    Ok(Json(projects))
 }
 
 /// POST /api/projects - Create a new project
@@ -596,24 +459,6 @@ mod tests {
         }
     }
 
-    /// The screen learns whether this computer has bd from the same answer
-    /// that carries the manifest, so the board question is drawn or not drawn
-    /// without a second round trip (bw-3tkl.2).
-    #[test]
-    fn the_probe_says_whether_this_computer_has_bd() {
-        let probe = ProjectProbe {
-            manifest: crate::project_manifest::infer(std::path::Path::new(".")),
-            instructions: String::new(),
-            existing: false,
-            storage: None,
-            manifest_path: None,
-            beads_available: false,
-        };
-        let json = serde_json::to_string(&probe).unwrap();
-        assert!(json.contains("\"beadsAvailable\":false"), "{json}");
-        assert!(!json.contains("beads_available"), "{json}");
-    }
-
     /// A second registration of the same path is a conflict the caller can
     /// read, not a fault in the app, and the body carries the sentence a
     /// person can act on rather than SQLite's (bw-uk0k.2).
@@ -628,50 +473,11 @@ mod tests {
     }
 
     #[test]
-    fn test_project_with_counts_serializes_camel_case_and_flattens() {
-        let entry = ProjectWithTagsAndCounts {
-            project: make_project_with_tags(),
-            cached_counts: Some(CachedCounts {
-                open: 3,
-                in_progress: 1,
-                inreview: 0,
-                manager_review: 4,
-                closed: 2,
-                cancelled: 1,
-                data_source: Some("cli".to_string()),
-                updated_at: "2026-04-22T10:00:00Z".to_string(),
-            }),
-            uses_beads: true,
-        };
-        let json = serde_json::to_string(&entry).unwrap();
-
-        // Flattened fields preserve ProjectWithTags' camelCase rename
+    fn a_project_entry_serializes_camel_case() {
+        let json = serde_json::to_string(&make_project_with_tags()).unwrap();
         assert!(json.contains("\"lastOpened\":\"2026-04-22T10:00:00Z\""));
-        assert!(json.contains("\"createdAt\":\"2026-04-22T09:00:00Z\""));
         assert!(json.contains("\"localPath\":null"));
-        assert!(json.contains("\"archivedAt\":null"));
-
-        // cachedCounts wrapper is camelCase
-        assert!(json.contains("\"cachedCounts\":{"));
-        assert!(json.contains("\"usesBeads\":true"));
-        // CachedCounts inner fields are camelCase
-        assert!(json.contains("\"inProgress\":1"));
-        assert!(json.contains("\"dataSource\":\"cli\""));
-        assert!(json.contains("\"updatedAt\":\"2026-04-22T10:00:00Z\""));
-        // No snake_case leaks
-        assert!(!json.contains("\"in_progress\""));
-        assert!(!json.contains("\"data_source\""));
-        assert!(!json.contains("\"cached_counts\""));
-    }
-
-    #[test]
-    fn test_project_with_counts_serializes_null_when_no_cache() {
-        let entry = ProjectWithTagsAndCounts {
-            project: make_project_with_tags(),
-            cached_counts: None,
-            uses_beads: false,
-        };
-        let json = serde_json::to_string(&entry).unwrap();
-        assert!(json.contains("\"cachedCounts\":null"));
+        assert!(!json.contains("cachedCounts"));
+        assert!(!json.contains("usesBeads"));
     }
 }

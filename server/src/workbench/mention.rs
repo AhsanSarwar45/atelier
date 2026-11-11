@@ -1,14 +1,13 @@
-//! What the composer's `@` offers besides files: cards, tasks, chats and
+//! What the composer's `@` offers besides files: tasks, chats and
 //! skills (bw-mi3s.4).
 //!
 //! One question, one answer. The menu asks `GET /api/workbench/mention` once per
 //! keystroke and draws what comes back, grouped by kind, in the order it comes.
-//! Everything asked about is already held in memory: the board the board screen
-//! reads, the chat list, the library's skills, and the file listing `/api/fs/find`
+//! Everything asked about is already held in memory: the task list, the chat list, the library's skills, and the file listing `/api/fs/find`
 //! keeps. So a keystroke costs a scan of a few thousand short strings, not a
 //! disk or a process.
 //!
-//! Ranking is one small scorer for every kind, so a card and a chat that answer
+//! Ranking is one small scorer for every kind, so a task and a chat that answer
 //! the same letters equally well are scored the same way. What was typed is a
 //! single word — whitespace ends an `@` in the composer — so there is no query
 //! language here, only how well that word fits a name or an id.
@@ -16,7 +15,6 @@
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::routes::beads::Bead;
 use crate::workbench::store::Session;
 
 /// A kind the menu can offer, in the order its groups are drawn when nothing
@@ -25,7 +23,6 @@ use crate::workbench::store::Session;
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     File,
-    Bead,
     Chat,
     Skill,
     Diff,
@@ -33,12 +30,11 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 6] = [Kind::File, Kind::Diff, Kind::Bead, Kind::Task, Kind::Chat, Kind::Skill];
+    pub const ALL: [Kind; 5] = [Kind::File, Kind::Diff, Kind::Task, Kind::Chat, Kind::Skill];
 
     pub fn parse(word: &str) -> Option<Kind> {
         match word {
             "file" => Some(Kind::File),
-            "bead" => Some(Kind::Bead),
             "chat" => Some(Kind::Chat),
             "skill" => Some(Kind::Skill),
             "diff" => Some(Kind::Diff),
@@ -52,7 +48,6 @@ impl Kind {
     pub fn share(self) -> usize {
         match self {
             Kind::File => 8,
-            Kind::Bead => 6,
             Kind::Chat => 5,
             Kind::Skill => 5,
             Kind::Diff => 4,
@@ -67,13 +62,13 @@ pub struct Offer {
     pub kind: Kind,
     /// What goes after `@kind:` — or, for a file, after `@`.
     pub id: String,
-    /// What is read: a file's name, a card's title, a chat's or a skill's name.
+    /// What is read: a file's name, a task's title, a chat's or a skill's name.
     pub label: String,
-    /// What is read after it, dimmed: a file's folder, a card's status, a
+    /// What is read after it, dimmed: a file's folder, a task's status, a
     /// chat's provider, a skill's description.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub detail: String,
-    /// A file that is a folder; a card's status; a chat's provider.
+    /// A file that is a folder; a task's status; a chat's provider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -140,33 +135,6 @@ fn keep(mut offers: Vec<Offer>, limit: usize, tie: impl Fn(&Offer, &Offer) -> st
     offers.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| tie(a, b)));
     offers.truncate(limit);
     offers
-}
-
-/// The cards that answer `wanted`. With nothing typed, the ones being worked
-/// on and then the ones waiting, newest first; a closed card is only offered
-/// when it is asked for.
-pub fn cards(board: &[Bead], wanted: &str, limit: usize) -> Vec<Offer> {
-    let wanted = wanted.to_lowercase();
-    // Work under way first, then everything waiting, and finished work last.
-    let lively = |status: &str| match status {
-        "in_progress" => 2,
-        "closed" => 0,
-        _ => 1,
-    };
-    let mut offers = board
-        .iter()
-        .filter(|bead| bead.status != "tombstone")
-        .filter(|bead| !wanted.is_empty() || lively(&bead.status) > 0)
-        .filter_map(|bead| {
-            let score = best_fit(&[&bead.id, &bead.title], &wanted)?;
-            let mut offer = Offer::new(Kind::Bead, bead.id.clone(), bead.title.clone(), score * 4 + lively(&bead.status));
-            offer.detail = bead.id.clone();
-            offer.status = Some(bead.status.clone());
-            Some((offer, bead.updated_at.clone().unwrap_or_default()))
-        })
-        .collect::<Vec<_>>();
-    offers.sort_by(|a, b| b.0.score.cmp(&a.0.score).then_with(|| b.1.cmp(&a.1)));
-    offers.into_iter().take(limit).map(|(offer, _)| offer).collect()
 }
 
 /// The project's tasks that answer `wanted`, by number (`12` or `#12`) or by
@@ -292,7 +260,7 @@ pub fn in_order(mut groups: Vec<(Kind, Vec<Offer>)>, typed: bool) -> Vec<Offer> 
         let top = |offers: &[Offer]| offers.iter().map(|o| o.score).max().unwrap_or(i32::MIN);
         let ranked = |kind: Kind, offers: &[Offer]| match kind {
             // Undo the tie-breaking multipliers so every kind is on one scale.
-            Kind::Bead | Kind::Task => top(offers) / 4,
+            Kind::Task => top(offers) / 4,
             Kind::Chat => top(offers) / 2,
             _ => top(offers),
         };
@@ -302,11 +270,11 @@ pub fn in_order(mut groups: Vec<(Kind, Vec<Offer>)>, typed: bool) -> Vec<Offer> 
 }
 
 /// What the word after the composer's `@` asks for: a kind named with
-/// `bead:`, `task:`, `chat:`, `skill:` or `diff:` narrows the menu to it, and the rest is the
+/// `task:`, `chat:`, `skill:` or `diff:` narrows the menu to it, and the rest is the
 /// word to look for.
 pub fn scoped(typed: &str) -> (Option<Kind>, &str) {
     if let Some((word, rest)) = typed.split_once(':') {
-        if let Some(kind @ (Kind::Bead | Kind::Task | Kind::Chat | Kind::Skill | Kind::Diff)) = Kind::parse(word) {
+        if let Some(kind @ (Kind::Task | Kind::Chat | Kind::Skill | Kind::Diff)) = Kind::parse(word) {
             return (Some(kind), rest);
         }
     }
@@ -344,13 +312,6 @@ impl<T> Kept<T> {
 mod tests {
     use super::*;
 
-    fn bead(id: &str, title: &str, status: &str, updated: &str) -> Bead {
-        serde_json::from_value(serde_json::json!({
-            "id": id, "title": title, "status": status, "updated_at": updated
-        }))
-        .unwrap()
-    }
-
     #[test]
     fn a_name_fits_best_whole_then_at_the_start_then_on_a_word_then_inside_then_loosely() {
         let fits = ["standup", "standup-notes", "daily-standup", "withstand", "s-t-a-n-d"]
@@ -360,22 +321,10 @@ mod tests {
     }
 
     #[test]
-    fn a_card_answers_to_its_id_and_its_title_and_a_closed_one_only_when_asked() {
-        let board = [
-            bead("bw-1", "Fix the login page", "closed", "2026-09-01"),
-            bead("bw-2", "Draw the badge", "in_progress", "2026-09-02"),
-            bead("bw-3", "Search for chats", "in_progress", "2026-09-03"),
-        ];
-        let ids = |offers: Vec<Offer>| offers.into_iter().map(|o| o.id).collect::<Vec<_>>();
-        assert_eq!(ids(cards(&board, "", 10)), ["bw-3", "bw-2"]);
-        assert_eq!(ids(cards(&board, "login", 10)), ["bw-1"]);
-        assert_eq!(ids(cards(&board, "bw-3", 10)), ["bw-3"]);
-    }
-
-    #[test]
     fn a_kind_named_before_a_colon_narrows_the_menu_to_it() {
         assert_eq!(scoped("chat:stand"), (Some(Kind::Chat), "stand"));
-        assert_eq!(scoped("bead:"), (Some(Kind::Bead), ""));
+        // The board's kind is gone; `bead:` is read as a word to look for.
+        assert_eq!(scoped("bead:"), (None, "bead:"));
         assert_eq!(scoped("src/a:b"), (None, "src/a:b"));
         assert_eq!(scoped("file:x"), (None, "file:x"));
     }

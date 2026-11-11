@@ -78,10 +78,6 @@ enum Command {
     LastModelForBrand(String, Reply<Option<String>>),
     ListRestoreSessions(Option<String>, bool, Vec<std::path::PathBuf>, Reply<Vec<Session>>),
     MarkAllDormant(Reply<usize>),
-    BeadsForSessions(Vec<String>, Reply<HashMap<String, Vec<String>>>),
-    BeadsForSession(String, Reply<Vec<String>>),
-    RememberBeadLink(String, String, String, String, Reply<()>),
-    SessionsForBead(String, Reply<Vec<Session>>),
     SaveAccountHandoff(String, String, Reply<()>),
     SavedAccountHandoff(String, Reply<Option<String>>),
     ClearAccountHandoff(String, Reply<()>),
@@ -409,32 +405,6 @@ impl ChatDb {
         self.request(Command::MarkAllDormant).await
     }
 
-    pub async fn beads_for_sessions(
-        &self,
-        session_ids: Vec<String>,
-    ) -> Result<HashMap<String, Vec<String>>, String> {
-        self.request(|reply| Command::BeadsForSessions(session_ids, reply))
-            .await
-    }
-
-    pub async fn beads_for_session(&self, id: String) -> Result<Vec<String>, String> {
-        self.request(|reply| Command::BeadsForSession(id, reply))
-            .await
-    }
-    pub async fn remember_bead_link(
-        &self,
-        session: String,
-        bead: String,
-        via: String,
-        at: String,
-    ) -> Result<(), String> {
-        self.request(|reply| Command::RememberBeadLink(session, bead, via, at, reply))
-            .await
-    }
-    pub async fn sessions_for_bead(&self, id: String) -> Result<Vec<Session>, String> {
-        self.request(|reply| Command::SessionsForBead(id, reply))
-            .await
-    }
     pub async fn search(&self, query: String, limit: usize) -> Result<Vec<SearchHit>, String> {
         self.read(move |store, _| store.search(&query, limit)).await
     }
@@ -1050,16 +1020,6 @@ fn persist_event(
         }
         _ => {}
     }
-    if event.kind == EventKind::LinkBead {
-        if let Some(bead_id) = string(&event, "beadId") {
-            store.remember_bead_link(
-                session_id,
-                &bead_id,
-                string(&event, "via").as_deref().unwrap_or("tool"),
-                string(&event, "at").as_deref().unwrap_or(""),
-            )?;
-        }
-    }
     Ok(Some((seq, event)))
 }
 
@@ -1427,15 +1387,6 @@ fn run(
                 store.list_restore_sessions(project_id.as_deref(), everything, &others),
             ),
             Command::MarkAllDormant(reply) => respond(reply, store.mark_all_dormant()),
-            Command::BeadsForSessions(ids, reply) => respond(reply, store.beads_for_sessions(&ids)),
-            Command::BeadsForSession(id, reply) => respond(reply, store.beads_for_session(&id)),
-            Command::RememberBeadLink(session, bead, via, at, reply) => respond(
-                reply,
-                store
-                    .remember_bead_link(&session, &bead, &via, &at)
-                    .map(|_| ()),
-            ),
-            Command::SessionsForBead(id, reply) => respond(reply, store.sessions_for_bead(&id)),
             Command::SaveAccountHandoff(id, context, reply) => respond(reply, store.save_account_handoff(&id, &context)),
             Command::SavedAccountHandoff(id, reply) => respond(reply, store.saved_account_handoff(&id)),
             Command::ClearAccountHandoff(id, reply) => respond(reply, store.clear_account_handoff(&id)),

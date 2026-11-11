@@ -32,14 +32,8 @@ pub const NEEDED: &[Need] = &[
     Need {
         name: "git",
         also: &[],
-        carries: "reading and writing your project, and cutting each ticket its own copy",
+        carries: "reading and writing your project",
         from: "https://git-scm.com/downloads",
-    },
-    Need {
-        name: "bd",
-        also: &[],
-        carries: "the board, for projects that opt into one",
-        from: "https://github.com/gastownhall/beads",
     },
     Need {
         name: "claude",
@@ -146,7 +140,7 @@ mod tests {
         assert_eq!(words.len(), 2, "one readable line for each program, in:\n{said}");
         assert_eq!(words[0][0], "git");
         assert_eq!(words[0][1], "found");
-        assert_eq!(words[1][0], "bd");
+        assert_eq!(words[1][0], NEEDED[1].name);
         assert_eq!(words[1][1], "missing");
     }
 

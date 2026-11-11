@@ -292,11 +292,7 @@ pub fn forget() {
 
 fn settings_of(project_path: &str) -> Option<ChatNameSettings> {
     let data = crate::identity::data_dir()?;
-    let located = if project_path.starts_with("dolt://") {
-        crate::project_manifest::locate_key(project_path, &data)
-    } else {
-        crate::project_manifest::locate(Path::new(project_path), &data)
-    }?;
+    let located = crate::project_manifest::locate(Path::new(project_path), &data)?;
     Some(located.manifest.chat_name)
 }
 

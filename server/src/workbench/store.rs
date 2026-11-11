@@ -2550,39 +2550,6 @@ fn held_in_its_project(
         found
     }
 
-    pub fn remember_bead_link(
-        &self,
-        session_id: &str,
-        bead_id: &str,
-        via: &str,
-        first_seen_at: &str,
-    ) -> rusqlite::Result<bool> {
-        self.connection
-            .execute(
-                "INSERT OR IGNORE INTO bead_link (session_id, bead_id, via, first_seen_at) VALUES (?1,?2,?3,?4)",
-                params![session_id, bead_id, via, first_seen_at],
-            )
-            .map(|changed| changed == 1)
-    }
-
-    pub fn beads_for_session(&self, session_id: &str) -> rusqlite::Result<Vec<String>> {
-        let mut statement = self.connection.prepare(
-            "SELECT bead_id FROM bead_link WHERE session_id = ?1 ORDER BY first_seen_at",
-        )?;
-        let found = statement
-            .query_map([session_id], |row| row.get(0))?
-            .collect();
-        found
-    }
-
-    pub fn sessions_for_bead(&self, bead_id: &str) -> rusqlite::Result<Vec<Session>> {
-        let mut statement = self.connection.prepare(
-            "SELECT s.* FROM bead_link b JOIN session s ON s.id = b.session_id WHERE b.bead_id = ?1 ORDER BY s.last_active_at DESC",
-        )?;
-        let sessions = statement.query_map([bead_id], session_from_row)?.collect();
-        sessions
-    }
-
     pub fn tool_details(&self, session_id: &str, tool_id: &str) -> rusqlite::Result<Option<Value>> {
         let mut statement = self.connection.prepare(TOOL_DETAILS_SQL)?;
         let rows =
@@ -2611,33 +2578,6 @@ fn held_in_its_project(
             }
         }
         Ok(found.then(|| json!({"input":input,"output":output,"diff":diff})))
-    }
-
-    pub fn beads_for_sessions(
-        &self,
-        session_ids: &[String],
-    ) -> rusqlite::Result<HashMap<String, Vec<String>>> {
-        let mut grouped = HashMap::new();
-        if session_ids.is_empty() {
-            return Ok(grouped);
-        }
-        let ids = serde_json::to_string(session_ids).map_err(json_error)?;
-        let mut statement = self.connection.prepare(
-            r#"SELECT session_id, bead_id FROM bead_link
-               WHERE session_id IN (SELECT value FROM json_each(?1))
-               ORDER BY first_seen_at"#,
-        )?;
-        let rows = statement.query_map([ids], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in rows {
-            let (session_id, bead_id) = row?;
-            grouped
-                .entry(session_id)
-                .or_insert_with(Vec::new)
-                .push(bead_id);
-        }
-        Ok(grouped)
     }
 
     /// Materialise the canonical fold when the event tail has moved.
@@ -5585,28 +5525,6 @@ mod tests {
             ]
         );
 
-        assert!(store
-            .remember_bead_link("chat-1", "bw-one", "tool", "2026-08-20T00:00:02.000Z")
-            .unwrap());
-        assert!(!store
-            .remember_bead_link("chat-1", "bw-one", "brief", "2026-08-20T00:00:03.000Z")
-            .unwrap());
-        store
-            .remember_bead_link("chat-1", "bw-two", "manual", "2026-08-20T00:00:04.000Z")
-            .unwrap();
-        assert_eq!(
-            store.beads_for_session("chat-1").unwrap(),
-            ["bw-one", "bw-two"]
-        );
-        assert_eq!(
-            store
-                .beads_for_sessions(&["chat-1".to_string()])
-                .unwrap()
-                .get("chat-1")
-                .unwrap(),
-            &["bw-one".to_string(), "bw-two".to_string()]
-        );
-
         store.retract_message("chat-1", "answer-1").unwrap();
         assert!(store.search("kept", 100).unwrap().is_empty());
     }
@@ -6799,7 +6717,11 @@ mod tests {
             .map(|session| session.id)
             .collect();
         assert_eq!(left, vec!["full".to_string(), "alone".to_string()]);
-        assert_eq!(store.beads_for_session("full").unwrap(), vec!["bw-1"]);
+        let linked: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM bead_link WHERE session_id = 'full'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(linked, 1);
         assert_eq!(store.spend().unwrap().len(), 1);
         assert_eq!(store.event_count("full").unwrap(), 2);
         assert_eq!(store.event_count("alone").unwrap(), 1);

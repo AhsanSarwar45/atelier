@@ -1,20 +1,12 @@
-pub mod board_gate;
 // Library entry point — exposes modules for integration tests.
 pub mod allocator;
-pub mod board_push;
-pub mod board_tools;
 pub mod command_line;
-pub mod completion_gate;
 pub mod db;
 pub mod doing;
-pub mod dolt;
-pub mod dolt_lifecycle;
 pub mod handover;
-pub mod hook_bypass;
 pub mod identity;
 pub mod laid_down;
 pub mod join;
-pub mod lifecycle;
 pub mod local_host;
 pub mod needs;
 pub mod personal;
@@ -30,7 +22,3 @@ pub mod service;
 pub mod serving;
 pub mod terminal;
 pub mod workbench;
-
-pub mod board_state;
-
-pub mod board_landing;

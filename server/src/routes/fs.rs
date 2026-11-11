@@ -1047,8 +1047,7 @@ pub struct DirectoryEntry {
 
 /// GET /api/fs/list?path=/some/directory
 ///
-/// Lists the contents of a directory, filtering out hidden files
-/// except for .beads directories.
+/// Lists the contents of a directory, filtering out hidden files.
 pub async fn list_directory(Query(params): Query<FsListParams>) -> impl IntoResponse {
     let dir_path = PathBuf::from(&params.path);
 
@@ -1099,8 +1098,8 @@ pub async fn list_directory(Query(params): Query<FsListParams>) -> impl IntoResp
 
         let name = entry.file_name().to_string_lossy().to_string();
 
-        // Filter out hidden files except .beads
-        if name.starts_with('.') && name != ".beads" {
+        // Filter out hidden files
+        if name.starts_with('.') {
             continue;
         }
 

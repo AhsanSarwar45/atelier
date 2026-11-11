@@ -10,7 +10,7 @@ fn setup() -> (tempfile::TempDir, tempfile::TempDir) {
     let data = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     project_manifest::create(project.path(), data.path(), ManifestStorage::Repository,
-        &project_manifest::infer_virtual("Folder test")).unwrap();
+        &project_manifest::named("Folder test")).unwrap();
     (data, project)
 }
 
@@ -92,7 +92,7 @@ fn project_skill_switches_cover_both_sources_and_storage_formats() {
                 let (data, project) = setup();
                 let other = tempfile::tempdir().unwrap();
                 project_manifest::create(other.path(), data.path(), ManifestStorage::Repository,
-                    &project_manifest::infer_virtual("Other project")).unwrap();
+                    &project_manifest::named("Other project")).unwrap();
                 let scope = local.then_some(project.path());
                 if folder {
                     let base = if local { project.path().join(".atelier") } else { data.path().to_path_buf() };

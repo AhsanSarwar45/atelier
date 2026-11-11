@@ -8,7 +8,7 @@
 use super::protocol::{Event, EventKind};
 use chrono::DateTime;
 use serde_json::{json, Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projection {
@@ -45,7 +45,6 @@ pub(crate) fn empty_view() -> Map<String, Value> {
     view.insert("context".into(), Value::Null);
     view.insert("todos".into(), json!([]));
     view.insert("agents".into(), json!([]));
-    view.insert("beads".into(), json!([]));
     view.insert("permissionMode".into(), Value::Null);
     view.insert("autoApprove".into(), json!(false));
     view.insert("model".into(), Value::Null);
@@ -229,15 +228,8 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
         .remove("agents")
         .and_then(|v| v.as_array().cloned())
         .unwrap_or_default();
-    let mut beads = view
-        .remove("beads")
-        .and_then(|v| v.as_array().cloned())
-        .unwrap_or_default();
-    let mut bead_seen = beads
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect::<HashSet<_>>();
+    // A view folded before the board was retired may still carry its cards.
+    view.remove("beads");
     let mut agent_at = agents
         .iter()
         .enumerate()
@@ -640,12 +632,9 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
             EventKind::Todo => {
                 view.insert("todos".into(), value(event, "items"));
             }
-            EventKind::LinkBead => {
-                let id = string(event, "beadId");
-                if bead_seen.insert(id.clone()) {
-                    beads.push(json!(id));
-                }
-            }
+            // Retired with the board: older chats still hold these, and they
+            // still read, but nothing is drawn from them.
+            EventKind::LinkBead => {}
             // Reports are project-level links rather than transcript rows. The
             // app consumes this durable event from the live stream; replaying
             // an older chat must still accept it and advance lastSeq.
@@ -800,8 +789,6 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
             EventKind::TranscriptReset => {
                 items.clear();
                 agents.clear();
-                beads.clear();
-                bead_seen.clear();
                 agent_at.clear();
             }
             EventKind::SessionEnded => {}
@@ -815,7 +802,6 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
 
     view.insert("items".into(), Value::Array(items));
     view.insert("agents".into(), Value::Array(agents));
-    view.insert("beads".into(), Value::Array(beads));
     Projection {
         view: Value::Object(view.clone()),
     }
@@ -1029,7 +1015,8 @@ mod tests {
         // Two of those newest events are the queue's, which draw no row:
         // the watermark counts them, the transcript does not (bw-r54j.1).
         assert_eq!(before_reset.view["lastSeq"], 39);
-        assert_eq!(before_reset.view["beads"], json!(["bw-1"]));
+        // A chat recorded with a board link still folds, and draws nothing of it.
+        assert!(before_reset.view.get("beads").is_none());
         assert_eq!(before_reset.view["items"][0]["text"], "Hello");
         assert_eq!(before_reset.view["items"][2]["status"], "ok");
 

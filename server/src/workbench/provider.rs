@@ -945,18 +945,6 @@ impl SessionFactory for NativeProviderFactory {
                 }))
                 .map_err(|error| error.to_string())?;
                 database.append(menu).await?;
-                if let Some(bead_id) = command
-                    .fields
-                    .get("brief")
-                    .and_then(|brief| brief["beadId"].as_str())
-                {
-                    let linked: Event = serde_json::from_value(json!({
-                        "type":"link.bead", "sessionId":session.id, "seq":0, "at":now(),
-                        "beadId":bead_id, "via":"brief"
-                    }))
-                    .map_err(|error| error.to_string())?;
-                    database.append(linked).await?;
-                }
                 append_state(&database, &session.id, "idle", "Choose a model").await?;
                 let stored = database
                     .get_session(session.id.clone())
@@ -991,10 +979,6 @@ impl SessionFactory for NativeProviderFactory {
                 .get("brief")
                 .filter(|brief| brief.is_object())
             {
-                if let Some(bead_id) = brief["beadId"].as_str() {
-                    let linked: Event = serde_json::from_value(json!({"type":"link.bead","sessionId":stored.id,"seq":0,"at":now(),"beadId":bead_id,"via":"brief"})).map_err(|error|error.to_string())?;
-                    database.append(linked).await?;
-                }
                 if let Some(text) = brief["text"].as_str().filter(|text| !text.is_empty()) {
                     let prompt = Command {
                         kind: CommandKind::PromptSend,

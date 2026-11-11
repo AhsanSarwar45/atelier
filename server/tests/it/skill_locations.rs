@@ -13,7 +13,7 @@ fn read(cwd: &Path, data: &Path, args: &[&str]) -> Value {
     serde_json::from_slice(&out.stdout).unwrap()
 }
 fn register(root: &Path, data: &Path, storage: ManifestStorage) {
-    project_manifest::create(root, data, storage, &project_manifest::infer_virtual("Locations test")).unwrap();
+    project_manifest::create(root, data, storage, &project_manifest::named("Locations test")).unwrap();
 }
 fn git(root: &Path, args: &[&str]) {
     let out = Command::new("git").arg("-C").arg(root)

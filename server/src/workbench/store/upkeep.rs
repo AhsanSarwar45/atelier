@@ -607,7 +607,14 @@ mod tests {
         let picture = format!("{}.png", "a".repeat(64));
         event(&store, "c", 1, "message", &json!({"text": "hello"}).to_string());
         event(&store, "c", 2, "image", &json!({"asset": picture}).to_string());
-        store.remember_bead_link("c", "bw-1", "tool", "2026-01-01T00:00:00.000Z").unwrap();
+        // A link from the retired board travels with the chat and comes back.
+        store
+            .connection
+            .execute(
+                "INSERT INTO bead_link (session_id,bead_id,via,first_seen_at) VALUES ('c','bw-1','tool','2026-01-01T00:00:00.000Z')",
+                [],
+            )
+            .unwrap();
 
         let archives = dir.path().join("archive");
         let summary = store.archive_session("c", &archives, "2026-02-01T00:00:00.000Z").unwrap();
@@ -625,7 +632,11 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM event WHERE session_id = 'c'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(events, 2);
-        assert_eq!(store.beads_for_session("c").unwrap(), vec!["bw-1".to_string()]);
+        let linked: String = store
+            .connection
+            .query_row("SELECT bead_id FROM bead_link WHERE session_id = 'c'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(linked, "bw-1");
         assert!(archived_chats(&archives).is_empty());
         assert!(!archive_file(&archives, "c").exists());
     }

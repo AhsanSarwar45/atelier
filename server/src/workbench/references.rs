@@ -1,13 +1,11 @@
-//! A card, a chat or a skill named in a message, and what the agent is told
+//! A chat, a skill, a diff or a task named in a message, and what the agent is told
 //! about it (bw-mi3s.2).
 //!
-//! The composer writes `@bead:bw-zldt.2`, `@chat:<id>` and `@skill:standup`
+//! The composer writes `@chat:<id>`, `@skill:standup`, `@diff:…` and `@task:12`
 //! into the message as plain text, and the person sees each as a badge. The
 //! agent gets the same text plus one block Atelier adds after it, which says
 //! what each reference is:
 //!
-//! - a card: its title, status, type, priority, parent, acceptance and
-//!   description, and the command that shows the rest of it;
 //! - a chat: its id, its name and its provider, and the command that prints the
 //!   whole conversation. Nothing of the conversation itself: a chat can be
 //!   hours long, and the agent reads it only if it needs to;
@@ -25,6 +23,8 @@
 //!
 //! The grammar is the composer's (`src/workbench/references.ts`), and both
 //! sides are held to one list of cases (`atelier-references.cases.json`).
+//! `@bead:…`, which named a card on the retired board, is no longer a
+//! reference: older messages that hold it read as the plain text they are.
 
 use std::collections::HashSet;
 
@@ -35,7 +35,6 @@ use super::metadata::{added_by_atelier, REFERENCES};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
-    Bead,
     Chat,
     Skill,
     Diff,
@@ -45,7 +44,6 @@ pub enum Kind {
 impl Kind {
     fn word(self) -> &'static str {
         match self {
-            Kind::Bead => "bead",
             Kind::Chat => "chat",
             Kind::Skill => "skill",
             Kind::Diff => "diff",
@@ -220,7 +218,7 @@ pub fn task_number(id: &str) -> Option<i64> {
 
 fn reference_at(text: &str, at: usize) -> Option<Found> {
     let rest = &text[at + 1..];
-    for kind in [Kind::Bead, Kind::Chat, Kind::Skill, Kind::Diff, Kind::Task] {
+    for kind in [Kind::Chat, Kind::Skill, Kind::Diff, Kind::Task] {
         let prefix = format!("{}:", kind.word());
         if rest.starts_with(&prefix) {
             let from = at + 1 + prefix.len();
@@ -328,9 +326,6 @@ pub fn find(text: &str) -> Vec<Found> {
 /// before the block is written.
 #[derive(Debug, Default, Clone)]
 pub struct Looked {
-    /// Each card as `bd show --json` or the held board has it; None when the
-    /// board has no such card.
-    pub cards: Vec<(String, Option<serde_json::Value>)>,
     /// Each chat's name and provider; None when there is no such chat.
     pub chats: Vec<(String, Option<(String, String)>)>,
     /// Each diff's patch for its file; None when there is no such change.
@@ -340,9 +335,9 @@ pub struct Looked {
     pub tasks: Vec<(String, Option<serde_json::Value>)>,
 }
 
-/// How much of a card's long text is carried, so a card with an essay in it
+/// How much of a task's long text is carried, so a task with an essay in it
 /// does not crowd the person's own words out of the turn.
-const CARD_TEXT: usize = 2_000;
+const LONG_TEXT: usize = 2_000;
 
 fn clipped(text: &str, limit: usize) -> String {
     let text = text.trim();
@@ -360,33 +355,6 @@ pub(super) fn brand_name(brand: &str) -> &str {
         "local" => "a local model",
         other => other,
     }
-}
-
-fn card_entry(id: &str, card: Option<&serde_json::Value>) -> String {
-    let Some(card) = card else {
-        return format!("@bead:{id} is not a card on this project's board.");
-    };
-    let text = |key: &str| card.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
-    let mut lines = vec![format!("@bead:{id} — card \"{}\"", text("title").unwrap_or(""))];
-    let mut facts = vec![format!("status {}", text("status").unwrap_or("unknown"))];
-    if let Some(kind) = text("issue_type") {
-        facts.push(format!("type {kind}"));
-    }
-    if let Some(priority) = card.get("priority").and_then(|v| v.as_i64()) {
-        facts.push(format!("priority P{priority}"));
-    }
-    if let Some(parent) = text("parent_id").or_else(|| text("parent")) {
-        facts.push(format!("parent {parent}"));
-    }
-    lines.push(facts.join(", "));
-    if let Some(acceptance) = text("acceptance_criteria") {
-        lines.push(format!("Acceptance: {}", clipped(acceptance, CARD_TEXT)));
-    }
-    if let Some(description) = text("description") {
-        lines.push(format!("Description:\n{}", clipped(description, CARD_TEXT)));
-    }
-    lines.push(format!("Run `bd show {id}` for the whole card."));
-    lines.join("\n")
 }
 
 fn chat_entry(id: &str, chat: Option<&(String, String)>) -> String {
@@ -488,7 +456,7 @@ fn task_entry(id: &str, task: Option<&serde_json::Value>) -> String {
         lines.push(format!("Why: {why}"));
     }
     let plan = task.get("plan").map(|plan| plan.to_string()).unwrap_or_else(|| "{}".into());
-    lines.push(format!("Plan: {}", clipped(&plan, CARD_TEXT)));
+    lines.push(format!("Plan: {}", clipped(&plan, LONG_TEXT)));
     lines.push(format!("Run `atelier task show {id}` for its result and history."));
     lines.join("\n")
 }
@@ -503,7 +471,7 @@ fn skill_entry(id: &str, library: &Snapshot) -> String {
     }
 }
 
-/// The block Atelier adds after a message that names cards, chats or skills,
+/// The block Atelier adds after a message that names chats, skills, diffs or tasks,
 /// or nothing when it names none. A command at the start is left to its own
 /// block, and a thing named twice is described once.
 pub fn block(found: &[Found], looked: &Looked, library: &Snapshot) -> Option<String> {
@@ -514,10 +482,6 @@ pub fn block(found: &[Found], looked: &Looked, library: &Snapshot) -> Option<Str
             continue;
         }
         entries.push(match reference.kind {
-            Kind::Bead => card_entry(
-                &reference.id,
-                looked.cards.iter().find(|(id, _)| *id == reference.id).and_then(|(_, c)| c.as_ref()),
-            ),
             Kind::Chat => chat_entry(
                 &reference.id,
                 looked.chats.iter().find(|(id, _)| *id == reference.id).and_then(|(_, c)| c.as_ref()),
@@ -545,7 +509,7 @@ pub fn block(found: &[Found], looked: &Looked, library: &Snapshot) -> Option<Str
     ))
 }
 
-/// The ids a message's cards and chats are to be looked up by. A bare
+/// The ids a message's chats, diffs and tasks are to be looked up by. A bare
 /// `@task` names nothing to look up.
 pub fn wanted(found: &[Found], kind: Kind) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
@@ -601,22 +565,11 @@ mod tests {
     }
 
     #[test]
-    fn a_card_carries_what_it_is_and_is_described_once() {
-        let found = find("@bead:bw-1 and again @bead:bw-1");
-        let card = serde_json::json!({"title":"Fix it","status":"open","issue_type":"bug","priority":1,"parent_id":"bw","acceptance_criteria":"It works","description":"Long story"});
-        let looked = Looked { cards: vec![("bw-1".into(), Some(card))], ..Default::default() };
-        let block = block(&found, &looked, &Snapshot::default()).unwrap();
-        assert_eq!(block.matches("@bead:bw-1 —").count(), 1);
-        for want in ["card \"Fix it\"", "status open, type bug, priority P1, parent bw", "Acceptance: It works", "Long story", "bd show bw-1"] {
-            assert!(block.contains(want), "{want} missing from {block}");
-        }
-    }
-
-    #[test]
-    fn a_missing_card_or_chat_is_said_so_rather_than_failing_the_message() {
+    fn a_missing_chat_is_said_so_rather_than_failing_the_message() {
         let found = find("@bead:bw-9 @chat:gone");
         let block = block(&found, &Looked::default(), &Snapshot::default()).unwrap();
-        assert!(block.contains("@bead:bw-9 is not a card"));
+        // A card on the retired board is plain text now, and is not described.
+        assert!(!block.contains("bw-9"));
         assert!(block.contains("@chat:gone is not a chat"));
     }
 

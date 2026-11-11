@@ -2,7 +2,7 @@
 //!
 //! Plain words must all be found somewhere in a chat. A word can be aimed at
 //! one part of a chat with a key — `title:`, `me:`, `agent:`, `tool:` — and
-//! the chats themselves narrowed by `project:`, `provider:`, `card:`,
+//! the chats themselves narrowed by `project:`, `provider:`,
 //! `from:`, and the dates `after:`, `before:` and `on:`. Quotes keep words
 //! together as a phrase, a leading `-` leaves out chats that say it, and `OR`
 //! between two words accepts either.
@@ -62,7 +62,6 @@ pub struct Query {
     pub none: Vec<Term>,
     pub projects: Vec<String>,
     pub providers: Vec<String>,
-    pub cards: Vec<String>,
     /// `app` or `terminal`: where the chat was begun.
     pub origins: Vec<String>,
     /// Inclusive lower bound, an ISO instant in UTC.
@@ -80,7 +79,6 @@ impl Query {
             && self.none.is_empty()
             && self.projects.is_empty()
             && self.providers.is_empty()
-            && self.cards.is_empty()
             && self.origins.is_empty()
             && self.after.is_none()
             && self.before.is_none()
@@ -94,7 +92,6 @@ pub fn widens(key: &str) -> Option<&'static str> {
     match key {
         "project" | "proj" | "repo" => Some("project"),
         "provider" | "brand" | "with" => Some("provider"),
-        "card" | "bead" | "ticket" | "issue" => Some("card"),
         "from" | "origin" | "started" => Some("from"),
         _ => None,
     }
@@ -119,7 +116,6 @@ pub fn parse(input: &str, now: DateTime<Local>) -> Query {
                         other => other.to_string(),
                     })
             }
-            "card" | "bead" | "ticket" | "issue" => query.cards.push(piece.value.clone()),
             "from" | "origin" | "started" => match piece.value.to_ascii_lowercase().as_str() {
                 "app" | "atelier" | "here" => query.origins.push("app".to_string()),
                 "terminal" | "cli" | "shell" => query.origins.push("terminal".to_string()),
@@ -217,12 +213,11 @@ mod tests {
     #[test]
     fn narrowing_keys_are_kept_apart_from_words() {
         let query = parse(
-            "project:atelier provider:goose card:bw-7ks from:terminal fix ",
+            "project:atelier provider:goose from:terminal fix ",
             now(),
         );
         assert_eq!(query.projects, ["atelier"]);
         assert_eq!(query.providers, ["local"]);
-        assert_eq!(query.cards, ["bw-7ks"]);
         assert_eq!(query.origins, ["terminal"]);
         assert_eq!(query.all, vec![vec![term("fix", &[])]]);
     }
@@ -294,14 +289,13 @@ mod tests {
     fn an_agent_cannot_search_past_the_chats_the_person_narrowed_to() {
         let now = Local::now();
         let held = |asked: &str, fixed: &str| parse(&words::held(asked, fixed, widens), now);
-        // Another project, provider, card or origin, by any of their names, is dropped.
+        // Another project, provider or origin, by any of their names, is dropped.
         let query = held(
-            "repo:other with:codex bead:bw-9 origin:terminal loader",
-            "project:web provider:claude card:bw-1 from:app",
+            "repo:other with:codex origin:terminal loader",
+            "project:web provider:claude from:app",
         );
         assert_eq!(query.projects, ["web"]);
         assert_eq!(query.providers, ["claude"]);
-        assert_eq!(query.cards, ["bw-1"]);
         assert_eq!(query.origins, ["app"]);
         assert_eq!(query.all.len(), 1);
         // The person's `in:` aims the agent's words, and the agent's own is dropped.

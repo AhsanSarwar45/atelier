@@ -20,81 +20,21 @@ pub const INSTRUCTIONS_FILE: &str = "instructions.md";
 pub struct ProjectManifest {
     pub schema_version: u32,
     pub project: ProjectSettings,
-    #[serde(default)]
-    pub git: GitSettings,
-    #[serde(default)]
-    pub beads: BeadsSettings,
-    #[serde(default)]
-    pub verification: VerificationSettings,
-    #[serde(default)]
-    pub review: ReviewSettings,
-    #[serde(default)]
-    pub cross_project: CrossProjectSettings,
     /// What this project's chats are called (workbench::chat_name). Empty
     /// means the app's own rule.
     #[serde(default, skip_serializing_if = "ChatNameSettings::is_empty")]
     pub chat_name: ChatNameSettings,
 }
 
+/// Older manifests also carry `use_beads`, `[git]`, `[beads]`,
+/// `[verification]`, `[review]` and `[cross_project]` — the board, landing,
+/// checks and external review settings. Those are gone; serde ignores the keys,
+/// so such a manifest still reads, and the next save leaves them out.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ProjectSettings {
     pub display_name: String,
     #[serde(default)]
-    pub use_beads: bool,
-    #[serde(default)]
     pub summary: String,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct GitSettings {
-    #[serde(default)]
-    pub completed_work_branch: String,
-    #[serde(default)]
-    pub agents_may_merge_completed_work: bool,
-    #[serde(default)]
-    pub protected_branches: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct BeadsSettings {
-    #[serde(default)]
-    pub issue_id_prefix: String,
-    #[serde(default)]
-    pub work_areas: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct VerificationSettings {
-    #[serde(default)]
-    pub commands: Vec<VerificationCommand>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct VerificationCommand {
-    pub name: String,
-    pub command: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub paths: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ReviewSettings {
-    #[serde(default = "agent_decides")]
-    pub external_review: String,
-}
-
-fn agent_decides() -> String { "agent_decides".into() }
-
-impl Default for ReviewSettings {
-    fn default() -> Self {
-        Self { external_review: agent_decides() }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct CrossProjectSettings {
-    #[serde(default)]
-    pub delivery_projects: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -141,13 +81,6 @@ pub struct LocatedManifest {
 #[derive(Debug, Default, Deserialize)]
 struct LegacyManifest {
     name: Option<String>,
-    prefix: Option<String>,
-    lands_on: Option<String>,
-    agent_merges: Option<bool>,
-    protected: Option<Vec<String>>,
-    areas: Option<Vec<String>>,
-    checks: Option<String>,
-    lands_elsewhere: Option<Vec<String>>,
     review: Option<LegacyReview>,
 }
 
@@ -174,28 +107,6 @@ pub fn project_id(root: &Path) -> String {
 
 pub fn personal_path(root: &Path, data_dir: &Path) -> PathBuf {
     data_dir.join("projects").join(project_id(root)).join("project.toml")
-}
-
-pub fn personal_path_for_key(key: &str, data_dir: &Path) -> PathBuf {
-    let digest = Sha256::digest(key.as_bytes());
-    let id: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    data_dir.join("projects").join(id).join("project.toml")
-}
-
-pub fn locate_key(key: &str, data_dir: &Path) -> Option<LocatedManifest> {
-    let path = personal_path_for_key(key, data_dir);
-    let _ = carry_retired_fields_forward(&path);
-    read(&path).ok().map(|manifest| LocatedManifest {
-        instructions: read_instructions(&path), manifest, path,
-        storage: ManifestStorage::Personal,
-    })
-}
-
-pub fn create_key(key: &str, data_dir: &Path, manifest: &ProjectManifest) -> Result<PathBuf, String> {
-    let path = personal_path_for_key(key, data_dir);
-    if path.exists() { return Err(format!("{} already exists", path.display())); }
-    write_atomic(&path, manifest)?;
-    Ok(path)
 }
 
 pub fn repository_path(root: &Path) -> PathBuf { root.join(REPOSITORY_MANIFEST) }
@@ -230,36 +141,13 @@ pub fn migrate_legacy(root: &Path, data_dir: &Path) -> Result<Option<PathBuf>, S
     let text = fs::read_to_string(&source).map_err(|error| error.to_string())?;
     let legacy: LegacyManifest = toml::from_str(&text).map_err(|error| format!("{} could not be migrated: {error}", source.display()))?;
     let fallback = infer(root);
-    let branch = legacy.lands_on.unwrap_or(fallback.git.completed_work_branch);
-    let checks = legacy.checks.unwrap_or_default();
     let review = legacy.review.unwrap_or_default();
     let manifest = ProjectManifest {
         schema_version: SCHEMA_VERSION,
         project: ProjectSettings {
             display_name: legacy.name.unwrap_or(fallback.project.display_name),
-            use_beads: true,
             summary: review.persona.unwrap_or_default(),
         },
-        git: GitSettings {
-            completed_work_branch: branch.clone(),
-            agents_may_merge_completed_work: legacy.agent_merges.unwrap_or(false),
-            protected_branches: legacy.protected.unwrap_or_else(|| {
-                let mut protected = fallback.git.protected_branches;
-                if !protected.contains(&branch) { protected.push(branch); }
-                protected
-            }),
-        },
-        beads: BeadsSettings {
-            issue_id_prefix: legacy.prefix.unwrap_or(fallback.beads.issue_id_prefix),
-            work_areas: legacy.areas.unwrap_or(fallback.beads.work_areas),
-        },
-        verification: VerificationSettings {
-            commands: if checks.trim().is_empty() { fallback.verification.commands } else {
-                vec![VerificationCommand { name: "Project checks".into(), command: checks, paths: vec![] }]
-            },
-        },
-        review: ReviewSettings { external_review: agent_decides() },
-        cross_project: CrossProjectSettings { delivery_projects: legacy.lands_elsewhere.unwrap_or_default() },
         chat_name: ChatNameSettings::default(),
     };
     let destination = personal_path(root, data_dir);
@@ -287,18 +175,6 @@ pub fn validate(manifest: &ProjectManifest) -> Result<(), String> {
         return Err(format!("project manifest schema {} is not supported", manifest.schema_version));
     }
     if manifest.project.display_name.trim().is_empty() { return Err("display_name cannot be empty".into()); }
-    if manifest.project.use_beads {
-        if manifest.beads.issue_id_prefix.trim().is_empty() { return Err("issue_id_prefix cannot be empty when Beads is enabled".into()); }
-        if manifest.git.completed_work_branch.trim().is_empty() { return Err("completed_work_branch cannot be empty when Beads is enabled".into()); }
-    }
-    if !matches!(manifest.review.external_review.as_str(), "agent_decides" | "always" | "never") {
-        return Err("external_review must be agent_decides, always, or never".into());
-    }
-    for check in &manifest.verification.commands {
-        if check.name.trim().is_empty() || check.command.trim().is_empty() {
-            return Err("every verification command needs a name and command".into());
-        }
-    }
     Ok(())
 }
 
@@ -320,53 +196,11 @@ fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {
     fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
-fn prefix(name: &str) -> String {
-    let mut out: String = name.to_ascii_lowercase().chars().filter(|c| c.is_ascii_alphabetic()).take(3).collect();
-    while out.len() < 2 { out.push('p'); }
-    out
-}
-
-fn existing_branches(root: &Path) -> Vec<String> {
-    git(root, &["for-each-ref", "--format=%(refname:short)", "refs/heads"])
-        .lines().map(str::to_string).collect()
-}
-
-pub fn branch_exists(root: &Path, branch: &str) -> bool {
-    existing_branches(root).iter().any(|existing| existing == branch)
-}
-
-/// Make the branch the reader named in the picker, at the current head.
-pub fn create_branch(root: &Path, branch: &str) -> Result<(), String> {
-    let out = Command::new("git").arg("-C").arg(root).args(["branch", "--", branch]).output()
-        .map_err(|error| format!("git could not be run: {error}"))?;
-    if out.status.success() { return Ok(()); }
-    let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
-    Err(if why.is_empty() { format!("branch {branch} could not be created") } else { why })
-}
-
 pub fn infer(root: &Path) -> ProjectManifest {
     let name = root.file_name().and_then(|name| name.to_str()).unwrap_or("Project").to_string();
-    let current = git(root, &["branch", "--show-current"]);
-    let branch = if current.is_empty() { "main".into() } else { current };
-    let branches = existing_branches(root);
-    let protected_branches = ["main", "master", "staging", "production", "release"]
-        .into_iter().filter(|candidate| branches.iter().any(|branch| branch == candidate))
-        .map(str::to_string).collect();
-    let mut commands = Vec::new();
-    if root.join("package.json").is_file() {
-        commands.push(VerificationCommand { name: "JavaScript tests".into(), command: "npm test".into(), paths: vec![] });
-    }
-    if root.join("Cargo.toml").is_file() || root.join("server/Cargo.toml").is_file() {
-        let command = if root.join("server/Cargo.toml").is_file() { "cd server && cargo test" } else { "cargo test" };
-        commands.push(VerificationCommand { name: "Rust tests".into(), command: command.into(), paths: vec!["**/*.rs".into(), "**/Cargo.toml".into()] });
-    }
     ProjectManifest {
         schema_version: SCHEMA_VERSION,
-        project: ProjectSettings { display_name: name.clone(), use_beads: root.join(".beads").is_dir(), summary: String::new() },
-        git: GitSettings { completed_work_branch: branch, agents_may_merge_completed_work: false, protected_branches },
-        beads: BeadsSettings { issue_id_prefix: prefix(&name), work_areas: vec!["interface".into(), "server".into(), "tests".into(), "tooling".into(), "docs".into()] },
-        verification: VerificationSettings { commands },
-        review: ReviewSettings::default(), cross_project: CrossProjectSettings::default(),
+        project: ProjectSettings { display_name: name, summary: String::new() },
         chat_name: ChatNameSettings::default(),
     }
 }
@@ -384,15 +218,13 @@ pub fn infer_instructions(root: &Path) -> String {
     lines.join("\n")
 }
 
-pub fn infer_virtual(name: &str) -> ProjectManifest {
+/// A manifest that says only a name.
+pub fn named(name: &str) -> ProjectManifest {
     let name = if name.trim().is_empty() { "Project" } else { name.trim() };
     ProjectManifest {
         schema_version: SCHEMA_VERSION,
-        project: ProjectSettings { display_name: name.into(), use_beads: true, summary: String::new() },
-        git: GitSettings { completed_work_branch: "main".into(), agents_may_merge_completed_work: false, protected_branches: vec!["main".into()] },
-        beads: BeadsSettings { issue_id_prefix: prefix(name), work_areas: vec!["product".into(), "operations".into()] },
-        verification: VerificationSettings::default(), review: ReviewSettings::default(),
-        cross_project: CrossProjectSettings::default(), chat_name: ChatNameSettings::default(),
+        project: ProjectSettings { display_name: name.into(), summary: String::new() },
+        chat_name: ChatNameSettings::default(),
     }
 }
 
@@ -583,8 +415,7 @@ mod tests {
         let data = held.path().join("data");
         fs::create_dir_all(&repo).unwrap();
         let mut manifest = infer(&repo);
-        manifest.project.use_beads = true;
-        manifest.git.completed_work_branch = "ours".into();
+        manifest.project.summary = "ours".into();
         create(&repo, &data, ManifestStorage::Personal, &manifest).unwrap();
         let found = locate(&repo, &data).unwrap();
         assert_eq!(found.manifest, manifest);
@@ -601,7 +432,7 @@ mod tests {
     fn a_chat_name_template_round_trips_through_the_file() {
         let held = tempdir().unwrap();
         let path = held.path().join("project.toml");
-        let mut manifest = infer_virtual("Example");
+        let mut manifest = named("Example");
         write_atomic(&path, &manifest).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("chat_name"));
 
@@ -677,8 +508,7 @@ mod tests {
             "Deployment command: deploy it\n",
             "Ask for explicit permission immediately before running the deployment command.",
         ));
-        // The policy a gate reads is untouched: only the prompt-only settings move.
-        assert_eq!(read(&path).unwrap().review.external_review, "always");
+        assert_eq!(read(&path).unwrap().project.display_name, "Keystone");
         // And the file is edited, not rewritten: what stayed, stayed as it was.
         let after = fs::read_to_string(&path).unwrap();
         assert!(after.starts_with("schema_version = 1\n[project]\ndisplay_name = \"Keystone\""), "{after}");
@@ -704,29 +534,39 @@ mod tests {
     }
 
     #[test]
-    fn project_manifest_requires_beads_identity_and_branch_only_when_enabled() {
+    fn a_manifest_with_the_retired_board_settings_still_reads() {
         let held = tempdir().unwrap();
-        let mut manifest = infer(held.path());
-        manifest.beads.issue_id_prefix.clear();
-        manifest.git.completed_work_branch.clear();
-        assert!(validate(&manifest).is_ok());
-        manifest.project.use_beads = true;
-        assert!(validate(&manifest).unwrap_err().contains("issue_id_prefix"));
-    }
+        let path = held.path().join("project.toml");
+        fs::write(&path, r#"schema_version = 1
 
-    #[test]
-    fn board_only_project_has_one_personal_manifest_too() {
-        let held = tempdir().unwrap();
-        let key = "dolt://keystone";
-        let manifest = infer_virtual("Keystone");
+[project]
+display_name = "Old"
+use_beads = true
 
-        let path = create_key(key, held.path(), &manifest).unwrap();
-        let found = locate_key(key, held.path()).unwrap();
+[git]
+completed_work_branch = "main"
+agents_may_merge_completed_work = true
+protected_branches = ["main"]
 
-        assert_eq!(path, found.path);
-        assert_eq!(ManifestStorage::Personal, found.storage);
-        assert!(found.manifest.project.use_beads);
-        assert_eq!("Keystone", found.manifest.project.display_name);
+[beads]
+issue_id_prefix = "old"
+work_areas = ["server"]
+
+[verification]
+commands = [{ name = "Rust tests", command = "cargo test" }]
+
+[review]
+external_review = "always"
+
+[cross_project]
+delivery_projects = []
+"#).unwrap();
+        let manifest = read(&path).unwrap();
+        assert_eq!(manifest.project.display_name, "Old");
+        write_atomic(&path, &manifest).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("beads"), "{written}");
+        assert!(!written.contains("external_review"), "{written}");
     }
 
     #[test]
@@ -739,8 +579,7 @@ mod tests {
         fs::create_dir_all(old.parent().unwrap()).unwrap();
         fs::write(&old, "name = \"Example\"\nprefix = \"ex\"\nlands_on = \"ship\"\nagent_merges = true\nchecks = \"make test\"\n").unwrap();
         let found = locate(&repo, &data).unwrap();
+        assert_eq!(found.manifest.project.display_name, "Example");
         assert!(!old.exists());
-        assert_eq!(found.manifest.git.completed_work_branch, "ship");
-        assert_eq!(found.manifest.verification.commands[0].command, "make test");
     }
 }

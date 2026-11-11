@@ -86,7 +86,6 @@ pub struct WorkbenchState {
     #[cfg(test)]
     claude_reader: Arc<std::sync::Mutex<Option<crate::workbench::claude::transport::ClaudeTransportConfig>>>,
     codex_records: Arc<std::sync::Mutex<HashMap<String, std::path::PathBuf>>>,
-    claim_sweeps: Arc<tokio::sync::Mutex<HashMap<std::path::PathBuf, std::time::Instant>>>,
     watch_polls: broadcast::Sender<Value>,
     watch_pollers: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     watch_poll_subscribers: Arc<AtomicUsize>,
@@ -180,7 +179,6 @@ impl WorkbenchState {
             #[cfg(test)]
             claude_reader: Arc::new(std::sync::Mutex::new(None)),
             codex_records: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            claim_sweeps: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             watch_polls,
             last_holds: Arc::new(tokio::sync::RwLock::new(None)),
             watch_pollers: Arc::new(tokio::sync::Mutex::new(None)),
@@ -203,19 +201,6 @@ impl WorkbenchState {
         self
     }
 
-    async fn begin_claim_sweep(&self, cwd: &std::path::Path) -> bool {
-        const EVERY: Duration = Duration::from_secs(60);
-        let now = std::time::Instant::now();
-        let mut swept = self.claim_sweeps.lock().await;
-        if swept
-            .get(cwd)
-            .is_some_and(|previous| now.duration_since(*previous) < EVERY)
-        {
-            return false;
-        }
-        swept.insert(cwd.to_path_buf(), now);
-        true
-    }
     /// The registry itself, for the one watcher that acts on chats without a
     /// browser asking it to (workbench/memory_limit.rs).
     pub fn registry(&self) -> &Arc<WorkbenchRegistry> {
@@ -1177,8 +1162,6 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/memory", get(memory))
         .route("/memory/terminate", post(terminate_memory_process))
         .route("/tokens", get(tokens))
-        .route("/links/bead/:id", get(chats_for_bead))
-        .route("/links/session/:id", get(beads_for_chat))
         .route("/history", get(history))
         .route("/agents", get(agents))
         .route("/chat-text", get(chat_text))
@@ -1493,65 +1476,6 @@ async fn tokens(
 }
 
 #[derive(Deserialize)]
-struct LinkQuery {
-    path: Option<String>,
-}
-async fn chats_for_bead(
-    State(state): State<WorkbenchState>,
-    Path(id): Path<String>,
-    Query(query): Query<LinkQuery>,
-) -> Result<Json<Value>, ApiError> {
-    let cached = state.database().sessions_for_bead(id.clone()).await?;
-    let board = if let Some(path) = query.path {
-        crate::workbench::beads_links::sessions_for_issue(
-            &Default::default(),
-            std::path::Path::new(&path),
-            &id,
-        )
-        .await
-    } else {
-        vec![]
-    };
-    let wanted = if board.is_empty() {
-        cached.iter().map(|s| s.id.clone()).collect()
-    } else {
-        board
-    };
-    Ok(Json(json!(wanted.into_iter().map(|session_id| {
-        let row = cached.iter().find(|s|s.id == session_id);
-        json!({"sessionId":session_id,"title":row.and_then(|s|s.title.clone()),
-            // Named the one way, from the chat's own record, which this
-            // answer has in hand (chat_name, bw-altj.7).
-            "name":row.map(crate::workbench::chat_name::name_session)
-            // The board can link a card to a chat this app has no record of.
-            // Nothing is known about it, so the rule's own last word names it,
-            // rather than a second word invented on the screen that draws it.
-            .unwrap_or_else(||crate::workbench::notice::naming(None,None,"")),
-            "brand":row.map(|s|s.brand.clone()),"lastActiveAt":row.map(|s|s.last_active_at.clone()),"projectId":row.map(|s|s.project_id.clone())})
-    }).collect::<Vec<_>>())))
-}
-
-async fn beads_for_chat(
-    State(state): State<WorkbenchState>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
-    let mut beads = state.database().beads_for_session(id.clone()).await?;
-    if let Some(session) = state.database().get_session(id.clone()).await? {
-        beads.extend(
-            crate::workbench::beads_links::issues_for_session(
-                &Default::default(),
-                std::path::Path::new(&session.cwd),
-                &id,
-            )
-            .await,
-        );
-    }
-    beads.sort();
-    beads.dedup();
-    Ok(Json(json!(beads)))
-}
-
-#[derive(Deserialize)]
 struct SessionsQuery {
     project: Option<String>,
 }
@@ -1648,12 +1572,9 @@ pub(crate) async fn session_summaries(
     project: Option<String>,
 ) -> Result<Vec<Value>, String> {
     let sessions = database.list_sessions(project).await?;
-    let ids = sessions.iter().map(|session| session.id.clone()).collect();
-    let mut beads = database.beads_for_sessions(ids).await?;
     let mut activities = database.session_activities().await?;
     let mut values = Vec::with_capacity(sessions.len());
     for session in sessions {
-        let linked = beads.remove(&session.id).unwrap_or_default();
         let activity =
             activities
                 .remove(&session.id)
@@ -1680,7 +1601,6 @@ pub(crate) async fn session_summaries(
         // draws rather than the wire's words for it (bw-gci9).
         object.insert("activityCall".into(), activity.call.clone());
         object.insert("busySince".into(), json!(activity.busy_since));
-        object.insert("beads".into(), json!(linked));
         values.push(value);
     }
     Ok(values)
@@ -1795,7 +1715,6 @@ async fn checkouts_of<'a>(
 
 fn restore_row(
     session: Session,
-    beads: Vec<String>,
     holds: &[crate::workbench::external::ProviderHold],
     checkouts: &HashMap<String, crate::routes::git::Checkout>,
 ) -> Value {
@@ -1815,7 +1734,7 @@ fn restore_row(
         "begunBy": session.begun_by,
         "projectId": session.project_id, "projectPath": session.project_path,
         "namedByOwner": session.named_by_owner, "cwdHint": session.cwd, "folder": folder,
-        "branch": branch, "beads": beads, "runningElsewhere": held.is_some(), "held": held,
+        "branch": branch, "runningElsewhere": held.is_some(), "held": held,
     })
 }
 
@@ -2370,8 +2289,6 @@ async fn restore(
         .database()
         .list_restore_sessions(query.project.clone(), everything, registered_roots(&state))
         .await?;
-    let ids = sessions.iter().map(|session| session.id.clone()).collect();
-    let mut beads = state.database().beads_for_sessions(ids).await?;
     // This first response exists solely to put durable rows on screen while
     // provider discovery continues in the concurrent full request. Do not put
     // process-table and provider-marker discovery back on its critical path —
@@ -2384,10 +2301,7 @@ async fn restore(
         let checkouts = checkouts_of(sessions.iter().map(|session| session.cwd.as_str())).await;
         let mut rows: Vec<Value> = sessions
             .into_iter()
-            .map(|session| {
-                let linked = beads.remove(&session.id).unwrap_or_default();
-                restore_row(session, linked, &lately, &checkouts)
-            })
+            .map(|session| restore_row(session, &lately, &checkouts))
             .collect();
         name_the_rows(&mut rows, query.path.as_deref());
         rows.sort_by(|a, b| restore_clock(b).cmp(restore_clock(a)));
@@ -2398,10 +2312,7 @@ async fn restore(
     let checkouts = checkouts_of(sessions.iter().map(|session| session.cwd.as_str())).await;
     let mut rows: Vec<Value> = sessions
         .into_iter()
-        .map(|session| {
-            let linked = beads.remove(&session.id).unwrap_or_default();
-            restore_row(session, linked, &holds, &checkouts)
-        })
+        .map(|session| restore_row(session, &holds, &checkouts))
         .collect();
     // Archived chats stay out until restored (store/upkeep.rs, `shelf`).
     let shelved: HashSet<String> = state
@@ -2632,7 +2543,7 @@ async fn restore(
             "title":known["name"],"lastActiveAt":known["lastActiveAt"],"lastSpokeAt":known["lastSpokeAt"],
             "begunBy":known["begunBy"],
             "state":"dormant","origin":"terminal","projectId":query.project,"cwdHint":known["cwd"],
-            "folder":known["cwd"].as_str().and_then(folder_of),"branch":known["branch"],"beads":[],
+            "folder":known["cwd"].as_str().and_then(folder_of),"branch":known["branch"],
             "runningElsewhere":held.is_some(),"held":held}));
     }
     // Whatever a row's directory came from — our own record or the provider's
@@ -2759,60 +2670,6 @@ async fn session(
         .as_ref()
         .map(|it| it.folder.clone())
         .or_else(|| folder_of(&cwd));
-    let mut linked = state
-        .database()
-        .beads_for_sessions(vec![found.id.clone()])
-        .await?;
-    let mut beads = linked.remove(&found.id).unwrap_or_default();
-    beads.extend(
-        crate::workbench::beads_links::issues_for_session(
-            &Default::default(),
-            std::path::Path::new(&cwd),
-            &found.id,
-        )
-        .await,
-    );
-    beads.sort();
-    beads.dedup();
-    for bead in &beads {
-        let _ = state
-            .database()
-            .remember_bead_link(
-                found.id.clone(),
-                bead.clone(),
-                "claim".into(),
-                chrono::Utc::now().to_rfc3339(),
-            )
-            .await;
-    }
-    if state.begin_claim_sweep(std::path::Path::new(&cwd)).await {
-        let sweep = state.database().clone();
-        let sweep_cwd = std::path::PathBuf::from(&cwd);
-        tokio::spawn(async move {
-            let Ok(sessions) = sweep.list_sessions(None).await else {
-                return;
-            };
-            let here = sessions
-                .iter()
-                .filter(|session| std::path::Path::new(&session.cwd) == sweep_cwd)
-                .filter_map(|session| Some((session.id.as_str(), session.external_id.as_deref()?)))
-                .collect::<Vec<_>>();
-            if here.is_empty() {
-                return;
-            }
-            let runner = crate::workbench::beads_links::BdRunner::default();
-            let cards = crate::workbench::beads_links::claimed_cards(&runner, &sweep_cwd).await;
-            let links = crate::workbench::beads_links::claimed_links(here, &cards);
-            let at = chrono::Utc::now().to_rfc3339();
-            for (session, beads) in links {
-                for bead in beads {
-                    let _ = sweep
-                        .remember_bead_link(session.clone(), bead, "claim".into(), at.clone())
-                        .await;
-                }
-            }
-        });
-    }
     let holds = state.provider_holds().await;
     let held = found
         .external_id
@@ -2826,7 +2683,6 @@ async fn session(
         "branch": checkout.as_ref().and_then(|it| it.branch.clone()).map(Value::from)
             .or_else(|| known.as_ref().map(|row| row["branch"].clone()))
             .unwrap_or(Value::Null),
-        "beads": beads,
     })))
 }
 
@@ -2872,8 +2728,6 @@ async fn history(
 
 #[derive(Deserialize)]
 struct MentionQuery {
-    /// The project's own folder, whose board the cards come from.
-    project: Option<String>,
     #[serde(rename = "projectId")]
     project_id: Option<String>,
     /// The folder the chat works in, whose files and skills are offered.
@@ -2948,13 +2802,11 @@ async fn mention_tasks(
         .unwrap_or_default()
 }
 
-/// What the composer's `@` offers for what was typed after it: files, cards,
+/// What the composer's `@` offers for what was typed after it: files,
 /// tasks, chats and skills together, grouped by kind, best group first (bw-mi3s.4).
 /// See `workbench::mention` for how each kind is ranked.
 async fn mention(
     State(state): State<WorkbenchState>,
-    axum::Extension(dolt_manager): axum::Extension<Arc<crate::dolt::DoltManager>>,
-    axum::Extension(db): axum::Extension<Arc<crate::db::Database>>,
     Query(query): Query<MentionQuery>,
 ) -> Result<Json<Value>, ApiError> {
     use crate::workbench::mention::{self, Kind};
@@ -2996,13 +2848,6 @@ async fn mention(
                 .await
                 .map(|found| mention::files(found, wanted))
                 .unwrap_or_default(),
-            Kind::Bead => match query.project.as_deref() {
-                Some(project) => crate::routes::beads::board_for_mention(&dolt_manager, &db, project)
-                    .await
-                    .map(|board| mention::cards(&board, wanted, share(kind)))
-                    .unwrap_or_default(),
-                None => Vec::new(),
-            },
             Kind::Task => mention::tasks(
                 &mention_tasks(&database, query.project_id.as_deref()).await,
                 wanted,
@@ -4106,7 +3951,7 @@ mod tests {
 
         // The rail's row for the same chat, named the way every restore answer
         // names one.
-        let mut listed = vec![restore_row(nameless, Vec::new(), &[], &HashMap::new())];
+        let mut listed = vec![restore_row(nameless, &[], &HashMap::new())];
         name_the_rows(&mut listed, None);
 
         assert_eq!(
@@ -4309,17 +4154,6 @@ mod tests {
             .keep_following_the_worked_in(&[stranger], &mut followed)
             .await;
         assert!(followed.is_empty());
-    }
-
-    #[tokio::test]
-    async fn external_claim_sweep_is_once_per_project_window() {
-        let (_directory, state) = fixture();
-        let first = std::path::Path::new("/work/project");
-        let second = std::path::Path::new("/work/another");
-
-        assert!(state.begin_claim_sweep(first).await);
-        assert!(!state.begin_claim_sweep(first).await);
-        assert!(state.begin_claim_sweep(second).await);
     }
 
     /// An allowance belongs to a login, so both the cache and the in-flight

@@ -97,7 +97,6 @@ fn rules_answer(state: &StorageState) -> Result<Value, Refusal> {
     let rules = cleanup::rules(&state.cleaner.settings).map_err(|why| failed("Couldn't read rules", why))?;
     Ok(json!({
         "rules": rules,
-        "keepLinked": cleanup::keep_linked(&state.cleaner.settings),
         "lastRun": cleanup::last_run(&state.cleaner.settings),
     }))
 }
@@ -111,17 +110,12 @@ async fn read_rules(State(state): State<StorageState>) -> Result<Json<Value>, Re
 #[serde(rename_all = "camelCase")]
 struct Rules {
     rules: Vec<Rule>,
-    #[serde(default)]
-    keep_linked: Option<bool>,
 }
 
 /// PUT /api/storage/rules
 async fn write_rules(State(state): State<StorageState>, Json(asked): Json<Rules>) -> Result<Json<Value>, Refusal> {
     cleanup::check(&asked.rules).map_err(|why| (StatusCode::UNPROCESSABLE_ENTITY, why))?;
     cleanup::save_rules(&state.cleaner.settings, &asked.rules).map_err(|why| failed("Couldn't save rules", why))?;
-    if let Some(keep) = asked.keep_linked {
-        cleanup::save_keep_linked(&state.cleaner.settings, keep).map_err(|why| failed("Couldn't save rules", why))?;
-    }
     *state.measured.lock().await = None;
     rules_answer(&state).map(Json)
 }
@@ -129,15 +123,11 @@ async fn write_rules(State(state): State<StorageState>, Json(asked): Json<Rules>
 /// POST /api/storage/preview — what these rules, saved or not, would do now.
 async fn preview(State(state): State<StorageState>, Json(asked): Json<Rules>) -> Result<Json<Value>, Refusal> {
     cleanup::check(&asked.rules).map_err(|why| (StatusCode::UNPROCESSABLE_ENTITY, why))?;
-    // The switch is part of what is previewed, saved or not.
-    let saved = cleanup::keep_linked(&state.cleaner.settings);
-    let asked_keep = asked.keep_linked.unwrap_or(saved);
-    let effects = if asked_keep == saved {
-        state.cleaner.preview(&state.registry, &asked.rules).await
-    } else {
-        state.cleaner.preview_keeping(&state.registry, &asked.rules, asked_keep).await
-    }
-    .map_err(|why| failed("Couldn't preview rules", why))?;
+    let effects = state
+        .cleaner
+        .preview(&state.registry, &asked.rules)
+        .await
+        .map_err(|why| failed("Couldn't preview rules", why))?;
     Ok(Json(json!({"effects": effects})))
 }
 

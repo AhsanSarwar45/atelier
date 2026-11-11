@@ -142,6 +142,8 @@ wire_kinds!(EventKind {
     PlanResolved => "plan.resolved",
     Cost => "cost",
     Context => "context",
+    // Retired with the board. Chats recorded while it existed hold these, and
+    // a kind that is not here would refuse to read them.
     LinkBead => "link.bead",
     ReportAvailable => "report.available",
     Error => "error",

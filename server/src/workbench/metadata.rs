@@ -52,7 +52,7 @@ pub const GUIDANCE: &str = "atelier_connection_guidance";
 pub const HANDOFF: &str = "account_handoff";
 /// The instructions of an Atelier command, sent after the line that ran it.
 pub const COMMAND: &str = "atelier_command";
-/// What the cards, chats and skills a message names are, sent after it
+/// What the chats, skills, diffs and tasks a message names are, sent after it
 /// (`references.rs`, bw-mi3s.2).
 pub const REFERENCES: &str = "atelier_references";
 

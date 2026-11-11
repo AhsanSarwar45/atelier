@@ -3482,10 +3482,9 @@ impl AcpDriver {
             .map_err(|_| "ACP adapter stopped before replying".to_string())?
     }
 
-    /// What the cards, chats, skills, diffs and tasks a message names are,
-    /// looked up now (`references.rs`). Cards come from the board already held for this
-    /// chat's project; chats from this app's own store; diffs from git in the
-    /// chat's own checkout.
+    /// What the chats, skills, diffs and tasks a message names are, looked up
+    /// now (`references.rs`). Chats come from this app's own store; diffs from
+    /// git in the chat's own checkout.
     async fn references_block(&self, text: &str) -> Option<String> {
         use crate::workbench::references::{self, Kind, Looked};
         let found = references::find(text);
@@ -3493,10 +3492,6 @@ impl AcpDriver {
             return None;
         }
         let mut looked = Looked::default();
-        for id in references::wanted(&found, Kind::Bead) {
-            let card = crate::routes::beads::card_for_reference(&self.session.project_path, &id).await;
-            looked.cards.push((id, card));
-        }
         for id in references::wanted(&found, Kind::Chat) {
             let chat = self.database.get_session(id.clone()).await.ok().flatten().map(|session| {
                 (crate::workbench::chat_name::name_session(&session), session.brand.clone())
