@@ -5,7 +5,6 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, Circle, Clock, FileCode2, Pause, Play } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
 import { Panel } from '@/components/ui/panel';
@@ -293,11 +292,8 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
       {widget.proposal ? <ProposalCard proposal={widget.proposal} /> : <TaskCard task={widget.task} event={widget.event} />}
     </WidgetFrame>
   );
-  if (widget.type === 'grid') return (
-    <WidgetFrame kind="grid" wide>
-      <GridCard widget={widget} />
-    </WidgetFrame>
-  );
+  // A grid change is a line of its own, like a task's (grid-card.tsx).
+  if (widget.type === 'grid') return <GridCard widget={widget} />;
   if (widget.type === 'image') return (
     <WidgetFrame kind="image" title={widget.title}>
       <ZoomableImage src={presentationAssetUrl(widget.asset)} alt={widget.alt} caption={widget.caption} />

@@ -47,7 +47,7 @@ import {
   type TaskProposal,
   type TaskStatus,
 } from '@/workbench/tasks/types';
-import { ITEM_LISTS, entryOutcome, itemCounts, itemProgress, itemText, recordedEntries, type ItemProgress } from '@/workbench/tasks/progress';
+import { ITEM_LISTS, VISUAL_TYPES, entryOutcome, itemCounts, itemProgress, itemText, recordedEntries, type ItemProgress } from '@/workbench/tasks/progress';
 import { tasksChangedFor, useLiveTask } from '@/workbench/tasks/use-tasks';
 import { ZoomableImage } from '@/workbench/zoomable-image';
 
@@ -230,24 +230,36 @@ function Still({ name, caption, src }: { name: string; caption: string; src: str
 }
 
 /**
- * A visual item's images behind a toggle: before and after side by side,
- * the after alone for something new (no before), and a reference under them.
+ * A visual item's images: before and after side by side, the after alone for
+ * something new (no before), and a reference under them. Behind a toggle
+ * where they would crowd a plan; `inline` where they are what is being
+ * looked at (a result in review, a checked item unfolded).
  */
-export function ShotPair({ name, before, after, reference, cwd }: { name: string; before?: string; after: string; reference?: string; cwd?: string | null }) {
-  const [shown, setShown] = useState(false);
+export function ShotPair({ name, before, after, reference, cwd, inline = false }: {
+  name: string;
+  before?: string;
+  after: string;
+  reference?: string;
+  cwd?: string | null;
+  inline?: boolean;
+}) {
+  const [toggled, setShown] = useState(false);
   const [looking, setLooking] = useState<LookableImage | null>(null);
   if (!before && !after) return null;
+  const shown = inline || toggled;
   const label = before
     ? reference ? 'Show before, after and reference' : 'Show before and after'
     : reference ? 'Show after and reference' : 'Show after';
   return (
     <div data-testid="task-images" data-shown={shown ? 'yes' : 'no'}>
-      <Button type="button" variant="ghost" size="xs" aria-expanded={shown} data-testid="task-images-toggle"
-        className="-ml-2 text-muted-foreground" onClick={() => setShown((open) => !open)}>
-        <Images aria-hidden />{shown ? 'Hide images' : label}
-      </Button>
+      {!inline && (
+        <Button type="button" variant="ghost" size="xs" aria-expanded={shown} data-testid="task-images-toggle"
+          className="-ml-2 text-muted-foreground" onClick={() => setShown((open) => !open)}>
+          <Images aria-hidden />{shown ? 'Hide images' : label}
+        </Button>
+      )}
       {shown && (
-        <div className="mt-1 space-y-2">
+        <div className={cn('space-y-2', !inline && 'mt-1')}>
           {before ? (
             <ImageComparisonView
               comparison={{
@@ -586,12 +598,15 @@ function MetList({ planned, results, label, cwd }: { planned: Loose[]; results: 
   );
 }
 
-/** The visual types: each screen or scene with its images behind a toggle. */
-function VisualResult({ type, plan, result, cwd }: { type: string; plan: Loose; result: Loose; cwd?: string | null }) {
+/**
+ * The visual types: each screen or scene with its images, behind a toggle
+ * each, or `inline` where the images are what is being reviewed.
+ */
+function VisualResult({ type, plan, result, cwd, inline = false }: { type: string; plan: Loose; result: Loose; cwd?: string | null; inline?: boolean }) {
   const key = ITEM_LISTS[type]?.result ?? 'screens';
   const shots = byId(list(result[key]));
   return (
-    <div className="space-y-2">
+    <div data-testid="task-visual-result" className={inline ? 'space-y-3' : 'space-y-2'}>
       {list(plan[ITEM_LISTS[type]?.plan ?? 'screens']).map((item) => {
         const shot = shots.get(str(item.id));
         const name = itemText(type, item);
@@ -599,7 +614,7 @@ function VisualResult({ type, plan, result, cwd }: { type: string; plan: Loose; 
           <div key={str(item.id)} data-testid="ui-screen">
             <div className="text-sm font-medium">{name}</div>
             {shot ? (
-              <ShotPair name={name} before={str(shot.before) || undefined} after={str(shot.after)} reference={str(shot.reference) || undefined} cwd={cwd} />
+              <ShotPair name={name} before={str(shot.before) || undefined} after={str(shot.after)} reference={str(shot.reference) || undefined} cwd={cwd} inline={inline} />
             ) : <Shortfall>No images</Shortfall>}
             {shot && str(shot.notes) && <div className="text-xs text-muted-foreground">{str(shot.notes)}</div>}
           </div>
@@ -638,12 +653,22 @@ function Followups({ items, label }: { items: Followup[]; label: string }) {
   );
 }
 
+/** A `plan` task's document. */
+function PlanDocument({ result }: { result: Loose }) {
+  if (!str(result.document)) return null;
+  return (
+    <Panel tone="nested" inset="md" data-testid="plan-document">
+      <MarkdownBody>{str(result.document)}</MarkdownBody>
+    </Panel>
+  );
+}
+
 export function ResultView({ type, plan, result, cwd, summarised = false }: {
   type: string;
   plan: unknown;
   result: unknown;
   cwd?: string | null;
-  /** Shown under a done summary, which already says the root cause and fix. */
+  /** Shown under a done summary, which already says the root cause and fix, and shows a plan's document. */
   summarised?: boolean;
 }) {
   const p = rec(plan);
@@ -680,9 +705,7 @@ export function ResultView({ type, plan, result, cwd, summarised = false }: {
     case 'plan':
       return (
         <div className="space-y-3">
-          <Panel tone="nested" inset="md" data-testid="plan-document">
-            <MarkdownBody>{str(r.document)}</MarkdownBody>
-          </Panel>
+          {!summarised && <PlanDocument result={r} />}
           {strings(r.decisions).length > 0 && <div><Label>Decisions</Label><Bullets items={strings(r.decisions)} /></div>}
           {strings(r.open_questions).length > 0 && <div><Label>Open questions</Label><Bullets items={strings(r.open_questions)} /></div>}
           <Followups label="Proposed tasks" items={list(r.proposed_tasks) as unknown as Followup[]} />
@@ -911,6 +934,18 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   return <section className="space-y-1.5"><Label>{label}</Label>{children}</section>;
 }
 
+/** The types whose plan starts with a heading of its own (Outcome, Steps, Symptom…). */
+const PLAN_HEADED: ReadonlySet<string> = new Set([
+  'bug', 'feature', 'general', 'ui_feature', 'render_feature', 'visual_bug', 'render_change', 'plan',
+  'investigation', 'refactor', 'tests', 'review', 'qa', 'docs', 'chore',
+]);
+
+/** A plan under a "Plan" heading, unless it starts with a heading of its own: never two stacked. */
+function PlanSection({ type, children }: { type: string; children: ReactNode }) {
+  if (PLAN_HEADED.has(type)) return <section data-testid="task-plan" className="space-y-1.5">{children}</section>;
+  return <Section label="Plan">{children}</Section>;
+}
+
 /** A plan field's value in a line: words as they are, a list joined. */
 function fieldValue(value: unknown): string {
   if (value === undefined || value === null || value === '') return '(none)';
@@ -972,7 +1007,9 @@ export function countsLine(items: readonly ItemProgress[]): string {
 /**
  * What a finished task came to, short: how many plan items were met, only
  * the missed ones with their reasons, the summary, and the commits with
- * whether they are merged. The whole result sits behind Show all.
+ * whether they are merged. The whole result sits behind Show all, except
+ * what is reviewed by looking at it: a visual task's images are shown as
+ * they are, and a plan's document comes first.
  */
 export function DoneSummary({ task, cwd, counted = false }: {
   task: Task;
@@ -989,8 +1026,10 @@ export function DoneSummary({ task, cwd, counted = false }: {
   const commits = Array.isArray(result.commits) ? result.commits.filter((c): c is string => typeof c === 'string') : [];
   const followups = Array.isArray(result.followups) ? result.followups : [];
   const r = rec(result);
+  const visual = VISUAL_TYPES.has(task.type);
   return (
     <div data-testid="task-done-summary" className="space-y-2">
+      {task.type === 'plan' && <PlanDocument result={r} />}
       {!counted && (counts || task.shortfalls) && (
         <div data-testid="task-done-counts" className={cn('flex items-center gap-1.5 text-xs', missed.length || task.shortfalls ? 'text-[var(--color-warning-accent)]' : 'text-muted-foreground')}>
           {(missed.length > 0 || task.shortfalls) && <AlertTriangle aria-hidden className="size-3.5" />}
@@ -1014,6 +1053,7 @@ export function DoneSummary({ task, cwd, counted = false }: {
       )}
       {typeof result.summary === 'string' && result.summary && <p className="whitespace-pre-wrap break-words text-sm">{result.summary}</p>}
       {(task.type === 'feature' || task.type === 'bug') && <Screenshots result={r} cwd={cwd} />}
+      {visual && <VisualResult type={task.type} plan={rec(task.plan)} result={r} cwd={cwd} inline />}
       {commits.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           <Label>Commits</Label>
@@ -1021,13 +1061,15 @@ export function DoneSummary({ task, cwd, counted = false }: {
           <MergeBadge task={task} />
         </div>
       )}
-      <Collapsible>
-        <CollapsibleTriggerRow size="sm" data-testid="task-result-all">{total ? `Show all ${total}` : 'Show the whole result'}</CollapsibleTriggerRow>
-        <CollapsibleContent className="space-y-3 pt-2">
-          <ResultView type={task.type} plan={task.plan} result={result} cwd={cwd} summarised />
-          <Followups label="Follow-ups" items={followups as Followup[]} />
-        </CollapsibleContent>
-      </Collapsible>
+      {visual ? <Followups label="Follow-ups" items={followups as Followup[]} /> : (
+        <Collapsible>
+          <CollapsibleTriggerRow size="sm" data-testid="task-result-all">{total ? `Show all ${total}` : 'Show the whole result'}</CollapsibleTriggerRow>
+          <CollapsibleContent className="space-y-3 pt-2">
+            <ResultView type={task.type} plan={task.plan} result={result} cwd={cwd} summarised />
+            <Followups label="Follow-ups" items={followups as Followup[]} />
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
   );
 }
@@ -1173,18 +1215,22 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
       {result ? (
         <>
           <Section label="Result"><DoneSummary task={task} cwd={cwd} /></Section>
+          {/* The answer to a result sits right after it. */}
+          {reviewing && (
+            <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve' || a === 'reopen')} onChanged={setActed} />
+          )}
           <Collapsible>
             <CollapsibleTriggerRow size="sm">Plan</CollapsibleTriggerRow>
             <CollapsibleContent className="pt-2"><PlanView type={task.type} plan={task.plan} /></CollapsibleContent>
           </Collapsible>
         </>
       ) : (
-        <Section label="Plan"><PlanView type={task.type} plan={task.plan} entries={checked} cwd={cwd} /></Section>
+        <PlanSection type={task.type}><PlanView type={task.type} plan={task.plan} entries={checked} cwd={cwd} /></PlanSection>
       )}
 
       <TaskCells task={task} />
 
-      {reviewing && (
+      {reviewing && !result && (
         <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve' || a === 'reopen')} onChanged={setActed} />
       )}
     </div>
@@ -1250,7 +1296,7 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
         <h4 className={cn('text-sm font-semibold text-foreground', proposal.status === 'cancelled' && 'text-muted-foreground line-through')}>{proposal.title}</h4>
         {proposal.why && <p className="text-xs text-muted-foreground">{proposal.why}</p>}
       </header>
-      <Section label="Plan"><PlanView type={proposal.type} plan={proposal.plan} /></Section>
+      <PlanSection type={proposal.type}><PlanView type={proposal.type} plan={proposal.plan} /></PlanSection>
       <ProposalCells proposal={proposal} />
       {pending ? (
         <div className="flex flex-wrap gap-2" data-testid="proposal-actions">

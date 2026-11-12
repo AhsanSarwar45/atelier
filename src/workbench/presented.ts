@@ -13,6 +13,10 @@
  * It is a reply rather than part of the command's row so that switching
  * commands off in the chat filter keeps the pictures. A block the agent did
  * paste into a later reply is drawn there instead, once.
+ *
+ * An `atelier task` or `atelier grid` call that drew its card is not drawn as
+ * a command too: the card says what happened, so each change is one row, not
+ * a command row and a card. A call that failed keeps its row.
  */
 import { widgetBlock, type ChatWidget } from '@/workbench/chat-widgets';
 import type { TranscriptItem, TranscriptMessage, TranscriptTool } from '@/workbench/fold';
@@ -37,14 +41,32 @@ export function ranThePresenter(tool: TranscriptTool): boolean {
 /** The row id a presenter call's widgets are drawn under. */
 export const presentedId = (toolId: string): string => `${toolId}:presented`;
 
-/** The items with a reply row after each presenter call whose widgets no reply carries. */
+/** Whether a call finished well: ran to the end without an error or a non-zero exit. */
+function succeeded(tool: TranscriptTool): boolean {
+  if (tool.status !== 'ok') return false;
+  const exit = tool.terminal?.exitCode;
+  return exit === undefined || exit === null || exit === 0;
+}
+
+/** Whether a call's own row gives way to the card it drew: a task or grid change that went well. */
+export function cardTakesItsPlace(tool: TranscriptTool, widgets: readonly ChatWidget[]): boolean {
+  return succeeded(tool) && widgets.length > 0 && widgets.every((widget) => widget.type === 'task' || widget.type === 'grid');
+}
+
+/**
+ * The items with a reply row after each presenter call whose widgets no reply
+ * carries; a task or grid call whose card is drawn there loses its own row.
+ */
 export function withPresented(items: TranscriptItem[]): TranscriptItem[] {
   if (!items.some((item) => item.kind === 'tool' && item.presented?.length)) return items;
   const pasted = lastPasted(items);
   const drawn: TranscriptItem[] = [];
+  let changed = false;
   items.forEach((item, at) => {
-    drawn.push(item);
-    if (item.kind !== 'tool' || !item.presented?.length || !ranThePresenter(item)) return;
+    if (item.kind !== 'tool' || !item.presented?.length || !ranThePresenter(item)) {
+      drawn.push(item);
+      return;
+    }
     const blocks: string[] = [];
     const widgets: ChatWidget[] = [];
     for (const widget of item.presented) {
@@ -53,7 +75,12 @@ export function withPresented(items: TranscriptItem[]): TranscriptItem[] {
       blocks.push(block);
       widgets.push(widget);
     }
-    if (widgets.length === 0) return;
+    if (widgets.length === 0) {
+      drawn.push(item);
+      return;
+    }
+    changed = true;
+    if (!cardTakesItsPlace(item, widgets)) drawn.push(item);
     const row: TranscriptMessage = {
       kind: 'message',
       id: presentedId(item.id),
@@ -68,8 +95,8 @@ export function withPresented(items: TranscriptItem[]): TranscriptItem[] {
     };
     drawn.push(row);
   });
-  // The same list when nothing was added, so what is drawn from it holds still.
-  return drawn.length === items.length ? items : drawn;
+  // The same list when nothing changed, so what is drawn from it holds still.
+  return changed ? drawn : items;
 }
 
 /** Where a reply last carried each widget, by the widget's exact block. */

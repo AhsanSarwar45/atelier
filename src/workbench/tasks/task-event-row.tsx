@@ -6,9 +6,11 @@
  * e.g. `Checked “Button works” — met`. Only the create card shows the plan.
  *
  * While the change still waits on the owner (a plan change not yet answered,
- * a finished task in review) its buttons sit on the line. A plan change and
- * a finished task unfold to what they changed and came to. Clicking the line
- * opens the task's detail in the Tasks tab; Back returns to the chat.
+ * a finished task in review) its buttons sit on the line, and once the line
+ * is unfolded, after what they decide on. A plan change and a finished task
+ * unfold to what they changed and came to, a visual check to its images.
+ * Clicking the line opens the task's detail in the Tasks tab; Back returns
+ * to the chat.
  */
 import { useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 
@@ -22,7 +24,7 @@ import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
 import { useLiveSessions } from '@/workbench/live';
 import { openTaskDetail } from '@/workbench/tasks/open-task';
-import { diffLine, planDiff, same } from '@/workbench/tasks/plan-diff';
+import { diffLine, planDiff, same, type PlanDiff } from '@/workbench/tasks/plan-diff';
 import { ITEM_LISTS, VISUAL_TYPES, entryOutcome, itemProgress, itemText, recordedEntries } from '@/workbench/tasks/progress';
 import { AmendDiff, DoneSummary, ShotPair, TaskOwnerActions, countsLine } from '@/workbench/tasks/task-card';
 import type { OwnerAction, Task, TaskEventDetail } from '@/workbench/tasks/types';
@@ -78,8 +80,21 @@ function checked(task: Task, detail: TaskEventDetail): { name: string; met: bool
   return { name, met, reason: str(detail.reason) || (outcome?.state === 'missed' ? outcome.note : '') };
 }
 
-/** What the line says, for the task as it was printed. */
-export function eventText(event: string, task: Task, detail: TaskEventDetail = {}): string {
+/** A plan change counted, for a line whose diff is open under it: `+1 / −1 / 1 changed`. */
+export function diffCounts(diff: PlanDiff): string {
+  const parts: string[] = [];
+  if (diff.added.length) parts.push(`+${diff.added.length}`);
+  if (diff.removed.length) parts.push(`−${diff.removed.length}`);
+  if (diff.changed.length) parts.push(`${diff.changed.length} changed`);
+  if (diff.fields.length) parts.push(`${diff.fields.length} ${diff.fields.length === 1 ? 'field' : 'fields'} changed`);
+  return parts.join(' / ') || 'no change';
+}
+
+/**
+ * What the line says, for the task as it was printed. `unfolded` when what it
+ * changed is open under it, so the line counts rather than repeats it.
+ */
+export function eventText(event: string, task: Task, detail: TaskEventDetail = {}, unfolded = false): string {
   switch (event) {
     case 'start': return 'Started';
     case 'unblock': return 'Unblocked';
@@ -98,8 +113,11 @@ export function eventText(event: string, task: Task, detail: TaskEventDetail = {
       const cause = str(detail.cause) || task.blocked?.cause || '';
       return cause ? `Blocked: ${cause}` : 'Blocked';
     }
-    case 'amend':
-      return task.pendingAmend ? `Plan change: ${diffLine(planDiff(task.type, task.plan, task.pendingAmend))}` : 'Plan change';
+    case 'amend': {
+      if (!task.pendingAmend) return 'Plan change';
+      const diff = planDiff(task.type, task.plan, task.pendingAmend);
+      return `Plan change: ${unfolded ? diffCounts(diff) : diffLine(diff)}`;
+    }
     case 'done': {
       const counts = countsLine(itemProgress(task));
       const head = task.status === 'review' ? 'Done, ready for review' : 'Done';
@@ -130,7 +148,7 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
   const [open, setOpen] = useState(() => rowOpensByDefault(event, waiting));
   const sessions = useLiveSessions();
   const cwd = (printed.sessionId ? sessions.find((s) => s.id === printed.sessionId)?.cwd : null) ?? null;
-  const text = useMemo(() => eventText(event, printed, detail), [event, printed, detail]);
+  const text = useMemo(() => eventText(event, printed, detail, open), [event, printed, detail, open]);
   const answered = answer(event, printed, now);
   const item = event === 'check' ? checked(printed, detail) : null;
   const Icon = item?.met === false ? AlertTriangle : ICON[event] ?? Check;
@@ -147,12 +165,17 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
     more = <div className="text-sm"><span className="text-muted-foreground">Needed to continue: </span>{str(detail.needed_to_resume)}</div>;
   } else if (event === 'check' && VISUAL_TYPES.has(printed.type) && item) {
     const entry = recordedEntries(printed).get(str(detail.item));
-    if (entry) more = <ShotPair name={item.name} before={str(entry.before) || undefined} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} />;
+    if (entry) more = <ShotPair name={item.name} before={str(entry.before) || undefined} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} inline />;
   }
 
   // A bare label (Started, Approved) sits on the task's own line rather than on a line of its own.
   const short = !more && !waiting && text.length <= 28;
   const only: OwnerAction[] = event === 'amend' ? ['approve_amend', 'reject_amend'] : event === 'done' ? ['approve', 'reopen'] : [];
+  // The owner's buttons: after what they decide on when it is open, on the line when it is folded.
+  const buttons = waiting && only.length > 0
+    ? <TaskOwnerActions task={now} only={only} onChanged={setActed} className="flex justify-end" />
+    : null;
+  const unfolded = open && !!more;
   // A click anywhere on the line opens the task, except on its buttons.
   const openFromLine = (e: MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button, a, textarea, input, form')) return;
@@ -192,11 +215,14 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
             <span data-testid="task-event-text" className="break-words">{text}</span>
           </Button>
         )}
-        {waiting && only.length > 0 && (
-          <TaskOwnerActions task={now} only={only} onChanged={setActed} className="flex justify-end" />
-        )}
+        {!unfolded && buttons}
       </div>
-      {open && more && <div data-testid="task-event-more" className="border-t border-border/60 px-3 py-2">{more}</div>}
+      {unfolded && (
+        <div data-testid="task-event-more" className="space-y-2 border-t border-border/60 px-3 py-2">
+          {more}
+          {buttons}
+        </div>
+      )}
     </Panel>
   );
 }

@@ -3,7 +3,7 @@
  * read as one, the draft card starts open with Approve and Discard, the N/A
  * card carries the owner's buttons, and the rest start folded.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { widget, widgetBlock } from '@/workbench/chat-widgets';
@@ -86,25 +86,44 @@ describe('the grid widget', () => {
     await waitFor(() => expect(act).toHaveBeenCalledWith('discard', { projectId: 'p1', slug: 'camera' }));
   });
 
-  it('says what became of a draft once it is answered', async () => {
+  it('says what became of a draft once it is answered, and only that', async () => {
     const approved = makeGrid();
     get.mockResolvedValue(makeDetail({ grid: approved }));
     render(<GridCard widget={{ type: 'grid', event: 'draft', grid: draftGrid }} />);
-    expect((await screen.findByTestId('grid-draft-answer')).textContent).toBe('Approved');
+    await waitFor(() => expect(screen.getByTestId('grid-card-label').textContent).toBe('Grid approved'));
+    // The line shows where the grid stands now, never "draft" and "approved" at once.
+    expect(screen.getByTestId('grid-card').textContent).not.toMatch(/draft/i);
+    expect(screen.getByTestId('grid-card')).toHaveAttribute('data-waiting', 'no');
     expect(screen.queryByTestId('grid-approve')).toBeNull();
   });
 
-  it('starts an N/A card open with the owner buttons', async () => {
+  it('starts an N/A card open with the owner buttons after the reason, Open grid beside them', async () => {
     const w: GridWidget = { type: 'grid', event: 'na', grid: makeGrid(), cell: { row: 'both', col: 'cpu', state: 'na_pending', reason: 'No CPU path' } };
     render(<GridCard widget={w} />);
-    fireEvent.click(await screen.findByTestId('cell-approve-na'));
+    const approve = await screen.findByTestId('cell-approve-na');
+    // One row of buttons: Approve N/A, Reject and Open grid.
+    const buttons = approve.parentElement!;
+    expect(within(buttons).getByTestId('cell-reject-na')).toBeVisible();
+    expect(within(buttons).getByTestId('grid-open')).toBeVisible();
+    expect(screen.getAllByTestId('grid-open')).toHaveLength(1);
+    const more = screen.getByTestId('grid-card-more');
+    expect(within(more).getByTestId('grid-cell-reason').compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Folded, the buttons stay on the line.
+    fireEvent.click(screen.getByTestId('grid-card-toggle'));
+    expect(screen.queryByTestId('grid-card-more')).toBeNull();
+    fireEvent.click(screen.getByTestId('cell-approve-na'));
     await waitFor(() => expect(act).toHaveBeenCalledWith('approve_na', { projectId: 'p1', slug: 'camera', row: 'both', col: 'cpu' }, undefined));
   });
 
-  it('starts a proof card folded', () => {
+  it('draws a proof as one folded line: what happened, the cell and the grid', async () => {
+    cell.mockResolvedValue(makeCellDetail());
     const w: GridWidget = { type: 'grid', event: 'prove', grid: makeGrid(), cell: { row: 'glare', col: 'gpu', state: 'proved' } };
     render(<GridCard widget={w} />);
     expect(screen.getByTestId('grid-card-toggle').getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByTestId('grid-cell-card')).toBeNull();
+    expect(screen.getByTestId('grid-card-label').textContent).toBe('Proved');
+    await waitFor(() => expect(screen.getByTestId('grid-card-what').textContent).toBe('Glare × GPU · camera'));
+    fireEvent.click(screen.getByTestId('grid-card-toggle'));
+    expect(screen.getByTestId('grid-cell-card')).toHaveTextContent('Glare kernel matches the reference renderer');
   });
 });

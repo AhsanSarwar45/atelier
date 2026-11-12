@@ -69,32 +69,39 @@ describe('the new visual types', () => {
 
   it('a finished ui_feature shows before and after side by side for a screen that existed, and the after alone for a new one', () => {
     render(<TaskCard task={uiFeature({ status: 'review', result: { summary: 'Pins', commits: ['abcdef1'], ...uiResult } })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Show all 2' }));
+    // Shown as they are: no Show all, no toggle per screen.
+    expect(screen.queryByTestId('task-result-all')).toBeNull();
+    expect(screen.queryByTestId('task-images-toggle')).toBeNull();
     const shots = screen.getAllByTestId('ui-screen');
-    expect(within(shots[0]!).queryByTestId('image-comparison')).toBeNull();
-    fireEvent.click(within(shots[0]!).getByRole('button', { name: 'Show before and after' }));
     expect(within(shots[0]!).getByTestId('image-comparison')).toBeInTheDocument();
     expect(within(shots[0]!).getByAltText('Chat list before')).toHaveAttribute('src', asset('a'));
-    fireEvent.click(within(shots[1]!).getByRole('button', { name: 'Show after' }));
     expect(within(shots[1]!).queryByTestId('image-comparison')).toBeNull();
     expect(within(shots[1]!).getByAltText('Pinned section after')).toHaveAttribute('src', asset('c'));
   });
 
   it('a finished render_feature shows the reference beside before and after', () => {
     render(<TaskCard task={renderFeature({ status: 'review', result: { summary: 'Sky', commits: ['abcdef1'], ...renderResult } })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Show all 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Show before, after and reference' }));
     expect(screen.getByAltText('Great hall after')).toHaveAttribute('src', asset('b'));
     expect(screen.getByAltText('Great hall reference')).toHaveAttribute('src', asset('c'));
   });
 
-  it('a check line unfolds to the images of the item it checked', () => {
+  it('a check line unfolds straight to the images of the item it checked', () => {
     const task = uiFeature({ status: 'in_progress', checks: { screens: [{ id: 'pinned', after: asset('c') }] } });
     render(<ChatWidgetView widget={{ type: 'task', event: 'check', task, detail: { item: 'pinned', met: true } }} />);
     expect(screen.getByTestId('task-event-text')).toHaveTextContent('Pinned section');
     fireEvent.click(screen.getByTestId('task-event-toggle'));
-    fireEvent.click(within(screen.getByTestId('task-event-more')).getByRole('button', { name: 'Show after' }));
-    expect(screen.getByAltText('Pinned section after')).toHaveAttribute('src', asset('c'));
+    const more = screen.getByTestId('task-event-more');
+    expect(within(more).queryByTestId('task-images-toggle')).toBeNull();
+    expect(within(more).getByAltText('Pinned section after')).toHaveAttribute('src', asset('c'));
+  });
+
+  it('a finished visual task in a chat shows its images in the done line, with the answer after them', () => {
+    const task = uiFeature({ status: 'review', result: { summary: 'Pins', commits: ['abcdef1'], ...uiResult } });
+    render(<ChatWidgetView widget={{ type: 'task', event: 'done', task }} />);
+    const more = screen.getByTestId('task-event-more');
+    expect(within(more).getByAltText('Pinned section after')).toHaveAttribute('src', asset('c'));
+    const approve = within(more).getByRole('button', { name: 'Approve' });
+    expect(within(more).getAllByTestId('ui-screen').at(-1)!.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

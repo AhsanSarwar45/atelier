@@ -132,7 +132,12 @@ describe('task widget validation', () => {
     expect(ranThePresenter(tool('atelier tool task done 7 --input r.json'))).toBe(true);
     expect(ranThePresenter(tool('atelier tool present image --file x.png'))).toBe(true);
     expect(ranThePresenter(tool('atelier tasks'))).toBe(false);
-    expect(withPresented([tool('atelier task done 7')]).map((item) => item.id)).toEqual(['t1', 't1:presented']);
+    // The card says what happened, so the call that drew it is not drawn as a command too.
+    expect(withPresented([tool('atelier task done 7')]).map((item) => item.id)).toEqual(['t1:presented']);
+    // A call that failed keeps its row, whatever it printed.
+    expect(withPresented([{ ...tool('atelier task done 7'), status: 'failed' }]).map((item) => item.id)).toEqual(['t1', 't1:presented']);
+    const exited = { ...tool('atelier task done 7'), terminal: { exitCode: 1 } } as unknown as TranscriptTool;
+    expect(withPresented([exited]).map((item) => item.id)).toEqual(['t1', 't1:presented']);
   });
 });
 
@@ -168,25 +173,30 @@ describe('task card rendering', () => {
     expect(prefill).toHaveBeenCalledWith('@task bug: Fix the layout thrash — Scroll is still slow');
   });
 
-  it('draws a UI change as before and after pictures behind a toggle, read from the chat folder', () => {
+  it('draws a UI change in review with its before and after pictures shown, read from the chat folder, and the answer after them', () => {
     detail(uiChange);
-    showAll();
+    // What is reviewed is looked at: no Show all, no toggle per screen.
+    expect(screen.queryByTestId('task-result-all')).toBeNull();
     const screenRow = screen.getByTestId('ui-screen');
-    expect(within(screenRow).queryByTestId('image-comparison')).toBeNull();
-    fireEvent.click(within(screenRow).getByTestId('task-images-toggle'));
+    expect(within(screenRow).queryByTestId('task-images-toggle')).toBeNull();
     expect(within(screenRow).getByTestId('image-comparison')).toBeInTheDocument();
     expect(within(screenRow).getByAltText('Home before')).toHaveAttribute('src', '/api/fs/media?path=%2Frepo%2Fshots%2Fbefore.png');
     expect(within(screenRow).getByAltText('Home after')).toHaveAttribute('src', `/api/presentation-assets/${'c'.repeat(64)}.png`);
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeVisible();
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(approve).toBeVisible();
     expect(screen.getByRole('button', { name: 'Reopen' })).toBeVisible();
+    expect(screenRow.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('draws a plan as its document, decisions, questions and proposed tasks', () => {
     const prefill = vi.fn();
     render(<ComposerPrefillContext.Provider value={prefill}><TaskCard task={plan.task!} /></ComposerPrefillContext.Provider>);
-    expect(screen.getByText('Wrote it')).toBeVisible();
+    // The document comes first, before the summary, and only once.
+    const document = screen.getByTestId('plan-document');
+    expect(document.compareDocumentPosition(screen.getByText('Wrote it')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     showAll();
-    expect(within(screen.getByTestId('plan-document')).getByRole('heading', { name: 'The design' })).toBeVisible();
+    expect(screen.getAllByTestId('plan-document')).toHaveLength(1);
+    expect(within(document).getByRole('heading', { name: 'The design' })).toBeVisible();
     expect(screen.getByText('Store in workbench.db')).toBeVisible();
     expect(screen.getByText('Import old cards?')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
@@ -235,10 +245,19 @@ describe('task card rendering', () => {
     render(<ChatWidgetView widget={card({ status: 'in_progress', plan: feature.task!.plan, pendingAmend: amend }, 'amend')} />);
     expect(screen.getByTestId('task-event-text')).toHaveTextContent('Plan change: +1 criterion “Exports PDF”');
     expect(screen.getByTestId('task-event')).toHaveAttribute('data-waiting', 'yes');
+    // Folded, the buttons sit on the line.
+    expect(screen.queryByTestId('task-event-more')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Approve change' })).toBeVisible();
     fireEvent.click(screen.getByTestId('task-event-toggle'));
+    // Open, the line counts the change rather than repeating it, and the buttons follow the diff.
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent(/^Plan change: \+1$/);
     const changes = screen.getAllByTestId('task-amend-change');
     expect(changes.map((row) => [row.getAttribute('data-change'), row.textContent])).toEqual([['added', 'Added: Exports PDF']]);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve change' }));
+    const more = screen.getByTestId('task-event-more');
+    const approve = within(more).getByRole('button', { name: 'Approve change' });
+    expect(screen.getAllByRole('button', { name: 'Approve change' })).toHaveLength(1);
+    expect(within(more).getByTestId('task-amend-diff').compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(approve);
     await waitFor(() => expect(act).toHaveBeenCalledWith('p1', 1, 'approve_amend', undefined));
     await waitFor(() => expect(screen.getByTestId('task-event-answer')).toHaveTextContent('Approved'));
     expect(screen.queryByRole('button', { name: 'Approve change' })).toBeNull();

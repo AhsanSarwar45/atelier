@@ -17,7 +17,7 @@ import { createContext, memo, useContext, useEffect, useMemo, useReducer, useRef
 
 import { request } from '@/lib/api';
 
-import { Brain, ChevronRight, Hand } from 'lucide-react';
+import { Ban, Brain, Check, ChevronDown, ChevronRight, CircleCheckBig, Hand, RotateCcw } from 'lucide-react';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { Badge, BadgeDot } from '@/components/ui/badge';
@@ -47,6 +47,7 @@ import { ChatSignIn } from '@/workbench/sign-in-dialog';
 import { attachmentMarker, attachmentsIn } from '@/workbench/mentions';
 import { AttachmentGrid, shownFrom } from '@/workbench/attachment-grid';
 import { useMessageActions } from '@/workbench/message-menu';
+import { ownerAnswers, type OwnerAnswer } from '@/workbench/owner-answer';
 import { withoutProposedPlans } from '@/workbench/proposed-plan';
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { comparisonSpecs } from '@/workbench/chat-media';
@@ -1179,6 +1180,49 @@ const MessageRow = memo(function MessageRow({
   );
 });
 
+/** The mark an answer's line wears, by what was answered. */
+function answerMark(line: string) {
+  if (/^You (approved|created)/.test(line)) return CircleCheckBig;
+  if (line.startsWith('You reopened')) return RotateCcw;
+  if (/^You (rejected|discarded|cancelled)/.test(line)) return Ban;
+  return Check;
+}
+
+/**
+ * The owner's answer to a task, proposal or grid as a short muted line in his
+ * words, not as a message he typed (owner-answer.ts). What the agent was told
+ * in full is on hover, and under the line when it is unfolded.
+ */
+const OwnerAnswerRow = memo(function OwnerAnswerRow({ id, answers }: { id: string; answers: OwnerAnswer[] }) {
+  const [open, setOpen] = useState(false);
+  const full = answers.map((a) => a.full).join('\n\n');
+  return (
+    <div data-testid="owner-answer" data-message-id={id} className="ml-auto max-w-[75ch] text-xs text-muted-foreground">
+      <div className="flex min-w-0 items-center justify-end gap-1.5">
+        <div className="min-w-0 space-y-0.5">
+          {answers.map((answer, index) => {
+            const Mark = answerMark(answer.line);
+            return (
+              <Tooltip key={index} label={answer.full}>
+                <div tabIndex={0} data-testid="owner-answer-line" className="flex min-w-0 items-center justify-end gap-1.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <Mark aria-hidden className="size-3.5 shrink-0" />
+                  <span className={cn('min-w-0', !open && 'truncate')}>{answer.line}</span>
+                </div>
+              </Tooltip>
+            );
+          })}
+        </div>
+        <Button type="button" variant="ghost" size="none" data-testid="owner-answer-toggle" aria-expanded={open}
+          aria-label={open ? 'Hide what the agent was told' : 'Show what the agent was told'}
+          className="size-4 shrink-0 text-muted-foreground" onClick={() => setOpen((o) => !o)}>
+          <ChevronDown aria-hidden className={cn('size-3.5 transition-transform', open && 'rotate-180')} />
+        </Button>
+      </div>
+      {open && <p data-testid="owner-answer-full" className="mt-1 whitespace-pre-wrap break-words pr-5 text-right">{full}</p>}
+    </div>
+  );
+});
+
 /**
  * Where each attachment's chip goes in the words of a message.
  *
@@ -1694,7 +1738,11 @@ export const TranscriptRow = memo(function TranscriptRow({
     case 'notice':
     case 'provider_message':
       return null;
-    default:
+    default: {
+      // The owner's answer, sent to the agent in his place, is a line, not his message.
+      const answers = item.role === 'user' && !item.images.length && !sentOff(item.parentId) ? ownerAnswers(item.text) : null;
+      if (answers) return <OwnerAnswerRow id={item.id} answers={answers} />;
       return <MessageRow item={item} mentions={mentions} onLook={onLook} />;
+    }
   }
 });
