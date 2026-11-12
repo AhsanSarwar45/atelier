@@ -53,7 +53,9 @@ describe('the grids list', () => {
     expect(within(camera).getByTestId('grid-na-pending').textContent).toBe('1 N/A pending');
     expect(within(camera).getByTestId('grid-awaiting')).toBeTruthy();
     expect(within(camera).queryByTestId('grid-gaps')).toBeNull();
-    expect(within(camera).getByTestId('grid-percent').textContent).toContain('20%');
+    // Proved over the cells that count, beside the bar.
+    expect(within(camera).getByTestId('grid-percent').dataset.percent).toBe('20');
+    expect(within(camera).getByTestId('grid-proved').textContent).toBe('2/10 proved');
     expect(within(rows[2]!).getByTestId('grid-gaps').textContent).toBe('2 gap');
     expect(within(rows[0]!).queryByTestId('grid-percent')).toBeNull();
     fireEvent.click(camera);

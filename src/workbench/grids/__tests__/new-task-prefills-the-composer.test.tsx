@@ -15,7 +15,7 @@ import { takeNewChatLine } from '@/workbench/tasks/new-task';
 const get = vi.fn();
 vi.mock('@/lib/api', async (original) => ({
   ...(await original<typeof import('@/lib/api')>()),
-  grids: { list: vi.fn(), get: (...args: unknown[]) => get(...args), cell: vi.fn(), act: vi.fn() },
+  grids: { list: vi.fn(), get: (...args: unknown[]) => get(...args), cell: vi.fn(() => new Promise(() => {})), act: vi.fn() },
 }));
 vi.mock('@/workbench/live', async (original) => ({
   ...(await original<typeof import('@/workbench/live')>()),
@@ -85,7 +85,26 @@ describe('New task from a grid selection', () => {
   it('cannot start a task with nothing claimable', async () => {
     draw();
     const both = (await screen.findAllByTestId('grid-cell')).find((el) => el.dataset.row === 'both' && el.dataset.col === 'gpu')!;
-    fireEvent.click(both);
+    fireEvent.click(both, { ctrlKey: true });
     await waitFor(() => expect(screen.getByTestId('grid-new-task')).toBeDisabled());
+  });
+
+  it('offers New task only for a selection made on purpose, not for opening a cell', async () => {
+    const onShow = vi.fn();
+    const { rerender } = render(<GridsView projectId="p1" grid="camera" cell={null} onShow={onShow} onOpenChat={vi.fn()} />);
+    const glare = (await screen.findAllByTestId('grid-cell')).find((el) => el.dataset.row === 'glare' && el.dataset.col === 'cpu')!;
+    fireEvent.click(glare);
+    expect(onShow).toHaveBeenLastCalledWith({ grid: 'camera', cell: 'glare:cpu' });
+    rerender(<GridsView projectId="p1" grid="camera" cell={{ row: 'glare', col: 'cpu' }} onShow={onShow} onOpenChat={vi.fn()} />);
+    // The open cell is outlined, but there is no selection bar.
+    const open = (await screen.findAllByTestId('grid-cell')).find((el) => el.dataset.row === 'glare' && el.dataset.col === 'cpu')!;
+    expect(open.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByTestId('grid-selection')).toBeNull();
+    // A column picked on purpose brings it; Clear takes it away and leaves the cell open.
+    fireEvent.click((await screen.findAllByTestId('grid-column')).find((el) => el.dataset.col === 'gpu')!);
+    expect(screen.getByTestId('grid-selection')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.queryByTestId('grid-selection')).toBeNull();
+    expect(onShow).not.toHaveBeenCalledWith({ grid: 'camera', cell: null });
   });
 });

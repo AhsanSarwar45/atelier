@@ -31,6 +31,19 @@ const draw = (onOpenTask = vi.fn()) => {
 };
 
 describe('the cell detail', () => {
+  it('heads with the way back to the grid, by name, for a phone', async () => {
+    const onClose = vi.fn();
+    render(<CellDetailPanel projectId="p1" slug="camera" row="glare" col="gpu" gridName="Renderer camera" onClose={onClose} />);
+    const back = screen.getByTestId('cell-back');
+    expect(back.textContent).toBe('Renderer camera');
+    // Shown below md, where the cell takes the grid's place; the close button is the desktop's.
+    expect(back.className).toContain('md:hidden');
+    expect(screen.getByRole('button', { name: 'Close' }).className).toContain('md:inline-flex');
+    fireEvent.click(back);
+    expect(onClose).toHaveBeenCalled();
+    await screen.findByTestId('cell-proof');
+  });
+
   it('shows the proof: summary, checks with their last result, benchmarks, tests and merged commits', async () => {
     draw();
     const proof = await screen.findByTestId('cell-proof');

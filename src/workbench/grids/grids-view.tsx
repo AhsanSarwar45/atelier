@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Progress } from '@/components/ui/progress';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Row } from '@/components/ui/row';
 import { Spinner } from '@/components/ui/spinner';
@@ -19,7 +20,7 @@ import { Switch } from '@/components/ui/switch';
 import { grids as gridsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { CellDetailPanel, failure } from '@/workbench/grids/cell-detail';
-import { DraftActions, DraftView, PercentBar } from '@/workbench/grids/grid-card';
+import { DraftActions, DraftView } from '@/workbench/grids/grid-card';
 import { GridHeatmap, Legend, orderRows } from '@/workbench/grids/grid-heatmap';
 import { newTaskLine, selectedCells, type Selection } from '@/workbench/grids/selection';
 import { draftColumns, draftContent, draftDiff, type GridDetail, type GridSummary, type GridTemplate } from '@/workbench/grids/types';
@@ -41,6 +42,19 @@ export function orderGrids(grids: GridSummary[]): GridSummary[] {
     });
 }
 
+/** How far a grid is proved: a bar and "2/34 proved". */
+export function GridProgress({ grid, className }: { grid: Pick<GridSummary, 'percent' | 'counts'>; className?: string }) {
+  if (grid.percent === null || grid.percent === undefined) return null;
+  const proved = grid.counts?.proved ?? 0;
+  const counted = grid.counts?.counted ?? 0;
+  return (
+    <div className={cn('flex items-center gap-2', className)} data-testid="grid-percent" data-percent={grid.percent}>
+      <Progress value={grid.percent} size="sm" tone={grid.percent >= 100 ? 'success' : 'default'} aria-label="Proved" className="min-w-16 flex-1" />
+      <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground" data-testid="grid-proved">{`${proved}/${counted} proved`}</span>
+    </div>
+  );
+}
+
 function Count({ n, label, tone, testId }: { n: number; label: string; tone: 'destructive' | 'warning' | 'secondary'; testId: string }) {
   if (!n) return null;
   return (
@@ -54,15 +68,15 @@ function GridListRow({ grid, onOpen }: { grid: GridSummary; onOpen: () => void }
   return (
     <Row gap="md" data-testid="grid-list-row" data-slug={grid.slug} onClick={onOpen} className="min-h-12 flex-wrap py-2 sm:flex-nowrap">
       <Grid3x3 aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate text-sm">{grid.title || grid.slug}</span>
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+      <span className="min-w-0 flex-1 break-words text-sm sm:truncate">{grid.title || grid.slug}</span>
+      <div className="flex w-full flex-wrap items-center gap-1.5 empty:hidden sm:w-auto sm:shrink-0">
         {grid.status === 'draft' && <Badge variant="secondary" appearance="light" size="sm"><span>Draft</span></Badge>}
         {grid.pending && <Badge variant="warning" appearance="light" size="sm" data-testid="grid-awaiting"><span>Awaiting approval</span></Badge>}
         <Count n={grid.counts?.gap ?? 0} label="gap" tone="destructive" testId="grid-gaps" />
         <Count n={grid.counts?.stale ?? 0} label="stale" tone="warning" testId="grid-stale" />
         <Count n={grid.counts?.naPending ?? 0} label="N/A pending" tone="warning" testId="grid-na-pending" />
       </div>
-      {grid.status === 'approved' && <PercentBar percent={grid.percent} className="w-full sm:w-40" />}
+      {grid.status === 'approved' && <GridProgress grid={grid} className="w-full sm:w-48" />}
     </Row>
   );
 }
@@ -145,12 +159,13 @@ function GridToolbar({ detail, onDone }: { detail: GridDetail; onDone: () => voi
   };
   return (
     <div className="space-y-1">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <span className="min-w-0 flex-1 text-xs text-muted-foreground" data-testid="grid-discovery">
           {!run ? 'Row search not run yet'
             : run.ok === false ? <span className="text-[var(--color-destructive-accent)]">{`Row search failed ${ago(run.at)}: ${run.error ?? 'no reason given'}`}</span>
               : `Rows searched ${ago(run.at)} · ${run.added?.length ?? 0} added · ${run.missing?.length ?? 0} missing`}
         </span>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
         <Button type="button" size="xs" variant="outline" data-testid="grid-discover" loading={busy === 'discover'} disabled={busy !== null} onClick={() => void act('discover')}>
           <Search aria-hidden />
           Discover
@@ -159,6 +174,7 @@ function GridToolbar({ detail, onDone }: { detail: GridDetail; onDone: () => voi
           <RefreshCw aria-hidden />
           Re-check stale
         </Button>
+        </div>
       </div>
       {run?.skipped && run.skipped.length > 0 && (
         <p className="text-xs text-muted-foreground">{`Owned by other grids: ${run.skipped.map((s) => `${s.id} (${s.owner})`).join(', ')}`}</p>
@@ -247,9 +263,11 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
 }) {
   const { data: detail, loaded, error, refetch } = useGrid(projectId, slug);
   const [showRetired, setShowRetired] = useState(false);
-  const [own, setSelection] = useState<Selection | null>(null);
-  // A cell named in the address is selected as well as open.
-  const selection = own ?? (cell ? { rows: [cell.row], cols: [cell.col] } : null);
+  // A selection made on purpose: a row or column name, shift-click,
+  // ctrl-click or a drag. Only this one offers New task.
+  const [chosen, setSelection] = useState<Selection | null>(null);
+  // The cell whose detail is open is outlined too, without the selection bar.
+  const selection = chosen ?? (cell ? { rows: [cell.row], cols: [cell.col] } : null);
   const rows = useMemo(() => (detail ? orderRows(detail.rows) : []), [detail]);
   const columns = useMemo(() => (detail ? detail.columns.filter((c) => showRetired || !c.retired) : []), [detail, showRetired]);
   const retired = detail?.columns.filter((c) => c.retired).length ?? 0;
@@ -259,14 +277,14 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
   const main = (
     <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', cell && 'hidden md:flex')}>
       <div className="space-y-2 border-b border-border/60 px-4 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <Button type="button" variant="ghost" size="xs" data-testid="grid-back" onClick={() => onShow({ grid: null })}>
             <ArrowLeft aria-hidden />
             Grids
           </Button>
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold" data-testid="grid-title">{grid?.title || slug}</h2>
+          <h2 className="min-w-0 flex-1 text-sm font-semibold sm:truncate" data-testid="grid-title">{grid?.title || slug}</h2>
           {grid?.status === 'draft' && <Badge variant="secondary" appearance="light" size="sm"><span>Draft</span></Badge>}
-          {grid?.status === 'approved' && <PercentBar percent={grid.percent} className="w-28 sm:w-40" />}
+          {grid?.status === 'approved' && <GridProgress grid={grid} className="w-full sm:w-56" />}
         </div>
         {grid?.status === 'approved' && detail && <GridToolbar detail={detail} onDone={refetch} />}
       </div>
@@ -304,6 +322,7 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
                     selection={selection}
                     onSelect={setSelection}
                     onOpenCell={(row, column) => {
+                      setSelection(null);
                       // A reference row's cells are the owner grid's; its detail is there.
                       if (row.kind === 'reference' && row.ref) onShow({ grid: row.ref.grid, cell: `${row.ref.row}:${column.id}` });
                       else onShow({ grid: slug, cell: `${row.id}:${column.id}` });
@@ -317,14 +336,14 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
           </>
         )}
       </div>
-      {detail && selection && grid?.status === 'approved' && (
+      {detail && chosen && grid?.status === 'approved' && (
         <SelectionBar
           detail={detail}
-          selection={selection}
+          selection={chosen}
           projectId={projectId}
           onOpenChat={onOpenChat}
           onNewChat={onNewChat}
-          onClear={() => { setSelection(null); if (cell) onShow({ grid: slug, cell: null }); }}
+          onClear={() => setSelection(null)}
         />
       )}
     </div>
@@ -340,6 +359,7 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
             slug={slug}
             row={cell.row}
             col={cell.col}
+            gridName={grid?.title || slug}
             onClose={() => onShow({ grid: slug, cell: null })}
             onOpenTask={onOpenTask}
           />

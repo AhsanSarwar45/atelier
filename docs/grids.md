@@ -521,14 +521,15 @@ N/A awaiting the owner: camera.ghosts.presets_grounded
   the Tasks tab. The address is `tab=tasks&view=grids`. `grid=SLUG` opens a
   grid, and `cell=ROW:COL` also opens that cell's detail. These are added to
   `src/lib/address.ts` like `task=`.
-- **Grids list.** One row per grid: title, a percent-proved bar, and chips
+- **Grids list.** One row per grid: title, a bar with "N/M proved", and chips
   for gap, stale and N/A pending, plus an **Awaiting approval** chip when
   `pending` is set. Draft grids come first, then the rest by lowest percent
   first. Discarded grids are hidden. Templates are listed under the grids,
   read-only, with any pending change.
 - **Grid view.** A heatmap with rows down the side (combinations indented
   under their first `of` row, references in italics with their owner),
-  columns along the top (hovering shows the `proof_rule`), and one square per
+  columns along the top, their names reading upwards and wrapping rather
+  than cut (hovering shows the `proof_rule`), and one square per
   cell coloured by state: unchecked muted, gap destructive, in progress info,
   proved success, stale success hatched, N/A pending warning outline, N/A
   dash. Missing rows are dimmed and retired columns are hidden behind a
@@ -536,10 +537,12 @@ N/A awaiting the owner: camera.ghosts.presets_grounded
   added/missing counts, error), **Discover**, **Re-check stale**, and the
   pending-edit banner with Approve/Discard.
 - **Selection.** Clicking a column header selects that column. Clicking a
-  row header selects that row. Clicking a cell selects it and opens its
-  detail. Shift-click or drag selects the rectangle from the anchor. A
-  selection is always a row set × column set, which is what `@grid:`
-  encodes. The selection bar reads "N cells (M claimable) · **New task**".
+  row header selects that row. Clicking a cell opens its detail and outlines
+  it; ctrl- or cmd-click selects the cell without opening it. Shift-click or
+  drag selects the rectangle from the anchor. A selection is always a row set
+  × column set, which is what `@grid:` encodes. The selection bar, shown only
+  for a selection made this way and not for a cell opened, reads "N cells (M
+  claimable) · **New task**".
   New task uses the Tasks tab's New task flow (new chat or an existing chat)
   and prefills `@task @grid:SLUG.ROWS.COLS ` through `prefillChat`, with
   `startTaskIn` given the line. Cells that are not claimable are listed in a

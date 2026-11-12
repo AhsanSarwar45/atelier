@@ -5,9 +5,9 @@
  * open, the proof behind it and what became of each check, its history, and
  * the owner's buttons.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
-import { Check, ExternalLink, GitMerge, X } from 'lucide-react';
+import { ArrowLeft, Check, ExternalLink, GitMerge, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -56,7 +56,7 @@ export function withinBudget(b: Pick<Benchmark, 'value' | 'budget' | 'lower_is_b
  * N/A waits on him, Reopen (with a reason) for a proved or N/A cell, and
  * Re-check for a cell with proof.
  */
-export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = true, onDone }: {
+export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = true, onDone, extra }: {
   projectId: string;
   slug: string;
   row: string;
@@ -65,6 +65,8 @@ export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = tr
   /** Offer Re-check: the detail panel does, the N/A card does not. */
   recheck?: boolean;
   onDone?: () => void;
+  /** More buttons for the same row, after these (the N/A card's Open grid). */
+  extra?: ReactNode;
 }) {
   const [busy, setBusy] = useState<GridOwnerAction | null>(null);
   const [asking, setAsking] = useState<'reject_na' | 'reopen' | null>(null);
@@ -134,6 +136,7 @@ export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = tr
           {reopens && (
             <Button type="button" size="sm" variant="ghost" data-testid="cell-reopen" onClick={() => setAsking('reopen')} disabled={busy !== null}>Reopen</Button>
           )}
+          {extra}
         </div>
       )}
       {checkFailed && <div role="alert" data-testid="cell-check-failed" className="text-xs text-destructive">{`Re-check failed: ${checkFailed}`}</div>}
@@ -294,11 +297,14 @@ export function ProofView({ cell }: { cell: Pick<CellFull, 'proof' | 'lastCheck'
 }
 
 /** The detail panel: reads the cell, and again whenever the project's grids change. */
-export function CellDetailPanel({ projectId, slug, row, col, onClose, onOpenTask }: {
+export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, onOpenTask }: {
   projectId: string;
   slug: string;
   row: string;
   col: string;
+  /** The grid's name, for the back control a phone shows in place of the grid. */
+  gridName?: string;
+  /** Back to the grid. */
   onClose: () => void;
   /** Opens the task that claims the cell. */
   onOpenTask?: (task: number) => void;
@@ -328,13 +334,20 @@ export function CellDetailPanel({ projectId, slug, row, col, onClose, onOpenTask
   const cell = detail?.cell;
   return (
     <div data-testid="cell-detail" data-row={row} data-col={col} className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">
-        <span className="min-w-0 truncate text-sm font-medium">
-          {detail ? `${detail.row.name} × ${detail.column.name}` : `${row} × ${col}`}
-        </span>
-        <Button type="button" variant="ghost" size="icon" aria-label="Close" className="ml-auto size-8 shrink-0" onClick={onClose}>
-          <X />
+      <div className="space-y-1 border-b border-border/60 px-4 py-2">
+        {/* On a phone the cell takes the grid's place, so the way back names the grid. */}
+        <Button type="button" variant="ghost" size="xs" data-testid="cell-back" className="-ml-2 max-w-full md:hidden" onClick={onClose}>
+          <ArrowLeft aria-hidden />
+          <span className="truncate">{gridName || slug}</span>
         </Button>
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 text-sm font-medium md:truncate" data-testid="cell-title">
+            {detail ? `${detail.row.name} × ${detail.column.name}` : `${row} × ${col}`}
+          </span>
+          <Button type="button" variant="ghost" size="icon" aria-label="Close" className="ml-auto hidden size-8 shrink-0 md:inline-flex" onClick={onClose}>
+            <X />
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
         {error && !detail ? (

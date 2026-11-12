@@ -4,12 +4,15 @@
  * A grid as a heatmap (docs/grids.md, "Grid view"): rows down the side,
  * columns along the top, one square per cell coloured by its state.
  *
- * Clicking a column header selects the column, a row header the row, and a
- * cell the cell, which also opens its detail. Shift-click, or a drag with the
- * mouse, selects the rectangle from the cell clicked first. On a phone the
- * table scrolls sideways under row names that stay put.
+ * Clicking a column header selects the column, a row header the row; clicking
+ * a cell opens its detail, and ctrl- or cmd-click selects it instead.
+ * Shift-click, or a drag with the mouse, selects the rectangle from the cell
+ * clicked first. Cells grow with the width, between CELL_MIN and CELL_MAX, the
+ * same on a phone as on a desktop; column names read upwards and wrap rather
+ * than being cut. When the table is wider than the page it scrolls sideways
+ * under row names that stay put.
  */
-import { useEffect, useRef, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -91,11 +94,62 @@ export function Legend({ className }: { className?: string }) {
 
 const key = (row: string, col: string) => `${row}\u0000${col}`;
 
+/** The smallest and largest a cell is drawn, the same on a phone and a desktop. */
+export const CELL_MIN = 32;
+export const CELL_MAX = 48;
+/** The gap between cells. */
+const GAP = 3;
+/** A column name's line height, and the tallest the names' header grows. */
+const LINE = 14;
+const LABEL_MAX = 200;
+/** What one character of a 12px name takes, near enough to size the header by. */
+const CHAR_PX = 6.6;
+
+/**
+ * The cell size that fills `width` with `columns` columns beside the row
+ * names, kept between CELL_MIN and CELL_MAX.
+ */
+export function cellSize(width: number, names: number, columns: number): number {
+  if (!columns || width <= 0) return CELL_MIN;
+  const each = Math.floor((width - names) / columns) - GAP;
+  return Math.max(CELL_MIN, Math.min(CELL_MAX, each));
+}
+
+/**
+ * How tall the column names' header is: the names read upwards and wrap to as
+ * many lines as fit across a column (two at the smallest size, three at the
+ * largest), so the longest name is shown whole rather than cut.
+ */
+export function headerHeight(names: string[], size: number): number {
+  const longest = Math.max(0, ...names.map((name) => name.length)) * CHAR_PX;
+  const lines = Math.max(1, Math.floor((size - 4) / LINE));
+  // A little over an even share, since lines break between words.
+  return Math.ceil(Math.min(longest, Math.max(96, longest / lines + 4 * CHAR_PX), LABEL_MAX)) + 8;
+}
+
+/** The width of the box, followed as it changes. */
+function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
+  const ref = useRef<T>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    setWidth(node.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(() => setWidth(node.clientWidth));
+    watch.observe(node);
+    return () => watch.disconnect();
+  }, []);
+  return [ref, width];
+}
+
 export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenCell }: {
   rows: DrawnRow[];
   columns: GridColumn[];
   cells: GridCell[];
+  /** What is outlined: a selection made on purpose, or the cell whose detail is open. */
   selection: Selection | null;
+  /** A selection made on purpose: a row or column name, shift-click, ctrl-click or a drag. */
   onSelect: (selection: Selection) => void;
   /** A plain click on a cell: its detail. */
   onOpenCell: (row: GridRow, column: GridColumn) => void;
@@ -105,6 +159,7 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
   const colOrder = columns.map((column) => column.id);
   const anchor = useRef<{ row: string; col: string } | null>(null);
   const drag = useRef<{ from: { row: string; col: string }; moved: boolean } | null>(null);
+  const [box, width] = useWidth<HTMLDivElement>();
 
   useEffect(() => {
     const up = () => { drag.current = null; };
@@ -112,31 +167,41 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
     return () => window.removeEventListener('pointerup', up);
   }, []);
 
+  // Row names take what they need, up to two fifths of the width (and 16rem), wrapping past it.
+  const wanted = Math.max(64, ...rows.map(({ row, depth }) => row.name.length * CHAR_PX + depth * 12 + 20));
+  const names = Math.round(Math.min(wanted, Math.max(width * 0.4, 112), 256));
+  const size = cellSize(width, names, columns.length);
+  const header = headerHeight(columns.map((column) => column.name), size);
+  const colSelected = (id: string) => !!selection && selection.cols !== '*' && selection.cols.includes(id) && selection.rows === '*';
+  const rowSelected = (id: string) => !!selection && selection.rows !== '*' && selection.rows.includes(id) && selection.cols === '*';
+
   return (
-    <div className="min-h-0 overflow-auto overscroll-x-contain" data-testid="grid-heatmap">
-      <table className="border-separate border-spacing-[3px] select-none">
+    <div ref={box} className="w-full shrink-0 overflow-x-auto overflow-y-hidden overscroll-x-contain" data-testid="grid-heatmap" data-cell-size={size}>
+      <table className="border-separate select-none" style={{ borderSpacing: GAP }}>
         <thead>
           <tr>
-            <th className="sticky left-0 top-0 z-30 bg-background" />
+            <th className="sticky left-0 z-20 bg-background" style={{ minWidth: names, maxWidth: names }} />
             {columns.map((column) => (
-              <th key={column.id} scope="col" className="sticky top-0 z-20 bg-background p-0 align-bottom">
-                <Tooltip label={column.proofRule || undefined} side="bottom">
+              <th key={column.id} scope="col" className="p-0 align-bottom" style={{ height: header, width: size, minWidth: size }}>
+                <Tooltip label={column.proofRule ? `${column.name}: ${column.proofRule}` : column.name} side="top">
                   <Button
                     type="button"
                     variant="foreground"
                     size="none"
                     data-testid="grid-column"
                     data-col={column.id}
-                    aria-pressed={!!selection && selection.rows === '*' && selection.cols !== '*' && selection.cols.length === 1 && selection.cols[0] === column.id}
+                    data-reach="own"
+                    aria-pressed={colSelected(column.id)}
                     onClick={() => {
                       anchor.current = null;
                       onSelect({ rows: '*', cols: [column.id] });
                     }}
+                    style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', width: size, maxHeight: header - 4, lineHeight: `${LINE}px` }}
                     className={cn(
-                      'mx-auto block max-h-36 w-8 truncate rounded-sm px-1 py-1 text-left text-xs font-normal text-muted-foreground [writing-mode:vertical-rl] rotate-180 hover:bg-accent hover:text-foreground sm:w-6',
+                      'flex items-center justify-start overflow-hidden whitespace-normal break-words rounded-sm py-1 text-left text-xs font-normal text-muted-foreground hover:bg-accent hover:text-foreground',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       column.retired && 'line-through',
-                      selection && selection.cols !== '*' && selection.cols.includes(column.id) && 'font-medium text-foreground',
+                      colSelected(column.id) && 'bg-accent font-medium text-foreground',
                     )}
                   >
                     {column.name}
@@ -149,25 +214,27 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
         <tbody>
           {rows.map(({ row, depth }) => (
             <tr key={row.id} data-testid="grid-row" data-row={row.id} data-missing={row.missing || undefined} className={cn(row.missing && 'opacity-40')}>
-              <th scope="row" className="sticky left-0 z-10 bg-background p-0 text-left font-normal">
+              <th scope="row" className="sticky left-0 z-10 bg-background p-0 text-left font-normal" style={{ minWidth: names, maxWidth: names }}>
                 <Tooltip label={row.missing ? 'Missing: the row search no longer lists it' : undefined} side="right">
                 <Button
                   type="button"
                   variant="foreground"
                   size="none"
                   data-testid="grid-row-name"
+                  data-reach="own"
+                  aria-pressed={rowSelected(row.id)}
                   onClick={() => {
                     anchor.current = null;
                     onSelect({ rows: [row.id], cols: '*' });
                   }}
-                  style={{ paddingLeft: `${0.25 + depth * 0.75}rem` }}
+                  style={{ paddingLeft: `${0.25 + depth * 0.75}rem`, minHeight: size }}
                   className={cn(
-                    'flex h-8 w-36 items-center justify-start gap-1 rounded-sm pr-2 text-left text-xs font-normal hover:bg-accent sm:h-6 sm:w-56',
+                    'flex w-full items-center justify-start gap-1 whitespace-normal rounded-sm py-0.5 pr-2 text-left text-xs font-normal leading-4 hover:bg-accent',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    selection && selection.rows !== '*' && selection.rows.includes(row.id) && 'font-medium',
+                    rowSelected(row.id) && 'bg-accent font-medium',
                   )}
                 >
-                  <span className={cn('min-w-0 truncate', row.kind === 'reference' && 'italic text-muted-foreground')}>{row.name}</span>
+                  <span className={cn('min-w-0 break-words', row.kind === 'reference' && 'italic text-muted-foreground')}>{row.name}</span>
                   {row.kind === 'reference' && row.ref && <span className="shrink-0 text-[10px] text-muted-foreground">{row.ref.grid}</span>}
                 </Button>
                 </Tooltip>
@@ -179,7 +246,7 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
                 const chosen = selects(selection, row.id, column.id);
                 const here = { row: row.id, col: column.id };
                 return (
-                  <td key={column.id} className="p-0">
+                  <td key={column.id} className="p-0 align-middle">
                     <Button
                       type="button"
                       variant="foreground"
@@ -190,10 +257,11 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
                       data-state={cell.state}
                       data-look={look}
                       data-ref={cell.ref ? 'yes' : undefined}
+                      data-reach="own"
                       aria-pressed={chosen}
                       aria-label={`${row.name} × ${column.name}: ${LOOK_LABEL[look]}${cell.claimedTask ? `, claimed by #${cell.claimedTask}` : ''}`}
                       onPointerDown={(event) => {
-                        if (event.pointerType !== 'mouse' || event.button !== 0 || event.shiftKey) return;
+                        if (event.pointerType !== 'mouse' || event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey) return;
                         drag.current = { from: here, moved: false };
                       }}
                       onPointerEnter={(event) => {
@@ -210,16 +278,20 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
                           return;
                         }
                         anchor.current = here;
-                        onSelect({ rows: [row.id], cols: [column.id] });
+                        // Ctrl- or Cmd-click picks the cell for a task without opening it.
+                        if (event.ctrlKey || event.metaKey) {
+                          onSelect({ rows: [row.id], cols: [column.id] });
+                          return;
+                        }
                         onOpenCell(row, column);
                       }}
-                      style={look === 'stale' ? HATCH : undefined}
+                      style={{ ...(look === 'stale' ? HATCH : undefined), width: size, height: size }}
                       className={cn(
-                        'flex size-8 items-center justify-center rounded-[4px] text-xs leading-none sm:size-6',
+                        'flex items-center justify-center rounded-[4px] text-xs leading-none',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         LOOK_CLASS[look],
                         cell.ref && 'opacity-70',
-                        chosen && 'outline outline-2 outline-offset-1 outline-primary',
+                        chosen && 'relative z-[1] ring-2 ring-foreground ring-offset-1 ring-offset-background',
                       )}
                     >
                       {look === 'na' ? '–' : null}
