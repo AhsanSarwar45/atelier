@@ -1125,7 +1125,7 @@ const MessageRow = memo(function MessageRow({
   const actions = useMessageActions(item);
   // A task card printed by `atelier task` is a card of its own, not a reply:
   // no message box around it, so it is not a card inside a card.
-  const bare = !!item.presentedBy && !!item.widgets?.length && item.widgets.every((widget) => widget.type === 'task');
+  const bare = !!item.presentedBy && !!item.widgets?.length && item.widgets.every((widget) => widget.type === 'task' || widget.type === 'grid');
   return (
     <>
     <div

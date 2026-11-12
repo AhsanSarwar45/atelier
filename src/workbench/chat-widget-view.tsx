@@ -24,6 +24,7 @@ import { StoredImage } from '@/workbench/stored-image';
 const VisualArtifactView = dynamic(() => import('@/workbench/visual-artifact-view').then((m) => m.VisualArtifactView), { ssr: false });
 import { useOpenPath } from '@/workbench/open-path';
 import { presentationAssetUrl } from '@/workbench/attachment-store';
+import { GridCard } from '@/workbench/grids/grid-card';
 import { ProposalCard, TaskCard } from '@/workbench/tasks/task-card';
 
 const COLORS = ['var(--color-primary-accent)', 'var(--color-info-accent)', 'var(--color-success-accent)', 'var(--color-warning-accent)'];
@@ -287,6 +288,11 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   if (widget.type === 'task') return (
     <WidgetFrame kind="task" wide>
       {widget.proposal ? <ProposalCard proposal={widget.proposal} /> : <TaskCard task={widget.task} event={widget.event} />}
+    </WidgetFrame>
+  );
+  if (widget.type === 'grid') return (
+    <WidgetFrame kind="grid" wide>
+      <GridCard widget={widget} />
     </WidgetFrame>
   );
   if (widget.type === 'image') return (

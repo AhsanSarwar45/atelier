@@ -18,10 +18,11 @@ import { widgetBlock, type ChatWidget } from '@/workbench/chat-widgets';
 import type { TranscriptItem, TranscriptMessage, TranscriptTool } from '@/workbench/fold';
 
 /**
- * The presenter, and `atelier task` (or `atelier tool task`), whose every
- * change prints the task's card the same way (docs/tasks.md).
+ * The presenter, and `atelier task` and `atelier grid` (or `atelier tool
+ * task`, `atelier tool grid`), whose every change prints its card the same way
+ * (docs/tasks.md, docs/grids.md).
  */
-const PRESENTER = /\batelier\s+(?:tool\s+present|(?:tool\s+)?task)\b/;
+const PRESENTER = /\batelier\s+(?:tool\s+present|(?:tool\s+)?(?:task|grid))\b/;
 
 /** Whether this call ran the presenter, read from what it was asked to run. */
 export function ranThePresenter(tool: TranscriptTool): boolean {

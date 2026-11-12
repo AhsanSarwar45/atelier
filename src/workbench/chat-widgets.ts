@@ -1,6 +1,8 @@
 import { TASK_STATUSES, type TaskWidget } from '@/workbench/tasks/types';
 
 export type { TaskWidget } from '@/workbench/tasks/types';
+import type { GridWidget } from '@/workbench/grids/types';
+export type { GridWidget } from '@/workbench/grids/types';
 
 const BLOCK = /```atelier-widget\s*\n([\s\S]*?)\n```/g;
 
@@ -45,7 +47,7 @@ export type ExplainerWidget = {
   steps: Array<{ label: string; detail?: string; active: string[] }>;
   evidence?: Array<{ label: string; path: string; line?: number }>;
 };
-export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ImageWidget | ImageCompareWidget | ArtifactWidget | ExplainerWidget | TaskWidget;
+export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ImageWidget | ImageCompareWidget | ArtifactWidget | ExplainerWidget | TaskWidget | GridWidget;
 
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -64,6 +66,7 @@ const artifactAsset = (value: unknown): value is string => typeof value === 'str
 export function widget(value: unknown): ChatWidget | null {
   if (!object(value) || !text(value.type) || !title(value.title)) return null;
   if (value.type === 'task') return taskWidget(value);
+  if (value.type === 'grid') return gridWidget(value);
   const nodes = value.nodes;
   const edges = value.edges;
   const steps = value.steps;
@@ -147,6 +150,30 @@ function taskWidget(value: Record<string, unknown>): TaskWidget | null {
   return value as unknown as TaskWidget;
 }
 
+const GRID_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+/**
+ * A coverage grid card (docs/grids.md). Checked loosely, like a task card:
+ * enough to know which grid, cell or template it is about; the card rereads
+ * the rest live.
+ */
+function gridWidget(value: Record<string, unknown>): GridWidget | null {
+  if (!text(value.event)) return null;
+  const grid = value.grid;
+  const template = value.template;
+  if (grid !== undefined && grid !== null) {
+    if (!object(grid) || typeof grid.projectId !== 'string' || typeof grid.slug !== 'string' || !GRID_SLUG.test(grid.slug)) return null;
+  } else if (value.event !== 'template') {
+    return null;
+  }
+  if (value.event === 'template' && (!object(template) || typeof template.name !== 'string' || !template.name)) return null;
+  if (template !== undefined && !object(template)) return null;
+  const cell = value.cell;
+  if (cell !== undefined && cell !== null && (!object(cell) || typeof cell.row !== 'string' || typeof cell.col !== 'string')) return null;
+  if (value.audit !== undefined && value.audit !== null && !object(value.audit)) return null;
+  return value as unknown as GridWidget;
+}
+
 const TOP_LEVEL_FIELDS: Record<ChatWidget['type'], Set<string>> = {
   metrics: new Set(['type', 'title', 'items']),
   chart: new Set(['type', 'title', 'chart', 'series', 'data']),
@@ -159,6 +186,7 @@ const TOP_LEVEL_FIELDS: Record<ChatWidget['type'], Set<string>> = {
   artifact: new Set(['type', 'title', 'kind', 'asset']),
   explainer: new Set(['type', 'layout', 'title', 'summary', 'nodes', 'edges', 'steps', 'evidence']),
   task: new Set(['type', 'title', 'event', 'task', 'proposal']),
+  grid: new Set(['type', 'title', 'event', 'grid', 'cell', 'template', 'audit']),
 };
 
 const fieldsAre = (value: Record<string, unknown>, allowed: Set<string>) =>
