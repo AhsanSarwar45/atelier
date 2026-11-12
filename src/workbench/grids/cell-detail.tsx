@@ -419,7 +419,7 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
             </section>
             {(cell.checks?.length ?? 0) > 0 && (
               <section className="space-y-1" data-testid="cell-checks">
-                <Label>Checks</Label>
+                <Label>Approved checks</Label>
                 <CheckList checks={(cell.checks ?? []).map(readCheck)} />
               </section>
             )}
