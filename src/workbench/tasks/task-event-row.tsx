@@ -145,7 +145,7 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
     more = <div className="text-sm"><span className="text-muted-foreground">Needed to continue: </span>{str(detail.needed_to_resume)}</div>;
   } else if (event === 'check' && VISUAL_TYPES.has(printed.type) && item) {
     const entry = recordedEntries(printed).get(str(detail.item));
-    if (entry) more = <ShotPair name={item.name} before={str(entry.before)} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} />;
+    if (entry) more = <ShotPair name={item.name} before={str(entry.before) || undefined} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} />;
   }
 
   const only: OwnerAction[] = event === 'amend' ? ['approve_amend', 'reject_amend'] : event === 'done' ? ['approve', 'reopen'] : [];

@@ -219,39 +219,72 @@ function OptimizationPlanTable({ targets }: { targets: OptimizationTarget[] }) {
  * reference image. Folded behind a toggle, so a card with many takes no room
  * until they are wanted; open, they sit side by side and open large on a click.
  */
-export function ShotPair({ name, before, after, reference, cwd }: { name: string; before: string; after: string; reference?: string; cwd?: string | null }) {
+/** One image with its caption, opened full size on a click. */
+function Still({ name, caption, src, onLook }: { name: string; caption: string; src: string; onLook: (image: LookableImage) => void }) {
+  const alt = `${name} ${caption.toLowerCase()}`;
+  return (
+    <figure className="space-y-1">
+      <figcaption className="text-xs text-muted-foreground">{caption}</figcaption>
+      <Button type="button" variant="foreground" size="none" className="block" aria-label={`Open ${alt}`}
+        onClick={() => onLook({ mime: 'image/*', dataUrl: src, alt })}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={alt} className="max-h-48 rounded border border-border/60 object-contain" />
+      </Button>
+    </figure>
+  );
+}
+
+/**
+ * A visual item's images behind a toggle: before and after side by side,
+ * the after alone for something new (no before), and a reference under them.
+ */
+export function ShotPair({ name, before, after, reference, cwd }: { name: string; before?: string; after: string; reference?: string; cwd?: string | null }) {
   const [shown, setShown] = useState(false);
   const [looking, setLooking] = useState<LookableImage | null>(null);
   if (!before && !after) return null;
+  const label = before
+    ? reference ? 'Show before, after and reference' : 'Show before and after'
+    : reference ? 'Show after and reference' : 'Show after';
   return (
     <div data-testid="task-images" data-shown={shown ? 'yes' : 'no'}>
       <Button type="button" variant="ghost" size="xs" aria-expanded={shown} data-testid="task-images-toggle"
         className="-ml-2 text-muted-foreground" onClick={() => setShown((open) => !open)}>
-        <Images aria-hidden />{shown ? 'Hide images' : reference ? 'Show before, after and reference' : 'Show before and after'}
+        <Images aria-hidden />{shown ? 'Hide images' : label}
       </Button>
       {shown && (
         <div className="mt-1 space-y-2">
-          <ImageComparisonView
-            comparison={{
-              mode: 'side_by_side',
-              before: { mime: 'image/*', dataUrl: shotUrl(before, cwd), alt: `${name} before` },
-              after: { mime: 'image/*', dataUrl: shotUrl(after, cwd), alt: `${name} after` },
-            }}
-            onLook={setLooking}
-          />
-          {reference && (
-            <figure className="space-y-1">
-              <figcaption className="text-xs text-muted-foreground">Reference</figcaption>
-              <Button type="button" variant="foreground" size="none" className="block" aria-label={`Open ${name} reference`}
-                onClick={() => setLooking({ mime: 'image/*', dataUrl: shotUrl(reference, cwd), alt: `${name} reference` })}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={shotUrl(reference, cwd)} alt={`${name} reference`} className="max-h-48 rounded border border-border/60 object-contain" />
-              </Button>
-            </figure>
-          )}
+          {before ? (
+            <ImageComparisonView
+              comparison={{
+                mode: 'side_by_side',
+                before: { mime: 'image/*', dataUrl: shotUrl(before, cwd), alt: `${name} before` },
+                after: { mime: 'image/*', dataUrl: shotUrl(after, cwd), alt: `${name} after` },
+              }}
+              onLook={setLooking}
+            />
+          ) : <Still name={name} caption="After" src={shotUrl(after, cwd)} onLook={setLooking} />}
+          {reference && <Still name={name} caption="Reference" src={shotUrl(reference, cwd)} onLook={setLooking} />}
         </div>
       )}
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
+    </div>
+  );
+}
+
+/** The screenshots a `feature` or `bug` result carries, each behind its own toggle. */
+export function Screenshots({ result, cwd }: { result: unknown; cwd?: string | null }) {
+  const shots = list(rec(result).screens);
+  if (!shots.length) return null;
+  return (
+    <div data-testid="task-screenshots"><Label>Screenshots</Label>
+      <div className="space-y-1">
+        {shots.map((shot, index) => (
+          <div key={index}>
+            <div className="text-sm">{str(shot.name)}</div>
+            <ShotPair name={str(shot.name)} before={str(shot.before) || undefined} after={str(shot.after)} cwd={cwd} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -279,8 +312,8 @@ function EntryDetail({ type, item, entry, cwd }: { type: string; item: Loose; en
     case 'investigation':
       shown = <div className="whitespace-pre-wrap text-xs text-muted-foreground">{str(entry.answer)}</div>;
       break;
-    case 'ui_change': case 'visual_bug': case 'render_change':
-      shown = <ShotPair name={itemText(type, item)} before={str(entry.before)} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} />;
+    case 'ui_change': case 'ui_feature': case 'visual_bug': case 'render_change': case 'render_feature':
+      shown = <ShotPair name={itemText(type, item)} before={str(entry.before) || undefined} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} />;
       break;
   }
   return (
@@ -372,6 +405,36 @@ export function PlanView({ type, plan, entries, cwd }: {
               <div className="text-sm">{str(s.change)}</div>
             </div>
           ))}
+        </div>
+      );
+    case 'ui_feature':
+      return (
+        <div className="space-y-2">
+          <Field label="Outcome">{str(p.outcome)}</Field>
+          <div><Label>Screens</Label>
+            <Checklist>{list(p.screens).map((s) => (
+              <PlanItem key={str(s.id)} type={type} item={s} entries={entries} cwd={cwd} text={<span className="font-medium">{str(s.name)}</span>}>
+                <div className="text-xs text-muted-foreground">{`${str(s.how_to_reach)}${s.existed === true ? ' · existed' : ' · new'}`}</div>
+                <div className="text-sm">{str(s.shows)}</div>
+              </PlanItem>
+            ))}</Checklist>
+          </div>
+        </div>
+      );
+    case 'render_feature':
+      return (
+        <div className="space-y-2">
+          <Field label="Outcome">{str(p.outcome)}</Field>
+          <div><Label>Scenes</Label>
+            <Checklist>{list(p.scenes).map((s) => (
+              <PlanItem key={str(s.id)} type={type} item={s} entries={entries} cwd={cwd} text={<span className="font-medium">{str(s.name)}</span>}>
+                <div className="text-xs text-muted-foreground">
+                  {`${str(s.scene)} · camera: ${str(s.camera)}${s.existed === true ? ' · existed' : ' · new'}${s.reference === true ? ' · reference image asked for' : ''}`}
+                </div>
+                <div className="text-sm">{str(s.shows)}</div>
+              </PlanItem>
+            ))}</Checklist>
+          </div>
         </div>
       );
     case 'visual_bug':
@@ -528,7 +591,7 @@ function MetList({ planned, results, label, cwd }: { planned: Loose[]; results: 
   );
 }
 
-/** ui_change, visual_bug and render_change: each screen or scene with its images behind a toggle. */
+/** The visual types: each screen or scene with its images behind a toggle. */
 function VisualResult({ type, plan, result, cwd }: { type: string; plan: Loose; result: Loose; cwd?: string | null }) {
   const key = ITEM_LISTS[type]?.result ?? 'screens';
   const shots = byId(list(result[key]));
@@ -541,7 +604,7 @@ function VisualResult({ type, plan, result, cwd }: { type: string; plan: Loose; 
           <div key={str(item.id)} data-testid="ui-screen">
             <div className="text-sm font-medium">{name}</div>
             {shot ? (
-              <ShotPair name={name} before={str(shot.before)} after={str(shot.after)} reference={str(shot.reference) || undefined} cwd={cwd} />
+              <ShotPair name={name} before={str(shot.before) || undefined} after={str(shot.after)} reference={str(shot.reference) || undefined} cwd={cwd} />
             ) : <Shortfall>No images</Shortfall>}
             {shot && str(shot.notes) && <div className="text-xs text-muted-foreground">{str(shot.notes)}</div>}
           </div>
@@ -594,7 +657,12 @@ export function ResultView({ type, plan, result, cwd, summarised = false }: {
     case 'optimization':
       return <OptimizationResultTable plan={p} result={r} />;
     case 'feature':
-      return <MetList label="Criteria" planned={list(p.criteria)} results={list(r.criteria)} cwd={cwd} />;
+      return (
+        <div className="space-y-2">
+          <MetList label="Criteria" planned={list(p.criteria)} results={list(r.criteria)} cwd={cwd} />
+          {!summarised && <Screenshots result={r} cwd={cwd} />}
+        </div>
+      );
     case 'general':
       return <MetList label="Done when" planned={list(p.done_when)} results={list(r.done_when)} cwd={cwd} />;
     case 'qa':
@@ -602,7 +670,9 @@ export function ResultView({ type, plan, result, cwd, summarised = false }: {
     case 'chore':
       return <MetList label="Steps" planned={list(p.steps)} results={list(r.steps)} cwd={cwd} />;
     case 'ui_change':
+    case 'ui_feature':
     case 'render_change':
+    case 'render_feature':
       return <VisualResult type={type} plan={p} result={r} cwd={cwd} />;
     case 'visual_bug':
       return (
@@ -684,6 +754,7 @@ export function ResultView({ type, plan, result, cwd, summarised = false }: {
           {!summarised && <Field label="Fix">{str(r.fix)}</Field>}
           <div><Label>Proof</Label><Evidence value={str(r.proof)} cwd={cwd} /></div>
           {strings(r.regression_checked).length > 0 && <div><Label>Regressions checked</Label><Bullets items={strings(r.regression_checked)} /></div>}
+          {!summarised && <Screenshots result={r} cwd={cwd} />}
         </div>
       );
     case 'refactor': {
@@ -947,6 +1018,7 @@ export function DoneSummary({ task, cwd, counted = false }: {
         </>
       )}
       {typeof result.summary === 'string' && result.summary && <p className="whitespace-pre-wrap break-words text-sm">{result.summary}</p>}
+      {(task.type === 'feature' || task.type === 'bug') && <Screenshots result={r} cwd={cwd} />}
       {commits.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           <Label>Commits</Label>
@@ -969,7 +1041,10 @@ export function DoneSummary({ task, cwd, counted = false }: {
 export const ITEMS_SHOWN = 5;
 
 /** The field a type leads its plan with, drawn as one line above its items. */
-const LEAD: Record<string, string> = { feature: 'outcome', general: 'outcome', refactor: 'change', docs: 'audience', visual_bug: 'symptom' };
+const LEAD: Record<string, string> = {
+  feature: 'outcome', general: 'outcome', refactor: 'change', docs: 'audience', visual_bug: 'symptom',
+  ui_feature: 'outcome', render_feature: 'outcome',
+};
 
 /**
  * The plan as a chat card shows it: one line per item, ticked live as it is

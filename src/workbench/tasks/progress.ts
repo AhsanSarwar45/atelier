@@ -18,8 +18,10 @@ export const ITEM_LISTS: Readonly<Record<string, { plan: string; result: string 
   feature: { plan: 'criteria', result: 'criteria' },
   general: { plan: 'done_when', result: 'done_when' },
   ui_change: { plan: 'screens', result: 'screens' },
+  ui_feature: { plan: 'screens', result: 'screens' },
   visual_bug: { plan: 'screens', result: 'screens' },
   render_change: { plan: 'scenes', result: 'scenes' },
+  render_feature: { plan: 'scenes', result: 'scenes' },
   optimization: { plan: 'targets', result: 'targets' },
   investigation: { plan: 'questions', result: 'answers' },
   refactor: { plan: 'invariants', result: 'invariants' },
@@ -46,7 +48,9 @@ export interface ItemProgress {
 export function itemText(type: string, item: Loose): string {
   switch (type) {
     case 'ui_change':
+    case 'ui_feature':
     case 'visual_bug':
+    case 'render_feature':
     case 'optimization':
       return str(item.name);
     case 'render_change':
@@ -112,7 +116,7 @@ export function itemProgress(task: Pick<Task, 'type' | 'plan' | 'result' | 'chec
 }
 
 /** The types whose items are proved with before and after images. */
-export const VISUAL_TYPES: ReadonlySet<string> = new Set(['ui_change', 'visual_bug', 'render_change']);
+export const VISUAL_TYPES: ReadonlySet<string> = new Set(['ui_change', 'ui_feature', 'visual_bug', 'render_change', 'render_feature']);
 
 export interface ItemCounts { met: number; missed: number; total: number }
 

@@ -12,7 +12,7 @@ export const TASK_STATUSES = ['todo', 'in_progress', 'blocked', 'review', 'done'
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export const TASK_TYPES = [
-  'bug', 'feature', 'ui_change', 'visual_bug', 'render_change', 'optimization', 'plan', 'investigation',
+  'bug', 'feature', 'ui_change', 'ui_feature', 'visual_bug', 'render_change', 'render_feature', 'optimization', 'plan', 'investigation',
   'refactor', 'tests', 'review', 'qa', 'docs', 'chore', 'general',
 ] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
@@ -21,13 +21,30 @@ export interface ListItem { id: string; text: string }
 export interface Followup { type: string; title: string; why: string }
 
 export interface BugPlan { symptom: string; repro_steps: string[]; expected: string; actual: string; suspected_area?: string }
-export interface BugResult { root_cause: string; fix: string; proof: string; regression_checked: string[] }
+export interface BugResult { root_cause: string; fix: string; proof: string; regression_checked: string[]; screens?: Screenshot[] }
+
+/**
+ * A screenshot on a `feature` or `bug` result: required when its commits
+ * change visual files. `before` is left out for something new.
+ */
+export interface Screenshot { name: string; before?: string; after: string }
 
 export interface FeaturePlan { outcome: string; criteria: ListItem[] }
-export interface FeatureResult { criteria: Array<{ id: string; met: boolean; evidence: string; reason?: string }> }
+export interface FeatureResult { criteria: Array<{ id: string; met: boolean; evidence: string; reason?: string }>; screens?: Screenshot[] }
 
 export interface UiChangePlan { screens: Array<{ id: string; name: string; how_to_reach: string; change: string }> }
 export interface UiChangeResult { screens: Array<{ id: string; before: string; after: string; notes?: string }> }
+
+/** New work you can see on screen. `existed: true` marks a screen that was already there, which needs a before image too. */
+export interface UiFeaturePlan { outcome: string; screens: Array<{ id: string; name: string; how_to_reach: string; shows: string; existed?: boolean }> }
+export interface UiFeatureResult { screens: Array<{ id: string; after: string; before?: string; notes?: string }> }
+
+/** New work you can see in a render: each scene from one camera, as for render_change. */
+export interface RenderFeaturePlan {
+  outcome: string;
+  scenes: Array<{ id: string; name: string; scene: string; camera: string; shows: string; existed?: boolean; reference?: boolean }>;
+}
+export interface RenderFeatureResult { scenes: Array<{ id: string; after: string; before?: string; reference?: string; notes?: string }> }
 
 /** A bug you can see: the bug fields, and the screens it shows on. Proved with before and after images. */
 export interface VisualBugPlan extends BugPlan { screens: Array<{ id: string; name: string; how_to_reach: string }> }
@@ -205,8 +222,10 @@ export const TYPE_LABEL: Record<TaskType, string> = {
   bug: 'Bug',
   feature: 'Feature',
   ui_change: 'UI change',
+  ui_feature: 'UI feature',
   visual_bug: 'Visual bug',
   render_change: 'Render change',
+  render_feature: 'Render feature',
   optimization: 'Optimization',
   plan: 'Plan',
   investigation: 'Investigation',

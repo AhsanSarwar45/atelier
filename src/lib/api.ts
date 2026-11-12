@@ -25,6 +25,11 @@ export interface ProjectManifest {
   project: { display_name: string; summary: string };
   /** What the project's chats are called (bw-mv45). Absent means the app's own rule. */
   chat_name?: ChatNameSettings;
+  /**
+   * What tasks need to know: the files whose change shows on screen, as
+   * extensions or globs. Absent means the app's own list. Edited in the file.
+   */
+  tasks?: { visual_files?: string[] };
 }
 
 export type ChatNameSource = 'worktree' | 'branch' | 'path';
