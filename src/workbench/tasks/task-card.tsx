@@ -7,7 +7,7 @@
  * The same card is the `task` chat widget and the body of the Tasks tab's
  * detail panel.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { AlertTriangle, Ban, Check, ChevronRight, Circle, CircleDot, GitMerge, Pause, Plus } from 'lucide-react';
 
@@ -44,6 +44,7 @@ import {
   type TaskProposal,
   type TaskStatus,
 } from '@/workbench/tasks/types';
+import { entryOutcome, recordedEntries } from '@/workbench/tasks/progress';
 import { tasksChangedFor, useLiveTask } from '@/workbench/tasks/use-tasks';
 
 /* ------------------------------------------------------------------ reading */
@@ -161,10 +162,10 @@ function Evidence({ value, cwd }: { value: string; cwd?: string | null }) {
 }
 
 /** One promised item and how it came out: the shape of feature, general, qa, chore and the rest. */
-function CheckRow({ ok, text, children, testId }: { ok: boolean | null; text: ReactNode; children?: ReactNode; testId?: string }) {
+function CheckRow({ ok, text, children, testId, itemId }: { ok: boolean | null; text: ReactNode; children?: ReactNode; testId?: string; itemId?: string }) {
   const Icon = ok === null ? Circle : ok ? Check : AlertTriangle;
   return (
-    <li data-testid={testId} data-met={ok === null ? 'pending' : ok ? 'yes' : 'no'} className="flex gap-2 py-1.5">
+    <li data-testid={testId} data-item={itemId} data-met={ok === null ? 'pending' : ok ? 'yes' : 'no'} className="flex gap-2 py-1.5">
       <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0',
         ok === null ? 'text-muted-foreground' : ok ? 'text-[var(--color-success-accent)]' : 'text-[var(--color-warning-accent)]')} />
       <div className="min-w-0 flex-1 space-y-0.5">
@@ -210,12 +211,105 @@ function OptimizationPlanTable({ targets }: { targets: OptimizationTarget[] }) {
   );
 }
 
-function ItemList({ items }: { items: Loose[] }) {
-  return <Checklist>{items.map((item) => <CheckRow key={str(item.id)} ok={null} text={str(item.text)} />)}</Checklist>;
+/** Two screenshots of one screen, side by side, opening large on a click. */
+function ShotPair({ name, before, after, cwd }: { name: string; before: string; after: string; cwd?: string | null }) {
+  const [looking, setLooking] = useState<LookableImage | null>(null);
+  return (
+    <>
+      <ImageComparisonView
+        comparison={{
+          mode: 'side_by_side',
+          before: { mime: 'image/*', dataUrl: shotUrl(before, cwd), alt: `${name} before` },
+          after: { mime: 'image/*', dataUrl: shotUrl(after, cwd), alt: `${name} after` },
+        }}
+        onLook={setLooking}
+      />
+      {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
+    </>
+  );
 }
 
-export function PlanView({ type, plan }: { type: string; plan: unknown }) {
+/** What a checked item's entry says beside its tick: the evidence, and why it was missed. */
+function EntryDetail({ type, item, entry, cwd }: { type: string; item: Loose; entry: Loose; cwd?: string | null }) {
+  const outcome = entryOutcome(type, item, entry);
+  let shown: ReactNode = null;
+  switch (type) {
+    case 'feature': case 'general': case 'qa':
+      shown = <Evidence value={str(entry.evidence)} cwd={cwd} />;
+      break;
+    case 'chore':
+      shown = <Evidence value={str(entry.output)} cwd={cwd} />;
+      break;
+    case 'refactor':
+      shown = <Evidence value={str(entry.how_verified)} cwd={cwd} />;
+      break;
+    case 'docs':
+      shown = <span className="text-xs text-muted-foreground">{str(entry.what_changed)}</span>;
+      break;
+    case 'tests':
+      shown = <div className="break-all font-mono text-xs text-muted-foreground">{`${str(entry.test_path)} › ${str(entry.test_name)}`}</div>;
+      break;
+    case 'investigation':
+      shown = <div className="whitespace-pre-wrap text-xs text-muted-foreground">{str(entry.answer)}</div>;
+      break;
+    case 'ui_change':
+      shown = <ShotPair name={itemName(type, item)} before={str(entry.before)} after={str(entry.after)} cwd={cwd} />;
+      break;
+  }
+  return (
+    <>
+      {shown}
+      {outcome.state === 'missed' && <Shortfall>{outcome.note}</Shortfall>}
+      {outcome.state === 'met' && str(entry.notes) && <div className="text-xs text-muted-foreground">{str(entry.notes)}</div>}
+    </>
+  );
+}
+
+const itemName = (type: string, item: Loose): string => (type === 'ui_change' ? str(item.name) : str(item.text));
+
+/**
+ * One plan item: an open circle until it is checked, then ticked or marked
+ * missed with what its entry says.
+ */
+function PlanItem({ type, item, entries, cwd, text, children }: {
+  type: string;
+  item: Loose;
+  entries?: ReadonlyMap<string, Loose>;
+  cwd?: string | null;
+  text: ReactNode;
+  children?: ReactNode;
+}) {
+  const id = str(item.id);
+  const entry = entries?.get(id);
+  const ok = entry ? entryOutcome(type, item, entry).state === 'met' : null;
+  return (
+    <CheckRow testId="task-plan-item" itemId={id} ok={ok} text={text}>
+      {children}
+      {entry && <EntryDetail type={type} item={item} entry={entry} cwd={cwd} />}
+    </CheckRow>
+  );
+}
+
+function ItemList({ type, items, entries, cwd }: { type: string; items: Loose[]; entries?: ReadonlyMap<string, Loose>; cwd?: string | null }) {
+  return (
+    <Checklist>
+      {items.map((item) => <PlanItem key={str(item.id)} type={type} item={item} entries={entries} cwd={cwd} text={str(item.text)} />)}
+    </Checklist>
+  );
+}
+
+/**
+ * A task's plan. Given the entries checked so far (`atelier task check`),
+ * each plan item shows whether it was met, missed or is still open.
+ */
+export function PlanView({ type, plan, entries, cwd }: {
+  type: string;
+  plan: unknown;
+  entries?: ReadonlyMap<string, Loose>;
+  cwd?: string | null;
+}) {
   const p = rec(plan);
+  const items = (key: string) => <ItemList type={type} items={list(p[key])} entries={entries} cwd={cwd} />;
   switch (type) {
     case 'bug':
       return (
@@ -230,10 +324,20 @@ export function PlanView({ type, plan }: { type: string; plan: unknown }) {
         </div>
       );
     case 'feature':
-      return <div className="space-y-2"><Field label="Outcome">{str(p.outcome)}</Field><div><Label>Criteria</Label><ItemList items={list(p.criteria)} /></div></div>;
+      return <div className="space-y-2"><Field label="Outcome">{str(p.outcome)}</Field><div><Label>Criteria</Label>{items('criteria')}</div></div>;
     case 'general':
-      return <div className="space-y-2"><Field label="Outcome">{str(p.outcome)}</Field><div><Label>Done when</Label><ItemList items={list(p.done_when)} /></div></div>;
+      return <div className="space-y-2"><Field label="Outcome">{str(p.outcome)}</Field><div><Label>Done when</Label>{items('done_when')}</div></div>;
     case 'ui_change':
+      if (entries?.size) {
+        return (
+          <Checklist>{list(p.screens).map((s) => (
+            <PlanItem key={str(s.id)} type={type} item={s} entries={entries} cwd={cwd} text={<span className="font-medium">{str(s.name)}</span>}>
+              <div className="text-xs text-muted-foreground">{str(s.how_to_reach)}</div>
+              <div className="text-sm">{str(s.change)}</div>
+            </PlanItem>
+          ))}</Checklist>
+        );
+      }
       return (
         <div className="space-y-2">
           {list(p.screens).map((s) => (
@@ -246,6 +350,8 @@ export function PlanView({ type, plan }: { type: string; plan: unknown }) {
         </div>
       );
     case 'optimization':
+      // Once a target is measured, the plan reads as the before/after table.
+      if (entries?.size) return <OptimizationResultTable plan={p} result={{ targets: [...entries.values()] }} />;
       return <OptimizationPlanTable targets={list(p.targets) as unknown as OptimizationTarget[]} />;
     case 'plan':
       return (
@@ -256,17 +362,17 @@ export function PlanView({ type, plan }: { type: string; plan: unknown }) {
         </div>
       );
     case 'investigation':
-      return <div><Label>Questions</Label><ItemList items={list(p.questions)} /></div>;
+      return <div><Label>Questions</Label>{items('questions')}</div>;
     case 'refactor':
       return (
         <div className="space-y-2">
           <Field label="Change">{str(p.change)}</Field>
           <Field label="Reason">{str(p.reason)}</Field>
-          <div><Label>Invariants</Label><ItemList items={list(p.invariants)} /></div>
+          <div><Label>Invariants</Label>{items('invariants')}</div>
         </div>
       );
     case 'tests':
-      return <div><Label>Behaviors</Label><ItemList items={list(p.behaviors)} /></div>;
+      return <div><Label>Behaviors</Label>{items('behaviors')}</div>;
     case 'review':
       return (
         <div className="space-y-2">
@@ -278,7 +384,7 @@ export function PlanView({ type, plan }: { type: string; plan: unknown }) {
       return (
         <div><Label>Scenarios</Label>
           <Checklist>{list(p.scenarios).map((s) => (
-            <CheckRow key={str(s.id)} ok={null} text={str(s.expected)}><Bullets items={strings(s.steps)} ordered /></CheckRow>
+            <PlanItem key={str(s.id)} type={type} item={s} entries={entries} cwd={cwd} text={str(s.expected)}><Bullets items={strings(s.steps)} ordered /></PlanItem>
           ))}</Checklist>
         </div>
       );
@@ -288,15 +394,15 @@ export function PlanView({ type, plan }: { type: string; plan: unknown }) {
           <Field label="Audience">{str(p.audience)}</Field>
           <div><Label>Pages</Label>
             <Checklist>{list(p.pages).map((page) => (
-              <CheckRow key={str(page.id)} ok={null} text={<span className="font-mono text-xs">{str(page.path)}</span>}>
+              <PlanItem key={str(page.id)} type={type} item={page} entries={entries} cwd={cwd} text={<span className="font-mono text-xs">{str(page.path)}</span>}>
                 <div className="text-sm">{str(page.change)}</div>
-              </CheckRow>
+              </PlanItem>
             ))}</Checklist>
           </div>
         </div>
       );
     case 'chore':
-      return <div><Label>Steps</Label><ItemList items={list(p.steps)} /></div>;
+      return <div><Label>Steps</Label>{items('steps')}</div>;
     default:
       return <pre className="overflow-x-auto whitespace-pre-wrap text-xs text-muted-foreground">{JSON.stringify(plan, null, 2)}</pre>;
   }
@@ -672,7 +778,7 @@ export function TaskOwnerActions({ task, only, onChanged }: {
 
 const EVENT_LABEL: Record<string, string> = {
   create: 'Created', start: 'Started', block: 'Blocked', unblock: 'Unblocked', amend: 'Change proposed',
-  done: 'Finished', cancel: 'Cancelled', take: 'Taken', approve: 'Approved', reopen: 'Reopened',
+  check: 'Checked', done: 'Finished', cancel: 'Cancelled', take: 'Taken', approve: 'Approved', reopen: 'Reopened',
   approve_amend: 'Change approved', reject_amend: 'Change rejected', release: 'Released',
 };
 
@@ -717,6 +823,8 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
   const reviewing = task.status === 'review';
   const followups = Array.isArray(result?.followups) ? result.followups : [];
   const commits = Array.isArray(result?.commits) ? result.commits.filter((c): c is string => typeof c === 'string') : [];
+  // Plan items checked so far, ticked on the plan while the work goes on.
+  const checked = useMemo(() => recordedEntries({ type: task.type, result: null, checks: task.checks }), [task.type, task.checks]);
 
   const header = (
     <header className="min-w-0 flex-1 space-y-1">
@@ -779,7 +887,7 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
           <Followups label="Follow-ups" items={followups as Followup[]} />
         </>
       ) : (
-        <Section label="Plan"><PlanView type={task.type} plan={task.plan} /></Section>
+        <Section label="Plan"><PlanView type={task.type} plan={task.plan} entries={checked} cwd={cwd} /></Section>
       )}
 
       <TaskCells task={task} />

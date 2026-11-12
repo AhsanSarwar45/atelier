@@ -69,7 +69,7 @@ function sessionName(task: Task, sessions: ReadonlyMap<string, LiveSession>): st
 }
 
 const EVENT_LABEL: Record<string, string> = {
-  created: 'Created', started: 'Started', blocked: 'Blocked', unblocked: 'Unblocked',
+  created: 'Created', started: 'Started', checked: 'Item checked', blocked: 'Blocked', unblocked: 'Unblocked',
   amend_proposed: 'Plan change proposed', amend_approved: 'Plan change approved', amend_rejected: 'Plan change rejected',
   done: 'Finished', submitted: 'Submitted for review', approved: 'Approved', reopened: 'Reopened',
   cancelled: 'Cancelled', taken: 'Moved to chat', released: 'Released',
@@ -80,6 +80,11 @@ function eventDetail(payload: unknown): string {
   if (typeof payload === 'string') return payload;
   if (typeof payload !== 'object' || payload === null) return '';
   const p = payload as Record<string, unknown>;
+  // An item checked: which one, and whether it was met.
+  if (typeof p.item === 'string' && typeof p.met === 'boolean') {
+    const why = typeof p.reason === 'string' && p.reason ? `: ${p.reason}` : '';
+    return p.met ? `"${p.item}" met` : `"${p.item}" not met${why}`;
+  }
   for (const key of ['note', 'reason', 'cause', 'summary']) {
     if (typeof p[key] === 'string' && p[key]) return p[key] as string;
   }

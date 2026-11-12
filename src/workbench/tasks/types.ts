@@ -91,6 +91,12 @@ export interface Task {
   blocked: { cause: string; needed_to_resume: string } | null;
   cancelReason: string | null;
   pendingAmend: Record<string, unknown> | null;
+  /**
+   * Plan items checked while in progress (`atelier task check`), shaped like
+   * the type's result list, e.g. `{criteria: [...]}`. Cleared once done, when
+   * the result holds them (docs/tasks.md, "Checking items").
+   */
+  checks?: Record<string, unknown> | null;
   createdAt: number;
   updatedAt: number;
   startedAt: number | null;
@@ -146,7 +152,7 @@ export interface TaskProposal {
 }
 
 export type TaskEventKind =
-  | 'created' | 'started' | 'blocked' | 'unblocked' | 'amend_proposed' | 'amend_approved'
+  | 'created' | 'started' | 'checked' | 'blocked' | 'unblocked' | 'amend_proposed' | 'amend_approved'
   | 'amend_rejected' | 'done' | 'submitted' | 'approved' | 'reopened' | 'cancelled' | 'taken' | 'released';
 
 export interface TaskEvent {
