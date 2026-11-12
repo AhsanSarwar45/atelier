@@ -118,6 +118,11 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
             name: "task".to_string(),
             rest: args[1..].to_vec(),
         },
+        // The agent's coverage grid commands (docs/grids.md).
+        "grid" => Ask::Tool {
+            name: "grid".to_string(),
+            rest: args[1..].to_vec(),
+        },
         // Installing Tailscale needs a password, and a settings screen has
         // nowhere to type one. That one step is this command; everything
         // after it is the switch on the screen (bw-hdor).
@@ -153,6 +158,7 @@ Usage:
   atelier init [folder]       Configure a project
   atelier tool <name> [...]   Run an Atelier tool
   atelier task <command>      Create and finish tasks from a chat session
+  atelier grid <command>      Draft, prove and audit coverage grids from a chat session
   atelier where               Show app addresses
   atelier tools               Show dependencies
   atelier remote install      Install private remote access

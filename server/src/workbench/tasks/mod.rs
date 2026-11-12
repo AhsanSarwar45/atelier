@@ -286,6 +286,7 @@ pub fn to_json(store: &Store, task: &TaskRow) -> Value {
         "blocked": task.blocked, "cancelReason": task.cancel_reason, "pendingAmend": task.pending_amend,
         "createdAt": task.created_at, "updatedAt": task.updated_at,
         "startedAt": task.started_at, "finishedAt": task.finished_at,
+        "cells": super::grids::task_cells(store.connection(), &task.project_id, task.number).unwrap_or_default(),
     })
 }
 
@@ -304,12 +305,17 @@ pub struct Request {
     pub missing_commits: HashSet<String>,
     /// The session's folder, for messages about missing commits.
     pub cwd: Option<String>,
+    /// Fingerprints, in the project's folder, of the rows of the grids whose
+    /// cells the payload names: a stale proved cell may be claimed.
+    pub prints: super::grids::Prints,
     pub now: i64,
 }
 
 pub struct Outcome {
     pub task: TaskRow,
     pub summary: String,
+    /// The grids whose cells the change claimed or released.
+    pub grids: Vec<String>,
 }
 
 fn payload_text<'a>(payload: &'a Value, key: &str, what: &str) -> Result<&'a str, TaskError> {
@@ -373,8 +379,8 @@ fn check_done(task: &TaskRow, request: &Request) -> Result<(Value, Vec<String>),
         .payload
         .as_object()
         .ok_or_else(|| TaskError::Refused("the done payload must be an object: {summary, commits?, followups?, result}".into()))?;
-    if let Some(unknown) = payload.keys().find(|key| !["summary", "commits", "followups", "result"].contains(&key.as_str())) {
-        return refuse(format!("{unknown} is not a done field (allowed: summary, commits, followups, result)"));
+    if let Some(unknown) = payload.keys().find(|key| !["summary", "commits", "followups", "result", "cells"].contains(&key.as_str())) {
+        return refuse(format!("{unknown} is not a done field (allowed: summary, commits, followups, result, cells)"));
     }
     let summary = payload_text(&request.payload, "summary", "say in a sentence or two what was done")?;
     let kind = types::find(&task.kind).ok_or_else(|| TaskError::Refused(format!("unknown type {}", task.kind)))?;
@@ -430,20 +436,22 @@ fn check_done(task: &TaskRow, request: &Request) -> Result<(Value, Vec<String>),
     Ok((stored, unmet))
 }
 
-/// A checked `{type, title, why, plan}`: what `create` and `propose` take.
+/// A checked `{type, title, why, plan, cells?}`: what `create` and `propose` take.
 pub struct Draft {
     pub kind: String,
     pub title: String,
     pub why: String,
     pub plan: Value,
+    /// Grid cells the task works on, claimed when it is created.
+    pub cells: Vec<super::grids::CellRef>,
 }
 
 fn check_draft(payload: &Value, action: &str) -> Result<Draft, TaskError> {
     let object = payload.as_object().ok_or_else(|| {
         TaskError::Refused(format!("the {action} payload must be an object: {{type, title, why, plan}}"))
     })?;
-    if let Some(unknown) = object.keys().find(|key| !["type", "title", "why", "plan"].contains(&key.as_str())) {
-        return refuse(format!("{unknown} is not a {action} field (allowed: type, title, why, plan)"));
+    if let Some(unknown) = object.keys().find(|key| !["type", "title", "why", "plan", "cells"].contains(&key.as_str())) {
+        return refuse(format!("{unknown} is not a {action} field (allowed: type, title, why, plan, cells)"));
     }
     let kind = payload_text(payload, "type", &format!("one of {}", types::names()))?;
     if types::find(kind).is_none() {
@@ -460,7 +468,8 @@ fn check_draft(payload: &Value, action: &str) -> Result<Draft, TaskError> {
         ))
     })?;
     types::check_plan(kind, plan)?;
-    Ok(Draft { kind: kind.to_string(), title: title.trim().to_string(), why: why.trim().to_string(), plan: plan.clone() })
+    let cells = super::grids::parse_cells(object.get("cells"), false)?;
+    Ok(Draft { kind: kind.to_string(), title: title.trim().to_string(), why: why.trim().to_string(), plan: plan.clone(), cells })
 }
 
 fn insert_task(
@@ -500,6 +509,9 @@ fn insert_task(
     save(connection, &task)?;
     payload["type"] = json!(task.kind);
     payload["title"] = json!(task.title);
+    if !draft.cells.is_empty() {
+        payload["cells"] = json!(draft.cells.iter().map(super::grids::CellRef::to_json).collect::<Vec<_>>());
+    }
     append_event(connection, project, number, now, "created", session, actor, &payload)?;
     Ok(task)
 }
@@ -541,10 +553,15 @@ pub struct ProposalRow {
     pub task_number: Option<i64>,
     pub created_at: i64,
     pub decided_at: Option<i64>,
+    /// `[{grid, row, col}]`: the cells the task would claim.
+    pub cells: Value,
 }
 
 const PROPOSAL_COLUMNS: &str =
     "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at";
+/// The columns read: the stored ones plus the cells.
+const PROPOSAL_READ: &str =
+    "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at, cells";
 
 fn proposal_row(row: &Row) -> rusqlite::Result<ProposalRow> {
     Ok(ProposalRow {
@@ -559,13 +576,14 @@ fn proposal_row(row: &Row) -> rusqlite::Result<ProposalRow> {
         task_number: row.get(8)?,
         created_at: row.get(9)?,
         decided_at: row.get(10)?,
+        cells: json_column(row, 11)?.unwrap_or_else(|| json!([])),
     })
 }
 
 pub fn get_proposal(connection: &Connection, project: &str, id: i64) -> rusqlite::Result<Option<ProposalRow>> {
     connection
         .query_row(
-            &format!("SELECT {PROPOSAL_COLUMNS} FROM task_proposal WHERE project_id = ?1 AND id = ?2"),
+            &format!("SELECT {PROPOSAL_READ} FROM task_proposal WHERE project_id = ?1 AND id = ?2"),
             params![project, id],
             proposal_row,
         )
@@ -575,7 +593,7 @@ pub fn get_proposal(connection: &Connection, project: &str, id: i64) -> rusqlite
 /// A chat's proposals still waiting for the owner, oldest first.
 pub fn pending_proposals(connection: &Connection, session: &str) -> rusqlite::Result<Vec<ProposalRow>> {
     let mut statement = connection.prepare(&format!(
-        "SELECT {PROPOSAL_COLUMNS} FROM task_proposal WHERE session_id = ?1 AND status = 'pending' ORDER BY id"
+        "SELECT {PROPOSAL_READ} FROM task_proposal WHERE session_id = ?1 AND status = 'pending' ORDER BY id"
     ))?;
     let rows = statement.query_map([session], proposal_row)?.collect::<rusqlite::Result<_>>()?;
     Ok(rows)
@@ -583,6 +601,7 @@ pub fn pending_proposals(connection: &Connection, session: &str) -> rusqlite::Re
 
 pub fn proposal_json(proposal: &ProposalRow) -> Value {
     json!({
+        "cells": proposal.cells,
         "projectId": proposal.project_id, "id": proposal.id, "sessionId": proposal.session_id,
         "type": proposal.kind, "title": proposal.title, "why": proposal.why, "plan": proposal.plan,
         "status": proposal.status, "taskNumber": proposal.task_number,
@@ -596,9 +615,19 @@ pub fn proposal_widget(proposal: &Value) -> Result<String, String> {
 }
 
 /// Store a proposal. The same checks as `create`; nothing else changes.
-pub fn propose(store: &Store, project: &str, session: &str, payload: &Value, now: i64) -> Result<(ProposalRow, String), TaskError> {
+pub fn propose(
+    store: &Store,
+    project: &str,
+    session: &str,
+    payload: &Value,
+    prints: &super::grids::Prints,
+    now: i64,
+) -> Result<(ProposalRow, String), TaskError> {
     let draft = check_draft(payload, "propose")?;
     let connection = store.connection();
+    super::grids::check_claimable(connection, project, &draft.cells, prints)?;
+    let cells = (!draft.cells.is_empty())
+        .then(|| json!(draft.cells.iter().map(super::grids::CellRef::to_json).collect::<Vec<_>>()).to_string());
     let id: i64 = connection.query_row(
         "SELECT COALESCE(MAX(id), 0) + 1 FROM task_proposal WHERE project_id = ?1",
         [project],
@@ -616,6 +645,7 @@ pub fn propose(store: &Store, project: &str, session: &str, payload: &Value, now
         task_number: None,
         created_at: now,
         decided_at: None,
+        cells: json!(draft.cells.iter().map(super::grids::CellRef::to_json).collect::<Vec<_>>()),
     };
     connection.execute(
         &format!("INSERT INTO task_proposal ({PROPOSAL_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
@@ -624,6 +654,10 @@ pub fn propose(store: &Store, project: &str, session: &str, payload: &Value, now
             proposal.why, proposal.plan.to_string(), proposal.status, proposal.task_number,
             proposal.created_at, proposal.decided_at,
         ],
+    )?;
+    connection.execute(
+        "UPDATE task_proposal SET cells = ?3 WHERE project_id = ?1 AND id = ?2",
+        params![proposal.project_id, proposal.id, cells],
     )?;
     let summary = "Proposed a task; the owner answers on the card with Create task, Just do it or Cancel. \
         Stop here and end your turn without starting the work. The owner's answer arrives as your next message."
@@ -638,8 +672,9 @@ pub fn answer_proposal(
     project: &str,
     id: i64,
     choice: &str,
+    prints: &super::grids::Prints,
     now: i64,
-) -> Result<(ProposalRow, Option<TaskRow>), TaskError> {
+) -> Result<(ProposalRow, Option<TaskRow>, Vec<String>), TaskError> {
     if !PROPOSAL_CHOICES.contains(&choice) {
         return refuse(format!("choice must be one of {}, not \"{choice}\"", PROPOSAL_CHOICES.join(", ")));
     }
@@ -650,15 +685,23 @@ pub fn answer_proposal(
     if proposal.status != "pending" {
         return refuse(format!("this proposal is already answered ({})", proposal.status.replace('_', " ")));
     }
+    let mut grids = Vec::new();
     let task = if choice == "create" {
         let draft = Draft {
             kind: proposal.kind.clone(),
             title: proposal.title.clone(),
             why: proposal.why.clone(),
             plan: proposal.plan.clone(),
+            cells: super::grids::parse_cells(Some(&proposal.cells), false)?,
         };
+        // A cell may have been taken since the proposal was made.
+        super::grids::check_claimable(&transaction, project, &draft.cells, prints).map_err(|error| match error {
+            TaskError::Refused(why) => TaskError::Refused(format!("the task cannot be created: {why}")),
+            other => other,
+        })?;
         let task = insert_task(&transaction, project, Some(&proposal.session_id), &draft, now, "owner",
             json!({"proposal": id}))?;
+        grids = super::grids::claim(&transaction, project, task.number, &draft.cells, prints, Some(&proposal.session_id), "owner", now)?;
         proposal.task_number = Some(task.number);
         proposal.status = "created".into();
         Some(task)
@@ -672,7 +715,7 @@ pub fn answer_proposal(
         params![project, id, proposal.status, proposal.task_number, proposal.decided_at],
     )?;
     transaction.commit()?;
-    Ok((proposal, task))
+    Ok((proposal, task, grids))
 }
 
 /// What the proposing chat's agent is told of the owner's answer.
@@ -702,10 +745,15 @@ pub fn open_section(connection: &Connection, session: &str) -> rusqlite::Result<
     for proposal in pending_proposals(connection, session)? {
         lines.push(format!("proposal [awaiting the owner's answer] {}: {}", proposal.kind, proposal.title));
     }
-    if lines.is_empty() {
-        return Ok(String::new());
+    let grid_lines = super::grids::open_lines(connection, session)?;
+    let mut sections = Vec::new();
+    if !lines.is_empty() {
+        sections.push(format!("Your open tasks in this chat:\n{}", lines.join("\n")));
     }
-    Ok(format!("Your open tasks in this chat:\n{}", lines.join("\n")))
+    if !grid_lines.is_empty() {
+        sections.push(grid_lines.join("\n"));
+    }
+    Ok(sections.join("\n"))
 }
 
 /// Apply one action. Runs inside a transaction; nothing is written on refusal.
@@ -750,13 +798,23 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                  Cancel, and the answer comes back to you as a message",
             );
         }
+        super::grids::check_claimable(connection, &request.project, &draft.cells, &request.prints)?;
         let task = insert_task(connection, &request.project, caller, &draft, now, actor, json!({}))?;
         let number = task.number;
-        let summary = format!(
+        let grids =
+            super::grids::claim(connection, &request.project, number, &draft.cells, &request.prints, caller, actor, now)?;
+        let mut summary = format!(
             "Created #{number} ({}): {} — todo. Start it with `atelier task start {number}`.",
             task.kind, task.title
         );
-        return Ok(Outcome { task, summary });
+        if !draft.cells.is_empty() {
+            summary.push_str(&format!(
+                " It claims {} grid cell{}; prove each with `atelier grid prove`, ask for N/A, or give a reason in `cells` when done.",
+                draft.cells.len(),
+                if draft.cells.len() == 1 { "" } else { "s" }
+            ));
+        }
+        return Ok(Outcome { task, summary, grids });
     }
     if action == "propose" || action == "answer_proposal" {
         return refuse(format!("{action} is answered by its own route, not as a task change"));
@@ -768,6 +826,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
     let mut task = get(connection, &request.project, number)?
         .ok_or_else(|| TaskError::Refused(format!("there is no task #{number} in this project")))?;
     let before_session = task.session_id.clone();
+    let mut grids = Vec::new();
     let event_session = |task: &TaskRow| caller.map(str::to_string).or_else(|| task.session_id.clone());
     let (kind, payload, summary): (&str, Value, String) = match (owner, action) {
         (false, "start") => {
@@ -821,7 +880,13 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         (false, "done") => {
             held_by(&task, caller.unwrap())?;
             status_is(&task, &["in_progress"], "done")?;
-            let (result, unmet) = check_done(&task, request)?;
+            let (mut result, unmet) = check_done(&task, request)?;
+            let cells = super::grids::parse_cells(request.payload.get("cells"), true)?;
+            super::grids::check_done_cells(connection, &request.project, number, &cells)?;
+            grids = super::grids::finish(connection, &request.project, number, &cells, caller, actor, now)?;
+            if !cells.is_empty() {
+                result["cells"] = json!(cells.iter().map(super::grids::CellRef::to_json).collect::<Vec<_>>());
+            }
             let review = types::find(&task.kind).is_some_and(|kind| kind.review);
             let dropped = task.pending_amend.take();
             task.result = Some(result);
@@ -854,6 +919,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             }
             status_is(&task, &["todo", "in_progress", "blocked", "review"], "cancel")?;
             let reason = payload_text(&request.payload, "reason", "why the task is cancelled (--reason)")?;
+            grids = super::grids::cancel(connection, &request.project, number, caller, actor, now)?;
             task.status = "cancelled".into();
             task.cancel_reason = Some(reason.to_string());
             task.finished_at = Some(now);
@@ -930,7 +996,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         other => other.into(),
     })?;
     append_event(connection, &task.project_id, number, now, kind, session.as_deref(), actor, &payload)?;
-    Ok(Outcome { task, summary })
+    Ok(Outcome { task, summary, grids })
 }
 
 /// The `atelier-widget` block for a task card.
@@ -982,6 +1048,7 @@ mod tests {
             payload,
             missing_commits: HashSet::new(),
             cwd: Some("/repo".into()),
+            prints: Default::default(),
             now: 1,
         })
     }
@@ -1098,7 +1165,7 @@ mod tests {
         let mut request = Request {
             action: "done".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(),
             number: Some(one), payload: done_payload("feature"), missing_commits: HashSet::from(["abcdef1".to_string()]),
-            cwd: Some("/repo".into()), now: 2,
+            cwd: Some("/repo".into()), prints: Default::default(), now: 2,
         };
         assert!(refused(apply(&store, &request)).contains("\"abcdef1\" is not a commit in the session's repository (/repo)"));
         request.missing_commits.clear();
@@ -1203,21 +1270,21 @@ mod tests {
     #[test]
     fn a_proposal_waits_for_the_owner_and_create_makes_it_a_task_in_that_chat() {
         let (_d, store) = store();
-        assert!(refused_proposal(propose(&store, "p", "s1", &json!({"type": "epic"}), 1)).contains("not a task type"));
-        let (proposal, summary) = propose(&store, "p", "s1", &draft("feature"), 1).unwrap();
+        assert!(refused_proposal(propose(&store, "p", "s1", &json!({"type": "epic"}), &Default::default(), 1)).contains("not a task type"));
+        let (proposal, summary) = propose(&store, "p", "s1", &draft("feature"), &Default::default(), 1).unwrap();
         assert_eq!((proposal.id, proposal.status.as_str()), (1, "pending"));
         assert!(summary.contains("Stop here"), "{summary}");
         assert!(list(store.connection(), Some("p"), None).unwrap().is_empty(), "a proposal is not a task");
         let block = proposal_widget(&proposal_json(&proposal)).unwrap();
         assert_eq!(super::super::media::widget_specs(&block)[0]["proposal"]["id"], 1);
 
-        let (answered, task) = answer_proposal(&store, "p", 1, "create", 2).unwrap();
+        let (answered, task, _) = answer_proposal(&store, "p", 1, "create", &Default::default(), 2).unwrap();
         let task = task.unwrap();
         assert_eq!((task.number, task.status.as_str(), task.session_id.as_deref()), (1, "todo", Some("s1")));
         assert_eq!((answered.status.as_str(), answered.task_number), ("created", Some(1)));
         assert!(answer_prompt(&answered).starts_with("Owner chose Create task for proposal \"T\": task #1 created"));
         assert_eq!(events(store.connection(), "p", 1).unwrap()[0]["actor"], "owner");
-        assert!(refused_proposal(answer_proposal(&store, "p", 1, "cancel", 3)).contains("already answered"));
+        assert!(refused_proposal(answer_proposal(&store, "p", 1, "cancel", &Default::default(), 3)).contains("already answered"));
         // The new task is the chat's like any other.
         agent(&store, "s1", "start", Some(1), json!({})).unwrap();
     }
@@ -1225,18 +1292,18 @@ mod tests {
     #[test]
     fn just_do_it_and_cancel_discard_a_proposal() {
         let (_d, store) = store();
-        propose(&store, "p", "s1", &draft("chore"), 1).unwrap();
-        propose(&store, "p", "s1", &draft("chore"), 1).unwrap();
-        assert!(refused_proposal(answer_proposal(&store, "p", 1, "maybe", 2)).contains("choice must be one of"));
-        let (one, task) = answer_proposal(&store, "p", 1, "just_do_it", 2).unwrap();
+        propose(&store, "p", "s1", &draft("chore"), &Default::default(), 1).unwrap();
+        propose(&store, "p", "s1", &draft("chore"), &Default::default(), 1).unwrap();
+        assert!(refused_proposal(answer_proposal(&store, "p", 1, "maybe", &Default::default(), 2)).contains("choice must be one of"));
+        let (one, task, _) = answer_proposal(&store, "p", 1, "just_do_it", &Default::default(), 2).unwrap();
         assert!(task.is_none());
         assert_eq!(answer_prompt(&one), "Owner chose Just do it for proposal \"T\": do the work without a task.");
-        let (two, task) = answer_proposal(&store, "p", 2, "cancel", 2).unwrap();
+        let (two, task, _) = answer_proposal(&store, "p", 2, "cancel", &Default::default(), 2).unwrap();
         assert!(task.is_none());
         assert_eq!(answer_prompt(&two), "Owner chose Cancel for proposal \"T\": don't do this work.");
         assert!(list(store.connection(), Some("p"), None).unwrap().is_empty());
         assert!(pending_proposals(store.connection(), "s1").unwrap().is_empty());
-        assert!(refused_proposal(answer_proposal(&store, "p", 9, "create", 2)).contains("no proposal 9"));
+        assert!(refused_proposal(answer_proposal(&store, "p", 9, "create", &Default::default(), 2)).contains("no proposal 9"));
     }
 
     #[test]
@@ -1249,7 +1316,7 @@ mod tests {
         create(&store, "s2", "chore");
         agent(&store, "s1", "start", Some(two), json!({})).unwrap();
         agent(&store, "s1", "cancel", Some(three), json!({"reason": "r"})).unwrap();
-        propose(&store, "p", "s1", &draft("docs"), 1).unwrap();
+        propose(&store, "p", "s1", &draft("docs"), &Default::default(), 1).unwrap();
         let section = open_section(store.connection(), "s1").unwrap();
         assert_eq!(
             section,

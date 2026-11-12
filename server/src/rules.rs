@@ -365,6 +365,9 @@ pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
     if name == "task" {
         return crate::workbench::tasks::cli::run(rest).await;
     }
+    if name == "grid" {
+        return crate::workbench::grids::cli::run(rest).await;
+    }
     if name == "screen-check" {
         return crate::workbench::cli::screen_check(rest).await;
     }

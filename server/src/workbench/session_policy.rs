@@ -96,6 +96,7 @@ mod tests {
             assert!(guidance.contains("instructions — Tasks:"), "{guidance}");
             assert!(guidance.contains(rules.trim()), "the tasks skill is missing:\n{guidance}");
             assert!(guidance.contains("atelier task create"), "{guidance}");
+            assert!(guidance.contains("atelier grid prove"), "{guidance}");
         }
     }
 

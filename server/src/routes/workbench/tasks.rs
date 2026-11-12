@@ -5,6 +5,8 @@
 //! commits a `done` names, and the media store, for its evidence files — is
 //! done here before the change is handed to the database writer.
 
+use super::grids::{announce_grids, prints_for};
+use super::tell::tell_chat;
 use super::{decoded, presentation_directory, ApiError, WorkbenchState};
 use crate::workbench::tasks::{self, types, Request, TaskError};
 use axum::{
@@ -113,7 +115,7 @@ fn folder_of(store: &crate::workbench::store::Store, task: &tasks::TaskRow) -> O
 }
 
 /// The project's own folder, for a task whose session is gone.
-fn project_folder(state: &WorkbenchState, project: &str) -> Option<String> {
+pub(super) fn project_folder(state: &WorkbenchState, project: &str) -> Option<String> {
     let found = state.projects.as_ref()?.get_project(project).ok()?;
     Some(found.local_path.filter(|path| !path.is_empty()).unwrap_or(found.path))
 }
@@ -183,7 +185,7 @@ async fn missing_commits(cwd: &str, commits: &[String]) -> HashSet<String> {
 
 /// Store each uploaded evidence file and put its served address where the
 /// result named its path.
-fn store_evidence(
+pub(super) fn store_evidence(
     result: &mut Value,
     files: BTreeMap<String, String>,
     directory: &std::path::Path,
@@ -244,10 +246,11 @@ pub(super) async fn act(
         let payload = request.payload;
         let now = chrono::Utc::now().timestamp_millis();
         let asked_project = project.clone();
+        let prints = prints_for(&state, &project, cell_grids(&payload)).await;
         let outcome = state
             .database()
             .write_tasks(move |store| {
-                tasks::propose(store, &asked_project, &session, &payload, now)
+                tasks::propose(store, &asked_project, &session, &payload, &prints, now)
                     .map(|(proposal, summary)| (tasks::proposal_json(&proposal), summary))
             })
             .await
@@ -264,18 +267,29 @@ pub(super) async fn act(
             .ok_or_else(|| format!("choice is required: one of {}", tasks::PROPOSAL_CHOICES.join(", ")))?
             .to_string();
         let now = chrono::Utc::now().timestamp_millis();
+        let asked = project.clone();
+        let named = state
+            .database()
+            .read_tasks(move |store| {
+                Ok(tasks::get_proposal(store.connection(), &asked, id)?.map(|p| p.cells).unwrap_or(Value::Null))
+            })
+            .await
+            .map_err(failed)?;
+        let prints = prints_for(&state, &project, cell_grids(&json!({"cells": named}))).await;
+        let answered = project.clone();
         let outcome = state
             .database()
             .write_tasks(move |store| {
-                tasks::answer_proposal(store, &project, id, &choice, now).map(|(proposal, task)| {
+                tasks::answer_proposal(store, &answered, id, &choice, &prints, now).map(|(proposal, task, grids)| {
                     let prompt = tasks::answer_prompt(&proposal);
-                    (tasks::proposal_json(&proposal), task.map(|task| tasks::to_json(store, &task)), prompt, proposal.session_id)
+                    (tasks::proposal_json(&proposal), task.map(|task| tasks::to_json(store, &task)), prompt, proposal.session_id, grids)
                 })
             })
             .await
             .map_err(failed)?;
-        let (proposal, task, prompt, session) = refused_or(outcome)?;
+        let (proposal, task, prompt, session, grids) = refused_or(outcome)?;
         announce(&state, &proposal["projectId"], task.as_ref().map_or(&Value::Null, |task| &task["number"]));
+        announce_grids(&state, &project, &grids);
         // The agent stopped to wait for this; it hears the answer as its
         // next message, queued behind a turn still running.
         let telling = state.clone();
@@ -303,6 +317,8 @@ pub(super) async fn act(
         }
     }
     let action = request.action.clone();
+    let prints = if request.action == "create" { prints_for(&state, &project, cell_grids(&payload)).await } else { Default::default() };
+    let announced = project.clone();
     let asked = Request {
         action: request.action,
         actor: request.actor,
@@ -312,18 +328,20 @@ pub(super) async fn act(
         payload,
         missing_commits: missing,
         cwd,
+        prints,
         now: chrono::Utc::now().timestamp_millis(),
     };
     let outcome = state
         .database()
         .write_tasks(move |store| {
-            tasks::apply(store, &asked).map(|outcome| (tasks::to_json(store, &outcome.task), outcome.summary))
+            tasks::apply(store, &asked).map(|outcome| (tasks::to_json(store, &outcome.task), outcome.summary, outcome.grids))
         })
         .await
         .map_err(failed)?;
-    let (task, summary) = refused_or(outcome)?;
+    let (task, summary, grids) = refused_or(outcome)?;
     let widget = tasks::widget(&action, &task).map_err(failed)?;
     announce(&state, &task["projectId"], &task["number"]);
+    announce_grids(&state, &announced, &grids);
     Ok(Json(json!({"task": task, "widget": widget, "summary": summary})))
 }
 
@@ -335,35 +353,23 @@ fn refused_or<T>(outcome: Result<T, TaskError>) -> Result<T, ApiError> {
     }
 }
 
+/// The grids a payload's `cells` name.
+fn cell_grids(payload: &Value) -> Vec<String> {
+    let mut grids: Vec<String> = payload["cells"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|cell| cell["grid"].as_str().map(str::to_string))
+        .collect();
+    grids.sort();
+    grids.dedup();
+    grids
+}
+
 /// Tell every screen the project's tasks changed.
-fn announce(state: &WorkbenchState, project: &Value, number: &Value) {
+pub(super) fn announce(state: &WorkbenchState, project: &Value, number: &Value) {
     let _ = state.watch_polls.send(json!({
         "type": "tasks.changed", "kind": "tasks.changed",
         "projectId": project, "number": number,
     }));
-}
-
-/// Send a line into a chat as the owner's next message: now when the chat is
-/// between turns (waking it if it sleeps), held for the end of the turn when
-/// it is in one — the same queue a message the owner holds waits in. A send
-/// the chat refuses is held instead, so the answer is never lost.
-async fn tell_chat(state: &WorkbenchState, session: &str, text: String) {
-    use crate::workbench::protocol::{Command, CommandKind};
-    let command = |kind| Command {
-        kind,
-        fields: serde_json::Map::from_iter([
-            ("sessionId".into(), json!(session)),
-            ("text".into(), json!(text)),
-            ("images".into(), json!([])),
-        ]),
-    };
-    let busy = state.registry.mid_turn(session).await.unwrap_or(false);
-    let first = if busy { CommandKind::PromptHold } else { CommandKind::PromptSend };
-    let Err(error) = state.registry.execute(&command(first)).await else { return };
-    tracing::warn!(chat = session, %error, "a proposal's answer could not be sent to its chat");
-    if first == CommandKind::PromptSend {
-        if let Err(error) = state.registry.execute(&command(CommandKind::PromptHold)).await {
-            tracing::warn!(chat = session, %error, "a proposal's answer could not be held for its chat either");
-        }
-    }
 }

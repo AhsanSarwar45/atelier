@@ -63,6 +63,7 @@ pub mod signin;
 pub mod storage_index;
 pub mod store;
 pub mod summary;
+pub mod grids;
 pub mod tasks;
 pub mod usage;
 pub mod wire;

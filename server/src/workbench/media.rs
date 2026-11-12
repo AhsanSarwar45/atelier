@@ -626,9 +626,10 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
             "type", "layout", "title", "summary", "nodes", "edges", "steps", "evidence",
         ][..],
         "task" => &["type", "event", "task", "proposal"][..],
+        "grid" => &["type", "title", "event", "grid", "cell", "template", "audit"][..],
         other => {
             return Err(format!(
-                "{other} is not a widget type: use metrics, chart, progress, timeline, table, video, image, image_compare, artifact, explainer or task"
+                "{other} is not a widget type: use metrics, chart, progress, timeline, table, video, image, image_compare, artifact, explainer, task or grid"
             ))
         }
     };
@@ -873,6 +874,48 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
             }
             required_string(task, "title", 480)?;
             one_of(task, "status", crate::workbench::tasks::STATUSES, true)?;
+        }
+        "grid" => {
+            // The card `atelier grid` prints (docs/grids.md): the change and
+            // the grid as it stood after; a template change carries the
+            // template instead of a grid.
+            one_of(object, "event", crate::workbench::grids::WIDGET_EVENTS, true)?;
+            let event = object.get("event").and_then(Value::as_str).unwrap_or("");
+            match object.get("grid") {
+                Some(Value::Object(grid)) => {
+                    required_string(grid, "projectId", 400)?;
+                    let slug = required_string(grid, "slug", 64)?;
+                    if !crate::workbench::grids::valid_id(slug) {
+                        return Err(format!("grid.slug {slug} is not a grid id"));
+                    }
+                    one_of(grid, "status", crate::workbench::grids::STATUSES, true)?;
+                }
+                None | Some(Value::Null) if event == "template" => {}
+                _ => return Err("grid is required and is an object (the grid summary)".into()),
+            }
+            if event == "template" {
+                let template = object
+                    .get("template")
+                    .and_then(Value::as_object)
+                    .ok_or("template is required for a template card and is an object")?;
+                required_string(template, "name", 64)?;
+            } else if object.get("template").is_some_and(|t| !t.is_object()) {
+                return Err("template is an object".into());
+            }
+            if let Some(cell) = object.get("cell").filter(|c| !c.is_null()) {
+                let cell = cell.as_object().ok_or("cell is an object: {row, col, state, …}")?;
+                required_string(cell, "row", 64)?;
+                required_string(cell, "col", 64)?;
+                one_of(cell, "state", crate::workbench::grids::STATES, true)?;
+            }
+            if let Some(audit) = object.get("audit").filter(|a| !a.is_null()) {
+                let audit = audit.as_object().ok_or("audit is an object: {passed, reopened, cells}")?;
+                for key in ["passed", "reopened"] {
+                    if !audit.get(key).and_then(Value::as_i64).is_some_and(|n| n >= 0) {
+                        return Err(format!("audit.{key} is a whole number from 0 upwards"));
+                    }
+                }
+            }
         }
         _ => unreachable!("the type was matched against the field allowlist above"),
     }
@@ -1447,6 +1490,25 @@ mod tests {
         assert!(super::import_artifact(&serde_json::to_vec(&other).unwrap(), "other", directory.path()).unwrap_err().contains("1 MiB"));
     }
     use super::*;
+
+    #[test]
+    fn the_grid_widget_is_a_valid_block() {
+        use serde_json::json;
+        let grid = json!({"projectId": "p", "slug": "camera", "title": "Renderer camera", "status": "approved", "percent": 0});
+        let block = widget_block(&json!({"type": "grid", "event": "draft", "grid": grid})).unwrap();
+        assert!(block.starts_with("```atelier-widget\n") && block.contains("\"camera\""), "{block}");
+        let cell = json!({"row": "glare", "col": "gpu", "state": "proved"});
+        widget_block(&json!({"type": "grid", "event": "prove", "grid": grid, "cell": cell})).unwrap();
+        widget_block(&json!({"type": "grid", "event": "audit", "grid": grid, "audit": {"passed": 2, "reopened": 1, "cells": []}})).unwrap();
+        widget_block(&json!({"type": "grid", "event": "template", "template": {"name": "physics", "columns": []}})).unwrap();
+        let refused = |value: serde_json::Value| widget_block(&value).unwrap_err();
+        assert!(refused(json!({"type": "grid", "event": "draft"})).contains("grid is required"));
+        assert!(refused(json!({"type": "grid", "event": "won", "grid": grid})).contains("event is one of"));
+        assert!(refused(json!({"type": "grid", "event": "template"})).contains("template is required"));
+        assert!(refused(json!({"type": "grid", "event": "prove", "grid": grid, "cell": {"row": "a", "col": "b", "state": "done"}})).contains("state is one of"));
+        assert!(refused(json!({"type": "grid", "event": "draft", "grid": {"projectId": "p", "slug": "Camera", "status": "draft"}})).contains("not a grid id"));
+        assert!(refused(json!({"type": "grid", "event": "draft", "grid": grid, "rows": []})).contains("rows"));
+    }
 
     /// An attachment is kept by its content, under a name read off its own.
     #[test]

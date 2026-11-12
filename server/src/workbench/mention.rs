@@ -27,10 +27,11 @@ pub enum Kind {
     Skill,
     Diff,
     Task,
+    Grid,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [Kind::File, Kind::Diff, Kind::Task, Kind::Chat, Kind::Skill];
+    pub const ALL: [Kind; 6] = [Kind::File, Kind::Diff, Kind::Task, Kind::Grid, Kind::Chat, Kind::Skill];
 
     pub fn parse(word: &str) -> Option<Kind> {
         match word {
@@ -39,6 +40,7 @@ impl Kind {
             "skill" => Some(Kind::Skill),
             "diff" => Some(Kind::Diff),
             "task" => Some(Kind::Task),
+            "grid" => Some(Kind::Grid),
             _ => None,
         }
     }
@@ -52,6 +54,7 @@ impl Kind {
             Kind::Skill => 5,
             Kind::Diff => 4,
             Kind::Task => 6,
+            Kind::Grid => 4,
         }
     }
 }
@@ -166,6 +169,26 @@ pub fn tasks(tasks: &[crate::workbench::tasks::TaskRow], wanted: &str, limit: us
     offers.into_iter().take(limit).map(|(offer, _)| offer).collect()
 }
 
+/// The project's coverage grids that answer `wanted`, by slug or title; a
+/// discarded grid is never offered. Each is offered by its slug, which is
+/// what `@grid:` and `@audit` take.
+pub fn grids(grids: &[crate::workbench::grids::Grid], wanted: &str, limit: usize) -> Vec<Offer> {
+    let wanted = wanted.to_lowercase();
+    let offers = grids
+        .iter()
+        .filter(|grid| grid.status != "discarded")
+        .filter_map(|grid| {
+            let score = best_fit(&[&grid.slug, &grid.title], &wanted)?;
+            let mut offer = Offer::new(Kind::Grid, grid.slug.clone(), grid.title.clone(), score);
+            offer.detail = grid.slug.clone();
+            offer.status = Some(grid.status.clone());
+            offer.project_id = Some(grid.project_id.clone());
+            Some(offer)
+        })
+        .collect();
+    keep(offers, limit, |a, b| a.id.cmp(&b.id))
+}
+
 /// The chats that answer `wanted`, by name or by id. The chat asking is not
 /// offered to itself. Chats of the project being worked in come first among
 /// equals, then the most recently active.
@@ -274,7 +297,7 @@ pub fn in_order(mut groups: Vec<(Kind, Vec<Offer>)>, typed: bool) -> Vec<Offer> 
 /// word to look for.
 pub fn scoped(typed: &str) -> (Option<Kind>, &str) {
     if let Some((word, rest)) = typed.split_once(':') {
-        if let Some(kind @ (Kind::Task | Kind::Chat | Kind::Skill | Kind::Diff)) = Kind::parse(word) {
+        if let Some(kind @ (Kind::Task | Kind::Chat | Kind::Skill | Kind::Diff | Kind::Grid)) = Kind::parse(word) {
             return (Some(kind), rest);
         }
     }

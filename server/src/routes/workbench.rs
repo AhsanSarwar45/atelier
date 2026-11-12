@@ -26,7 +26,9 @@ use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 
 mod ai_search;
+mod grids;
 mod tasks;
+mod tell;
 
 use crate::workbench::{
     actor::ChatDb,
@@ -1141,6 +1143,12 @@ async fn fresh_usage(
         .map(|(_, value)| value.clone())
 }
 
+/// Start the coverage grids' watcher, which reruns row searches when a
+/// project's HEAD moves (docs/grids.md).
+pub fn watch_grids(state: WorkbenchState) {
+    grids::watch(state);
+}
+
 pub fn router(state: WorkbenchState) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -1176,6 +1184,10 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/task-types", get(tasks::kinds))
         .route("/task", post(tasks::act))
         .route("/task-proposals/:project/:id", get(tasks::proposal))
+        .route("/grids", get(grids::list))
+        .route("/grids/:project/:slug", get(grids::detail))
+        .route("/grids/:project/:slug/cells/:row/:col", get(grids::cell))
+        .route("/grid", post(grids::act))
         // A prompt carries its pictures inline, as base64 inside the JSON, and
         // there is no ceiling on how many a person may attach to one message.
         // Axum otherwise buffers every body under a 2 MiB default nobody here
@@ -2803,6 +2815,15 @@ async fn mention_tasks(
         .unwrap_or_default()
 }
 
+/// A project's coverage grids, for the `@` menu.
+async fn mention_grids(database: &crate::workbench::actor::ChatDb, project_id: Option<&str>) -> Vec<crate::workbench::grids::Grid> {
+    let Some(project) = project_id.map(str::to_string) else { return Vec::new() };
+    database
+        .read_tasks(move |store| crate::workbench::grids::list_grids(store.connection(), &project))
+        .await
+        .unwrap_or_default()
+}
+
 /// What the composer's `@` offers for what was typed after it: files,
 /// tasks, chats and skills together, grouped by kind, best group first (bw-mi3s.4).
 /// See `workbench::mention` for how each kind is ranked.
@@ -2827,6 +2848,17 @@ async fn mention(
                 Some(Kind::Task) => mention::tasks(&mention_tasks(&database, query.project_id.as_deref()).await, id, usize::MAX)
                     .into_iter()
                     .find(|offer| offer.id == id),
+                Some(Kind::Grid) => {
+                    // A selection names its grid first: `camera.glare.*`.
+                    let slug = id.split('.').next().unwrap_or(id);
+                    mention::grids(&mention_grids(&database, query.project_id.as_deref()).await, slug, usize::MAX)
+                        .into_iter()
+                        .find(|offer| offer.id == slug)
+                        .map(|mut offer| {
+                            offer.id = id.to_string();
+                            offer
+                        })
+                }
                 _ => None,
             };
             named.extend(found);
@@ -2851,6 +2883,11 @@ async fn mention(
                 .unwrap_or_default(),
             Kind::Task => mention::tasks(
                 &mention_tasks(&database, query.project_id.as_deref()).await,
+                wanted,
+                share(kind),
+            ),
+            Kind::Grid => mention::grids(
+                &mention_grids(&database, query.project_id.as_deref()).await,
                 wanted,
                 share(kind),
             ),

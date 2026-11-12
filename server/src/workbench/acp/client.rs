@@ -3542,6 +3542,37 @@ impl AcpDriver {
                 .flatten();
             looked.tasks.push((id, task));
         }
+        let new_task = found.iter().any(|reference| reference.kind == Kind::Task && reference.id.is_empty() && !reference.run);
+        for id in references::wanted(&found, Kind::Grid) {
+            use crate::workbench::grids;
+            let Some(selection) = grids::Selection::parse(&id) else {
+                looked.grids.push((id.clone(), grids::describe(&id, None, &Default::default(), new_task)));
+                continue;
+            };
+            let project = self.session.project_id.clone();
+            let loaded = self
+                .database
+                .read_tasks(move |store| grids::load(store.connection(), &project, &selection.slug))
+                .await
+                .ok()
+                .flatten();
+            // Staleness is read in the project's folder.
+            let mut prints = grids::Prints::new();
+            if let Some(grid) = loaded.as_ref().filter(|grid| grid.grid.status == "approved") {
+                let folder = Path::new(&self.session.project_path);
+                if let Some(head) = grids::proof::head(folder).await {
+                    for (row, paths) in grid.coverage() {
+                        if let Some(print) = grids::proof::fingerprint(folder, &head, &paths).await {
+                            prints.insert((grid.grid.slug.clone(), row), print);
+                        }
+                    }
+                }
+            }
+            looked.grids.push((id.clone(), grids::describe(&id, loaded.as_ref(), &prints, new_task)));
+        }
+        if found.iter().any(|reference| reference.kind == Kind::Audit && !reference.run) {
+            looked.audit_slugs = references::audit_slugs(text);
+        }
         if found.iter().any(|reference| reference.kind == Kind::Merge && !reference.run) {
             let facts = crate::workbench::tasks::git::merge_facts(Path::new(&self.session.cwd)).await;
             looked.merge = Some(crate::workbench::tasks::git::merge_instructions(&facts));

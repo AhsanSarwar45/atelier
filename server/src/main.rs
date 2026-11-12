@@ -574,6 +574,10 @@ async fn serve(open_browser: bool) {
     // operating system freezing it (push.rs).
     atelier::push::watch(database.clone(), workbench_state.clone());
 
+    // What reruns a coverage grid's row search when the project's HEAD moves
+    // across what it watches (docs/grids.md, "Row search").
+    routes::workbench::watch_grids(workbench_state.clone());
+
     // What stops a chat that has grown past the limit set for it, and tells it
     // what it spent. Does nothing at all while no limit is set
     // (workbench/memory_limit.rs).

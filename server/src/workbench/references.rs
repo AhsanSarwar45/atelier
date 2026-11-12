@@ -25,6 +25,13 @@
 //!   the chat's folder (`tasks::git::merge_instructions`). Like a bare `@task`
 //!   it has an empty id, and `@merge:…` is nothing.
 //!
+//! - a grid: `@grid:camera` is coverage grid "camera", and
+//!   `@grid:camera.glare+sunstar.gpu+perf` cells of it (rows, then columns,
+//!   each `*` or ids joined by `+`); its id has its own scanner, like a diff's
+//!   (docs/grids.md). A bare `@matrix` asks the agent to draft a grid of the
+//!   area the message describes, and a bare `@audit` followed by a slug asks
+//!   it to audit that grid. Both carry their own steps and have empty ids.
+//!
 //! The grammar is the composer's (`src/workbench/references.ts`), and both
 //! sides are held to one list of cases (`atelier-references.cases.json`).
 //! `@bead:…`, which named a card on the retired board, is no longer a
@@ -44,6 +51,9 @@ pub enum Kind {
     Diff,
     Task,
     Merge,
+    Grid,
+    Matrix,
+    Audit,
 }
 
 impl Kind {
@@ -54,6 +64,9 @@ impl Kind {
             Kind::Diff => "diff",
             Kind::Task => "task",
             Kind::Merge => "merge",
+            Kind::Grid => "grid",
+            Kind::Matrix => "matrix",
+            Kind::Audit => "audit",
         }
     }
 }
@@ -215,6 +228,35 @@ fn id_at(text: &str, from: usize) -> Option<usize> {
     })
 }
 
+/// A grid reference's id starting at `from`: the longest run that reads as a
+/// grid or a selection of its cells, with nothing id-like after it, so a
+/// sentence keeps its full stop.
+fn grid_id_at(text: &str, from: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut run = from;
+    while run < bytes.len() && (bytes[run].is_ascii_lowercase() || bytes[run].is_ascii_digit() || b"_-.*+".contains(&bytes[run])) {
+        run += 1;
+    }
+    (from + 1..=run).rev().find(|&end| {
+        !bytes.get(end).is_some_and(|&c| c.is_ascii_alphanumeric() || b"_*+-".contains(&c))
+            && super::grids::Selection::parse(&text[from..end]).is_some()
+    })
+}
+
+/// The grid slugs named after each bare `@audit` in a message.
+pub fn audit_slugs(text: &str) -> Vec<String> {
+    let mut slugs = Vec::new();
+    for found in find(text).into_iter().filter(|f| f.kind == Kind::Audit) {
+        let rest = text[found.end..].trim_start();
+        let word: String =
+            rest.chars().take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_' || *c == '-').collect();
+        if super::grids::valid_id(&word) && !slugs.contains(&word) {
+            slugs.push(word);
+        }
+    }
+    slugs
+}
+
 /// A task's number: digits, not starting with 0.
 pub fn task_number(id: &str) -> Option<i64> {
     (!id.starts_with('0') && !id.is_empty() && id.bytes().all(|c| c.is_ascii_digit()))
@@ -224,6 +266,11 @@ pub fn task_number(id: &str) -> Option<i64> {
 
 fn reference_at(text: &str, at: usize) -> Option<Found> {
     let rest = &text[at + 1..];
+    if rest.starts_with("grid:") {
+        let from = at + 1 + "grid:".len();
+        let end = grid_id_at(text, from)?;
+        return Some(Found { kind: Kind::Grid, id: text[from..end].to_string(), start: at, end, run: false });
+    }
     for kind in [Kind::Chat, Kind::Skill, Kind::Diff, Kind::Task] {
         let prefix = format!("{}:", kind.word());
         if rest.starts_with(&prefix) {
@@ -243,6 +290,13 @@ fn reference_at(text: &str, at: usize) -> Option<Found> {
     // A bare `@merge`: the owner asking the agent to merge this branch.
     if rest.starts_with("merge") && rest[5..].chars().next().is_none_or(char::is_whitespace) {
         return Some(Found { kind: Kind::Merge, id: String::new(), start: at, end: at + 6, run: false });
+    }
+    // A bare `@matrix`: the owner asking for a grid of the area; a bare
+    // `@audit`, for an audit of the grid named after it.
+    for (word, kind) in [("matrix", Kind::Matrix), ("audit", Kind::Audit)] {
+        if rest.starts_with(word) && rest[word.len()..].chars().next().is_none_or(char::is_whitespace) {
+            return Some(Found { kind, id: String::new(), start: at, end: at + 1 + word.len(), run: false });
+        }
     }
     None
 }
@@ -346,6 +400,10 @@ pub struct Looked {
     /// What a bare `@merge` tells the agent, worked out from git in the
     /// chat's folder (`tasks::git::merge_instructions`).
     pub merge: Option<String>,
+    /// What each `@grid:` reference says (`grids::describe`), by id.
+    pub grids: Vec<(String, String)>,
+    /// The slugs named after a bare `@audit` (`audit_slugs`).
+    pub audit_slugs: Vec<String>,
 }
 
 /// How much of a task's long text is carried, so a task with an essay in it
@@ -441,6 +499,35 @@ fn diff_entry(id: &str, file: Option<&DiffFile>) -> String {
     entry
 }
 
+/// What a bare `@matrix` asks of the agent (docs/grids.md, "Drafting").
+pub const NEW_GRID: &str = "@matrix — The owner asks you to draft a coverage grid for the area this message describes: \
+one row per user-visible feature, one column per requirement, a cell for each pair. Steps:
+1. Read the area's code. Write and commit a row-search script that prints one JSON line per feature, \
+`{\"id\", \"name\", \"paths\": [...]}`, plus a combination line `{\"id\", \"name\", \"kind\": \"combination\", \"of\": [ids]}` \
+for features that interact (share energy, a buffer or a pass). Ids are lower-case letters, digits, _ and -. Run it and check the output.
+2. Run `atelier grid template list`, pick the template that fits, and add the grid's own columns \
+(`{id, name, proof_rule}`) only for requirements the template lacks.
+3. Run `atelier grid list --rows` to see which features other grids already own; add those as reference rows \
+(`{\"id\", \"name\", \"kind\": \"reference\", \"ref\": {\"grid\", \"row\"}}`), not new rows.
+4. Run `atelier grid draft` with `{slug, title, area, template?, row_search: {command, watch: [path prefixes]}, columns, rows}` \
+on stdin, then stop and end your turn. The owner approves or discards the draft on its card; their answer, or \
+the changes they want (draft again with the same slug), arrives as your next message.";
+
+/// What a bare `@audit SLUG` asks of the agent.
+fn audit_entry(slugs: &[String]) -> String {
+    let Some(slug) = slugs.first() else {
+        return "@audit — The owner asks for an audit, but no grid slug follows @audit. Ask which grid (`atelier grid list`).".into();
+    };
+    format!(
+        "@audit {slug} — The owner asks you to audit coverage grid \"{slug}\" adversarially. Run `atelier grid audit {slug}` \
+for its proved cells, each with its column's proof_rule, proof and last check. For each, decide whether the checks \
+really test the proof_rule, whether the ground truth is independent of the code under test, whether benchmarks are \
+measured rather than asserted, and whether combinations are really exercised. Read the tests themselves. Then give a \
+verdict on every cell: `atelier grid pass {slug} ROW COL [--note TEXT]`, or `atelier grid reopen {slug} ROW COL --reason TEXT` \
+with what is missing. Finish with `atelier grid audit {slug} --done`. You may not judge cells this chat proved."
+    )
+}
+
 /// What a bare `@task` asks of the agent.
 const NEW_TASK: &str = "@task — The owner asks you to create a task from this message. Pick the type, draft the plan and run `atelier task create` (`atelier task types TYPE` prints the payload); do not ask for confirmation first.";
 
@@ -511,6 +598,14 @@ pub fn block(found: &[Found], looked: &Looked, library: &Snapshot) -> Option<Str
             Kind::Merge => looked.merge.clone().unwrap_or_else(|| {
                 "@merge — The owner asks you to merge this chat's branch into the base branch, but Atelier could not read git here. Tell the owner so.".to_string()
             }),
+            Kind::Matrix => NEW_GRID.to_string(),
+            Kind::Audit => audit_entry(&looked.audit_slugs),
+            Kind::Grid => looked
+                .grids
+                .iter()
+                .find(|(id, _)| *id == reference.id)
+                .map(|(_, entry)| entry.clone())
+                .unwrap_or_else(|| format!("@grid:{} could not be read.", reference.id)),
         });
     }
     if entries.is_empty() {
@@ -687,6 +782,27 @@ mod tests {
         let missing = super::block(&find("@task:9"), &Looked::default(), &Snapshot::default()).unwrap();
         assert!(missing.contains("@task:9 is not a task in this project"), "{missing}");
         assert!(find("@task:0 @task:x1").is_empty());
+    }
+
+    #[test]
+    fn matrix_audit_and_grid_references_are_read() {
+        let found = find("@matrix the camera, then @audit camera and see @grid:camera.glare+sunstar.*.");
+        let kinds: Vec<_> = found.iter().map(|f| (f.kind, f.id.as_str())).collect();
+        assert_eq!(kinds, [(Kind::Matrix, ""), (Kind::Audit, ""), (Kind::Grid, "camera.glare+sunstar.*")]);
+        assert_eq!(audit_slugs("please @audit camera now"), ["camera"]);
+        assert!(audit_slugs("@audit").is_empty());
+        assert!(audit_slugs("@audited camera").is_empty());
+        assert_eq!(find("@grid:camera.glare.").iter().map(|f| f.id.as_str()).collect::<Vec<_>>(), ["camera"]);
+        assert!(find("@grid:camera+x @grid:Camera").is_empty());
+        let block = block(&find("@matrix camera"), &Looked::default(), &Snapshot::default()).unwrap();
+        for want in ["atelier grid template list", "atelier grid list --rows", "atelier grid draft", "stop and end your turn"] {
+            assert!(block.contains(want), "{want} missing from {block}");
+        }
+        let looked = Looked { audit_slugs: vec!["camera".into()], ..Default::default() };
+        let block = super::block(&find("@audit camera"), &looked, &Snapshot::default()).unwrap();
+        for want in ["atelier grid audit camera", "atelier grid pass camera", "--done", "proof_rule"] {
+            assert!(block.contains(want), "{want} missing from {block}");
+        }
     }
 
     #[test]

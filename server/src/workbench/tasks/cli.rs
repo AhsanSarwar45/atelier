@@ -14,13 +14,13 @@ use std::collections::BTreeMap;
 pub const USAGE: &str = "\
 usage: atelier task <command>
   types [TYPE]                 list types, or print one type's create and done payloads
-  propose                      {type, title, why, plan} on stdin or --input FILE: ask the owner first
-  create                       {type, title, why, plan}; only when the owner's message says @task
+  propose                      {type, title, why, plan, cells?} on stdin or --input FILE: ask the owner first
+  create                       {type, title, why, plan, cells?}; only when the owner's message says @task
   start N
   block N --cause TEXT --needs TEXT
   unblock N
   amend N                      {plan} on stdin or --input FILE
-  done N                       {summary, commits?, followups?, result} on stdin or --input FILE
+  done N                       {summary, commits?, followups?, result, cells?} on stdin or --input FILE
   cancel N --reason TEXT
   take N
   list [--all]                 this session's tasks (or the project's)

@@ -4096,6 +4096,7 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     // Tasks (docs/tasks.md): the app's own record of work, keyed by project
     // and number, with one event row per change.
     transaction.execute_batch(super::tasks::SCHEMA)?;
+    super::grids::ensure_schema(&transaction)?;
 
     one_row_per_external_chat(transaction)
 }
