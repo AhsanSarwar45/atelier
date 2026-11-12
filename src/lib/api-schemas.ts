@@ -80,6 +80,9 @@ export const TaskDetailSchema = schema(object({
 
 export const TaskActionResponseSchema = schema(object({ task, widget: nullish(string) }));
 
+/** The owner's Create task from grid cells: the task, and the chat it went to. */
+export const TaskCreateResponseSchema = schema(object({ task, sessionId: string }));
+
 /** A proposal (docs/tasks.md, "Proposals"). */
 const proposal = object({
   projectId: string,

@@ -27,7 +27,9 @@ import { cellFrom } from '@/lib/address';
 import { tasks as tasksApi } from '@/lib/api';
 import { copyText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
+import { useProjectChats } from '@/workbench/grids/create-task';
 import GridsView from '@/workbench/grids/grids-view';
+import { claimShapeLabel } from '@/workbench/grids/task-cells';
 import { useLiveSessions, type LiveSession } from '@/workbench/live';
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
 import { lineForNewChat, NEW_TASK_LINE, startTaskIn } from '@/workbench/tasks/new-task';
@@ -281,8 +283,8 @@ function TaskDetail({ task, onClose, onOpenChat }: {
  * opens with `@task ` waiting in its composer. The agent makes the task from
  * what the owner writes after it (docs/tasks.md, "Principles").
  *
- * A grid's selection uses the same button with its own line,
- * `@task @grid:camera.*.gpu ` (docs/grids.md, "Selection").
+ * A grid's selection has Create task instead, which makes the task itself
+ * (grids/create-task.tsx).
  */
 export function NewTaskButton({ projectId, onOpenChat, onNewChat, line = NEW_TASK_LINE, label = 'New task', disabled, testId = 'new-task', size = 'sm' }: {
   projectId: string;
@@ -295,14 +297,7 @@ export function NewTaskButton({ projectId, onOpenChat, onNewChat, line = NEW_TAS
   testId?: string;
   size?: 'sm' | 'xs';
 }) {
-  const live = useLiveSessions();
-  const chats = useMemo(
-    () => live
-      .filter((s) => s.projectId === projectId)
-      .map((s) => ({ id: s.id, name: s.name || s.title || 'Untitled chat' }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
-    [live, projectId],
-  );
+  const chats = useProjectChats(projectId);
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -438,7 +433,6 @@ export default function TasksTab(props: Omit<Parameters<typeof TaskList>[0], 'sw
         cell={cellFrom(cell)}
         onShow={showGrid}
         onOpenChat={rest.onOpenChat}
-        onNewChat={rest.onNewChat}
         onOpenTask={onOpenTask ?? ((task) => { pickView('tasks'); rest.onSelect?.(task); })}
       />
     </div>
@@ -566,6 +560,9 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
                                 <Badge variant="secondary" size="sm" className="min-w-0"><span className="truncate">{typeLabel(task.type)}</span></Badge>
                               </span>
                               <span data-testid="task-row-title" className={cn('order-last line-clamp-2 min-w-0 basis-full text-sm sm:order-none sm:line-clamp-none sm:flex-1 sm:basis-auto sm:truncate', task.status === 'cancelled' && 'text-muted-foreground')}>{task.title}</span>
+                              {task.claimShape && (
+                                <span data-testid="task-row-shape" className="hidden max-w-56 shrink-0 truncate text-xs text-muted-foreground sm:inline">{claimShapeLabel(task.claimShape)}</span>
+                              )}
                               <span data-testid="task-row-chat" className="ml-auto hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground [@container(min-width:44rem)]:inline">{sessionName(task, sessions)}</span>
                               <span className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
                                 {stale.has(task.number) && (

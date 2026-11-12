@@ -27,7 +27,7 @@ import { useLiveSessions } from '@/workbench/live';
 import { onWorkbench } from '@/workbench/live-wire';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import type { LookableImage, SessionState } from '@/workbench/protocol';
-import { ProposalCells, TaskCells } from '@/workbench/grids/task-cells';
+import { ClaimShapeLink, ProposalCells, TaskCells } from '@/workbench/grids/task-cells';
 import { useComposerPrefill } from '@/workbench/tasks/composer-prefill';
 import { openTaskDetail } from '@/workbench/tasks/open-task';
 import { fieldName, planDiff } from '@/workbench/tasks/plan-diff';
@@ -1185,6 +1185,7 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
   if (event) return (
     <div data-testid="task-card" data-task-type={task.type} data-task-status={status} data-compact="yes" className="space-y-2">
       {header}
+      {task.claimShape && <ClaimShapeLink shape={task.claimShape} projectId={task.projectId} />}
       <CompactPlan task={task} />
     </div>
   );

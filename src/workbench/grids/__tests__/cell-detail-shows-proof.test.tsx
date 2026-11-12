@@ -11,9 +11,18 @@ import { makeCellDetail } from '@/workbench/grids/__tests__/fixtures';
 
 const cell = vi.fn();
 const act = vi.fn();
-vi.mock('@/lib/api', async (original) => ({
-  ...(await original<typeof import('@/lib/api')>()),
-  grids: { list: vi.fn(), get: vi.fn(), cell: (...args: unknown[]) => cell(...args), act: (...args: unknown[]) => act(...args) },
+const createForCells = vi.fn();
+vi.mock('@/lib/api', async (original) => {
+  const real = await original<typeof import('@/lib/api')>();
+  return {
+    ...real,
+    grids: { list: vi.fn(), get: vi.fn(), cell: (...args: unknown[]) => cell(...args), act: (...args: unknown[]) => act(...args) },
+    tasks: { ...real.tasks, createForCells: (...args: unknown[]) => createForCells(...args) },
+  };
+});
+vi.mock('@/workbench/live', async (original) => ({
+  ...(await original<typeof import('@/workbench/live')>()),
+  useLiveSessions: () => [{ id: 's1', projectId: 'p1', name: 'Chat one' }],
 }));
 vi.mock('@/workbench/live-wire', async (original) => ({
   ...(await original<typeof import('@/workbench/live-wire')>()),
@@ -94,10 +103,33 @@ describe('the cell detail', () => {
     await waitFor(() => expect(act).toHaveBeenCalledWith('reject_na', { projectId: 'p1', slug: 'camera', row: 'glare', col: 'gpu' }, { note: 'The CPU path ships' }));
   });
 
-  it('links the task that claims it', async () => {
-    cell.mockResolvedValue(makeCellDetail({ state: 'in_progress', claimedTask: 7, proof: null, lastCheck: null }));
+  it('links the task that claims it, with the chat holding it', async () => {
+    cell.mockResolvedValue(makeCellDetail({ state: 'in_progress', claimedTask: 7, claimedChat: { id: 's2', title: 'Glare fixes' }, proof: null, lastCheck: null }));
     const { onOpenTask } = draw();
-    fireEvent.click(await screen.findByTestId('cell-claimed'));
+    const claimed = await screen.findByTestId('cell-claimed');
+    expect(claimed.textContent).toBe('Task #7 · Glare fixes');
+    fireEvent.click(claimed);
     expect(onOpenTask).toHaveBeenCalledWith(7);
+    // A claimed cell is not offered to another task.
+    expect(screen.queryByTestId('cell-create-task')).toBeNull();
+  });
+
+  it('names the task alone when the server does not say which chat holds it', async () => {
+    cell.mockResolvedValue(makeCellDetail({ state: 'in_progress', claimedTask: 7, proof: null, lastCheck: null }));
+    draw();
+    expect((await screen.findByTestId('cell-claimed')).textContent).toBe('Task #7');
+  });
+
+  it('makes a task for an unclaimed gap in the chat picked, and opens it', async () => {
+    cell.mockResolvedValue(makeCellDetail({ state: 'gap', reason: 'No test', proof: null, lastCheck: null, provedAt: null }));
+    createForCells.mockResolvedValue({ task: { projectId: 'p1', number: 15 }, sessionId: 's1' });
+    const onOpenChat = vi.fn();
+    const onCreated = vi.fn();
+    render(<CellDetailPanel projectId="p1" slug="camera" row="glare" col="gpu" onClose={vi.fn()} onOpenChat={onOpenChat} onCreated={onCreated} />);
+    fireEvent.click(await screen.findByTestId('cell-create-task'));
+    fireEvent.click(await screen.findByTestId('create-task-chat'));
+    await waitFor(() => expect(onOpenChat).toHaveBeenCalledWith('s1'));
+    expect(createForCells).toHaveBeenCalledWith('p1', { slug: 'camera', rows: ['glare'], cols: ['gpu'], onlyGaps: false }, 's1');
+    expect(onCreated).toHaveBeenCalled();
   });
 });

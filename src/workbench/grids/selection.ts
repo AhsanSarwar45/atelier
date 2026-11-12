@@ -19,7 +19,14 @@ export const isGridId = (id: string): boolean => ID.test(id);
 /** All of them, or these. */
 export type Chosen = '*' | string[];
 
-export interface Selection { rows: Chosen; cols: Chosen }
+/**
+ * Rows times columns; with `onlyGaps`, only the gaps among them (All gaps
+ * is every row and column with `onlyGaps`).
+ */
+export interface Selection { rows: Chosen; cols: Chosen; onlyGaps?: boolean }
+
+/** Every gap in the grid. */
+export const ALL_GAPS: Selection = { rows: '*', cols: '*', onlyGaps: true };
 
 export interface GridRef { slug: string; selection: Selection | null }
 
@@ -107,6 +114,7 @@ export function selectedCells(selection: Selection, rows: GridRow[], columns: Gr
       if (!picks(selection.cols, column.id)) continue;
       const cell = at.get(`${row.id}\u0000${column.id}`);
       if (row.kind === 'reference' && !cell) continue;
+      if (selection.onlyGaps && (!cell || cellLook(cell) !== 'gap')) continue;
       out.push({ row, column, cell, blocker: blocker(cell, row, column) });
     }
   }

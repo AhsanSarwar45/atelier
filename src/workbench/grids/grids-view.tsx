@@ -6,7 +6,7 @@
  */
 import { useMemo, useState } from 'react';
 
-import { ArrowLeft, Grid3x3, RefreshCw, Search } from 'lucide-react';
+import { ArrowLeft, CircleAlert, Grid3x3, RefreshCw, Search } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,12 +20,12 @@ import { Switch } from '@/components/ui/switch';
 import { grids as gridsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { CellDetailPanel, failure } from '@/workbench/grids/cell-detail';
+import { cellCount, CreateTaskButton } from '@/workbench/grids/create-task';
 import { DraftActions, DraftView } from '@/workbench/grids/grid-card';
 import { GridHeatmap, Legend, orderRows } from '@/workbench/grids/grid-heatmap';
-import { newTaskLine, selectedCells, type Selection } from '@/workbench/grids/selection';
+import { ALL_GAPS, selectedCells, type Selection } from '@/workbench/grids/selection';
 import { draftColumns, draftContent, draftDiff, type GridDetail, type GridSummary, type GridTemplate } from '@/workbench/grids/types';
 import { useGrid, useGrids } from '@/workbench/grids/use-grids';
-import { NewTaskButton } from '@/workbench/tasks/tasks-tab';
 
 /** Drafts first, then the rest by lowest percent proved; discarded grids are left out. */
 export function orderGrids(grids: GridSummary[]): GridSummary[] {
@@ -134,8 +134,8 @@ const ago = (at: number): string => {
   return new Date(at).toLocaleDateString();
 };
 
-/** The last row search, Discover and Re-check stale. */
-function GridToolbar({ detail, onDone }: { detail: GridDetail; onDone: () => void }) {
+/** The last row search, All gaps, Discover and Re-check stale. */
+function GridToolbar({ detail, onDone, onAllGaps }: { detail: GridDetail; onDone: () => void; onAllGaps: () => void }) {
   const grid = detail.grid;
   const [busy, setBusy] = useState<'discover' | 'verify' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -166,6 +166,10 @@ function GridToolbar({ detail, onDone }: { detail: GridDetail; onDone: () => voi
               : `Rows searched ${ago(run.at)} · ${run.added?.length ?? 0} added · ${run.missing?.length ?? 0} missing`}
         </span>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <Button type="button" size="xs" variant="outline" data-testid="grid-all-gaps" disabled={!grid.counts?.gap} onClick={onAllGaps}>
+          <CircleAlert aria-hidden />
+          All gaps
+        </Button>
         <Button type="button" size="xs" variant="outline" data-testid="grid-discover" loading={busy === 'discover'} disabled={busy !== null} onClick={() => void act('discover')}>
           <Search aria-hidden />
           Discover
@@ -193,13 +197,16 @@ function GridToolbar({ detail, onDone }: { detail: GridDetail; onDone: () => voi
   );
 }
 
-/** "N cells (M claimable) · New task", with the cells that cannot be claimed and why. */
-function SelectionBar({ detail, selection, projectId, onOpenChat, onNewChat, onClear }: {
+/**
+ * "N cells (M claimable) · Create task · M cells", with the cells that cannot
+ * be claimed and why. All gaps reads "All gaps · N cells".
+ */
+function SelectionBar({ detail, selection, projectId, onOpenChat, onCreated, onClear }: {
   detail: GridDetail;
   selection: Selection;
   projectId: string;
   onOpenChat?: (sessionId: string) => void;
-  onNewChat?: () => void;
+  onCreated: () => void;
   onClear: () => void;
 }) {
   const drawn = orderRows(detail.rows).map((d) => d.row);
@@ -212,8 +219,8 @@ function SelectionBar({ detail, selection, projectId, onOpenChat, onNewChat, onC
     <div className="space-y-1 border-t border-border/60 bg-background px-4 py-2" data-testid="grid-selection">
       {onlyColumn?.proofRule && <p className="text-xs text-muted-foreground"><span className="font-medium text-foreground">{onlyColumn.name}: </span>{onlyColumn.proofRule}</p>}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm" data-testid="grid-selection-count">{`${cells.length} ${cells.length === 1 ? 'cell' : 'cells'}`}</span>
-        {blocked.length > 0 ? (
+        <span className="text-sm" data-testid="grid-selection-count">{selection.onlyGaps ? `All gaps · ${cellCount(cells.length)}` : cellCount(cells.length)}</span>
+        {blocked.length > 0 && (
           <Popover>
             <PopoverTrigger asChild>
               <Button type="button" size="xs" variant="ghost" data-testid="grid-selection-claimable" className="text-muted-foreground">{`(${claimable} claimable)`}</Button>
@@ -230,41 +237,36 @@ function SelectionBar({ detail, selection, projectId, onOpenChat, onNewChat, onC
               </ul>
             </PopoverContent>
           </Popover>
-        ) : (
-          <span className="text-xs text-muted-foreground" data-testid="grid-selection-claimable">{`(${claimable} claimable)`}</span>
         )}
         <div className="ml-auto flex items-center gap-2">
           <Button type="button" size="xs" variant="ghost" onClick={onClear}>Clear</Button>
-          {onOpenChat && (
-            <NewTaskButton
-              projectId={projectId}
-              onOpenChat={onOpenChat}
-              onNewChat={onNewChat}
-              line={newTaskLine(detail.grid.slug, selection)}
-              disabled={!claimable}
-              size="xs"
-              testId="grid-new-task"
-            />
-          )}
+          <CreateTaskButton
+            projectId={projectId}
+            cells={{ slug: detail.grid.slug, rows: selection.rows, cols: selection.cols, onlyGaps: !!selection.onlyGaps }}
+            label={claimable ? `Create task · ${cellCount(claimable)}` : 'Create task'}
+            disabled={!claimable}
+            size="xs"
+            onCreated={onCreated}
+            onOpenChat={onOpenChat}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOpenTask }: {
+function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onOpenTask }: {
   projectId: string;
   slug: string;
   cell: { row: string; col: string } | null;
   onShow: (where: { grid: string | null; cell?: string | null }) => void;
   onOpenChat?: (sessionId: string) => void;
-  onNewChat?: () => void;
   onOpenTask?: (task: number) => void;
 }) {
   const { data: detail, loaded, error, refetch } = useGrid(projectId, slug);
   const [showRetired, setShowRetired] = useState(false);
-  // A selection made on purpose: a row or column name, shift-click,
-  // ctrl-click or a drag. Only this one offers New task.
+  // A selection made on purpose: a row or column name, All gaps,
+  // shift-click, ctrl-click or a drag. Only this one offers Create task.
   const [chosen, setSelection] = useState<Selection | null>(null);
   // The cell whose detail is open is outlined too, without the selection bar.
   const selection = chosen ?? (cell ? { rows: [cell.row], cols: [cell.col] } : null);
@@ -286,7 +288,7 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
           {grid?.status === 'draft' && <Badge variant="secondary" appearance="light" size="sm"><span>Draft</span></Badge>}
           {grid?.status === 'approved' && <GridProgress grid={grid} className="w-full sm:w-56" />}
         </div>
-        {grid?.status === 'approved' && detail && <GridToolbar detail={detail} onDone={refetch} />}
+        {grid?.status === 'approved' && detail && <GridToolbar detail={detail} onDone={refetch} onAllGaps={() => setSelection(ALL_GAPS)} />}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         {error && !detail ? (
@@ -321,6 +323,7 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
                     cells={detail.cells}
                     selection={selection}
                     onSelect={setSelection}
+                    onOpenTask={onOpenTask}
                     onOpenCell={(row, column) => {
                       setSelection(null);
                       // A reference row's cells are the owner grid's; its detail is there.
@@ -342,7 +345,8 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
           selection={chosen}
           projectId={projectId}
           onOpenChat={onOpenChat}
-          onNewChat={onNewChat}
+          // The task holds its cells now: show them claimed.
+          onCreated={() => { setSelection(null); refetch(); }}
           onClear={() => setSelection(null)}
         />
       )}
@@ -362,6 +366,8 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
             gridName={grid?.title || slug}
             onClose={() => onShow({ grid: slug, cell: null })}
             onOpenTask={onOpenTask}
+            onOpenChat={onOpenChat}
+            onCreated={refetch}
           />
         </aside>
       )}
@@ -373,14 +379,13 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onNewChat, onOp
  * The Grids view: the list, or one grid when the address names it, with the
  * cell it names open beside it.
  */
-export default function GridsView({ projectId, grid, cell, onShow, onOpenChat, onNewChat, onOpenTask }: {
+export default function GridsView({ projectId, grid, cell, onShow, onOpenChat, onOpenTask }: {
   projectId: string;
   grid: string | null;
   cell: { row: string; col: string } | null;
   /** Shows another grid or cell, or the list (`grid: null`). */
   onShow: (where: { grid: string | null; cell?: string | null }) => void;
   onOpenChat?: (sessionId: string) => void;
-  onNewChat?: () => void;
   onOpenTask?: (task: number) => void;
 }) {
   if (grid) {
@@ -392,7 +397,6 @@ export default function GridsView({ projectId, grid, cell, onShow, onOpenChat, o
         cell={cell}
         onShow={onShow}
         onOpenChat={onOpenChat}
-        onNewChat={onNewChat}
         onOpenTask={onOpenTask}
       />
     );

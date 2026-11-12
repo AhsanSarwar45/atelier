@@ -17,7 +17,9 @@ import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { grids as gridsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { CreateTaskButton } from '@/workbench/grids/create-task';
 import { CellSquare } from '@/workbench/grids/grid-heatmap';
+import { blocker } from '@/workbench/grids/selection';
 import { cellLook, LOOK_LABEL, type Benchmark, type CellDetail, type CellFull, type GridEvent, type GridOwnerAction } from '@/workbench/grids/types';
 import { gridsChangedFor } from '@/workbench/grids/use-grids';
 import { onWorkbench } from '@/workbench/live-wire';
@@ -297,7 +299,12 @@ export function ProofView({ cell }: { cell: Pick<CellFull, 'proof' | 'lastCheck'
 }
 
 /** The detail panel: reads the cell, and again whenever the project's grids change. */
-export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, onOpenTask }: {
+/** Who holds a claimed cell: `Task #14 · Glare fixes`, or `Task #14` when the chat is not known. */
+export function claimLine(task: number, chat: { title: string | null } | null | undefined): string {
+  return chat?.title ? `Task #${task} · ${chat.title}` : `Task #${task}`;
+}
+
+export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, onOpenTask, onOpenChat, onCreated }: {
   projectId: string;
   slug: string;
   row: string;
@@ -308,6 +315,10 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
   onClose: () => void;
   /** Opens the task that claims the cell. */
   onOpenTask?: (task: number) => void;
+  /** Opens the chat a task made here went to. */
+  onOpenChat?: (sessionId: string) => void;
+  /** A task was made for this cell. */
+  onCreated?: () => void;
 }) {
   const [detail, setDetail] = useState<CellDetail | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -332,6 +343,8 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
   }), [projectId]);
 
   const cell = detail?.cell;
+  // A cell no task holds and that still needs work can be given to one.
+  const claimable = !!detail && !!cell && !cell.claimedTask && blocker(cell, detail.row, detail.column) === null;
   return (
     <div data-testid="cell-detail" data-row={row} data-col={col} className="flex min-h-0 flex-1 flex-col">
       <div className="space-y-1 border-b border-border/60 px-4 py-2">
@@ -362,12 +375,12 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
                 {cell.stale && <span className="text-xs text-muted-foreground">The covered code changed since it was proved</span>}
                 {cell.claimedTask ? (
                   onOpenTask ? (
-                    <Button type="button" size="xs" variant="ghost" data-testid="cell-claimed" onClick={() => onOpenTask(cell.claimedTask!)}>
-                      {`Claimed by #${cell.claimedTask}`}
+                    <Button type="button" size="xs" variant="ghost" data-testid="cell-claimed" className="min-w-0 max-w-full" onClick={() => onOpenTask(cell.claimedTask!)}>
+                      <span className="truncate">{claimLine(cell.claimedTask, cell.claimedChat)}</span>
                       <ExternalLink aria-hidden />
                     </Button>
                   ) : (
-                    <span data-testid="cell-claimed" className="text-xs text-muted-foreground">{`Claimed by #${cell.claimedTask}`}</span>
+                    <span data-testid="cell-claimed" className="text-xs text-muted-foreground">{claimLine(cell.claimedTask, cell.claimedChat)}</span>
                   )
                 ) : null}
                 {cell.auditedAt ? <span className="text-xs text-muted-foreground">{`Audited ${when(cell.auditedAt)}`}</span> : null}
@@ -381,6 +394,18 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
                 </Panel>
               )}
               <CellOwnerActions projectId={projectId} slug={slug} row={row} col={col} cell={cell} onDone={() => setRound((n) => n + 1)} />
+              {claimable && (
+                <div className="flex">
+                  <CreateTaskButton
+                    projectId={projectId}
+                    cells={{ slug, rows: [row], cols: [col], onlyGaps: false }}
+                    label="Create task"
+                    testId="cell-create-task"
+                    onCreated={() => { setRound((n) => n + 1); onCreated?.(); }}
+                    onOpenChat={onOpenChat}
+                  />
+                </div>
+              )}
             </section>
             <section className="space-y-2">
               <Label>Proof</Label>

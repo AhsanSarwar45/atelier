@@ -137,6 +137,21 @@ export interface Task {
    * (docs/grids.md, "Claims"). `claimed` is false once the claim is released.
    */
   cells?: TaskCell[];
+  /**
+   * What the claimed cells make up, when they are one whole row, column or
+   * grid (`Glare row · 5 cells`). Null or absent when they are not.
+   */
+  claimShape?: ClaimShape | null;
+}
+
+/** A task's claimed cells as one row, one column or one whole grid. */
+export interface ClaimShape {
+  grid: string;
+  kind: 'row' | 'col' | 'grid';
+  /** The row's or column's id; the grid's slug for a whole grid. */
+  id: string;
+  name: string;
+  count: number;
 }
 
 /** One grid cell a task claimed. `state` is null if the cell is gone. */

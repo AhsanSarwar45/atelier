@@ -5,7 +5,7 @@
 
 import { apiUrl } from '@/lib/api-base';
 import { onFolder, onRepository } from '@/workbench/live-wire';
-import { CellDetailSchema, GridDetailSchema, GridsResponseSchema, ProposalAnswerSchema, ProposalResponseSchema, TaskActionResponseSchema, TaskDetailSchema, TasksResponseSchema } from '@/lib/api-schemas';
+import { CellDetailSchema, GridDetailSchema, GridsResponseSchema, ProposalAnswerSchema, ProposalResponseSchema, TaskActionResponseSchema, TaskCreateResponseSchema, TaskDetailSchema, TasksResponseSchema } from '@/lib/api-schemas';
 import type { Project, Tag } from '@/types';
 import type { CellDetail, GridActionAnswer, GridDetail, GridOwnerAction, GridsList } from '@/workbench/grids/types';
 import type { OwnerAction, ProposalChoice, Task, TaskEvent, TaskProposal, TaskTypeInfo } from '@/workbench/tasks/types';
@@ -1645,6 +1645,18 @@ export const tasks = {
     });
     return TaskActionResponseSchema.parse(answer);
   },
+  /**
+   * The owner's Create task for grid cells: a task claiming the cells picked
+   * (only the gaps among them with `onlyGaps`), in an existing chat or a new
+   * one, whose agent is told to start. Answers with the task and its chat.
+   */
+  createForCells: async (projectId: string, grid: GridTaskCells, chat: string | 'new') => {
+    const answer = await fetchApi<{ task: Task; sessionId: string }>('/api/workbench/task', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'create', actor: 'owner', project: projectId, grid, chat }),
+    });
+    return TaskCreateResponseSchema.parse(answer);
+  },
   /** A proposal as it stands now. */
   proposal: async (projectId: string, id: number) => {
     const answer = await fetchApi<{ proposal: TaskProposal }>(
@@ -1661,6 +1673,14 @@ export const tasks = {
     return ProposalAnswerSchema.parse(answer);
   },
 };
+
+/** The grid cells an owner's Create task claims: rows times columns, each `*` or ids. */
+export interface GridTaskCells {
+  slug: string;
+  rows: '*' | string[];
+  cols: '*' | string[];
+  onlyGaps: boolean;
+}
 
 /** How long an owner's Re-check or Discover may take: they run the grid's commands first. */
 const GRID_LONG_MS = 60 * 60_000;

@@ -93,3 +93,15 @@ export function makeCellDetail(over: Partial<CellDetail['cell']> = {}): CellDeta
     ],
   };
 }
+
+/** The camera grid with task #9 claiming the whole glare row, from the chat "Glare fixes". */
+export function makeClaimedRowDetail(): GridDetail {
+  const detail = makeDetail();
+  const claimedChat = { id: 's2', title: 'Glare fixes' };
+  return {
+    ...detail,
+    cells: detail.cells.map((cell) => (cell.row === 'glare' && cell.col !== 'old'
+      ? { ...cell, state: 'in_progress', stale: false, claimedTask: 9, claimedChat }
+      : cell)),
+  };
+}

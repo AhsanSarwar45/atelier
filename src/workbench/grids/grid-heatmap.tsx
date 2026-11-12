@@ -4,7 +4,8 @@
  * A grid as a heatmap (docs/grids.md, "Grid view"): rows down the side,
  * columns along the top, one square per cell coloured by its state.
  *
- * Clicking a column header selects the column, a row header the row; clicking
+ * Clicking a column header selects the column, a row header the row; a row
+ * or column one task claims whole carries a link to that task. Clicking
  * a cell opens its detail, and ctrl- or cmd-click selects it instead.
  * Shift-click, or a drag with the mouse, selects the rectangle from the cell
  * clicked first. Cells grow with the width, between CELL_MIN and CELL_MAX, the
@@ -127,6 +128,43 @@ export function headerHeight(names: string[], size: number): number {
   return Math.ceil(Math.min(longest, Math.max(96, longest / lines + 4 * CHAR_PX), LABEL_MAX)) + 8;
 }
 
+/**
+ * The task claiming every one of these cells, or null when they are not all
+ * claimed by one task (or there are none).
+ */
+export function sharedClaim(cells: Array<GridCell | undefined>): number | null {
+  let task: number | null = null;
+  for (const cell of cells) {
+    if (!cell || cell.claimedTask === null || cell.claimedTask === undefined) return null;
+    if (task !== null && cell.claimedTask !== task) return null;
+    task = cell.claimedTask;
+  }
+  return task;
+}
+
+/** A small link to the task that claims a whole row or column. */
+function ClaimLink({ task, where, onOpenTask, className }: { task: number; where: string; onOpenTask?: (task: number) => void; className?: string }) {
+  const look = 'rounded-sm px-1 font-mono text-[10px] leading-4 text-[var(--color-info-accent)]';
+  if (!onOpenTask) return <span data-testid="grid-claim" data-task={task} className={cn(look, className)}>{`#${task}`}</span>;
+  return (
+    <Tooltip label={`${where} is claimed by task #${task}`}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="none"
+        data-testid="grid-claim"
+        data-task={task}
+        data-reach="own"
+        aria-label={`Open task #${task}`}
+        onClick={() => onOpenTask(task)}
+        className={cn(look, 'hover:underline', className)}
+      >
+        {`#${task}`}
+      </Button>
+    </Tooltip>
+  );
+}
+
 /** The width of the box, followed as it changes. */
 function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   const ref = useRef<T>(null);
@@ -143,7 +181,7 @@ function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   return [ref, width];
 }
 
-export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenCell }: {
+export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenCell, onOpenTask }: {
   rows: DrawnRow[];
   columns: GridColumn[];
   cells: GridCell[];
@@ -153,6 +191,8 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
   onSelect: (selection: Selection) => void;
   /** A plain click on a cell: its detail. */
   onOpenCell: (row: GridRow, column: GridColumn) => void;
+  /** Opens the task that claims a whole row or column. */
+  onOpenTask?: (task: number) => void;
 }) {
   const at = new Map(cells.map((cell) => [key(cell.row, cell.col), cell]));
   const rowOrder = rows.map((drawn) => drawn.row.id);
@@ -172,8 +212,14 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
   const names = Math.round(Math.min(wanted, Math.max(width * 0.4, 112), 256));
   const size = cellSize(width, names, columns.length);
   const header = headerHeight(columns.map((column) => column.name), size);
-  const colSelected = (id: string) => !!selection && selection.cols !== '*' && selection.cols.includes(id) && selection.rows === '*';
-  const rowSelected = (id: string) => !!selection && selection.rows !== '*' && selection.rows.includes(id) && selection.cols === '*';
+  const whole = !!selection && !selection.onlyGaps;
+  const colSelected = (id: string) => whole && selection!.cols !== '*' && selection!.cols.includes(id) && selection!.rows === '*';
+  const rowSelected = (id: string) => whole && selection!.rows !== '*' && selection!.rows.includes(id) && selection!.cols === '*';
+  // A row or column one task claims whole. A reference row's cells are the owner grid's.
+  const own = rows.filter(({ row }) => row.kind !== 'reference');
+  const rowClaim = new Map(own.map(({ row }) => [row.id, sharedClaim(columns.map((column) => at.get(key(row.id, column.id))))]));
+  const colClaim = new Map(columns.map((column) => [column.id, own.length ? sharedClaim(own.map(({ row }) => at.get(key(row.id, column.id)))) : null]));
+  const anyColClaim = [...colClaim.values()].some((task) => task !== null);
 
   return (
     <div ref={box} className="w-full shrink-0 overflow-x-auto overflow-y-hidden overscroll-x-contain" data-testid="grid-heatmap" data-cell-size={size}>
@@ -210,11 +256,25 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
               </th>
             ))}
           </tr>
+          {anyColClaim && (
+            <tr>
+              <th className="sticky left-0 z-20 bg-background" />
+              {columns.map((column) => {
+                const task = colClaim.get(column.id);
+                return (
+                  <th key={column.id} className="p-0 text-center font-normal" style={{ width: size }}>
+                    {task != null && <ClaimLink task={task} where={`${column.name} column`} onOpenTask={onOpenTask} />}
+                  </th>
+                );
+              })}
+            </tr>
+          )}
         </thead>
         <tbody>
           {rows.map(({ row, depth }) => (
             <tr key={row.id} data-testid="grid-row" data-row={row.id} data-missing={row.missing || undefined} className={cn(row.missing && 'opacity-40')}>
               <th scope="row" className="sticky left-0 z-10 bg-background p-0 text-left font-normal" style={{ minWidth: names, maxWidth: names }}>
+                <div className="flex items-center">
                 <Tooltip label={row.missing ? 'Missing: the row search no longer lists it' : undefined} side="right">
                 <Button
                   type="button"
@@ -229,7 +289,7 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
                   }}
                   style={{ paddingLeft: `${0.25 + depth * 0.75}rem`, minHeight: size }}
                   className={cn(
-                    'flex w-full items-center justify-start gap-1 whitespace-normal rounded-sm py-0.5 pr-2 text-left text-xs font-normal leading-4 hover:bg-accent',
+                    'flex w-full min-w-0 flex-1 items-center justify-start gap-1 whitespace-normal rounded-sm py-0.5 pr-2 text-left text-xs font-normal leading-4 hover:bg-accent',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     rowSelected(row.id) && 'bg-accent font-medium',
                   )}
@@ -238,12 +298,14 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
                   {row.kind === 'reference' && row.ref && <span className="shrink-0 text-[10px] text-muted-foreground">{row.ref.grid}</span>}
                 </Button>
                 </Tooltip>
+                {rowClaim.get(row.id) != null && <ClaimLink task={rowClaim.get(row.id)!} where={`${row.name} row`} onOpenTask={onOpenTask} className="mr-1 shrink-0" />}
+                </div>
               </th>
               {columns.map((column) => {
                 const cell = at.get(key(row.id, column.id));
                 if (!cell) return <td key={column.id} className="p-0" />;
                 const look = cellLook(cell);
-                const chosen = selects(selection, row.id, column.id);
+                const chosen = selects(selection, row.id, column.id) && (!selection?.onlyGaps || look === 'gap');
                 const here = { row: row.id, col: column.id };
                 return (
                   <td key={column.id} className="p-0 align-middle">

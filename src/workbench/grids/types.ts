@@ -106,6 +106,8 @@ export interface GridCell {
   auditedAt: number | null;
   lastCheck: LastCheckBrief | null;
   proofSummary: string | null;
+  /** The chat holding the claiming task, when the server says (absent on older servers). */
+  claimedChat?: { id: string; title: string | null } | null;
   /** A reference row's cell: the owner grid's, read-only here. */
   ref?: boolean;
 }
