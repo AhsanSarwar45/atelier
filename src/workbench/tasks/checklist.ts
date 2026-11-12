@@ -1,4 +1,5 @@
 import type { SessionState } from '@/workbench/protocol';
+import { itemProgress, type ItemProgress } from '@/workbench/tasks/progress';
 import { isStale } from '@/workbench/tasks/stale';
 import { sessionStopped, type Task } from '@/workbench/tasks/types';
 
@@ -9,7 +10,14 @@ export interface ChecklistItem {
   status: 'pending' | 'in_progress' | 'paused' | 'blocked' | 'review' | 'completed' | 'cancelled';
   /** A `todo` task nobody has touched for too long (stale.ts). */
   stale?: boolean;
+  /**
+   * A task being worked on: its plan items, ticked as they are checked
+   * (`atelier task check`), missed with a reason, or still open.
+   */
+  items?: ItemProgress[];
 }
+
+const WORKING = new Set<ChecklistItem['status']>(['in_progress', 'paused', 'blocked']);
 
 /** Rows that count as finished in the panel's `n/m`. */
 export const finished = (item: ChecklistItem) => item.status === 'completed' || item.status === 'cancelled';
@@ -24,15 +32,20 @@ export function checklistForTasks(tasks: Task[], sessionId: string | null, state
   return tasks
     .filter((task) => task.sessionId === sessionId)
     .sort((a, b) => a.number - b.number)
-    .map((task) => ({
-      id: String(task.number),
-      text: `#${task.number} ${task.title}`,
-      status: task.status === 'todo' ? 'pending'
+    .map((task) => {
+      const status: ChecklistItem['status'] = task.status === 'todo' ? 'pending'
         : task.status === 'in_progress' ? (sessionStopped(state) ? 'paused' : 'in_progress')
           : task.status === 'blocked' ? 'blocked'
             : task.status === 'review' ? 'review'
               : task.status === 'cancelled' ? 'cancelled'
-                : 'completed',
-      ...(isStale(task, now) ? { stale: true } : {}),
-    }));
+                : 'completed';
+      const items = WORKING.has(status) ? itemProgress(task) : [];
+      return {
+        id: String(task.number),
+        text: `#${task.number} ${task.title}`,
+        status,
+        ...(isStale(task, now) ? { stale: true } : {}),
+        ...(items.length ? { items } : {}),
+      };
+    });
 }

@@ -12,7 +12,7 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { ArrowDown, ArrowUp, CheckCheck, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, Check, CheckCheck, Circle, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
 
 import { ReferenceBadge } from '@/components/reference-badge';
 import { type Mentions } from '@/components/markdown-body';
@@ -632,8 +632,35 @@ const CHECKLIST_NOTE: Partial<Record<ChecklistItem['status'], string>> = {
   review: 'In review',
 };
 
-/** The tasks this chat holds, with their live statuses (docs/tasks.md). */
-export function TodoPanel({ items }: { items: ChecklistItem[] }) {
+/** One plan item under the task being worked on: ticked, missed, or still open. */
+function TodoPlanItem({ item }: { item: NonNullable<ChecklistItem['items']>[number] }) {
+  const Icon = item.state === 'met' ? Check : item.state === 'missed' ? AlertTriangle : Circle;
+  return (
+    <li data-testid="todo-plan-item" data-item={item.id} data-state={item.state} className="flex items-start gap-2 text-xs">
+      <Icon
+        aria-label={item.state === 'met' ? 'Met' : item.state === 'missed' ? 'Not met' : 'Open'}
+        className={cn(
+          'mt-0.5 h-3.5 w-3.5 shrink-0',
+          item.state === 'met' ? 'text-[var(--color-success-accent)]'
+            : item.state === 'missed' ? 'text-[var(--color-warning-accent)]' : 'text-muted-foreground',
+        )}
+      />
+      <span className="min-w-0">
+        <span className={cn(item.state === 'open' && 'text-muted-foreground')}>{item.text}</span>
+        {item.state === 'missed' && item.note && (
+          <span data-testid="todo-plan-item-note" className="block text-[var(--color-warning-accent)]">{item.note}</span>
+        )}
+      </span>
+    </li>
+  );
+}
+
+/**
+ * The tasks this chat holds, with their live statuses (docs/tasks.md). The
+ * task being worked on lists its plan items as they are checked. A row opens
+ * the task's detail.
+ */
+export function TodoPanel({ items, onOpen }: { items: ChecklistItem[]; onOpen?: (number: number) => void }) {
   const complete = items.filter(finished).length;
   const allComplete = complete === items.length;
   // An opened chat is opened to be read: the checklist starts as its one-line
@@ -682,7 +709,8 @@ export function TodoPanel({ items }: { items: ChecklistItem[] }) {
         className="max-h-[min(16rem,40vh)] space-y-1 overflow-y-auto px-3 py-2"
       >
         {items.map((t) => (
-          <li key={t.id} data-testid="todo-item" data-todo-status={t.status} className="flex items-center gap-2 text-sm">
+          <li key={t.id} data-testid="todo-item" data-todo-status={t.status} className="text-sm">
+            <div className="flex items-center gap-2">
             {/* The agent's tick, not the reader's: it shows the state and is
                 not a control, so it is kept out of the tab order. The one the
                 agent is on is the half-ticked box, pulsing. */}
@@ -693,6 +721,13 @@ export function TodoPanel({ items }: { items: ChecklistItem[] }) {
               tabIndex={-1}
               className={cn(t.status === 'in_progress' && 'animate-pulse')}
             />
+            <Button
+              variant="ghost"
+              size="inherit"
+              data-testid="todo-open"
+              onClick={() => onOpen?.(Number(t.id))}
+              className="min-w-0 flex-1 justify-start gap-2 rounded-sm text-left font-normal hover:bg-transparent hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
             <span
               id={`${tickId}-${t.id}`}
               className={cn(
@@ -716,6 +751,13 @@ export function TodoPanel({ items }: { items: ChecklistItem[] }) {
               >
                 {CHECKLIST_NOTE[t.status]}
               </span>
+            )}
+            </Button>
+            </div>
+            {t.items && (
+              <ul data-testid="todo-plan-items" aria-label={`#${t.id} plan items`} className="ml-6 mt-1 space-y-0.5">
+                {t.items.map((item) => <TodoPlanItem key={item.id} item={item} />)}
+              </ul>
             )}
           </li>
         ))}
@@ -1213,6 +1255,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const checklist = useMemo(
     () => checklistForTasks(projectTasks.tasks, reading, view.state),
     [projectTasks.tasks, reading, view.state],
+  );
+  // A checklist row opens that task's detail in the Tasks tab; Back returns here.
+  const openTask = useCallback(
+    (number: number) => window.history.pushState(null, '', addressWith(params, { tab: 'tasks', task: number, message: null })),
+    [params],
   );
   // A follow-up's "Create task" writes into this chat's composer.
   const prefillComposer = useCallback((line: string) => { if (sessionId) prefillChat(sessionId, line); }, [sessionId]);
@@ -2740,7 +2787,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
       {checklist.length > 0 && (
         <div className="border-b border-border/60 px-4 py-2" aria-live="polite">
-          <TodoPanel items={checklist} />
+          <TodoPanel items={checklist} onOpen={openTask} />
         </div>
       )}
     </>
