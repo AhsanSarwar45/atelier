@@ -69,3 +69,24 @@ Types: `bug`, `feature`, `ui_change`, `optimization`, `plan`,
 5. Never leave a task in progress when the work stops. Finish, block or
    cancel it.
 6. The checklist shows this chat's tasks. Do not keep a separate checklist.
+
+## Grids
+
+A coverage grid lists an area's features (rows) against what each must do
+(columns). Each cell is proved, a gap, or N/A, and a proof goes stale when
+the covered code changes. `@matrix AREA` and `@audit SLUG` from the owner
+come with their own steps; `@grid:…` comes with the cells it names.
+
+```
+atelier grid list [--rows]
+atelier grid show SLUG [ROW COL]
+atelier grid prove SLUG ROW COL  <<< '{"summary":…,"checks":[{"name":…,"command":…}],"commits":[…]}'
+atelier grid verify SLUG [ROW COL]
+atelier grid na SLUG ROW COL --reason TEXT
+```
+
+1. Prove only with checks that pass, and commit the covered code first.
+2. To work on cells, list them as `cells` in the task's create or propose
+   payload. A task with `cells` must end with proof, N/A or a reason for
+   every cell (`done` takes `"cells":[{"grid","row","col","reason"}]`).
+3. Never pass or reopen cells outside an `@audit` request.
