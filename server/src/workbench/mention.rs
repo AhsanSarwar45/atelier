@@ -357,7 +357,7 @@ mod tests {
             project_id: "p".into(), number, kind: "bug".into(), title: title.into(), why: String::new(),
             status: status.into(), session_id: None, created_by: None, plan: Value::Null, result: None,
             shortfalls: false, blocked: None, cancel_reason: None, pending_amend: None,
-            created_at: 0, updated_at: 0, started_at: None, finished_at: None, checks: None,
+            created_at: 0, updated_at: 0, started_at: None, finished_at: None, checks: None, gate: None,
         }
     }
 

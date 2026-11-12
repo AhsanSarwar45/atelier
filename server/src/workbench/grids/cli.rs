@@ -17,10 +17,12 @@ usage: atelier grid <command>
   show SLUG [ROW COL]             the matrix as text, or one cell with proof and history
   next SLUG [--row ROW | --col COL]  the free cells to work on next (first row with any), and the task create payload for them
   template list
-  template set NAME               {columns:[{id,name,proof_rule}]} on stdin or --input FILE
-  draft                           {slug,title,area,template?,row_search,columns,rows}; the owner approves or discards it
+  template set NAME               {columns:[{id,name,proof_rule,checks?}]} on stdin or --input FILE
+  draft                           {slug,title,area,template?,row_search,columns,rows,cells?}; the owner approves or discards it
+                                  columns[].checks: check templates ({row} = the row id); cells: [{row,col,checks,override?}]
   discover SLUG                   rerun the grid's row search now
-  prove SLUG ROW COL              {summary,checks,tests?,commits?,benchmarks?,evidence?}
+  prove SLUG ROW COL              {summary,commits?,evidence?}: runs the cell's approved checks
+                                  (a cell with none, proved before checks: {summary,checks,tests?,commits?,benchmarks?,evidence?})
   verify SLUG [ROW COL]           re-run checks (whole grid: every proved cell)
   na SLUG ROW COL --reason TEXT   ask the owner to mark a cell N/A
   audit SLUG [--done]             proved cells to audit; --done prints the audit summary
@@ -360,6 +362,12 @@ pub fn next_text(value: &Value) -> String {
         if pending > 0 {
             out.push_str(&format!("{pending} N/A request(s) wait for the owner's answer.\n"));
         }
+        let needing = value["needsCheckInGrid"].as_u64().unwrap_or(0);
+        if needing > 0 {
+            out.push_str(&format!(
+                "{needing} cell(s) need a check before they can be claimed: add one to the column or cell (`atelier grid draft` again) and get it approved.\n"
+            ));
+        }
         return out;
     }
     let kind = if scope["kind"] == "col" { "column" } else { "row" };
@@ -379,6 +387,20 @@ pub fn next_text(value: &Value) -> String {
             cell["colName"].as_str().unwrap_or(""),
             cell["proofRule"].as_str().unwrap_or("")
         ));
+    }
+    let needing = value["needsCheck"].as_array().cloned().unwrap_or_default();
+    if !needing.is_empty() {
+        out.push_str("Needs a check (cannot be claimed until the owner approves a check for its column or cell; draft the grid again with one):\n");
+        for cell in &needing {
+            out.push_str(&format!(
+                "  {slug}.{}.{} {} × {}: {}\n",
+                cell["row"].as_str().unwrap_or(""),
+                cell["col"].as_str().unwrap_or(""),
+                cell["rowName"].as_str().unwrap_or(""),
+                cell["colName"].as_str().unwrap_or(""),
+                cell["proofRule"].as_str().unwrap_or("")
+            ));
+        }
     }
     if !taken.is_empty() {
         out.push_str("Taken by other tasks (leave these alone):\n");

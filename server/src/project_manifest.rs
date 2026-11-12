@@ -49,10 +49,18 @@ pub struct TaskSettings {
     /// (`workbench::tasks::visual::DEFAULT_VISUAL_FILES`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub visual_files: Vec<String>,
+    /// The test harness's config files (`vitest.config.ts`, `Cargo.toml`, …):
+    /// hashed when a checked task is approved, like each check's own files,
+    /// so loosening the harness shows (docs/tasks.md, "Checks").
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub harness: Vec<String>,
+    /// The project's whole test command, run with every check at `done`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_command: Option<String>,
 }
 
 impl TaskSettings {
-    pub fn is_empty(&self) -> bool { self.visual_files.is_empty() }
+    pub fn is_empty(&self) -> bool { self.visual_files.is_empty() && self.harness.is_empty() && self.test_command.is_none() }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

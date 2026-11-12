@@ -132,6 +132,16 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
     if !has_cells {
         connection.execute_batch("ALTER TABLE task_proposal ADD COLUMN cells TEXT;")?;
     }
+    // Check templates on columns and a cell's own checks (docs/grids.md,
+    // "Checks"); the files they lock, hashed when the owner approves.
+    for (table, column) in [("grid_column", "checks"), ("grid_cell", "checks"), ("grid", "hashes")] {
+        let has = connection
+            .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'"))?
+            .exists([])?;
+        if !has {
+            connection.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} TEXT;"))?;
+        }
+    }
     Ok(())
 }
 
@@ -266,11 +276,13 @@ pub struct Column {
     pub position: i64,
     pub from_template: bool,
     pub retired_at: Option<i64>,
+    /// Check templates, `{row}` standing for the row id.
+    pub checks: Vec<Value>,
 }
 
 pub fn columns(connection: &Connection, project: &str, slug: &str) -> rusqlite::Result<Vec<Column>> {
     let mut statement = connection.prepare(
-        "SELECT id, name, proof_rule, position, from_template, retired_at FROM grid_column
+        "SELECT id, name, proof_rule, position, from_template, retired_at, checks FROM grid_column
           WHERE project_id = ?1 AND slug = ?2 ORDER BY position, id",
     )?;
     let rows = statement
@@ -282,6 +294,7 @@ pub fn columns(connection: &Connection, project: &str, slug: &str) -> rusqlite::
                 position: row.get(3)?,
                 from_template: row.get::<_, i64>(4)? != 0,
                 retired_at: row.get(5)?,
+                checks: json_column(row, 6)?.and_then(|v| v.as_array().cloned()).unwrap_or_default(),
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -352,10 +365,12 @@ pub struct Cell {
     pub reason: Option<String>,
     pub audited_at: Option<i64>,
     pub audited_by: Option<String>,
+    /// The cell's own checks, approved with the grid: `{checks, override}`.
+    pub own_checks: Option<Value>,
 }
 
 const CELL_COLUMNS: &str = "row, col, state, proof, fingerprint, proved_by, proved_at, last_check, claimed_task, claimed_from,
-    reason, audited_at, audited_by";
+    reason, audited_at, audited_by, checks";
 
 fn cell_record(row: &Row) -> rusqlite::Result<Cell> {
     Ok(Cell {
@@ -372,6 +387,7 @@ fn cell_record(row: &Row) -> rusqlite::Result<Cell> {
         reason: row.get(10)?,
         audited_at: row.get(11)?,
         audited_by: row.get(12)?,
+        own_checks: json_column(row, 13)?,
     })
 }
 
@@ -398,12 +414,12 @@ fn save_cell(connection: &Connection, project: &str, slug: &str, cell: &Cell) ->
     connection.execute(
         &format!(
             "INSERT OR REPLACE INTO grid_cell (project_id, slug, {CELL_COLUMNS})
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"
         ),
         params![
             project, slug, cell.row, cell.col, cell.state, text(&cell.proof), cell.fingerprint, cell.proved_by,
             cell.proved_at, text(&cell.last_check), cell.claimed_task, cell.claimed_from, cell.reason,
-            cell.audited_at, cell.audited_by,
+            cell.audited_at, cell.audited_by, text(&cell.own_checks),
         ],
     )?;
     Ok(())
@@ -448,6 +464,21 @@ impl Loaded {
         paths
     }
 
+    /// A cell's checks, resolved: the column's templates with `{row}` made
+    /// the row id, then the cell's own; or only the cell's own when it
+    /// overrides the column's. Empty: the cell needs a check.
+    pub fn cell_checks(&self, row: &str, col: &str) -> Vec<Value> {
+        let own = self.cell(row, col).and_then(|cell| cell.own_checks.clone()).unwrap_or(Value::Null);
+        let mut checks = Vec::new();
+        if own["override"] != true {
+            if let Some(column) = self.column(col) {
+                checks.extend(column.checks.iter().map(|template| fill_row(template, row)));
+            }
+        }
+        checks.extend(own["checks"].as_array().into_iter().flatten().map(|template| fill_row(template, row)));
+        checks
+    }
+
     /// Every row that has cells, with the paths it covers: what has to be
     /// fingerprinted to tell which proofs are stale.
     pub fn coverage(&self) -> Vec<(String, Vec<String>)> {
@@ -457,6 +488,24 @@ impl Loaded {
             .map(|row| (row.id.clone(), self.covered(&row.id)))
             .collect()
     }
+}
+
+/// A check template with `{row}` replaced by the row id, in every text.
+pub fn fill_row(template: &Value, row: &str) -> Value {
+    match template {
+        Value::String(text) => Value::String(text.replace("{row}", row)),
+        Value::Array(items) => Value::Array(items.iter().map(|item| fill_row(item, row)).collect()),
+        Value::Object(map) => Value::Object(map.iter().map(|(key, value)| (key.clone(), fill_row(value, row))).collect()),
+        other => other.clone(),
+    }
+}
+
+/// A cell's JSON with its resolved checks and whether it needs one.
+pub fn with_checks(loaded: &Loaded, row: &str, col: &str, mut value: Value) -> Value {
+    let checks = loaded.cell_checks(row, col);
+    value["needsCheck"] = json!(checks.is_empty());
+    value["checks"] = Value::Array(checks);
+    value
 }
 
 pub fn load(connection: &Connection, project: &str, slug: &str) -> rusqlite::Result<Option<Loaded>> {
@@ -540,7 +589,7 @@ pub fn summary(loaded: &Loaded, prints: &Prints) -> Value {
 
 pub fn column_json(column: &Column) -> Value {
     json!({"id": column.id, "name": column.name, "proofRule": column.proof_rule, "position": column.position,
-        "fromTemplate": column.from_template, "retired": column.retired_at.is_some()})
+        "fromTemplate": column.from_template, "retired": column.retired_at.is_some(), "checks": column.checks})
 }
 
 pub fn row_json(row: &GridRow) -> Value {
@@ -662,7 +711,8 @@ fn template_columns_json(columns: &[Value]) -> Value {
     Value::Array(
         columns
             .iter()
-            .map(|column| json!({"id": column["id"], "name": column["name"], "proofRule": column["proof_rule"]}))
+            .map(|column| json!({"id": column["id"], "name": column["name"], "proofRule": column["proof_rule"],
+                "checks": column.get("checks").cloned().unwrap_or_else(|| json!([]))}))
             .collect(),
     )
 }
@@ -806,6 +856,10 @@ pub struct Request {
     pub cwd: Option<String>,
     /// Fingerprints now, in the project's folder.
     pub prints: Prints,
+    /// For `approve`: the approved checks' files hashed then,
+    /// `{files: {path: sha}, harness}`. For `prove`: those files now,
+    /// `{files: {path: sha}}`.
+    pub hashes: Option<Value>,
     pub now: i64,
 }
 
@@ -909,7 +963,14 @@ fn check_title(text: &str, key: &str, max: usize) -> Result<(), TaskError> {
     Ok(())
 }
 
-/// `[{id, name, proof_rule}]`, checked.
+/// A column's or cell's check templates: checks as a task item takes them,
+/// with `{row}` allowed anywhere for the row id.
+fn check_templates(value: &Value, at: &str) -> Result<Vec<Value>, TaskError> {
+    crate::workbench::tasks::checks::parse_checks(&fill_row(value, "row"), at)?;
+    Ok(value.as_array().cloned().unwrap_or_default())
+}
+
+/// `[{id, name, proof_rule, checks?}]`, checked.
 fn check_columns(value: Option<&Value>, at: &str) -> Result<Vec<Value>, TaskError> {
     let items = match value {
         None | Some(Value::Null) => return Ok(Vec::new()),
@@ -920,8 +981,8 @@ fn check_columns(value: Option<&Value>, at: &str) -> Result<Vec<Value>, TaskErro
     for (index, item) in items.iter().enumerate() {
         let here = format!("{at}[{index}]");
         let object = item.as_object().ok_or_else(|| TaskError::Refused(format!("{here} must be an object: {{id, name, proof_rule}}")))?;
-        if let Some(unknown) = object.keys().find(|key| !["id", "name", "proof_rule"].contains(&key.as_str())) {
-            return refuse(format!("{here}.{unknown} is not a column field (allowed: id, name, proof_rule)"));
+        if let Some(unknown) = object.keys().find(|key| !["id", "name", "proof_rule", "checks"].contains(&key.as_str())) {
+            return refuse(format!("{here}.{unknown} is not a column field (allowed: id, name, proof_rule, checks)"));
         }
         let id = item["id"].as_str().unwrap_or("");
         if !valid_id(id) {
@@ -933,7 +994,11 @@ fn check_columns(value: Option<&Value>, at: &str) -> Result<Vec<Value>, TaskErro
         let name = payload_text(item, "name", "the requirement in a few words", 120).map_err(|e| at_field(e, &here))?;
         check_title(name, &format!("{here}.name"), 120)?;
         let rule = payload_text(item, "proof_rule", "what counts as proof for this requirement", 1000).map_err(|e| at_field(e, &here))?;
-        checked.push(json!({"id": id, "name": name, "proof_rule": rule}));
+        let mut column = json!({"id": id, "name": name, "proof_rule": rule});
+        if let Some(checks) = object.get("checks").filter(|checks| !checks.is_null()) {
+            column["checks"] = json!(check_templates(checks, &format!("{here}.checks"))?);
+        }
+        checked.push(column);
     }
     Ok(checked)
 }
@@ -1109,7 +1174,7 @@ fn draft(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
     let object = payload
         .as_object()
         .ok_or_else(|| TaskError::Refused("the draft payload must be an object: {slug, title, area, template?, row_search, columns, rows}".into()))?;
-    const FIELDS: &[&str] = &["slug", "title", "area", "template", "row_search", "columns", "rows"];
+    const FIELDS: &[&str] = &["slug", "title", "area", "template", "row_search", "columns", "rows", "cells"];
     if let Some(unknown) = object.keys().find(|key| !FIELDS.contains(&key.as_str())) {
         return refuse(format!("{unknown} is not a draft field (allowed: {})", FIELDS.join(", ")));
     }
@@ -1188,12 +1253,14 @@ fn draft(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
         all_rows.push(row);
     }
     check_rows(connection, &request.project, slug, &all_rows)?;
+    let cell_checks = check_cell_checks(object.get("cells"), &all_rows, &all_columns)?;
 
     let now = request.now;
     let mut pending = json!({
         "title": title, "area": area, "template": template, "rowSearch": row_search,
         "columns": all_columns.iter().map(|c| json!({"id": c["id"], "name": c["name"], "proofRule": c["proof_rule"],
-            "fromTemplate": c["from_template"]})).collect::<Vec<_>>(),
+            "fromTemplate": c["from_template"], "checks": c.get("checks").cloned().unwrap_or_else(|| json!([]))})).collect::<Vec<_>>(),
+        "cells": cell_checks,
         "rows": all_rows, "draftedBy": session, "draftedAt": now, "edit": edit, "diff": Value::Null,
     });
     let (rows_n, cols_n) = (all_rows.len(), all_columns.len());
@@ -1247,6 +1314,42 @@ fn draft(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
     })
 }
 
+/// A draft's `cells: [{row, col, checks, override?}]`: a cell's own checks,
+/// added to its column's or, with `override`, instead of them.
+fn check_cell_checks(value: Option<&Value>, rows: &[Value], columns: &[Value]) -> Result<Vec<Value>, TaskError> {
+    let items = match value {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(items)) => items,
+        Some(_) => return refuse("cells must be a list of {row, col, checks, override?}"),
+    };
+    let mut checked: Vec<Value> = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let here = format!("cells[{index}]");
+        let object = item.as_object().ok_or_else(|| TaskError::Refused(format!("{here} must be an object: {{row, col, checks, override?}}")))?;
+        if let Some(unknown) = object.keys().find(|key| !["row", "col", "checks", "override"].contains(&key.as_str())) {
+            return refuse(format!("{here}.{unknown} is not a cell field (allowed: row, col, checks, override)"));
+        }
+        let (row, col) = (item["row"].as_str().unwrap_or(""), item["col"].as_str().unwrap_or(""));
+        if !rows.iter().any(|known| known["id"] == row && known["kind"] != "reference") {
+            return refuse(format!("{here}.row \"{row}\" is not a row of the draft"));
+        }
+        if !columns.iter().any(|known| known["id"] == col) {
+            return refuse(format!("{here}.col \"{col}\" is not a column of the draft"));
+        }
+        if checked.iter().any(|known| known["row"] == row && known["col"] == col) {
+            return refuse(format!("{here}: cell {row}.{col} is given twice"));
+        }
+        let over = match item.get("override") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(flag)) => *flag,
+            Some(_) => return refuse(format!("{here}.override must be true or false")),
+        };
+        let checks = check_templates(item.get("checks").unwrap_or(&Value::Null), &format!("{here}.checks"))?;
+        checked.push(json!({"row": row, "col": col, "checks": checks, "override": over}));
+    }
+    Ok(checked)
+}
+
 fn get_existing(connection: &Connection, project: &str, slug: &str) -> Result<Grid, TaskError> {
     get_grid(connection, project, slug)?
         .filter(|grid| grid.status != "discarded")
@@ -1272,12 +1375,13 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
         let id = column["id"].as_str().unwrap_or("");
         let added = !loaded.columns.iter().any(|known| known.id == id && known.retired_at.is_none());
         connection.execute(
-            "INSERT INTO grid_column (project_id, slug, id, name, proof_rule, position, from_template, retired_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
+            "INSERT INTO grid_column (project_id, slug, id, name, proof_rule, position, from_template, retired_at, checks)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)
              ON CONFLICT (project_id, slug, id) DO UPDATE SET name = ?4, proof_rule = ?5, position = ?6,
-               from_template = ?7, retired_at = NULL",
+               from_template = ?7, retired_at = NULL, checks = ?8",
             params![project, slug, id, column["name"].as_str().unwrap_or(""), column["proofRule"].as_str().unwrap_or(""),
-                position as i64, column["fromTemplate"].as_bool().unwrap_or(false) as i64],
+                position as i64, column["fromTemplate"].as_bool().unwrap_or(false) as i64,
+                column.get("checks").filter(|c| c.as_array().is_some_and(|c| !c.is_empty())).map(Value::to_string)],
         )?;
         if edit && added {
             append_event(connection, project, slug, now, "column_added", None, None, "owner", &json!({"col": id}))?;
@@ -1336,6 +1440,20 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
         }
     }
     let added = fill_cells(connection, project, slug)?;
+    // A cell's own checks: the draft's list is the whole set.
+    if pending.get("cells").is_some() {
+        connection.execute("UPDATE grid_cell SET checks = NULL WHERE project_id = ?1 AND slug = ?2", params![project, slug])?;
+        for cell in pending["cells"].as_array().into_iter().flatten() {
+            let own = json!({"checks": cell["checks"], "override": cell["override"].as_bool().unwrap_or(false)});
+            connection.execute(
+                "UPDATE grid_cell SET checks = ?5 WHERE project_id = ?1 AND slug = ?2 AND row = ?3 AND col = ?4",
+                params![project, slug, cell["row"].as_str().unwrap_or(""), cell["col"].as_str().unwrap_or(""), own.to_string()],
+            )?;
+        }
+    }
+    if let Some(hashes) = &request.hashes {
+        connection.execute("UPDATE grid SET hashes = ?3 WHERE project_id = ?1 AND slug = ?2", params![project, slug, hashes.to_string()])?;
+    }
 
     grid.title = pending["title"].as_str().unwrap_or(&grid.title).to_string();
     grid.area = pending["area"].as_str().unwrap_or(&grid.area).to_string();
@@ -2106,9 +2224,19 @@ pub fn unclaimable(connection: &Connection, project: &str, cell: &CellRef, print
             cell.grid
         )));
     }
+    let needs_work = match found.state.as_str() {
+        "unchecked" | "gap" | "in_progress" => true,
+        "proved" => is_stale(&cell.grid, &found, prints),
+        _ => false,
+    };
+    if needs_work {
+        let loaded = load(connection, project, &cell.grid)?.expect("the cell was just found");
+        if loaded.cell_checks(&cell.row, &cell.col).is_empty() {
+            return Ok(Some(format!("{at} has no check. Add one to the column or cell and get it approved")));
+        }
+        return Ok(None);
+    }
     Ok(match found.state.as_str() {
-        "unchecked" | "gap" | "in_progress" => None,
-        "proved" if is_stale(&cell.grid, &found, prints) => None,
         "proved" => Some(format!(
             "{at} is proved and its proof is fresh; there is nothing to do. Run `atelier grid next {}` for cells that need work",
             cell.grid
@@ -2117,6 +2245,17 @@ pub fn unclaimable(connection: &Connection, project: &str, cell: &CellRef, print
         "na_pending" => Some(format!("{at} is waiting for the owner's N/A answer; leave it out until they answer")),
         other => Some(format!("{at} is {other}")),
     })
+}
+
+/// Every approved check of these cells, resolved.
+pub fn approved_cell_checks(connection: &Connection, project: &str, cells: &[CellRef]) -> Result<Vec<Value>, TaskError> {
+    let mut found = Vec::new();
+    for cell in cells {
+        if let Some(loaded) = load(connection, project, &cell.grid)? {
+            found.extend(loaded.cell_checks(&cell.row, &cell.col));
+        }
+    }
+    Ok(found)
 }
 
 /// The first cell of these a task cannot claim, as a refusal.
@@ -2184,6 +2323,7 @@ fn claimed_by(connection: &Connection, project: &str, number: i64) -> rusqlite::
                 reason: row.get(11)?,
                 audited_at: row.get(12)?,
                 audited_by: row.get(13)?,
+                own_checks: json_column(row, 14)?,
             }))
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -2363,18 +2503,26 @@ enum Standing {
     Free,
     /// An open task claims it: (task, holding chat).
     Taken(i64, Option<String>),
+    /// Needs work, but has no approved check: it cannot be claimed until the
+    /// owner approves one for its column or for it.
+    NeedsCheck,
     /// Proved and fresh, N/A, or waiting for the owner's N/A answer.
     Settled,
 }
 
-fn standing(connection: &Connection, project: &str, slug: &str, cell: &Cell, prints: &Prints) -> rusqlite::Result<Standing> {
+fn standing(connection: &Connection, project: &str, loaded: &Loaded, cell: &Cell, prints: &Prints) -> rusqlite::Result<Standing> {
     if let Some((number, holder)) = open_claim(connection, project, cell)? {
         return Ok(Standing::Taken(number, holder));
     }
-    Ok(match cell.state.as_str() {
-        "unchecked" | "gap" | "in_progress" => Standing::Free,
-        "proved" if is_stale(slug, cell, prints) => Standing::Free,
-        _ => Standing::Settled,
+    let free = match cell.state.as_str() {
+        "unchecked" | "gap" | "in_progress" => true,
+        "proved" => is_stale(&loaded.grid.slug, cell, prints),
+        _ => false,
+    };
+    Ok(match free {
+        true if loaded.cell_checks(&cell.row, &cell.col).is_empty() => Standing::NeedsCheck,
+        true => Standing::Free,
+        false => Standing::Settled,
     })
 }
 
@@ -2441,7 +2589,12 @@ pub fn task_payload(loaded: &Loaded, picked: &[(String, String)], label: &Label)
             let id = if id.chars().count() > 64 { format!("cell{}", index + 1) } else { id };
             let row_name = loaded.row(row).map(|r| r.name.as_str()).unwrap_or(row);
             let (col_name, rule) = loaded.column(col).map(|c| (c.name.as_str(), c.proof_rule.as_str())).unwrap_or((col, ""));
-            json!({"id": id, "text": format!("{row_name} × {col_name}: {rule}")})
+            let mut item = json!({"id": id, "text": format!("{row_name} × {col_name}: {rule}")});
+            let checks = loaded.cell_checks(row, col);
+            if !checks.is_empty() {
+                item["checks"] = Value::Array(checks);
+            }
+            item
         })
         .collect();
     json!({
@@ -2485,10 +2638,11 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
     let pairs = live_pairs(&loaded);
     let mut standings = Vec::with_capacity(pairs.len());
     for (_, _, cell) in &pairs {
-        standings.push(standing(connection, project, slug, cell, prints)?);
+        standings.push(standing(connection, project, &loaded, cell, prints)?);
     }
     let left = standings.iter().filter(|s| matches!(s, Standing::Free)).count();
     let taken_in_grid = standings.iter().filter(|s| matches!(s, Standing::Taken(..))).count();
+    let needs_check_in_grid = standings.iter().filter(|s| matches!(s, Standing::NeedsCheck)).count();
     let na_pending = pairs.iter().filter(|(_, _, cell)| cell.state == "na_pending").count();
     let chosen: Option<(&str, String, String)> = match scope {
         Scope::Row(id) => {
@@ -2509,7 +2663,7 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
             .find(|(_, standing)| matches!(standing, Standing::Free))
             .map(|((row, _, _), _)| ("row", row.id.clone(), row.name.clone())),
     };
-    let (mut claimable, mut taken, mut picked) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut claimable, mut taken, mut picked, mut needs_check) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if let Some((kind, id, _)) = &chosen {
         for ((row, col, cell), standing) in pairs.iter().zip(&standings) {
             let inside = if *kind == "row" { row.id == *id } else { col.id == *id };
@@ -2528,6 +2682,10 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
                     "row": row.id, "col": col.id, "task": number,
                     "chat": holder.as_deref().map(|session| chat_json(connection, session)),
                 })),
+                Standing::NeedsCheck => needs_check.push(json!({
+                    "row": row.id, "col": col.id, "rowName": row.name, "colName": col.name,
+                    "state": cell.state, "proofRule": col.proof_rule,
+                })),
                 Standing::Settled => {}
             }
         }
@@ -2541,6 +2699,7 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
         "grid": slug, "title": loaded.grid.title,
         "scope": chosen.as_ref().map(|(kind, id, name)| json!({"kind": kind, "id": id, "name": name})),
         "claimable": claimable, "taken": taken, "left": left, "takenInGrid": taken_in_grid, "naPending": na_pending,
+        "needsCheck": needs_check, "needsCheckInGrid": needs_check_in_grid,
         "create": create,
     }))
 }
@@ -2605,7 +2764,7 @@ pub fn picked_task(connection: &Connection, project: &str, pick: &Pick, prints: 
             return refuse(format!("grid \"{slug}\" has no column \"{id}\""));
         }
     }
-    let mut picked = Vec::new();
+    let (mut picked, mut needing) = (Vec::new(), Vec::new());
     for (row, col, cell) in live_pairs(&loaded) {
         if pick.rows.as_ref().is_some_and(|ids| !ids.contains(&row.id)) || pick.cols.as_ref().is_some_and(|ids| !ids.contains(&col.id)) {
             continue;
@@ -2613,9 +2772,17 @@ pub fn picked_task(connection: &Connection, project: &str, pick: &Pick, prints: 
         if pick.only_gaps && !matches!(cell.state.as_str(), "unchecked" | "gap") {
             continue;
         }
-        if matches!(standing(connection, project, slug, cell, prints)?, Standing::Free) {
-            picked.push((row.id.clone(), col.id.clone()));
+        match standing(connection, project, &loaded, cell, prints)? {
+            Standing::Free => picked.push((row.id.clone(), col.id.clone())),
+            Standing::NeedsCheck => needing.push(format!("{slug}.{}.{}", row.id, col.id)),
+            _ => {}
         }
+    }
+    if picked.is_empty() && !needing.is_empty() {
+        return refuse(format!(
+            "{} has no check. Add one to the column or cell and get it approved",
+            if needing.len() == 1 { needing[0].clone() } else { format!("{} and {} more cells", needing[0], needing.len() - 1) }
+        ));
     }
     if picked.is_empty() {
         return refuse(format!(

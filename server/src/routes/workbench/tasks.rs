@@ -9,7 +9,7 @@ use super::grids::{announce_grids, prints_for};
 use super::tell::tell_chat;
 use super::{decoded, presentation_directory, ApiError, WorkbenchState};
 use crate::workbench::grids;
-use crate::workbench::tasks::{self, types, Request, TaskError};
+use crate::workbench::tasks::{self, checks, types, Request, TaskError};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -174,6 +174,28 @@ pub(super) struct ActionRequest {
     brand: Option<String>,
 }
 
+/// The project's `[tasks]` settings, from its manifest.
+fn task_settings(state: &WorkbenchState, project: &str, fallback: Option<&str>) -> crate::project_manifest::TaskSettings {
+    match project_folder(state, project).or_else(|| fallback.map(str::to_string)) {
+        Some(folder) => checks::project_settings(std::path::Path::new(&folder)),
+        None => Default::default(),
+    }
+}
+
+/// For a draft with checks, in the folder its checks run in: the locked
+/// files' hashes, the check files missing, and the weak-check lint.
+async fn draft_gate(state: &WorkbenchState, project: &str, folder: Option<&str>, kind: &Value, plan: &Value) -> Option<checks::Gate> {
+    let folder = folder?.to_string();
+    let harness = task_settings(state, project, Some(&folder)).harness;
+    let (kind, plan) = (kind.as_str().unwrap_or_default().to_string(), plan.clone());
+    tokio::task::spawn_blocking(move || checks::draft_gate(std::path::Path::new(&folder), &kind, &plan, &harness)).await.ok()
+}
+
+/// A session's folder.
+async fn session_folder(state: &WorkbenchState, session: &str) -> Option<String> {
+    state.database().get_session(session.to_string()).await.ok().flatten().map(|session| session.cwd)
+}
+
 /// Which of these commits the repository at `cwd` does not have.
 async fn missing_commits(cwd: &str, commits: &[String]) -> HashSet<String> {
     let mut missing = HashSet::new();
@@ -259,10 +281,11 @@ pub(super) async fn act(
         let now = chrono::Utc::now().timestamp_millis();
         let asked_project = project.clone();
         let prints = prints_for(&state, &project, cell_grids(&payload)).await;
+        let gate = draft_gate(&state, &project, cwd.as_deref(), &payload["type"], &payload["plan"]).await;
         let outcome = state
             .database()
             .write_tasks(move |store| {
-                tasks::propose(store, &asked_project, &session, &payload, &prints, now)
+                tasks::propose(store, &asked_project, &session, &payload, &prints, gate.as_ref(), now)
                     .map(|(proposal, summary)| (tasks::proposal_json(&proposal), summary))
             })
             .await
@@ -280,19 +303,26 @@ pub(super) async fn act(
             .to_string();
         let now = chrono::Utc::now().timestamp_millis();
         let asked = project.clone();
-        let named = state
+        let found = state
             .database()
-            .read_tasks(move |store| {
-                Ok(tasks::get_proposal(store.connection(), &asked, id)?.map(|p| p.cells).unwrap_or(Value::Null))
-            })
+            .read_tasks(move |store| tasks::get_proposal(store.connection(), &asked, id))
             .await
             .map_err(failed)?;
+        let named = found.as_ref().map(|p| p.cells.clone()).unwrap_or(Value::Null);
         let prints = prints_for(&state, &project, cell_grids(&json!({"cells": named}))).await;
+        // Create task approves the checks: lock their files as they are now.
+        let gate = match found.as_ref().filter(|_| choice == "create") {
+            Some(proposal) => {
+                let folder = session_folder(&state, &proposal.session_id).await;
+                draft_gate(&state, &project, folder.as_deref(), &json!(proposal.kind), &proposal.plan).await
+            }
+            None => None,
+        };
         let answered = project.clone();
         let outcome = state
             .database()
             .write_tasks(move |store| {
-                tasks::answer_proposal(store, &answered, id, &choice, &prints, now).map(|(proposal, task, grids)| {
+                tasks::answer_proposal(store, &answered, id, &choice, &prints, gate.as_ref(), now).map(|(proposal, task, grids)| {
                     let prompt = tasks::answer_prompt(&proposal);
                     (tasks::proposal_json(&proposal), task.map(|task| tasks::to_json(store, &task)), prompt, proposal.session_id, grids)
                 })
@@ -350,6 +380,11 @@ pub(super) async fn act(
     let actor = request.actor.clone();
     let note = payload["note"].as_str().unwrap_or_default().to_string();
     let prints = if request.action == "create" { prints_for(&state, &project, cell_grids(&payload)).await } else { Default::default() };
+    let gate = if request.action == "create" && request.actor == "agent" {
+        draft_gate(&state, &project, cwd.as_deref(), &payload["type"], &payload["plan"]).await
+    } else {
+        None
+    };
     let announced = project.clone();
     let asked = Request {
         action: request.action,
@@ -362,6 +397,7 @@ pub(super) async fn act(
         cwd,
         visual_files: visual,
         prints,
+        gate,
         now: chrono::Utc::now().timestamp_millis(),
     };
     let outcome = state
@@ -426,7 +462,7 @@ async fn owner_create(
     // Check before a chat is started for it: nothing is left behind by a
     // pick with nothing to do.
     let (asked, checked, checked_prints) = (project.clone(), pick.clone(), prints.clone());
-    let (title, latest) = state
+    let (picked, latest) = state
         .database()
         .read_tasks(move |store| {
             let latest = store.list_sessions(Some(&asked))?.into_iter().next();
@@ -434,7 +470,8 @@ async fn owner_create(
         })
         .await
         .map_err(failed)?;
-    let title = refused_or(title)?["title"].as_str().unwrap_or_default().to_string();
+    let picked = refused_or(picked)?;
+    let title = picked["title"].as_str().unwrap_or_default().to_string();
     // A chat started here is ours to take back: whatever fails from here on
     // removes it, so a failed create leaves nothing behind.
     let made = (chat == "new").then(|| uuid::Uuid::new_v4().to_string());
@@ -457,11 +494,13 @@ async fn owner_create(
         chat
     };
     let (asked, held) = (project.clone(), session.clone());
+    let folder = session_folder(state, &session).await.or_else(|| project_folder(state, &project));
+    let gate = draft_gate(state, &project, folder.as_deref(), &picked["type"], &picked["plan"]).await;
     let now = chrono::Utc::now().timestamp_millis();
     let outcome = state
         .database()
         .write_tasks(move |store| {
-            tasks::create_from_pick(store, &asked, &held, &pick, &prints, now)
+            tasks::create_from_pick(store, &asked, &held, &pick, &prints, gate.as_ref(), now)
                 .map(|(task, grids, prompt)| (tasks::to_json(store, &task), grids, prompt))
         })
         .await
@@ -676,8 +715,10 @@ mod tests {
             "slug": "camera", "title": "Camera", "area": "An area.",
             "row_search": {"command": "scripts/rows.sh", "watch": ["camera/"]},
             "columns": [
-                {"id": "gpu", "name": "Runs on the GPU", "proof_rule": "a GPU test"},
-                {"id": "perf", "name": "Within budget", "proof_rule": "a benchmark check"},
+                {"id": "gpu", "name": "Runs on the GPU", "proof_rule": "a GPU test", "checks": [{"name": "gpu", "command": "cargo test {row}_on_gpu", "kind": "test",
+                    "given": "the {row} pass", "when": "it renders", "then": "it ran on the GPU", "red": "FAILED|panicked"}]},
+                {"id": "perf", "name": "Within budget", "proof_rule": "a benchmark check", "checks": [{"name": "perf", "command": "cargo test {row}_in_budget", "kind": "test",
+                    "given": "the {row} pass", "when": "it renders", "then": "it is within budget", "red": "FAILED|panicked"}]},
             ],
         });
         let found = |id: &str| search::Found {

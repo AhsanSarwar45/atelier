@@ -7,6 +7,7 @@
 //! commits exist in the session's repository, which evidence files were
 //! uploaded — and hand it in.
 
+pub mod checks;
 pub mod cli;
 pub mod git;
 pub mod types;
@@ -85,6 +86,15 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
         .exists([])?;
     if !has_checks {
         connection.execute_batch("ALTER TABLE task ADD COLUMN checks TEXT;")?;
+    }
+    // Test-first checks (checks.rs): what approval locked, the runs, the flags.
+    for (table, column) in [("task", "gate"), ("task_proposal", "flags")] {
+        let has = connection
+            .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'"))?
+            .exists([])?;
+        if !has {
+            connection.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} TEXT;"))?;
+        }
     }
     Ok(())
 }
@@ -174,10 +184,14 @@ pub struct TaskRow {
     /// partial result: `{<result list key>: [entry, …]}` in plan order. `done`
     /// merges them into its result and clears them.
     pub checks: Option<Value>,
+    /// A task under the check rules (checks.rs): `{hashes: {files, harness},
+    /// runs: {ITEM: {CHECK: run}}, flags: [flag], startCommit, baseline:
+    /// {ITEM: {CHECK: {p50, samples}}}}`. None for a task made before checks.
+    pub gate: Option<Value>,
 }
 
 const COLUMNS: &str = "project_id, number, type, title, why, status, session_id, created_by, plan, result,
-    shortfalls, blocked, cancel_reason, pending_amend, created_at, updated_at, started_at, finished_at, checks";
+    shortfalls, blocked, cancel_reason, pending_amend, created_at, updated_at, started_at, finished_at, checks, gate";
 
 fn json_column(row: &Row, index: usize) -> rusqlite::Result<Option<Value>> {
     Ok(row
@@ -206,6 +220,7 @@ fn task_row(row: &Row) -> rusqlite::Result<TaskRow> {
         started_at: row.get(16)?,
         finished_at: row.get(17)?,
         checks: json_column(row, 18)?,
+        gate: json_column(row, 19)?,
     })
 }
 
@@ -276,13 +291,14 @@ fn save(connection: &Connection, task: &TaskRow) -> rusqlite::Result<()> {
     connection.execute(
         &format!(
             "INSERT OR REPLACE INTO task ({COLUMNS})
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)"
         ),
         params![
             task.project_id, task.number, task.kind, task.title, task.why, task.status,
             task.session_id, task.created_by, task.plan.to_string(), text(&task.result),
             task.shortfalls as i64, text(&task.blocked), task.cancel_reason, text(&task.pending_amend),
             task.created_at, task.updated_at, task.started_at, task.finished_at, text(&task.checks),
+            text(&task.gate),
         ],
     )?;
     Ok(())
@@ -306,12 +322,16 @@ pub fn to_json(store: &Store, task: &TaskRow) -> Value {
         "createdAt": task.created_at, "updatedAt": task.updated_at,
         "startedAt": task.started_at, "finishedAt": task.finished_at,
         "checks": task.checks,
+        "checked": task.gate.is_some() || checks::is_checked(&task.plan),
+        "checkRuns": task.gate.as_ref().map(|gate| gate["runs"].clone()).filter(|runs| !runs.is_null()).unwrap_or_else(|| json!({})),
+        "checkFlags": task.gate.as_ref().map(|gate| gate["flags"].clone()).filter(|flags| !flags.is_null()).unwrap_or_else(|| json!([])),
         "cells": super::grids::task_cells(store.connection(), &task.project_id, task.number).unwrap_or_default(),
         "claimShape": super::grids::claim_shape(store.connection(), &task.project_id, task.number).unwrap_or(Value::Null),
     })
 }
 
 /// Who is asking, already resolved by the route.
+#[derive(Default)]
 pub struct Request {
     pub action: String,
     /// `agent` or `owner`.
@@ -333,6 +353,9 @@ pub struct Request {
     /// Fingerprints, in the project's folder, of the rows of the grids whose
     /// cells the payload names: a stale proved cell may be claimed.
     pub prints: super::grids::Prints,
+    /// For a task under the check rules: what the route ran and hashed
+    /// before the write (checks.rs, `Gate`).
+    pub gate: Option<checks::Gate>,
     pub now: i64,
 }
 
@@ -451,6 +474,8 @@ fn check_done(task: &TaskRow, request: &Request) -> Result<(Value, Vec<String>),
     }
     let given = payload.get("result").filter(|value| !value.is_null());
     let merged = match (given, &task.checks) {
+        // A task with checks: its items were ticked by their checks, not by entries.
+        (given, Some(_)) if checks::is_checked(&task.plan) && !types::is_visual(&task.kind) => given.cloned(),
         (given, Some(checks)) => Some(merge_checks(&task.kind, &task.plan, given.cloned().unwrap_or_else(|| json!({})), checks)),
         (Some(given), None) => Some(given.clone()),
         (None, None) => None,
@@ -594,8 +619,34 @@ fn check_draft(payload: &Value, action: &str) -> Result<Draft, TaskError> {
         ))
     })?;
     types::check_plan(kind, plan)?;
+    checks::require_checks(kind, plan)?;
     let cells = super::grids::parse_cells(object.get("cells"), false)?;
     Ok(Draft { kind: kind.to_string(), title: title.trim().to_string(), why: why.trim().to_string(), plan: plan.clone(), cells })
+}
+
+/// A new task's gate (checks.rs): for a plan with checks, what approval
+/// locks (the files' hashes, from the route) and the lint's flags. Refused
+/// while a check file is missing: the agent writes the checks first.
+fn approved_gate(plan: &Value, gate: Option<&checks::Gate>, flags: Vec<Value>) -> Result<Option<Value>, TaskError> {
+    if !checks::is_checked(plan) {
+        return Ok(None);
+    }
+    let found = gate.cloned().unwrap_or_default();
+    missing_check_files(&found)?;
+    Ok(Some(json!({
+        "hashes": checks::approved_hashes(&found.hashes, &found.harness),
+        "runs": {}, "flags": flags,
+    })))
+}
+
+fn missing_check_files(gate: &checks::Gate) -> Result<(), TaskError> {
+    if gate.missing.is_empty() {
+        return Ok(());
+    }
+    refuse(format!(
+        "check files are missing from the chat's folder: {}. Write each check's files first; approval locks them",
+        gate.missing.join(", ")
+    ))
 }
 
 fn insert_task(
@@ -606,6 +657,7 @@ fn insert_task(
     now: i64,
     actor: &str,
     mut payload: Value,
+    gate: Option<Value>,
 ) -> Result<TaskRow, TaskError> {
     let number: i64 = connection.query_row(
         "SELECT COALESCE(MAX(number), 0) + 1 FROM task WHERE project_id = ?1",
@@ -632,6 +684,7 @@ fn insert_task(
         started_at: None,
         finished_at: None,
         checks: None,
+        gate,
     };
     save(connection, &task)?;
     payload["type"] = json!(task.kind);
@@ -641,6 +694,26 @@ fn insert_task(
     }
     append_event(connection, project, number, now, "created", session, actor, &payload)?;
     Ok(task)
+}
+
+/// A task for approved grid cells made without the owner's @task takes the
+/// checks the owner approved for those cells, as they are: each check of
+/// the plan must be one of the cells'.
+fn same_checks_as_cells(connection: &Connection, project: &str, draft: &Draft) -> Result<(), TaskError> {
+    let approved = super::grids::approved_cell_checks(connection, project, &draft.cells)?;
+    for (item, listed) in checks::plan_items(&draft.kind, &draft.plan) {
+        for check in listed.as_array().into_iter().flatten() {
+            if !approved.contains(check) {
+                return refuse(format!(
+                    "item \"{item}\": check \"{}\" is not one the owner approved for these cells. A task for approved grid \
+                     cells takes the cells' checks as they are (copy the payload from `atelier grid next`); to change a check, \
+                     draft the grid again for the owner to approve, or propose the task",
+                    check["name"].as_str().unwrap_or("?")
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Whether the owner's latest message in this chat asks for a task with a
@@ -682,13 +755,15 @@ pub struct ProposalRow {
     pub decided_at: Option<i64>,
     /// `[{grid, row, col}]`: the cells the task would claim.
     pub cells: Value,
+    /// The weak-check lint's flags, for the card (checks.rs, `lint`).
+    pub flags: Value,
 }
 
 const PROPOSAL_COLUMNS: &str =
     "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at";
 /// The columns read: the stored ones plus the cells.
 const PROPOSAL_READ: &str =
-    "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at, cells";
+    "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at, cells, flags";
 
 fn proposal_row(row: &Row) -> rusqlite::Result<ProposalRow> {
     Ok(ProposalRow {
@@ -704,6 +779,7 @@ fn proposal_row(row: &Row) -> rusqlite::Result<ProposalRow> {
         created_at: row.get(9)?,
         decided_at: row.get(10)?,
         cells: json_column(row, 11)?.unwrap_or_else(|| json!([])),
+        flags: json_column(row, 12)?.unwrap_or_else(|| json!([])),
     })
 }
 
@@ -728,7 +804,7 @@ pub fn pending_proposals(connection: &Connection, session: &str) -> rusqlite::Re
 
 pub fn proposal_json(proposal: &ProposalRow) -> Value {
     json!({
-        "cells": proposal.cells,
+        "cells": proposal.cells, "checkFlags": proposal.flags,
         "projectId": proposal.project_id, "id": proposal.id, "sessionId": proposal.session_id,
         "type": proposal.kind, "title": proposal.title, "why": proposal.why, "plan": proposal.plan,
         "status": proposal.status, "taskNumber": proposal.task_number,
@@ -748,9 +824,14 @@ pub fn propose(
     session: &str,
     payload: &Value,
     prints: &super::grids::Prints,
+    gate: Option<&checks::Gate>,
     now: i64,
 ) -> Result<(ProposalRow, String), TaskError> {
     let draft = check_draft(payload, "propose")?;
+    let flags = gate.map(|gate| gate.flags.clone()).unwrap_or_default();
+    if let Some(gate) = gate {
+        missing_check_files(gate)?;
+    }
     let connection = store.connection();
     super::grids::check_claimable(connection, project, &draft.cells, prints)?;
     let cells = (!draft.cells.is_empty())
@@ -773,6 +854,7 @@ pub fn propose(
         created_at: now,
         decided_at: None,
         cells: json!(draft.cells.iter().map(super::grids::CellRef::to_json).collect::<Vec<_>>()),
+        flags: json!(flags),
     };
     connection.execute(
         &format!("INSERT INTO task_proposal ({PROPOSAL_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
@@ -783,8 +865,8 @@ pub fn propose(
         ],
     )?;
     connection.execute(
-        "UPDATE task_proposal SET cells = ?3 WHERE project_id = ?1 AND id = ?2",
-        params![proposal.project_id, proposal.id, cells],
+        "UPDATE task_proposal SET cells = ?3, flags = ?4 WHERE project_id = ?1 AND id = ?2",
+        params![proposal.project_id, proposal.id, cells, proposal.flags.to_string()],
     )?;
     let summary = "Proposed a task; the owner answers on the card with Create task, Just do it or Cancel. \
         Stop here and end your turn without starting the work. The owner's answer arrives as your next message."
@@ -800,6 +882,7 @@ pub fn answer_proposal(
     id: i64,
     choice: &str,
     prints: &super::grids::Prints,
+    gate: Option<&checks::Gate>,
     now: i64,
 ) -> Result<(ProposalRow, Option<TaskRow>, Vec<String>), TaskError> {
     if !PROPOSAL_CHOICES.contains(&choice) {
@@ -826,8 +909,13 @@ pub fn answer_proposal(
             TaskError::Refused(why) => TaskError::Refused(format!("the task cannot be created: {why}")),
             other => other,
         })?;
+        let flags = proposal.flags.as_array().cloned().unwrap_or_default();
+        let locked = approved_gate(&draft.plan, gate, flags).map_err(|error| match error {
+            TaskError::Refused(why) => TaskError::Refused(format!("the task cannot be created: {why}")),
+            other => other,
+        })?;
         let task = insert_task(&transaction, project, Some(&proposal.session_id), &draft, now, "owner",
-            json!({"proposal": id}))?;
+            json!({"proposal": id}), locked)?;
         grids = super::grids::claim(&transaction, project, task.number, &draft.cells, prints, Some(&proposal.session_id), "owner", now)?;
         proposal.task_number = Some(task.number);
         proposal.status = "created".into();
@@ -869,13 +957,15 @@ pub fn create_from_pick(
     session: &str,
     pick: &super::grids::Pick,
     prints: &super::grids::Prints,
+    gate: Option<&checks::Gate>,
     now: i64,
 ) -> Result<(TaskRow, Vec<String>, String), TaskError> {
     let connection = store.connection();
     let transaction = connection.unchecked_transaction()?;
     let (payload, label) = super::grids::picked_task(&transaction, project, pick, prints)?;
     let draft = check_draft(&payload, "create")?;
-    let task = insert_task(&transaction, project, Some(session), &draft, now, "owner", json!({"grid": pick.slug}))?;
+    let locked = approved_gate(&draft.plan, gate, Vec::new())?;
+    let task = insert_task(&transaction, project, Some(session), &draft, now, "owner", json!({"grid": pick.slug}), locked)?;
     let grids = super::grids::claim(&transaction, project, task.number, &draft.cells, prints, Some(session), "owner", now)?;
     transaction.commit()?;
     let number = task.number;
@@ -1018,7 +1108,12 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             );
         }
         super::grids::check_claimable(connection, &request.project, &draft.cells, &request.prints)?;
-        let task = insert_task(connection, &request.project, caller, &draft, now, actor, json!({}))?;
+        if agreed && !draft.cells.is_empty() {
+            same_checks_as_cells(connection, &request.project, &draft)?;
+        }
+        let flags = request.gate.as_ref().map(|gate| gate.flags.clone()).unwrap_or_default();
+        let locked = approved_gate(&draft.plan, request.gate.as_ref(), flags)?;
+        let task = insert_task(connection, &request.project, caller, &draft, now, actor, json!({}), locked)?;
         let number = task.number;
         let grids =
             super::grids::claim(connection, &request.project, number, &draft.cells, &request.prints, caller, actor, now)?;
@@ -1322,6 +1417,7 @@ mod tests {
 
     fn ask(store: &Store, actor: &str, session: Option<&str>, action: &str, number: Option<i64>, payload: Value) -> Result<Outcome, TaskError> {
         apply(store, &Request {
+            gate: None,
             action: action.into(),
             actor: actor.into(),
             session: session.map(str::to_string),
@@ -1365,7 +1461,8 @@ mod tests {
         json!({"type": kind, "title": "T", "why": "W", "plan": plan})
     }
 
-    fn create(store: &Store, session: &str, kind: &str) -> i64 {
+    /// A task with checks, as an agent creates one now.
+    fn create_checked(store: &Store, session: &str, kind: &str) -> i64 {
         owner_says(store, session, "@task do it");
         let plan = types::example(kind).unwrap()["create"]["plan"].clone();
         agent(store, session, "create", None, json!({"type": kind, "title": "T", "why": "W", "plan": plan}))
@@ -1374,8 +1471,36 @@ mod tests {
             .number
     }
 
+    /// A task made before checks: its plan has none and it has no gate, so
+    /// it keeps the old rules (an entry per item at check and done).
+    fn create(store: &Store, session: &str, kind: &str) -> i64 {
+        let number = create_checked(store, session, kind);
+        let mut task = get(store.connection(), "p", number).unwrap().unwrap();
+        task.plan = without_checks(&task.plan);
+        task.gate = None;
+        save(store.connection(), &task).unwrap();
+        number
+    }
+
+    fn without_checks(plan: &Value) -> Value {
+        let mut plan = plan.clone();
+        if let Some(row) = plan.as_object_mut() {
+            row.remove("checks");
+            for value in row.values_mut() {
+                for item in value.as_array_mut().into_iter().flatten() {
+                    if let Some(item) = item.as_object_mut() {
+                        item.remove("checks");
+                    }
+                }
+            }
+        }
+        plan
+    }
+
+    /// The done payload of a task made before checks: every item's entry.
     fn done_payload(kind: &str) -> Value {
         let mut done = types::example(kind).unwrap()["done"].clone();
+        done["result"] = types::examples(kind).1;
         if done.get("commits").is_some() {
             done["commits"] = json!(["abcdef1"]);
         }
@@ -1446,6 +1571,7 @@ mod tests {
         done["commits"] = json!(["xyz"]);
         assert!(refused(agent(&store, "s1", "done", Some(one), done.clone())).contains("is not a commit SHA"));
         let mut request = Request {
+            gate: None,
             action: "done".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(),
             number: Some(one), payload: done_payload("feature"), missing_commits: HashSet::from(["abcdef1".to_string()]),
             cwd: Some("/repo".into()), visual_files: Vec::new(), prints: Default::default(), now: 2,
@@ -1467,6 +1593,7 @@ mod tests {
             let one = create(&store, &session, kind);
             agent(&store, &session, "start", Some(one), json!({})).unwrap();
             let mut request = Request {
+                gate: None,
                 action: "done".into(), actor: "agent".into(), session: Some(session.clone()), project: "p".into(),
                 number: Some(one), payload: done_payload(kind), missing_commits: HashSet::new(),
                 cwd: Some("/repo".into()), visual_files: vec!["src/card.tsx".into(), "shaders/sky.wgsl".into()],
@@ -1656,40 +1783,106 @@ mod tests {
     #[test]
     fn a_proposal_waits_for_the_owner_and_create_makes_it_a_task_in_that_chat() {
         let (_d, store) = store();
-        assert!(refused_proposal(propose(&store, "p", "s1", &json!({"type": "epic"}), &Default::default(), 1)).contains("not a task type"));
-        let (proposal, summary) = propose(&store, "p", "s1", &draft("feature"), &Default::default(), 1).unwrap();
+        assert!(refused_proposal(propose(&store, "p", "s1", &json!({"type": "epic"}), &Default::default(), None, 1)).contains("not a task type"));
+        let (proposal, summary) = propose(&store, "p", "s1", &draft("feature"), &Default::default(), None, 1).unwrap();
         assert_eq!((proposal.id, proposal.status.as_str()), (1, "pending"));
         assert!(summary.contains("Stop here"), "{summary}");
         assert!(list(store.connection(), Some("p"), None).unwrap().is_empty(), "a proposal is not a task");
         let block = proposal_widget(&proposal_json(&proposal)).unwrap();
         assert_eq!(super::super::media::widget_specs(&block)[0]["proposal"]["id"], 1);
 
-        let (answered, task, _) = answer_proposal(&store, "p", 1, "create", &Default::default(), 2).unwrap();
+        let (answered, task, _) = answer_proposal(&store, "p", 1, "create", &Default::default(), None, 2).unwrap();
         let task = task.unwrap();
         assert_eq!((task.number, task.status.as_str(), task.session_id.as_deref()), (1, "todo", Some("s1")));
         assert_eq!((answered.status.as_str(), answered.task_number), ("created", Some(1)));
         assert!(answer_prompt(&answered).starts_with("Owner chose Create task for proposal \"T\": task #1 created"));
         assert_eq!(events(store.connection(), "p", 1).unwrap()[0]["actor"], "owner");
-        assert!(refused_proposal(answer_proposal(&store, "p", 1, "cancel", &Default::default(), 3)).contains("already answered"));
+        assert!(refused_proposal(answer_proposal(&store, "p", 1, "cancel", &Default::default(), None, 3)).contains("already answered"));
         // The new task is the chat's like any other.
         agent(&store, "s1", "start", Some(1), json!({})).unwrap();
+    }
+
+    /// A gate for `draft`'s plan, worked out in `folder` as the routes do.
+    fn gate_in(folder: &std::path::Path, payload: &Value) -> checks::Gate {
+        checks::draft_gate(folder, payload["type"].as_str().unwrap(), &payload["plan"], &["Cargo.toml".to_string()])
+    }
+
+    #[test]
+    fn a_new_task_needs_checks_and_their_files_and_approval_hashes_them() {
+        let (_d, store) = store();
+        owner_says(&store, "s1", "@task do it");
+        let old_style = json!({"type": "feature", "title": "T", "why": "W", "plan": without_checks(&draft("feature")["plan"])});
+        let message = refused(agent(&store, "s1", "create", None, old_style));
+        assert!(message.starts_with("plan.criteria[] (id \"export\") has no checks"), "{message}");
+        let message = refused(agent(&store, "s1", "create", None, json!({"type": "bug", "title": "T", "why": "W",
+            "plan": without_checks(&draft("bug")["plan"])})));
+        assert!(message.starts_with("plan.checks has no checks"), "{message}");
+
+        let folder = tempfile::tempdir().unwrap();
+        let payload = draft("feature");
+        let mut request = Request {
+            action: "create".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(),
+            payload: payload.clone(), gate: Some(gate_in(folder.path(), &payload)), now: 1, ..Default::default()
+        };
+        let message = refused(apply(&store, &request));
+        assert!(message.starts_with("check files are missing from the chat's folder: tests/export.rs, tests/images.rs"), "{message}");
+        std::fs::create_dir(folder.path().join("tests")).unwrap();
+        for name in ["export", "images"] {
+            std::fs::write(folder.path().join(format!("tests/{name}.rs")), format!("#[test] fn {name}() {{ assert_eq!(2, 1 + 1); }}")).unwrap();
+        }
+        std::fs::write(folder.path().join("Cargo.toml"), "[package]").unwrap();
+        request.gate = Some(gate_in(folder.path(), &payload));
+        let task = apply(&store, &request).unwrap().task;
+        let gate = task.gate.clone().unwrap();
+        assert_eq!(gate["hashes"]["files"]["tests/export.rs"].as_str().unwrap().len(), 64);
+        assert_eq!(gate["hashes"]["files"]["Cargo.toml"].as_str().unwrap().len(), 64);
+        assert_eq!(gate["hashes"]["harness"], json!(["Cargo.toml"]));
+        let shown = to_json(&store, &task);
+        assert_eq!((shown["checked"].clone(), shown["checkRuns"].clone(), shown["checkFlags"].clone()), (json!(true), json!({}), json!([])));
+        // A task made before checks is not checked.
+        let old = create(&store, "s2", "feature");
+        assert_eq!(to_json(&store, &get(store.connection(), "p", old).unwrap().unwrap())["checked"], false);
+    }
+
+    #[test]
+    fn a_proposal_carries_the_weak_check_lint_to_the_owner_and_the_task_keeps_it() {
+        let (_d, store) = store();
+        let folder = tempfile::tempdir().unwrap();
+        let mut payload = draft("feature");
+        payload["plan"]["criteria"][0]["checks"][0]["command"] = json!("true");
+        payload["plan"]["criteria"][1]["checks"][0]["files"] = json!([]);
+        payload["plan"]["criteria"][0]["checks"][0]["files"] = json!([]);
+        let gate = gate_in(folder.path(), &payload);
+        let (proposal, _) = propose(&store, "p", "s1", &payload, &Default::default(), Some(&gate), 1).unwrap();
+        let flags = proposal_json(&proposal)["checkFlags"].clone();
+        assert_eq!(flags[0]["kind"], "weak");
+        assert_eq!((flags[0]["item"].clone(), flags[0]["check"].clone()), (json!("export"), json!("export-works")));
+        assert!(flags[0]["text"].as_str().unwrap().contains("always passes"), "{flags}");
+        // Missing check files are refused at propose too.
+        let mut missing = draft("feature");
+        missing["plan"]["criteria"][1]["checks"][0]["files"] = json!([]);
+        let message = refused_proposal(propose(&store, "p", "s1", &missing, &Default::default(), Some(&gate_in(folder.path(), &missing)), 1));
+        assert!(message.contains("tests/export.rs"), "{message}");
+        let (_, task, _) = answer_proposal(&store, "p", 1, "create", &Default::default(), Some(&gate_in(folder.path(), &payload)), 2).unwrap();
+        let task = task.unwrap();
+        assert_eq!(to_json(&store, &task)["checkFlags"], flags);
     }
 
     #[test]
     fn just_do_it_and_cancel_discard_a_proposal() {
         let (_d, store) = store();
-        propose(&store, "p", "s1", &draft("chore"), &Default::default(), 1).unwrap();
-        propose(&store, "p", "s1", &draft("chore"), &Default::default(), 1).unwrap();
-        assert!(refused_proposal(answer_proposal(&store, "p", 1, "maybe", &Default::default(), 2)).contains("choice must be one of"));
-        let (one, task, _) = answer_proposal(&store, "p", 1, "just_do_it", &Default::default(), 2).unwrap();
+        propose(&store, "p", "s1", &draft("chore"), &Default::default(), None, 1).unwrap();
+        propose(&store, "p", "s1", &draft("chore"), &Default::default(), None, 1).unwrap();
+        assert!(refused_proposal(answer_proposal(&store, "p", 1, "maybe", &Default::default(), None, 2)).contains("choice must be one of"));
+        let (one, task, _) = answer_proposal(&store, "p", 1, "just_do_it", &Default::default(), None, 2).unwrap();
         assert!(task.is_none());
         assert_eq!(answer_prompt(&one), "Owner chose Just do it for proposal \"T\": do the work without a task.");
-        let (two, task, _) = answer_proposal(&store, "p", 2, "cancel", &Default::default(), 2).unwrap();
+        let (two, task, _) = answer_proposal(&store, "p", 2, "cancel", &Default::default(), None, 2).unwrap();
         assert!(task.is_none());
         assert_eq!(answer_prompt(&two), "Owner chose Cancel for proposal \"T\": don't do this work.");
         assert!(list(store.connection(), Some("p"), None).unwrap().is_empty());
         assert!(pending_proposals(store.connection(), "s1").unwrap().is_empty());
-        assert!(refused_proposal(answer_proposal(&store, "p", 9, "create", &Default::default(), 2)).contains("no proposal 9"));
+        assert!(refused_proposal(answer_proposal(&store, "p", 9, "create", &Default::default(), None, 2)).contains("no proposal 9"));
     }
 
     #[test]
@@ -1702,7 +1895,7 @@ mod tests {
         create(&store, "s2", "chore");
         agent(&store, "s1", "start", Some(two), json!({})).unwrap();
         agent(&store, "s1", "cancel", Some(three), json!({"reason": "r"})).unwrap();
-        propose(&store, "p", "s1", &draft("docs"), &Default::default(), 1).unwrap();
+        propose(&store, "p", "s1", &draft("docs"), &Default::default(), None, 1).unwrap();
         let section = open_section(store.connection(), "s1").unwrap();
         assert_eq!(
             section,
@@ -1781,7 +1974,7 @@ mod tests {
             let example = types::example(kind.name).unwrap();
             match types::item_lists(kind.name) {
                 Some((_, key)) => {
-                    let mut entry = example["done"]["result"][key][0].clone();
+                    let mut entry = types::examples(kind.name).1[key][0].clone();
                     if types::is_visual(kind.name) {
                         entry["before"] = json!(format!("{}{}.png", types::SERVED, "a".repeat(64)));
                         entry["after"] = json!(format!("{}{}.png", types::SERVED, "b".repeat(64)));

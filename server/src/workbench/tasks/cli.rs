@@ -205,9 +205,13 @@ fn print_types(rest: &[String]) -> Result<i32, String> {
             Ok(0)
         }
         Some(name) => {
-            let example = types::example(name)
+            let mut example = types::example(name)
                 .ok_or_else(|| format!("{name} is not a task type (types: {})", types::names()))?;
+            let recipe = example.as_object_mut().and_then(|row| row.remove("recipe"));
             println!("{}", serde_json::to_string_pretty(&example).map_err(|e| e.to_string())?);
+            if let Some(recipe) = recipe.as_ref().and_then(Value::as_str) {
+                println!("\nChecks for {name}:\n\n{recipe}");
+            }
             Ok(0)
         }
     }

@@ -64,8 +64,10 @@ fn draft_payload(slug: &str) -> Value {
         "slug": slug, "title": format!("Grid {slug}"), "area": "An area.",
         "row_search": {"command": "scripts/rows.sh", "watch": [format!("{slug}/")]},
         "columns": [
-            {"id": "gpu", "name": "Runs on the GPU", "proof_rule": "a GPU test"},
-            {"id": "perf", "name": "Within budget", "proof_rule": "a benchmark check"},
+            {"id": "gpu", "name": "Runs on the GPU", "proof_rule": "a GPU test", "checks": [{"name": "gpu", "command": "cargo test {row}_on_gpu", "kind": "test",
+                "given": "the {row} pass", "when": "it renders", "then": "it ran on the GPU", "red": "FAILED|panicked"}]},
+            {"id": "perf", "name": "Within budget", "proof_rule": "a benchmark check", "checks": [{"name": "perf", "command": "cargo test {row}_in_budget", "kind": "test",
+                "given": "the {row} pass", "when": "it renders", "then": "it is within budget", "red": "FAILED|panicked"}]},
         ],
     })
 }
@@ -112,8 +114,9 @@ fn prove(store: &Store, session: &str, slug: &str, row: &str, col: &str, print: 
 
 fn task_create(store: &Store, session: &str, cells: Value, prints: Prints) -> Result<tasks::Outcome, TaskError> {
     owner_says(store, session, "@task do these cells");
-    let plan = tasks::types::example("chore").unwrap()["create"]["plan"].clone();
+    let plan = cell_plan(store, &cells);
     tasks::apply(store, &tasks::Request {
+        gate: None,
         action: "create".into(),
         actor: "agent".into(),
         session: Some(session.into()),
@@ -130,6 +133,7 @@ fn task_create(store: &Store, session: &str, cells: Value, prints: Prints) -> Re
 
 fn task(store: &Store, session: Option<&str>, actor: &str, action: &str, number: i64, payload: Value) -> Result<tasks::Outcome, TaskError> {
     tasks::apply(store, &tasks::Request {
+        gate: None,
         action: action.into(),
         actor: actor.into(),
         session: session.map(str::to_string),
@@ -149,6 +153,22 @@ fn task_refused<T>(result: Result<T, TaskError>) -> String {
         Err(error) => error.message().to_string(),
         Ok(_) => panic!("expected a refusal"),
     }
+}
+
+/// A chore plan with the cells' own approved checks, one step each, as
+/// `grid next` gives them.
+fn cell_plan(store: &Store, cells: &Value) -> Value {
+    let picked = parse_cells(Some(cells), false).unwrap_or_default();
+    let approved = approved_cell_checks(store.connection(), "p", &picked).unwrap_or_default();
+    let mut steps: Vec<Value> = approved
+        .iter()
+        .enumerate()
+        .map(|(index, check)| json!({"id": format!("c{index}"), "text": "Prove the cell", "checks": [check]}))
+        .collect();
+    if steps.is_empty() {
+        steps.push(json!({"id": "c0", "text": "Prove the cells", "checks": [crate::workbench::tasks::checks::tests::sample("c0")]}));
+    }
+    json!({"steps": steps})
 }
 
 fn chore_done(cells: Value) -> Value {
@@ -662,8 +682,9 @@ fn chat(store: &Store, id: &str, title: &str) {
 }
 
 fn agent_create(store: &Store, session: &str, cells: Value) -> Result<tasks::Outcome, TaskError> {
-    let plan = tasks::types::example("chore").unwrap()["create"]["plan"].clone();
+    let plan = cell_plan(store, &cells);
     tasks::apply(store, &tasks::Request {
+        gate: None,
         action: "create".into(),
         actor: "agent".into(),
         session: Some(session.into()),
@@ -715,13 +736,18 @@ fn next_lists_one_row_and_names_the_chats_holding_taken_cells() {
     let create = &next["create"];
     assert_eq!(create["type"], "general");
     assert_eq!(create["title"], "camera: GLARE row");
-    assert_eq!(create["plan"]["done_when"][0], json!({"id": "glare.gpu", "text": "GLARE × Runs on the GPU: a GPU test"}));
+    assert_eq!(create["plan"]["done_when"][0]["id"], "glare.gpu");
+    assert_eq!(create["plan"]["done_when"][0]["text"], "GLARE × Runs on the GPU: a GPU test");
+    // The cell's check, its column's template filled in for the row.
+    assert_eq!(create["plan"]["done_when"][0]["checks"][0]["command"], "cargo test glare_on_gpu");
     assert_eq!(create["cells"].as_array().unwrap().len(), 2);
     // The payload is one an agent can create without @task.
     owner_says(&store, "s1", "next");
     let created = tasks::apply(&store, &tasks::Request {
+        gate: None,
         action: "create".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(), number: None,
-        payload: json!({"type": "general", "title": "x", "why": "y", "plan": create["plan"], "cells": [create["cells"][0]]}),
+        payload: json!({"type": "general", "title": "x", "why": "y", "cells": [create["cells"][0]],
+            "plan": {"outcome": create["plan"]["outcome"], "done_when": [create["plan"]["done_when"][0]]}}),
         missing_commits: Default::default(), cwd: None, visual_files: Vec::new(), prints: Prints::new(), now: 2,
     }).unwrap();
     let number = created.task.number;
@@ -763,7 +789,7 @@ fn the_owner_creates_a_task_from_a_selection_and_its_cells_are_claimed() {
     prove(&store, "s3", "camera", "glare", "perf", "f1").unwrap();
     let held = agent_create(&store, "s1", json!([{"grid": "camera", "row": "sunstar", "col": "gpu"}])).unwrap().task.number;
     let pick = Pick::parse(&json!({"slug": "camera", "rows": ["glare"], "cols": "*", "onlyGaps": false})).unwrap();
-    let (task, grids, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 5).unwrap();
+    let (task, grids, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 5).unwrap();
     assert_eq!(grids, ["camera"]);
     assert_eq!((task.status.as_str(), task.session_id.as_deref(), task.kind.as_str()), ("todo", Some("s2"), "general"));
     assert_eq!(task.title, "camera: GLARE × Runs on the GPU");
@@ -778,18 +804,18 @@ fn the_owner_creates_a_task_from_a_selection_and_its_cells_are_claimed() {
     assert!(tasks::to_json(&store, &tasks::get(store.connection(), "p", held).unwrap().unwrap())["claimShape"].is_null());
     // A column pick: only sunstar.perf is free; glare.perf is proved.
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": ["perf"], "onlyGaps": true})).unwrap();
-    let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 6).unwrap();
+    let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 6).unwrap();
     assert_eq!(task.title, "camera: SUNSTAR × Within budget");
     assert!(prompt.contains("(SUNSTAR × Within budget)"), "{prompt}");
     // Nothing left to pick is refused and writes nothing.
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*", "onlyGaps": false})).unwrap();
-    let refusal = task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &none, 7));
+    let refusal = task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 7));
     assert!(refusal.contains("none of the selected cells needs a task"), "{refusal}");
     assert!(tasks::get(store.connection(), "p", task.number + 1).unwrap().is_none());
     // Bad picks.
     assert!(Pick::parse(&json!({"slug": "camera", "rows": ["Bad Id"]})).unwrap_err().contains("not a valid id"));
     let pick = Pick::parse(&json!({"slug": "camera", "rows": ["nope"], "cols": "*"})).unwrap();
-    assert!(task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &none, 8)).contains("no row \"nope\""));
+    assert!(task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 8)).contains("no row \"nope\""));
     // A claimed cell in the grid's detail names its chat.
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     let mut cells: Vec<Value> = loaded.cells.iter().map(|cell| cell_json(cell, false, false)).collect();
@@ -806,14 +832,14 @@ fn a_task_for_several_rows_of_every_open_cell_is_the_whole_grid_and_a_row_pick_i
     chat(&store, "s2", "Camera work");
     let none = Prints::new();
     let pick = Pick::parse(&json!({"slug": "camera", "rows": ["sunstar"], "cols": "*", "onlyGaps": true})).unwrap();
-    let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 5).unwrap();
+    let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 5).unwrap();
     // A whole row: the card names its shape and count, so the title has no count.
     assert_eq!(task.title, "camera: SUNSTAR row");
     assert!(prompt.contains("(SUNSTAR row, 2 gaps)"), "{prompt}");
     assert_eq!(task.plan["done_when"].as_array().unwrap().len(), 2);
     // Every open cell left is the glare row: titled by that row, as its card is.
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*"})).unwrap();
-    let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 6).unwrap();
+    let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 6).unwrap();
     assert_eq!(task.title, "camera: GLARE row");
     assert_eq!(tasks::to_json(&store, &task)["claimShape"]["kind"], "row");
 }
@@ -825,7 +851,7 @@ fn a_whole_grid_is_titled_without_a_count_and_an_irregular_pick_keeps_it() {
     chat(&store, "s2", "Camera work");
     let none = Prints::new();
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*", "onlyGaps": true})).unwrap();
-    let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 5).unwrap();
+    let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 5).unwrap();
     assert_eq!(task.title, "camera: whole grid");
     assert!(prompt.contains("(whole grid, 4 gaps)"), "{prompt}");
     assert_eq!(tasks::to_json(&store, &task)["claimShape"]["kind"], "grid");
@@ -843,7 +869,7 @@ fn part_of_a_row_and_an_irregular_pick_keep_their_count() {
     assert_eq!(next["create"]["title"], "camera: GLARE row (1 cell)");
     // The three cells left, over two rows and columns, are no shape.
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*", "onlyGaps": true})).unwrap();
-    let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 6).unwrap();
+    let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 6).unwrap();
     assert_eq!(task.title, "camera: 3 gaps");
     assert!(tasks::to_json(&store, &task)["claimShape"].is_null());
 }
@@ -865,4 +891,64 @@ fn refusals_say_what_to_do() {
     let cells = parse_cells(Some(&json!([{"grid": "camera", "row": "sunstar", "col": "gpu"}])), false).unwrap();
     let refusal = unclaimable(store.connection(), "p", &cells[0], &fresh).unwrap().unwrap();
     assert!(refusal.contains("nothing to do") && refusal.contains("atelier grid next camera"), "{refusal}");
+}
+
+fn template(name: &str, command: &str) -> Value {
+    json!({"name": name, "command": command, "kind": "test", "given": "the {row} pass", "when": "it renders",
+        "then": "it is right", "red": "FAILED|panicked"})
+}
+
+/// Camera with checks only on the gpu column; glare.perf adds its own,
+/// sunstar.gpu overrides the column's.
+fn camera_with_cell_checks(store: &Store) {
+    owner_says(store, "s1", "@matrix the camera area");
+    let mut payload = draft_payload("camera");
+    payload["columns"][1].as_object_mut().unwrap().remove("checks");
+    payload["cells"] = json!([
+        {"row": "glare", "col": "perf", "checks": [template("perf", "scripts/bench.sh {row}")]},
+        {"row": "sunstar", "col": "gpu", "checks": [template("gpu-own", "cargo test sunstar_gpu_by_hand")], "override": true},
+    ]);
+    draft(store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
+    apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
+}
+
+#[test]
+fn column_check_templates_fill_in_the_row_and_a_cell_adds_or_overrides() {
+    let (_d, store) = store();
+    camera_with_cell_checks(&store);
+    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
+    let commands = |row: &str, col: &str| -> Vec<String> {
+        loaded.cell_checks(row, col).iter().map(|c| c["command"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(commands("glare", "gpu"), ["cargo test glare_on_gpu"]);
+    assert_eq!(loaded.cell_checks("glare", "gpu")[0]["given"], "the glare pass", "{{row}} is filled in every text");
+    assert_eq!(commands("sunstar", "gpu"), ["cargo test sunstar_gpu_by_hand"], "override drops the column's");
+    assert_eq!(commands("glare", "perf"), ["scripts/bench.sh glare"], "a cell's own checks are templates too");
+    assert!(commands("sunstar", "perf").is_empty());
+    let shown = with_checks(&loaded, "sunstar", "perf", json!({}));
+    assert_eq!((shown["needsCheck"].clone(), shown["checks"].clone()), (json!(true), json!([])));
+    assert_eq!(with_checks(&loaded, "glare", "gpu", json!({}))["needsCheck"], false);
+    // A cell check for a cell not in the draft is refused.
+    let mut payload = draft_payload("lens");
+    payload["cells"] = json!([{"row": "nope", "col": "gpu", "checks": [template("x", "true")]}]);
+    owner_says(&store, "s1", "@matrix the lens area");
+    assert!(refused(draft(&store, "s1", payload, vec![found("bokeh", &["lens/bokeh.rs"])])).contains("is not a row of the draft"));
+}
+
+#[test]
+fn a_cell_without_checks_needs_one_is_listed_apart_and_cannot_be_claimed() {
+    let (_d, store) = store();
+    camera_with_cell_checks(&store);
+    let next = next_cells(store.connection(), "p", "camera", &Prints::new(), &Scope::Row("sunstar".into())).unwrap();
+    let needing: Vec<String> = next["needsCheck"].as_array().unwrap().iter()
+        .map(|c| format!("{}.{}", c["row"].as_str().unwrap(), c["col"].as_str().unwrap())).collect();
+    assert_eq!(needing, ["sunstar.perf"]);
+    assert_eq!(next["needsCheckInGrid"], 1);
+    assert!(next["claimable"].as_array().unwrap().iter().all(|c| !(c["row"] == "sunstar" && c["col"] == "perf")));
+    let refusal = task_refused(agent_create(&store, "s2", json!([{"grid": "camera", "row": "sunstar", "col": "perf"}])));
+    assert!(refusal.contains("camera.sunstar.perf has no check. Add one to the column or cell and get it approved"), "{refusal}");
+    // The owner's pick of only that cell is refused the same way.
+    let pick = Pick::parse(&json!({"slug": "camera", "rows": ["sunstar"], "cols": ["perf"], "onlyGaps": false})).unwrap();
+    let refusal = task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &Prints::new(), None, 5));
+    assert!(refusal.contains("camera.sunstar.perf has no check"), "{refusal}");
 }

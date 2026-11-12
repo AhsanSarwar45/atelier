@@ -155,7 +155,7 @@ async fn grid_detail(state: &WorkbenchState, project: &str, slug: &str) -> Resul
     let mut cells: Vec<Value> = grid
         .cells
         .iter()
-        .map(|cell| grids::cell_json(cell, grids::is_stale(&grid.grid.slug, cell, &prints), false))
+        .map(|cell| grids::with_checks(&grid, &cell.row, &cell.col, grids::cell_json(cell, grids::is_stale(&grid.grid.slug, cell, &prints), false)))
         .collect();
     for row in grid.rows.iter().filter(|row| row.kind == "reference" && row.removed_at.is_none()) {
         let Some(target) = &row.reference else { continue };
@@ -163,7 +163,7 @@ async fn grid_detail(state: &WorkbenchState, project: &str, slug: &str) -> Resul
         let Some(owner) = owners.iter().find(|o| o.grid.slug == owner) else { continue };
         for column in grid.columns.iter().filter(|c| c.retired_at.is_none()) {
             if let Some(cell) = owner.cell(target_row, &column.id) {
-                let mut value = grids::cell_json(cell, grids::is_stale(&owner.grid.slug, cell, &prints), false);
+                let mut value = grids::with_checks(owner, target_row, &column.id, grids::cell_json(cell, grids::is_stale(&owner.grid.slug, cell, &prints), false));
                 value["row"] = json!(row.id);
                 value["ref"] = json!(true);
                 cells.push(value);
@@ -224,7 +224,7 @@ async fn cell_detail(state: &WorkbenchState, project: &str, slug: &str, row: &st
         Some(folder) if !commits.is_empty() => crate::workbench::tasks::git::merged(&folder, &commits).await,
         _ => None,
     };
-    let mut full = grids::cell_json(cell, grids::is_stale(slug, cell, &prints), true);
+    let mut full = grids::with_checks(grid, row, col, grids::cell_json(cell, grids::is_stale(slug, cell, &prints), true));
     full["merged"] = json!(merged);
     let asked = project.to_string();
     let full = state

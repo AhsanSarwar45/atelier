@@ -92,37 +92,108 @@ pub fn listing() -> Value {
     })).collect::<Vec<_>>()})
 }
 
+/// The check recipe for one type: its `## TYPE` section of recipes.md,
+/// printed by `atelier task types TYPE` after the payloads.
+pub fn recipe(name: &str) -> Option<String> {
+    const RECIPES: &str = include_str!("recipes.md");
+    let heading = format!("## {name}\n");
+    let start = RECIPES.find(&heading)? + heading.len();
+    let rest = &RECIPES[start..];
+    let end = rest.find("\n## ").map(|at| at + 1).unwrap_or(rest.len());
+    Some(rest[..end].trim().to_string())
+}
+
+/// A sample check for an example plan item.
+fn example_check(name: &str, id: &str) -> Value {
+    let (command, kind, red, files) = match name {
+        "docs" => (
+            format!("grep -q 'Quick start' README.md || {{ echo 'README.md has no quick start'; exit 1; }}"),
+            "structure", "has no quick start", json!([]),
+        ),
+        "refactor" => (format!("cargo test -p app --test {id}"), "characterisation", "", json!([format!("tests/{id}.rs")])),
+        _ => (
+            format!("cargo test -p app --test {id} -- --exact {id}_works"),
+            "test", "FAILED|panicked", json!([format!("tests/{id}.rs")]),
+        ),
+    };
+    let mut check = json!({
+        "name": format!("{id}-works"), "command": command, "kind": kind,
+        "given": "the state the item starts from", "when": "the behaviour happens", "then": "what the owner can observe",
+        "files": files,
+    });
+    if !red.is_empty() {
+        check["red"] = json!(red);
+    }
+    check
+}
+
+/// An example plan with checks on every item (or, for a type with no item
+/// list, in the plan's own `checks`).
+pub fn with_checks(name: &str, mut plan: Value) -> Value {
+    match item_lists(name) {
+        Some((key, _)) => {
+            for item in plan[key].as_array_mut().into_iter().flatten() {
+                let id = item["id"].as_str().unwrap_or("item").to_string();
+                item["checks"] = json!([example_check(name, &id)]);
+            }
+        }
+        None => plan["checks"] = json!([example_check(name, "repro")]),
+    }
+    plan
+}
+
 /// A filled-in example of the `create` payload and the `done` payload for one
-/// type, for an agent to copy (`atelier task types TYPE`).
+/// type, for an agent to copy (`atelier task types TYPE`), and its check
+/// recipe.
 pub fn example(name: &str) -> Option<Value> {
     let kind = find(name)?;
-    let (plan, result) = examples(name);
+    let (plan, mut result) = examples(name);
     let mut done = json!({"summary": "One or two sentences on what was done."});
     if kind.code {
         done["commits"] = json!(["<sha of a commit in this worktree>"]);
     }
     done["followups"] = json!([{"type": "chore", "title": "Optional suggestion", "why": "Why it is worth doing"}]);
-    // One plan item's entry, as `atelier task check` takes it while the work
-    // goes on: the same entry the done result would carry, without its id.
+    // `atelier task check` takes no payload: the server runs the item's
+    // checks. A task made before checks takes the item's result entry.
     let check = item_lists(name).and_then(|(_, key)| {
         let mut entry = result[key][0].clone();
         let id = entry.as_object_mut()?.remove("id")?;
-        Some(json!({"command": format!("atelier task check N {}", id.as_str().unwrap_or("ID")), "entry": entry}))
-    });
+        Some(json!({
+            "command": format!("atelier task check N {}", id.as_str().unwrap_or("ID")),
+            "payload": "none: the server runs the item's checks and ticks it when all pass",
+            "entry": entry,
+            "entry_is_for": "tasks made before checks only (no checks in their plan)",
+        }))
+    }).unwrap_or_else(|| json!({
+        "command": format!("atelier task check N {}", super::checks::PLAN_ITEM),
+        "payload": "none: the server runs the plan's checks",
+    }));
+    // Done takes no item entries: the checks met them. Visual types still
+    // give their images.
+    if let Some((_, key)) = item_lists(name) {
+        if !is_visual(name) {
+            if let Some(row) = result.as_object_mut() {
+                row.remove(key);
+            }
+        }
+    }
     done["result"] = result;
     let mut shown = json!({
         "type": kind.name, "code": kind.code, "review": kind.review,
         "plan_fields": kind.plan, "result_fields": kind.result,
-        "create": {"type": kind.name, "title": "Short title (≤ 120 chars)", "why": "One line (≤ 300 chars)", "plan": plan},
+        "create": {"type": kind.name, "title": "Short title (≤ 120 chars)", "why": "One line (≤ 300 chars)", "plan": with_checks(name, plan)},
     });
-    if let Some(check) = check {
-        shown["check"] = check;
-    }
+    shown["check"] = check;
     shown["done"] = done;
+    if let Some(recipe) = recipe(name) {
+        shown["recipe"] = json!(recipe);
+    }
     Some(shown)
 }
 
-fn examples(name: &str) -> (Value, Value) {
+/// The example plan (without checks) and result (with every item's entry,
+/// as a task made before checks gives it) for a type.
+pub(super) fn examples(name: &str) -> (Value, Value) {
     match name {
         "bug" => (
             json!({"symptom": "Saving a draft twice loses the title", "repro_steps": ["Open a draft", "Press save twice"], "expected": "Title kept", "actual": "Title is empty", "suspected_area": "src/drafts/save.ts"}),
@@ -366,10 +437,23 @@ fn plan_items<'a>(
             ));
         }
         path = format!("{path} (id \"{id}\")");
-        only(entry, allowed, &path)?;
+        let mut allowed = allowed.to_vec();
+        allowed.push("checks");
+        only(entry, &allowed, &path)?;
+        if let Some(checks) = present(entry, "checks") {
+            super::checks::parse_checks(checks, &child(&path, "checks"))?;
+        }
         out.push((id, entry, path));
     }
     Ok(out)
+}
+
+/// The plan's own `checks`, for a type with no item list (bug, plan, review).
+fn plan_checks(row: &Row, at: &str) -> Result<(), String> {
+    if let Some(checks) = present(row, "checks") {
+        super::checks::parse_checks(checks, &child(at, "checks"))?;
+    }
+    Ok(())
 }
 
 /// A result list that must have exactly one entry per plan id. Returned in
@@ -480,7 +564,8 @@ pub fn check_plan(kind: &str, plan: &Value) -> Result<(), String> {
     let row = object(plan, at)?;
     match kind {
         "bug" => {
-            only(row, &["symptom", "repro_steps", "expected", "actual", "suspected_area"], at)?;
+            only(row, &["symptom", "repro_steps", "expected", "actual", "suspected_area", "checks"], at)?;
+            plan_checks(row, at)?;
             text(row, "symptom", at)?;
             texts(row, "repro_steps", at, 1)?;
             text(row, "expected", at)?;
@@ -560,7 +645,8 @@ pub fn check_plan(kind: &str, plan: &Value) -> Result<(), String> {
             }
         }
         "plan" => {
-            only(row, &["question", "scope", "constraints"], at)?;
+            only(row, &["question", "scope", "constraints", "checks"], at)?;
+            plan_checks(row, at)?;
             text(row, "question", at)?;
             text(row, "scope", at)?;
             texts(row, "constraints", at, 0)?;
@@ -586,7 +672,8 @@ pub fn check_plan(kind: &str, plan: &Value) -> Result<(), String> {
             }
         }
         "review" => {
-            only(row, &["target", "focus"], at)?;
+            only(row, &["target", "focus", "checks"], at)?;
+            plan_checks(row, at)?;
             text(row, "target", at)?;
             texts(row, "focus", at, 0)?;
         }
@@ -829,6 +916,17 @@ fn plan_item<'a>(plan: &'a Value, key: &str, id: &str) -> Option<&'a Value> {
 /// unmet item to `unmet` as `id: reason`.
 fn check_items(kind: &str, plan: &Value, row: &Row, at: &str, unmet: &mut Vec<String>) -> Result<(), String> {
     let (plan_key, result_key) = item_lists(kind).ok_or_else(|| format!("a {kind} task has no plan items"))?;
+    // A plan with checks: the server ran each item's checks, so done gives
+    // no entries for them. Visual types still give each item's images.
+    if super::checks::is_checked(plan) && !is_visual(kind) {
+        if present(row, result_key).is_some() {
+            return Err(format!(
+                "{at}: {result_key} is not given for a task with checks: the server ran each item's checks and ticked it. \
+                 Give only the type's other fields (see `atelier task types {kind}`)"
+            ));
+        }
+        return Ok(());
+    }
     for (id, entry, path) in covering(&plan_ids(plan, plan_key), row, result_key, at, entry_fields(kind))? {
         let item = plan_item(plan, plan_key, &id).unwrap_or(&Value::Null);
         if let Some(reason) = check_item(kind, item, entry, &path)? {
