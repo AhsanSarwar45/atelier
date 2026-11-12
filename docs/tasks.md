@@ -17,6 +17,11 @@ the task and what it must prove when it finishes.
   refused unless the session's latest owner message has a bare `@task`.
 - Each type has a plan (given at create) and a result (given at done). The
   server rejects a result that does not cover the plan.
+- Tasks are test-first. Every plan item carries one or more checks, written
+  before the work and approved by the owner with the plan in one step. The
+  server locks the files they rely on, requires them to fail at start and
+  pass at done, and ticks items itself. Agents cannot tick an item by
+  saying so (see Checks).
 - "Done" means the result is accepted, and for code-changing types that the
   named commits exist in the session's repository. Merging is separate: the
   card shows whether the commits reached the base branch, and the owner asks
@@ -45,6 +50,9 @@ Stored in `workbench.db`.
 | `cancel_reason` | text, null | |
 | `pending_amend` | json, null | a proposed new plan waiting for the owner |
 | `checks` | json, null | plan items checked while in progress: `{<result list>: [entry, …]}` in plan order (see Checking items) |
+| `approved_hashes` | json, null | per item, per check: sha256 of each of its `files` and of the harness files, taken at approval (see Checks) |
+| `check_runs` | json, null | the last run of each check: `{ITEM: {CHECK: run}}` |
+| `check_flags` | json, null | flags for the owner: weak checks, proves nothing, added skips, deleted tests |
 | `created_at`, `updated_at`, `started_at`, `finished_at` | integer ms | |
 
 `task_proposal`: a task an agent asked to make, kept apart from tasks so it
@@ -94,6 +102,10 @@ todo ──start──▶ in_progress ──done──▶ done
   The task is then `done` with `shortfalls = 1`.
 
 ### Checking items
+
+For a task with checks, `atelier task check N ITEM` takes no payload: the
+server runs the item's checks and ticks it when every one passes (see
+Checks). The rest of this section is the rule for tasks made before checks.
 
 `atelier task check N ITEM` records one plan item's result entry while the
 task is `in_progress`, so the card ticks items as they are met instead of all
@@ -193,6 +205,183 @@ proposal [awaiting the owner's answer] docs: Document the export
 Nothing is added when there are none. Open means `todo`, `in_progress`,
 `blocked` or `review`.
 
+## Checks
+
+Every plan item and grid cell is defined by one or more checks: shell
+commands written before the work that fail now and pass once the item is
+met. The owner approves them, the server runs them, and only the server
+ticks an item. This is what keeps an agent from declaring an item met, or
+from editing a test until it passes.
+
+### A check
+
+```json
+{
+  "name": "repro",
+  "command": "cargo test -p app export_keeps_order",
+  "kind": "test",
+  "given": "a project with 3 chats", "when": "it is exported", "then": "the chats keep their order",
+  "red": "export_keeps_order.*FAILED|assertion",
+  "timeout_s": 600,
+  "files": ["server/tests/export.rs"],
+  "bench": {"value": "p50_ms=([0-9.]+)", "runs": 10, "warmup": 2, "budget": {"max": 0.4, "unit": "ms"}}
+}
+```
+
+| field | notes |
+|---|---|
+| `name` | unique within its item, `[a-z0-9-]+` |
+| `command` | run with `sh -c` in the task's folder; exit 0 is a pass |
+| `kind` | `test`, `benchmark`, `structure` (a grep or file check) or `characterisation` (behaviour that must not change) |
+| `given`, `when`, `then` | the behaviour in words; shown on the card |
+| `red` | regex the failing output must match at start; not used for `characterisation` |
+| `timeout_s` | default 600, at most 3600 |
+| `files` | the files the check relies on: its test file, a script, a baseline image. Locked at approval |
+| `bench` | only for `benchmark`: `value` is a regex with one group read from each run's output; `runs` (at least 10) and `warmup`; `budget` is `{max, unit}` (absolute) or `{improve_pct, unit}` (p50 at least that much under the start-of-task baseline) |
+
+Each plan item, under whatever key its type uses (`criteria`, `done_when`,
+`screens`, `scenes`, `targets`, `questions`, `invariants`, `behaviors`,
+`scenarios`, `pages`, `steps`), has `checks: [Check, …]`, one or more, and
+all must pass for the item to be met. A type with no item list (`bug`,
+`plan`, `review`) puts them in the plan's own `checks`. `create` and
+`propose` refuse an item without a check, or a malformed check.
+
+`atelier task types TYPE` prints, after the plan and result shape, the
+type's check recipe: what to check for that kind of work, with one to three
+example checks. The recipes live in `server/src/workbench/tasks/recipes.md`.
+
+What makes a good check, in short (the tasks skill says the same to
+agents): one observable behaviour per check and as many checks as the item
+needs; assert outcomes (return values, DOM, files, HTTP, exit codes), never
+that a mock was called, and mock only external boundaries; fail for one
+stated reason, the one in `red`; run in under about two minutes.
+
+### Project settings
+
+In the project's manifest:
+
+```toml
+[tasks]
+harness = ["vitest.config.ts", "package.json", "server/Cargo.toml"]
+test_command = "npm test && cargo test"
+```
+
+- `harness`: test configuration the checks depend on. It is locked with
+  every check, so a task cannot loosen the runner (exclude a file, change a
+  timeout, swap the test script) to get green.
+- `test_command`: the project's whole suite, run at `done` on top of the
+  task's checks. Optional.
+
+### Approval and the lock
+
+The owner approves every check in one step: **Create task** on a proposal,
+an agent's create after the owner's `@task`, approving a grid, or approving
+an amend. At that moment the server stores, per item and per check, the
+sha256 of each file in `files` and of every harness file
+(`approved_hashes`). The check files must therefore exist when the task is
+proposed or created; an agent writes them first.
+
+From then on, before any run, the hashes are compared. A changed file fails
+the item with `approved check file changed: tests/x.rs` (flag
+`hash-changed`) until the owner approves an amend that re-hashes it.
+
+Before the card reaches the owner, a lint reads each proposed check and
+flags weak ones on the proposal card (flag `weak`), for example "only
+checks the file exists", "asserts a mock call", "no `red` pattern names a
+behaviour". The owner sees the checks folded under each item and only sees
+a single check again when an agent asks to change it.
+
+### Red at start
+
+`atelier task start N` (and claiming a grid cell) runs every check at the
+current HEAD before the task moves to `in_progress`:
+
+- `test` and `structure` must fail, and their output must match `red`.
+- `benchmark` must miss its budget; the timed samples are kept as the
+  baseline for a relative budget, measured on the same machine.
+- `characterisation` must pass.
+
+Otherwise start is refused, naming the item and check: `export: "repro"
+already passes, so it proves nothing`, or `export: "repro" failed for
+another reason: <output tail>`. A check that passes before the work proves
+nothing; one that fails for the wrong reason (a typo, a missing fixture)
+would go green for the wrong reason too. The fix is an amend.
+
+### Ticking items
+
+`atelier task check N ITEM` takes no payload. The server verifies the
+hashes, runs every check of the item and records for each
+`{exit, passed, outputTail (last 40 lines), commit, at, samples?, value?}`
+in `checkRuns`. It ticks the item only when all pass; otherwise the card
+shows `2 of 3 checks pass`. Agent-written evidence is not accepted for a
+task with checks.
+
+### Done
+
+`done` takes the summary, commits, follow-ups and the type's fields other
+than its item list. Then:
+
+1. **Green.** The hashes are verified and every check is run again, plus
+   `test_command` if set. `done` is refused while any fails or any approved
+   file has changed. An item that cannot be met is amended, not finished
+   around.
+2. **Break-it.** In a scratch worktree at HEAD the server reverts the
+   task's changes since its start commit, except the checks' `files`, and
+   runs each check. A check that still passes is flagged `proves-nothing`:
+   it passes without the work. Characterisation checks are skipped. This is
+   a flag for the owner, not a refusal.
+3. **Diff scan.** The task's diff is scanned for added skip, only, xfail and
+   ignore markers (`skip-added`), `exit(` calls inside test files
+   (`exit-in-test`) and deleted test files or test functions
+   (`test-deleted`).
+
+Flags are stored as `checkFlags: [{item?, check?, kind, text}]` and shown on
+the review card.
+
+### Benchmarks
+
+A benchmark check's command does one measured run and prints its value.
+The server runs it `warmup` times unrecorded, then `runs` times (at least
+10), reads `bench.value` from each run's output, stores the raw samples and
+compares the p50 with the budget. The start-of-task samples are the
+baseline for `improve_pct`, so both sides come from the same machine.
+Correctness tests for the optimised code go in as `characterisation`
+checks, since they pass before and after.
+
+### Amend
+
+When a check is wrong or cannot be met, the agent runs `atelier task amend
+N` with the whole new plan and a `reason` (what it ran, what it printed).
+It must not work around it. The owner approves or rejects on the card, and
+the waiting-on-you bar shows it. Approval re-hashes the changed checks and
+re-runs them: a changed check must go red again (characterisation: pass).
+
+### Agent rules for checks
+
+The tasks skill tells agents: read the approved checks first; never edit,
+delete, skip or rename approved check files, the harness config or
+baselines (the server rejects it); implement the behaviour generally, never
+branch on test inputs or override equality; make the smallest change to
+green and refactor in separate commits; unit-level red-green inside an item
+is recommended, not required; file an amend with evidence when a check is
+wrong or impossible.
+
+### Grids
+
+Grid columns carry check templates where `{row}` is replaced by the row id.
+A cell may add its own checks, or replace the column's with `override:
+true`. Approving the grid approves them. A cell with no check is shown as
+"Needs a check" and cannot be claimed. Claiming runs the cell's checks red,
+and `atelier grid prove` runs them green. See docs/grids.md.
+
+### Migration
+
+A task created before checks (no `checks` key anywhere in its plan) keeps
+the old rules entirely: `task check` takes the agent's result entry, `done`
+takes the item entries, nothing is locked or run. Tasks already started or
+in review, and cells already proved, are untouched. New tasks and open cells
+use checks.
+
 ## CLI
 
 All subcommands read the session from `ATELIER_CHAT_SESSION_ID` and the server
@@ -201,14 +390,14 @@ mutating call prints an `atelier-widget` block of type `task` (the card) and a
 one-line summary. Errors exit non-zero and say exactly which field is wrong.
 
 ```
-atelier task types [TYPE]          list types, or print one type's plan and result shape
+atelier task types [TYPE]          list types, or print one type's plan and result shape and its check recipe
 atelier task create                {type, title, why, plan}   only after the owner's @task
 atelier task propose               {type, title, why, plan}   ask the owner instead
 atelier task start N
-atelier task check N ITEM          one plan item's result entry   as soon as it is met or missed
+atelier task check N ITEM          run the item's checks and tick it when all pass (old tasks: its result entry)
 atelier task block N --cause TEXT --needs TEXT
 atelier task unblock N
-atelier task amend N               {plan}
+atelier task amend N               {plan, reason?}
 atelier task done N                {summary, commits?, followups?, result}
 atelier task cancel N --reason TEXT
 atelier task take N
@@ -240,9 +429,16 @@ JSON is camelCase. A task:
   "plan": {}, "result": null, "shortfalls": false, "blocked": null,
   "cancelReason": null, "pendingAmend": null, "checks": null,
   "createdAt": 0, "updatedAt": 0, "startedAt": null, "finishedAt": null,
-  "merged": null
+  "merged": null,
+  "checked": true, "checkRuns": {}, "checkFlags": []
 }
 ```
+
+`checked` is true for a task under the check rules. `checkRuns` is
+`{ITEM: {CHECK: {exit, passed, outputTail, commit, at, samples?, value?}}}`;
+`checkFlags` is `[{item?, check?, kind, text}]` with `kind` one of `weak`,
+`proves-nothing`, `skip-added`, `test-deleted`, `exit-in-test`,
+`hash-changed`. Plan items carry their `checks`.
 
 `merged` is only in list and detail responses: `true` when every commit of a
 done task is in the base branch, `false` when one is not, `null` when there
@@ -432,11 +628,13 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
    the owner's choice arrives.
 2. `@task <text>` from the owner means: pick the type, draft the plan, run
    `atelier task create`. Don't ask again.
-3. Start the task before working on it. Run `atelier task check` for each
-   plan item as soon as it is met or missed, not all at the end. Block it
-   only for a cause outside your control. Finish it with a full result.
-   Never leave it in progress at the end of the work.
-4. Plan changes go through `amend`. Never change scope silently.
+3. Plans are test-first: every item carries checks written before the
+   work. Start the task before working on it; start runs the checks red.
+   Run `atelier task check` for each item as its checks turn green, not all
+   at the end. Block only for a cause outside your control. Finish it with
+   `done`. Never leave it in progress at the end of the work.
+4. Plan and check changes go through `amend`. Never change scope silently,
+   and never edit an approved check file.
    The owner's approve, reopen and plan-change answers arrive as messages;
    after an approval, ask before merging and never merge without the
    owner's yes.
@@ -448,7 +646,9 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
   card a task prints. Header with `#N`, type, title, status and a met count;
   the plan's items one line each, cut short with an ellipsis (the whole text
   is the tooltip and is in the detail), five at most until **Show all N**.
-  Ticked live as items are checked. A type without plan items (`bug`,
+  Ticked live as items are checked; an item under the check rules shows
+  `2 of 3 checks pass` until all do, and its checks (Given/When/Then and the
+  command, with the last run) unfold under it. A type without plan items (`bug`,
   `plan`, `review`) shows its short plan. Clicking the title opens the detail.
 - **Event lines**: every later change (`start`, `check`, `block`, `unblock`,
   `take`, `amend`, `done`, `cancel`, `approve`, `reopen`, `approve_amend`,
@@ -466,7 +666,8 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
   by id in the type's plan list) and the other top-level fields that
   changed, never both whole plans. The same in an event line and in the
   detail's pending change panel.
-- **Done summary**: met and missed counts, only the missed items with their
+- **Done summary**: met and missed counts, the check flags (proves
+  nothing, added skips, deleted tests, exit calls in tests), only the missed items with their
   reasons, root cause and fix for `bug` and `visual_bug`, the summary, and
   the commits with the Merged badge, and a `feature` or `bug` result's
   screenshots behind their toggles. The whole result per type
@@ -489,7 +690,7 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
 - **`@task`** in the composer: a menu entry that inserts `@task `. `@task:N`
   references an existing task.
 - **Proposal card** (a `task` widget with `event: "propose"`): the draft and
-  its plan, with **Create task**, **Just do it** and **Cancel** while it
+  its plan, each item's checks folded under it with any weak-check flags, with **Create task**, **Just do it** and **Cancel** while it
   waits, and what became of it once answered. It rereads the proposal on
   `tasks.changed`, so an answer given elsewhere shows.
 - **Merged badge** on a done task's card, next to its commits.

@@ -25,10 +25,14 @@ feature at a time they leave gaps. A grid shows the gaps.
 - A grid counts only after the owner approves it. An agent drafts it and the
   owner approves or discards the draft on a card. A later edit to an approved
   grid is drafted and approved the same way.
-- **Proved** means there is proof the app can run again. The proof names
-  shell checks that must pass. The app runs them when the proof is given and
-  again on request. A proof also stops counting as soon as the code it covers
+- **Proved** means there is proof the app can run again. The proof is the
+  cell's approved checks (docs/tasks.md, Checks): column templates written
+  when the grid is drafted and approved with it. They must fail when the
+  cell is claimed and pass when it is proved. The app runs them again on
+  request. A proof also stops counting as soon as the code it covers
   changes (stale).
+- A cell with no check cannot be worked on. It shows **Needs a check**
+  until an edit gives its column (or the cell) one.
 - A feature has one owner. A row id belongs to one grid in the project.
   Another grid that depends on it adds a reference row, which shows the
   owner's cells read-only. Rows are never copied.
@@ -69,7 +73,8 @@ CLI argument without quoting. A `.` or a `+` in an id is refused.
 
 `grid_column`: `(project_id, slug, id)` is the key. Other columns: `name`,
 `proof_rule` (text: what counts as proof for this requirement, ≤ 1000 chars),
-`position`, `from_template` (0/1) and `retired_at` (null while it counts).
+`checks` (json: check templates, see Column checks), `position`,
+`from_template` (0/1) and `retired_at` (null while it counts).
 
 `grid_row`: `(project_id, slug, id)` is the key. Other columns: `name`;
 `kind` (`feature`, `combination` or `reference`); `paths` (json array of
@@ -97,6 +102,8 @@ combination row has one cell per column. Reference rows have no cells.
 | `claimed_task` | integer, null | the task number that claims the cell |
 | `claimed_from` | text, null | the state it had before the claim, restored on cancel |
 | `reason` | text, null | why it is a gap, why N/A, or why an audit reopened it |
+| `checks` | json, null | the cell's own checks, `{checks: [Check], override?: true}` (see Column checks) |
+| `approved_hashes` | json, null | sha256 of each resolved check's `files` and the harness files, taken when the grid (or its edit) was approved |
 | `audited_at`, `audited_by` | integer, text, null | the last audit pass |
 
 `grid_event`: `(project_id, slug, seq, at, kind, row, col, session_id,
@@ -109,7 +116,7 @@ Every change appends a row. A cell's history is its own events. Kinds:
 `na_rejected`, `audit_passed`, `reopened`.
 
 `grid_template`: `(project_id, name)` is the key. Other columns: `columns`
-(json `[{id, name, proof_rule}]`), `pending` (json, null: a change waiting for
+(json `[{id, name, proof_rule, checks}]`), `pending` (json, null: a change waiting for
 the owner), `updated_at` and `updated_by`.
 
 `grid_task_cell`: `(project_id, task, slug, row, col)`, the key, one row per
@@ -129,6 +136,11 @@ These are worked out each time a grid is read:
   not removed) in live columns, minus cells in state `na`.
 - **percent proved** = `proved and not stale` / `counted`, rounded down.
   `na_pending` counts as open. Only approved grids have a percent.
+- **resolved checks** of a cell: its column's templates with `{row}`
+  replaced by the row id, followed by the cell's own checks; or only the
+  cell's own when it has `override: true`.
+- **needs a check**: a cell of an approved grid whose resolved checks are
+  empty (`needsCheck: true`). It cannot be claimed.
 
 ## Covered code and staleness
 
@@ -200,12 +212,44 @@ paths of every row in its `of`.
   (`routes/git_watch.rs`) is not reused. It only runs while a window
   subscribes to it, and discovery has to happen with no window open.
 
+## Column checks
+
+Each column carries `checks: [Check]`, in the shape tasks use (docs/tasks.md,
+Checks), written when the grid is drafted. In a template's `name`,
+`command`, `given`, `when`, `then`, `red` and `files`, `{row}` is replaced
+by the row id, so one template covers every row:
+
+```json
+{"id": "gpu", "name": "Runs on the GPU", "proof_rule": "The effect runs in a compute or fragment pass, not on the CPU",
+ "checks": [{"name": "on-gpu-{row}", "kind": "test",
+   "command": "cargo test -p renderer --test gpu_passes {row}_runs_on_gpu -- --exact",
+   "given": "the {row} effect enabled", "when": "a frame renders", "then": "its work is in a GPU pass and the CPU path is not called",
+   "red": "{row}_runs_on_gpu.*FAILED|running 0 tests", "files": ["renderer/tests/gpu_passes.rs"]}]}
+```
+
+- A cell that needs more, or something else, carries its own checks in the
+  draft's `cells: [{row, col, checks, override?}]`. Without `override` they
+  are added to the column's; with `override: true` they replace them.
+- A drafted column without checks is allowed, but every cell under it
+  shows **Needs a check** until an edit adds them, and cannot be claimed.
+  The draft card names those columns.
+- Approving the grid (or an edit, or a template change) approves every
+  check on it and stores its hashes, as a task's approval does. The lock,
+  the hash-changed failure and the harness files work as for tasks.
+- Claiming a cell (task create with `cells`, or the owner's Create task)
+  runs its resolved checks at HEAD, and they must go red as at task start;
+  otherwise the claim is refused, naming the cell and check.
+- Grids approved before column checks, and cells proved before them, keep
+  the old rules: `prove` takes its own `checks` in the payload.
+
 ## Proof
+
+`prove` runs the cell's approved checks; the payload only says what was
+done:
 
 ```json
 {
   "summary": "Glare kernel matches the reference renderer within 0.5% RMS",
-  "checks": [{"name": "glare ground truth", "command": "cargo test -p renderer glare_matches_reference", "timeout_s": 600}],
   "tests": ["renderer::camera::glare::tests::glare_matches_reference"],
   "commits": ["9f3c2ab"],
   "benchmarks": [{"name": "glare pass 4K", "value": 0.82, "budget": 1.0, "unit": "ms", "lower_is_better": true}],
@@ -214,10 +258,13 @@ paths of every row in its `of`.
 ```
 
 - `summary`: required, ≤ 600 chars.
-- `checks`: at least one. `command` is run with `sh -c` in the proving chat's
-  folder. Exit 0 means pass. `timeout_s` defaults to 600, max 3600. Every
-  check must pass when `prove` is called, or `prove` is refused with the
-  failing check's exit code and the last 40 lines of its output.
+- The checks are the cell's resolved checks. Each `command` is run with
+  `sh -c` in the proving chat's folder after the hashes are verified. Exit
+  0 means pass (a benchmark also needs its budget met). Every check must
+  pass, or `prove` is refused with the failing check's exit code and the
+  last 40 lines of its output. A `checks` list in the payload is refused
+  for a cell with approved checks, and required for a cell under the old
+  rules (at least one; `timeout_s` defaults to 600, max 3600).
 - `tests`: names, kept for people and auditors. A check should run them.
 - `commits`: each must exist in the proving chat's repository (the same
   `git cat-file -e` test `task done` uses).
@@ -246,7 +293,7 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
 | from | event | to | who | refused when |
 |---|---|---|---|---|
 | — | grid approved, row added, column added | `unchecked` | app | |
-| `unchecked`, `gap`, stale `proved` | task created with this cell | `in_progress` | agent (no `@task` needed for an approved grid), or owner (Create task) | another open task claims it; fresh `proved`; `na`, `na_pending`; row missing or column retired |
+| `unchecked`, `gap`, stale `proved` | task created with this cell | `in_progress` | agent (no `@task` needed for an approved grid), or owner (Create task) | another open task claims it; fresh `proved`; `na`, `na_pending`; row missing or column retired; it needs a check; a check does not go red |
 | any but `na`, `na_pending` | `prove` | `proved` | agent | claimed by a task held by another chat; a check fails; a benchmark misses its budget; a commit is missing; covered paths are dirty |
 | `in_progress` | claiming task done, cell listed with a reason | `gap` (reason) | app | |
 | `in_progress` | claiming task cancelled | `claimed_from` | app | |
@@ -275,7 +322,9 @@ message describes the area. The server adds an entry that tells the agent to:
    that interact (anything that shares energy, a buffer or a pass). Run it
    and check the output.
 2. Run `atelier grid template list`, pick the template that fits, and add
-   grid-specific columns only for requirements the template lacks.
+   grid-specific columns only for requirements the template lacks. Give
+   every column check templates with `{row}` (write the test files they
+   name first), and cell checks where a row needs something else.
 3. Run `atelier grid list --rows` to see which features other grids already
    own, and add reference rows for them instead of new rows.
 4. Run `atelier grid draft` and stop. Continue when the owner's answer
@@ -288,7 +337,12 @@ message describes the area. The server adds an entry that tells the agent to:
   "slug": "camera", "title": "Renderer camera", "area": "Physical camera: lens, glare, sunstars, ghosts, exposure, colour transforms, presets.",
   "template": "physics",
   "row_search": {"command": "scripts/grid-rows/camera.sh", "watch": ["renderer/camera/", "shaders/camera/"]},
-  "columns": [{"id": "presets_grounded", "name": "Presets physically grounded", "proof_rule": "Each preset cites a real lens/sensor datasheet and a test loads it"}],
+  "columns": [{"id": "presets_grounded", "name": "Presets physically grounded", "proof_rule": "Each preset cites a real lens/sensor datasheet and a test loads it",
+    "checks": [{"name": "presets-{row}", "kind": "test", "command": "cargo test -p renderer --test presets {row}_presets_cite_datasheets -- --exact",
+      "given": "every {row} preset", "when": "it is loaded", "then": "it names a datasheet and its values match it",
+      "red": "{row}_presets_cite_datasheets.*FAILED|running 0 tests", "files": ["renderer/tests/presets.rs"]}]}],
+  "cells": [{"row": "ghosts", "col": "presets_grounded", "override": true, "checks": [{"name": "no-ghost-presets", "kind": "structure",
+    "command": "! grep -rn 'ghost' renderer/camera/presets/", "given": "the preset files", "when": "they are searched", "then": "no preset sets ghosts directly", "red": "ghost"}]}],
   "rows": [
     {"id": "glare_x_exposure", "name": "Glare × exposure", "kind": "combination", "of": ["glare", "exposure"], "paths": []},
     {"id": "tonemap", "name": "Tone mapping (owned by colour grid)", "kind": "reference", "ref": {"grid": "colour", "row": "tonemap"}}
@@ -303,7 +357,8 @@ message describes the area. The server adds an entry that tells the agent to:
   is proven to rerun.
 - The columns are the template's columns (`from_template`) followed by the
   payload's own. An own column with the same id as a template column is
-  refused.
+  refused. Checks are validated as for tasks (a malformed one is refused);
+  a `cells` entry for a row or column not in the draft is refused.
 - Refused when: the slug belongs to a grid created by another chat that is
   still a draft; a feature or combination id is owned by another approved
   grid (the error names that grid and says to use a reference row); a
@@ -321,7 +376,8 @@ message describes the area. The server adds an entry that tells the agent to:
 - The CLI prints a `grid` widget with `event: "draft"`. The **draft card**
   shows the title, area, template, columns (template ones marked), rows
   grouped by kind (combinations show their `of`, references show their
-  owner), the row-search command, and for an edit a diff (rows and columns
+  owner), each column's checks (folded, with weak-check flags) and the
+  columns that have none, the row-search command, and for an edit a diff (rows and columns
   added, retired or removed). It has **Approve** and **Discard** buttons. The
   owner asks for changes in chat, and the agent drafts again, which replaces
   `pending` and the card's content (the card rereads on `grids.changed`).
@@ -341,7 +397,7 @@ message describes the area. The server adds an entry that tells the agent to:
 
 ```
 atelier grid template list
-atelier grid template set NAME   {columns: [{id, name, proof_rule}]}
+atelier grid template set NAME   {columns: [{id, name, proof_rule, checks}]}
 ```
 
 - `set` stores the change in `grid_template.pending` and prints a `grid`
@@ -401,11 +457,13 @@ atelier grid template set NAME   {columns: [{id, name, proof_rule}]}
   (a whole row, column or grid is named without a count, since the task's
   card shows its shape and count; part of one keeps it, `camera: Glare row
   (3 cells)`, and an irregular pick is a count, `camera: 12 gaps`), one `done_when` item per cell, id `ROW.COL`, text `<row> ×
-  <column>: <proof rule>`. With nothing free it says so: `No gaps left in
+  <column>: <proof rule>`, with the cell's resolved checks as its `checks`.
+  Cells that need a check are not free; `next` lists them apart. With nothing free it says so: `No gaps left in
   camera. Every cell is proved or N/A.`
 - **The work-through loop.** `grid next` → `task create` with those cells →
-  `task start` → `grid prove` each cell (or N/A, or a reason at `done`) →
-  `task done` → `grid next` again, until no gaps are left.
+  `task start` (the cells' checks go red) → `grid prove` each cell, which
+  runs its checks, and `task check N ROW.COL` (or N/A, or a reason at
+  `done`) → `task done` → `grid next` again, until no gaps are left.
 - **Owner's Create task.** On the Grids screen the owner selects cells and
   presses Create task, choosing an existing chat or a new one. The server
   keeps the selected cells that need work (with **Only gaps**, only
@@ -487,7 +545,7 @@ atelier grid template list
 atelier grid template set NAME               {columns:[{id,name,proof_rule}]}
 atelier grid draft                           {slug,title,area,template?,row_search,columns,rows}
 atelier grid discover SLUG
-atelier grid prove SLUG ROW COL              {summary,checks,tests?,commits?,benchmarks?,evidence?}
+atelier grid prove SLUG ROW COL              {summary,tests?,commits?,benchmarks?,evidence?}  runs the approved checks (old cells: checks in the payload)
 atelier grid verify SLUG [ROW COL]           re-run checks (whole grid: proved cells)
 atelier grid na SLUG ROW COL --reason TEXT
 atelier grid audit SLUG [--done]
@@ -518,8 +576,10 @@ JSON is camelCase.
   columns: [{id, name, proofRule, position, fromTemplate, retired}], rows:
   [{id, name, kind, paths, of, ref, source, missing, removed}], cells: [{row,
   col, state, stale, claimedTask, reason, provedBy, provedAt, auditedAt,
-  lastCheck: {at, passed}|null, proofSummary, claimedChat: {id, title}|null}]}`
-  (`claimedChat` is set on claimed cells). A reference row's cells
+  lastCheck: {at, passed}|null, proofSummary, claimedChat: {id, title}|null,
+  checks: Check[], needsCheck?: true}]}` (`claimedChat` is set on claimed
+  cells; `checks` are the resolved checks; `needsCheck` is set when they
+  are empty). Columns also carry their `checks` templates. A reference row's cells
   are the owner grid's cells for columns with the same id, marked `ref:
   true`. Columns that do not match are left out.
 - `GET /api/workbench/grids/:project/:slug/cells/:row/:col` → `{cell (with
@@ -589,7 +649,8 @@ N/A awaiting the owner: camera.ghosts.presets_grounded
   than cut (hovering shows the `proof_rule`), and one square per
   cell coloured by state: unchecked muted, gap destructive, in progress info,
   proved success, stale success hatched, N/A pending warning outline, N/A
-  dash. Missing rows are dimmed and retired columns are hidden behind a
+  dash, needs a check a dotted outline with the tooltip "Needs a check".
+  Missing rows are dimmed and retired columns are hidden behind a
   "Show retired" toggle. Above the heatmap: discovery status (last run,
   added/missing counts, error), **Discover**, **Re-check stale**, and the
   pending-edit banner with Approve/Discard.
@@ -605,7 +666,8 @@ N/A awaiting the owner: camera.ghosts.presets_grounded
   `startTaskIn` given the line. Cells that are not claimable are listed in a
   tooltip with the reason.
 - **Cell detail panel.** State (and stale or claimed, with a link to the
-  task); reason; proof: summary, checks with the last result and time,
+  task); reason; the cell's checks (Given/When/Then and command, the
+  column's marked apart from the cell's own), or **Needs a check**; proof: summary, checks with the last result and time,
   benchmarks as a value/budget/unit table with pass marks, tests, commits
   (with the Merged badge logic), evidence inline; history from the cell's
   events; buttons: **Re-check**, **Approve N/A** and **Reject** (with a note)
@@ -624,10 +686,12 @@ N/A awaiting the owner: camera.ghosts.presets_grounded
 
 The tasks builtin (`machinery/skills/tasks/SKILL.md`, id `atelier-tasks`,
 always on) gets a short **Grids** section: what a grid and a cell are, that
-a grid may be drafted without `@matrix`, the command list above, the
+a grid may be drafted without `@matrix`, that every column needs check
+templates with `{row}` (a cell may add or override) and a cell without one
+shows "Needs a check" and cannot be claimed, the command list above, the
 work-through loop (`grid next` → `task create`, no `@task` needed →
-`task start` → prove → `task done` → repeat), "prove only with checks that
-pass; commit the covered code first", "a task with `cells` must end with
+`task start` → prove → `task check` → `task done` → repeat), "`grid prove`
+runs the approved checks; commit the covered code first", "a task with `cells` must end with
 proof, N/A or a reason for every cell", "leave cells another task claims
 alone", and "never pass or reopen cells outside an `@audit` request". The
 step-by-step instructions for drafting and auditing are in the `@matrix` and
