@@ -9,14 +9,15 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { AlertTriangle, Ban, Check, ChevronRight, Circle, CircleDot, GitMerge, Pause, Plus } from 'lucide-react';
+import { AlertTriangle, Ban, Check, Circle, CircleDot, GitMerge, Images, Minus, Pause, Pencil, Plus } from 'lucide-react';
 
 import { MarkdownBody } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger, CollapsibleTriggerRow } from '@/components/ui/collapsible';
+import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip } from '@/components/ui/tooltip';
 import { tasks as tasksApi } from '@/lib/api';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
@@ -28,6 +29,8 @@ import { PictureViewer } from '@/workbench/picture-viewer';
 import type { LookableImage, SessionState } from '@/workbench/protocol';
 import { ProposalCells, TaskCells } from '@/workbench/grids/task-cells';
 import { useComposerPrefill } from '@/workbench/tasks/composer-prefill';
+import { openTaskDetail } from '@/workbench/tasks/open-task';
+import { fieldName, planDiff } from '@/workbench/tasks/plan-diff';
 import {
   STATUS_LABEL,
   followupLine,
@@ -44,7 +47,7 @@ import {
   type TaskProposal,
   type TaskStatus,
 } from '@/workbench/tasks/types';
-import { entryOutcome, recordedEntries } from '@/workbench/tasks/progress';
+import { ITEM_LISTS, entryOutcome, itemCounts, itemProgress, itemText, recordedEntries, type ItemProgress } from '@/workbench/tasks/progress';
 import { tasksChangedFor, useLiveTask } from '@/workbench/tasks/use-tasks';
 
 /* ------------------------------------------------------------------ reading */
@@ -211,21 +214,45 @@ function OptimizationPlanTable({ targets }: { targets: OptimizationTarget[] }) {
   );
 }
 
-/** Two screenshots of one screen, side by side, opening large on a click. */
-function ShotPair({ name, before, after, cwd }: { name: string; before: string; after: string; cwd?: string | null }) {
+/**
+ * The before and after images of one screen or scene, and a render's
+ * reference image. Folded behind a toggle, so a card with many takes no room
+ * until they are wanted; open, they sit side by side and open large on a click.
+ */
+export function ShotPair({ name, before, after, reference, cwd }: { name: string; before: string; after: string; reference?: string; cwd?: string | null }) {
+  const [shown, setShown] = useState(false);
   const [looking, setLooking] = useState<LookableImage | null>(null);
+  if (!before && !after) return null;
   return (
-    <>
-      <ImageComparisonView
-        comparison={{
-          mode: 'side_by_side',
-          before: { mime: 'image/*', dataUrl: shotUrl(before, cwd), alt: `${name} before` },
-          after: { mime: 'image/*', dataUrl: shotUrl(after, cwd), alt: `${name} after` },
-        }}
-        onLook={setLooking}
-      />
+    <div data-testid="task-images" data-shown={shown ? 'yes' : 'no'}>
+      <Button type="button" variant="ghost" size="xs" aria-expanded={shown} data-testid="task-images-toggle"
+        className="-ml-2 text-muted-foreground" onClick={() => setShown((open) => !open)}>
+        <Images aria-hidden />{shown ? 'Hide images' : reference ? 'Show before, after and reference' : 'Show before and after'}
+      </Button>
+      {shown && (
+        <div className="mt-1 space-y-2">
+          <ImageComparisonView
+            comparison={{
+              mode: 'side_by_side',
+              before: { mime: 'image/*', dataUrl: shotUrl(before, cwd), alt: `${name} before` },
+              after: { mime: 'image/*', dataUrl: shotUrl(after, cwd), alt: `${name} after` },
+            }}
+            onLook={setLooking}
+          />
+          {reference && (
+            <figure className="space-y-1">
+              <figcaption className="text-xs text-muted-foreground">Reference</figcaption>
+              <Button type="button" variant="foreground" size="none" className="block" aria-label={`Open ${name} reference`}
+                onClick={() => setLooking({ mime: 'image/*', dataUrl: shotUrl(reference, cwd), alt: `${name} reference` })}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={shotUrl(reference, cwd)} alt={`${name} reference`} className="max-h-48 rounded border border-border/60 object-contain" />
+              </Button>
+            </figure>
+          )}
+        </div>
+      )}
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
-    </>
+    </div>
   );
 }
 
@@ -252,8 +279,8 @@ function EntryDetail({ type, item, entry, cwd }: { type: string; item: Loose; en
     case 'investigation':
       shown = <div className="whitespace-pre-wrap text-xs text-muted-foreground">{str(entry.answer)}</div>;
       break;
-    case 'ui_change':
-      shown = <ShotPair name={itemName(type, item)} before={str(entry.before)} after={str(entry.after)} cwd={cwd} />;
+    case 'ui_change': case 'visual_bug': case 'render_change':
+      shown = <ShotPair name={itemText(type, item)} before={str(entry.before)} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} />;
       break;
   }
   return (
@@ -264,8 +291,6 @@ function EntryDetail({ type, item, entry, cwd }: { type: string; item: Loose; en
     </>
   );
 }
-
-const itemName = (type: string, item: Loose): string => (type === 'ui_change' ? str(item.name) : str(item.text));
 
 /**
  * One plan item: an open circle until it is checked, then ticked or marked
@@ -347,6 +372,30 @@ export function PlanView({ type, plan, entries, cwd }: {
               <div className="text-sm">{str(s.change)}</div>
             </div>
           ))}
+        </div>
+      );
+    case 'visual_bug':
+      return (
+        <div className="space-y-2">
+          <PlanView type="bug" plan={p} />
+          <div><Label>Screens</Label>
+            <Checklist>{list(p.screens).map((s) => (
+              <PlanItem key={str(s.id)} type={type} item={s} entries={entries} cwd={cwd} text={<span className="font-medium">{str(s.name)}</span>}>
+                <div className="text-xs text-muted-foreground">{str(s.how_to_reach)}</div>
+              </PlanItem>
+            ))}</Checklist>
+          </div>
+        </div>
+      );
+    case 'render_change':
+      return (
+        <div><Label>Scenes</Label>
+          <Checklist>{list(p.scenes).map((s) => (
+            <PlanItem key={str(s.id)} type={type} item={s} entries={entries} cwd={cwd} text={<span className="font-medium">{str(s.scene)}</span>}>
+              <div className="text-xs text-muted-foreground">{`Camera: ${str(s.camera)}${s.reference === true ? ' · reference image asked for' : ''}`}</div>
+              <div className="text-sm">{str(s.change)}</div>
+            </PlanItem>
+          ))}</Checklist>
         </div>
       );
     case 'optimization':
@@ -479,32 +528,25 @@ function MetList({ planned, results, label, cwd }: { planned: Loose[]; results: 
   );
 }
 
-function UiChangeResult({ plan, result, cwd }: { plan: Loose; result: Loose; cwd?: string | null }) {
-  const [looking, setLooking] = useState<LookableImage | null>(null);
-  const shots = byId(list(result.screens));
+/** ui_change, visual_bug and render_change: each screen or scene with its images behind a toggle. */
+function VisualResult({ type, plan, result, cwd }: { type: string; plan: Loose; result: Loose; cwd?: string | null }) {
+  const key = ITEM_LISTS[type]?.result ?? 'screens';
+  const shots = byId(list(result[key]));
   return (
-    <div className="space-y-3">
-      {list(plan.screens).map((screen) => {
-        const shot = shots.get(str(screen.id));
-        const name = str(screen.name);
+    <div className="space-y-2">
+      {list(plan[ITEM_LISTS[type]?.plan ?? 'screens']).map((item) => {
+        const shot = shots.get(str(item.id));
+        const name = itemText(type, item);
         return (
-          <div key={str(screen.id)} data-testid="ui-screen">
-            <div className="mb-1 text-sm font-medium">{name}</div>
+          <div key={str(item.id)} data-testid="ui-screen">
+            <div className="text-sm font-medium">{name}</div>
             {shot ? (
-              <ImageComparisonView
-                comparison={{
-                  mode: 'side_by_side',
-                  before: { mime: 'image/*', dataUrl: shotUrl(str(shot.before), cwd), alt: `${name} before` },
-                  after: { mime: 'image/*', dataUrl: shotUrl(str(shot.after), cwd), alt: `${name} after` },
-                }}
-                onLook={setLooking}
-              />
-            ) : <Shortfall>No screenshots</Shortfall>}
+              <ShotPair name={name} before={str(shot.before)} after={str(shot.after)} reference={str(shot.reference) || undefined} cwd={cwd} />
+            ) : <Shortfall>No images</Shortfall>}
             {shot && str(shot.notes) && <div className="text-xs text-muted-foreground">{str(shot.notes)}</div>}
           </div>
         );
       })}
-      {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
     </div>
   );
 }
@@ -538,7 +580,14 @@ function Followups({ items, label }: { items: Followup[]; label: string }) {
   );
 }
 
-export function ResultView({ type, plan, result, cwd }: { type: string; plan: unknown; result: unknown; cwd?: string | null }) {
+export function ResultView({ type, plan, result, cwd, summarised = false }: {
+  type: string;
+  plan: unknown;
+  result: unknown;
+  cwd?: string | null;
+  /** Shown under a done summary, which already says the root cause and fix. */
+  summarised?: boolean;
+}) {
   const p = rec(plan);
   const r = rec(result);
   switch (type) {
@@ -553,7 +602,16 @@ export function ResultView({ type, plan, result, cwd }: { type: string; plan: un
     case 'chore':
       return <MetList label="Steps" planned={list(p.steps)} results={list(r.steps)} cwd={cwd} />;
     case 'ui_change':
-      return <UiChangeResult plan={p} result={r} cwd={cwd} />;
+    case 'render_change':
+      return <VisualResult type={type} plan={p} result={r} cwd={cwd} />;
+    case 'visual_bug':
+      return (
+        <div className="space-y-2">
+          {!summarised && <Field label="Root cause">{str(r.root_cause)}</Field>}
+          {!summarised && <Field label="Fix">{str(r.fix)}</Field>}
+          <div><Label>Screens</Label><VisualResult type={type} plan={p} result={r} cwd={cwd} /></div>
+        </div>
+      );
     case 'plan':
       return (
         <div className="space-y-3">
@@ -622,8 +680,8 @@ export function ResultView({ type, plan, result, cwd }: { type: string; plan: un
     case 'bug':
       return (
         <div className="space-y-2">
-          <Field label="Root cause">{str(r.root_cause)}</Field>
-          <Field label="Fix">{str(r.fix)}</Field>
+          {!summarised && <Field label="Root cause">{str(r.root_cause)}</Field>}
+          {!summarised && <Field label="Fix">{str(r.fix)}</Field>}
           <div><Label>Proof</Label><Evidence value={str(r.proof)} cwd={cwd} /></div>
           {strings(r.regression_checked).length > 0 && <div><Label>Regressions checked</Label><Bullets items={strings(r.regression_checked)} /></div>}
         </div>
@@ -705,10 +763,11 @@ function failure(e: unknown): string {
  * The owner's buttons for one task. `only` limits them to a set — the chat
  * card shows the review and amend ones; the Tasks tab shows them all.
  */
-export function TaskOwnerActions({ task, only, onChanged }: {
+export function TaskOwnerActions({ task, only, onChanged, className }: {
   task: Task;
   only?: OwnerAction[];
   onChanged?: (task: Task) => void;
+  className?: string;
 }) {
   const [busy, setBusy] = useState<OwnerAction | null>(null);
   const [asking, setAsking] = useState<'reopen' | 'cancel' | null>(null);
@@ -734,7 +793,7 @@ export function TaskOwnerActions({ task, only, onChanged }: {
 
   const has = (a: OwnerAction) => actions.includes(a);
   return (
-    <div className="space-y-2" data-testid="task-actions">
+    <div className={cn('space-y-2', className)} data-testid="task-actions">
       {asking ? (
         <form
           className="space-y-2"
@@ -786,20 +845,181 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   return <section className="space-y-1.5"><Label>{label}</Label>{children}</section>;
 }
 
+/** A plan field's value in a line: words as they are, a list joined. */
+function fieldValue(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '(none)';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value) && value.every((v) => typeof v === 'string')) return value.join('; ');
+  return JSON.stringify(value);
+}
+
 /**
- * Whether a chat card starts open: a new task, and a card that waits on the
- * owner (a review, a proposed plan change, a block). Any other status update
- * starts folded to its header, so a chat is not a stack of repeated plans.
- * Read from the task as printed, so the card keeps its first look.
+ * A proposed plan change: only the items added, removed and changed, and the
+ * other fields that changed (plan-diff.ts). Never both whole plans.
  */
-export function opensByDefault(event: string, task: Task): boolean {
-  if (event === 'create' || event === 'amend' || event === 'block') return true;
-  return event === 'done' && task.status === 'review';
+export function AmendDiff({ type, plan, amend }: { type: string; plan: unknown; amend: unknown }) {
+  const diff = planDiff(type, plan, amend);
+  const rows: ReactNode[] = [];
+  const row = (key: string, change: string, icon: ReactNode, body: ReactNode) => rows.push(
+    <li key={key} data-testid="task-amend-change" data-change={change} className="flex gap-2 py-1">
+      <span aria-hidden className="mt-0.5 shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1 break-words text-sm">{body}</div>
+    </li>,
+  );
+  const plus = <Plus className="size-4 text-[var(--color-success-accent)]" />;
+  const minus = <Minus className="size-4 text-[var(--color-warning-accent)]" />;
+  const pencil = <Pencil className="size-3.5 text-muted-foreground" />;
+  for (const item of diff.added) row(`+${item.id}`, 'added', plus, <><span className="sr-only">Added: </span>{item.after || item.id}</>);
+  for (const item of diff.removed) row(`-${item.id}`, 'removed', minus, <><span className="sr-only">Removed: </span><span className="text-muted-foreground line-through">{item.before || item.id}</span></>);
+  for (const item of diff.changed) row(`~${item.id}`, 'changed', pencil, (
+    <>
+      {item.before !== item.after ? (
+        <>
+          <span className="text-muted-foreground line-through">{item.before}</span>
+          <span className="block">{item.after}</span>
+        </>
+      ) : <span>{item.after || item.id}</span>}
+      {item.fields.length > 0 && <span className="block text-xs text-muted-foreground">{`Changed: ${item.fields.map(fieldName).join(', ')}`}</span>}
+    </>
+  ));
+  for (const field of diff.fields) row(`f:${field.key}`, 'field', pencil, (
+    <>
+      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{fieldName(field.key)}</span>
+      <span className="block text-muted-foreground line-through">{fieldValue(field.before)}</span>
+      <span className="block">{fieldValue(field.after)}</span>
+    </>
+  ));
+  return (
+    <ul data-testid="task-amend-diff" className="divide-y divide-border/60">
+      {rows.length ? rows : <li className="py-1 text-sm text-muted-foreground">No change to the plan</li>}
+    </ul>
+  );
+}
+
+/** "6 of 7 met · 1 missed", or nothing for a type without plan items. */
+export function countsLine(items: readonly ItemProgress[]): string {
+  const { met, missed, total } = itemCounts(items);
+  if (!total) return '';
+  return `${met} of ${total} met${missed ? ` · ${missed} missed` : ''}`;
+}
+
+/**
+ * What a finished task came to, short: how many plan items were met, only
+ * the missed ones with their reasons, the summary, and the commits with
+ * whether they are merged. The whole result sits behind Show all.
+ */
+export function DoneSummary({ task, cwd, counted = false }: {
+  task: Task;
+  cwd?: string | null;
+  /** The line above already gives the counts (a done line in a chat). */
+  counted?: boolean;
+}) {
+  const result = task.result;
+  const items = useMemo(() => itemProgress(task), [task]);
+  if (!result) return null;
+  const counts = countsLine(items);
+  const missed = items.filter((item) => item.state === 'missed');
+  const total = items.length;
+  const commits = Array.isArray(result.commits) ? result.commits.filter((c): c is string => typeof c === 'string') : [];
+  const followups = Array.isArray(result.followups) ? result.followups : [];
+  const r = rec(result);
+  return (
+    <div data-testid="task-done-summary" className="space-y-2">
+      {!counted && (counts || task.shortfalls) && (
+        <div data-testid="task-done-counts" className={cn('flex items-center gap-1.5 text-xs', missed.length || task.shortfalls ? 'text-[var(--color-warning-accent)]' : 'text-muted-foreground')}>
+          {(missed.length > 0 || task.shortfalls) && <AlertTriangle aria-hidden className="size-3.5" />}
+          {counts || 'Finished with shortfalls'}
+        </div>
+      )}
+      {missed.length > 0 && (
+        <Checklist>
+          {missed.map((item) => (
+            <CheckRow key={item.id} testId="task-missed" itemId={item.id} ok={false} text={item.text}>
+              <Shortfall>{item.note}</Shortfall>
+            </CheckRow>
+          ))}
+        </Checklist>
+      )}
+      {(task.type === 'bug' || task.type === 'visual_bug') && (
+        <>
+          <Field label="Root cause">{str(r.root_cause)}</Field>
+          <Field label="Fix">{str(r.fix)}</Field>
+        </>
+      )}
+      {typeof result.summary === 'string' && result.summary && <p className="whitespace-pre-wrap break-words text-sm">{result.summary}</p>}
+      {commits.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Label>Commits</Label>
+          {commits.map((sha) => <Badge key={sha} variant="outline" size="sm"><span className="font-mono">{sha.slice(0, 10)}</span></Badge>)}
+          <MergeBadge task={task} />
+        </div>
+      )}
+      <Collapsible>
+        <CollapsibleTriggerRow size="sm" data-testid="task-result-all">{total ? `Show all ${total}` : 'Show the whole result'}</CollapsibleTriggerRow>
+        <CollapsibleContent className="space-y-3 pt-2">
+          <ResultView type={task.type} plan={task.plan} result={result} cwd={cwd} summarised />
+          <Followups label="Follow-ups" items={followups as Followup[]} />
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}
+
+/** How many plan items a chat card lists before "Show all". */
+export const ITEMS_SHOWN = 5;
+
+/** The field a type leads its plan with, drawn as one line above its items. */
+const LEAD: Record<string, string> = { feature: 'outcome', general: 'outcome', refactor: 'change', docs: 'audience', visual_bug: 'symptom' };
+
+/**
+ * The plan as a chat card shows it: one line per item, ticked live as it is
+ * checked, cut short with an ellipsis (the whole text is its tooltip and is in
+ * the task's detail). More than five fold behind "Show all". A type with no
+ * plan items is short enough to show as it is.
+ */
+export function CompactPlan({ task }: { task: Task }) {
+  const [all, setAll] = useState(false);
+  const items = useMemo(() => itemProgress(task), [task]);
+  if (!ITEM_LISTS[task.type]) return <PlanView type={task.type} plan={task.plan} />;
+  const lead = LEAD[task.type] ? str(rec(task.plan)[LEAD[task.type]!]) : '';
+  const shown = all ? items : items.slice(0, ITEMS_SHOWN);
+  return (
+    <div className="space-y-1">
+      {lead && <Tooltip label={lead}><p tabIndex={0} className="truncate text-sm text-foreground">{lead}</p></Tooltip>}
+      <ul data-testid="task-plan-items" className="space-y-0.5">
+        {shown.map((item) => {
+          const Icon = item.state === 'open' ? Circle : item.state === 'met' ? Check : AlertTriangle;
+          return (
+            <Tooltip key={item.id} label={item.note ? `${item.text} — ${item.note}` : item.text}>
+            <li data-testid="task-plan-item" data-item={item.id} data-full={item.text} tabIndex={0}
+              data-met={item.state === 'open' ? 'pending' : item.state === 'met' ? 'yes' : 'no'}
+              className="flex min-w-0 items-center gap-2 rounded-sm text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Icon aria-label={item.state === 'met' ? 'Met' : item.state === 'missed' ? 'Missed' : 'Open'} className={cn('size-3.5 shrink-0',
+                item.state === 'open' ? 'text-muted-foreground' : item.state === 'met' ? 'text-[var(--color-success-accent)]' : 'text-[var(--color-warning-accent)]')} />
+              <span className={cn('min-w-0 truncate', item.state === 'open' && 'text-muted-foreground')}>{item.text}</span>
+            </li>
+            </Tooltip>
+          );
+        })}
+      </ul>
+      {items.length > ITEMS_SHOWN && (
+        <Button type="button" variant="ghost" size="xs" data-testid="task-plan-show-all" aria-expanded={all}
+          className="-ml-2 text-muted-foreground" onClick={() => setAll((open) => !open)}>
+          {all ? 'Show fewer' : `Show all ${items.length}`}
+        </Button>
+      )}
+    </div>
+  );
 }
 
 /**
  * The task card. Draws the task as it stands now where the screen knows it
  * (`LiveTasksContext`), and otherwise the snapshot it was given.
+ *
+ * In a chat (`event` given) it is the one card a task prints, when it is
+ * created: the header and its plan items, one line each, ticked live. Every
+ * later change prints a one-line row instead (task-event-row.tsx). Without
+ * `event` it is the Tasks tab's detail: the whole task.
  */
 export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen', 'approve_amend', 'reject_amend'] }: {
   task: Task;
@@ -809,7 +1029,6 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
   actions?: OwnerAction[];
 }) {
   const live = useLiveTask(snapshot);
-  const [open, setOpen] = useState(() => (event ? opensByDefault(event, snapshot) : true));
   const [acted, setActed] = useState<Task | null>(null);
   // What an owner button answered, until the feed catches up. Only for this
   // task: the detail panel reuses the card when another task is chosen.
@@ -821,26 +1040,46 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
   const cwd = session?.cwd ?? null;
   const result = task.result;
   const reviewing = task.status === 'review';
-  const followups = Array.isArray(result?.followups) ? result.followups : [];
-  const commits = Array.isArray(result?.commits) ? result.commits.filter((c): c is string => typeof c === 'string') : [];
   // Plan items checked so far, ticked on the plan while the work goes on.
   const checked = useMemo(() => recordedEntries({ type: task.type, result: null, checks: task.checks }), [task.type, task.checks]);
+  const counts = countsLine(itemProgress(task));
 
+  const title = <h4 className={cn('text-sm font-semibold text-foreground', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</h4>;
   const header = (
     <header className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-xs text-muted-foreground">#{task.number}</span>
           <Badge variant="secondary" size="sm"><span>{typeLabel(task.type)}</span></Badge>
           {event && EVENT_LABEL[event] && <span className="text-xs text-muted-foreground">{EVENT_LABEL[event]}</span>}
-          <TaskStatusChip status={status} className="ml-auto" />
+          <span className="ml-auto flex items-center gap-2">
+            {event && counts && <span data-testid="task-card-counts" className="text-xs tabular-nums text-muted-foreground">{counts}</span>}
+            <TaskStatusChip status={status} />
+          </span>
         </div>
-        <h4 className={cn('text-sm font-semibold text-foreground', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</h4>
-        {task.why && <p className="text-xs text-muted-foreground">{task.why}</p>}
+        {event ? (
+          <Button type="button" variant="ghost" size="inherit" data-testid="task-card-open" onClick={() => openTaskDetail(task.number)}
+            className="block h-auto w-full whitespace-normal rounded-sm text-left hover:bg-transparent hover:underline">
+            {title}
+          </Button>
+        ) : title}
+        {task.why && (event
+          ? <Tooltip label={task.why}><p tabIndex={0} className="truncate text-xs text-muted-foreground">{task.why}</p></Tooltip>
+          : <p className="text-xs text-muted-foreground">{task.why}</p>)}
     </header>
   );
 
-  const body = (
-    <>
+  // In a chat: the header and the plan's items, nothing more. What happens
+  // to the task later is told by one-line rows, and the detail has the rest.
+  if (event) return (
+    <div data-testid="task-card" data-task-type={task.type} data-task-status={status} data-compact="yes" className="space-y-2">
+      {header}
+      <CompactPlan task={task} />
+    </div>
+  );
+
+  return (
+    <div data-testid="task-card" data-task-type={task.type} data-task-status={status} className="space-y-3">
+      {header}
 
       {task.status === 'blocked' && task.blocked && (
         <Panel tone="attention" inset="sm" data-testid="task-blocked" className="space-y-1">
@@ -856,35 +1095,18 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
       {task.pendingAmend && (
         <Panel tone="info" inset="sm" data-testid="task-amend" className="space-y-2">
           <Label>Proposed plan change</Label>
-          <PlanView type={task.type} plan={task.pendingAmend} />
+          <AmendDiff type={task.type} plan={task.plan} amend={task.pendingAmend} />
           <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve_amend' || a === 'reject_amend')} onChanged={setActed} />
         </Panel>
       )}
 
       {result ? (
         <>
+          <Section label="Result"><DoneSummary task={task} cwd={cwd} /></Section>
           <Collapsible>
             <CollapsibleTriggerRow size="sm">Plan</CollapsibleTriggerRow>
             <CollapsibleContent className="pt-2"><PlanView type={task.type} plan={task.plan} /></CollapsibleContent>
           </Collapsible>
-          <Section label="Result">
-            {task.shortfalls && (
-              <Panel tone="attention" inset="sm" data-testid="task-shortfalls" className="flex items-center gap-2 text-xs">
-                <AlertTriangle aria-hidden className="size-3.5 text-[var(--color-warning-accent)]" />
-                Finished with shortfalls
-              </Panel>
-            )}
-            {typeof result.summary === 'string' && result.summary && <p className="whitespace-pre-wrap text-sm">{result.summary}</p>}
-            <ResultView type={task.type} plan={task.plan} result={result} cwd={cwd} />
-          </Section>
-          {commits.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Label>Commits</Label>
-              {commits.map((sha) => <Badge key={sha} variant="outline" size="sm"><span className="font-mono">{sha.slice(0, 10)}</span></Badge>)}
-              <MergeBadge task={task} />
-            </div>
-          )}
-          <Followups label="Follow-ups" items={followups as Followup[]} />
         </>
       ) : (
         <Section label="Plan"><PlanView type={task.type} plan={task.plan} entries={checked} cwd={cwd} /></Section>
@@ -895,38 +1117,7 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
       {reviewing && (
         <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve' || a === 'reopen')} onChanged={setActed} />
       )}
-    </>
-  );
-
-  // The Tasks tab's detail panel always shows the whole card.
-  if (!event) return (
-    <div data-testid="task-card" data-task-type={task.type} data-task-status={status} className="space-y-3">
-      {header}
-      {body}
     </div>
-  );
-
-  return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      data-testid="task-card"
-      data-task-type={task.type}
-      data-task-status={status}
-    >
-      <CollapsibleTrigger
-        data-testid="task-card-toggle"
-        className="group/collapsible flex w-full cursor-pointer items-start gap-2 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-      >
-        <ChevronRight
-          aria-hidden="true"
-          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/collapsible:rotate-90"
-        />
-        {header}
-      </CollapsibleTrigger>
-      {/* Indented past the chevron, so the body lines up with the header. */}
-      <CollapsibleContent className="space-y-3 pl-[1.375rem] pt-3">{body}</CollapsibleContent>
-    </Collapsible>
   );
 }
 

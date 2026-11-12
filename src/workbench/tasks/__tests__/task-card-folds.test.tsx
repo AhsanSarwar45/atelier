@@ -1,10 +1,16 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+/**
+ * A chat shows one card per task, printed when it is created; every later
+ * change is one line (docs/tasks.md, "Front end").
+ */
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatWidgetView } from '@/workbench/chat-widget-view';
 import { makeTask } from '@/workbench/tasks/__tests__/fixtures';
-import { TaskCard } from '@/workbench/tasks/task-card';
-import type { Task } from '@/workbench/tasks/types';
+import { ITEMS_SHOWN, TaskCard } from '@/workbench/tasks/task-card';
+import { answer, eventText, waitsOnOwner } from '@/workbench/tasks/task-event-row';
+import type { Task, TaskEventDetail } from '@/workbench/tasks/types';
+import { LiveTasksContext, byNumber } from '@/workbench/tasks/use-tasks';
 
 vi.mock('@/workbench/live', async (original) => ({
   ...(await original<typeof import('@/workbench/live')>()),
@@ -16,40 +22,170 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/project',
 }));
 
-const plan = { summary: 'Fold the card', steps: ['one'] };
+const criteria = [
+  'The settings menu opens from the header button on every screen of the app',
+  'Arrow keys move through the menu',
+  'Theme switch works',
+  'Phone sheet',
+  'Saves at once',
+  'Reset button',
+  'Screen readers announce it',
+].map((text, index) => ({ id: `c${index}`, text }));
+const plan = { outcome: 'One settings menu', criteria };
+const feature = (over: Partial<Task> = {}) => makeTask({ number: 3, type: 'feature', title: 'Settings menu', plan, ...over });
+const show = (event: string, task: Task, detail?: TaskEventDetail) =>
+  render(<ChatWidgetView widget={{ type: 'task', event, task, ...(detail ? { detail } : {}) }} />);
 
-function chatCard(event: string, task: Partial<Task> = {}) {
-  render(<ChatWidgetView widget={{ type: 'task', event, task: makeTask({ type: 'general', title: 'Do the thing', plan, ...task }) }} />);
-  return screen.getByTestId('task-card');
-}
+afterEach(() => window.history.replaceState(null, '', '/'));
 
-describe('a task card in a chat', () => {
-  it.each([
-    ['create', {}],
-    ['amend', {}],
-    ['block', { status: 'blocked' as const, blocked: { cause: 'no key', needed_to_resume: 'a key' } }],
-    ['done', { status: 'review' as const, result: { summary: 'ok' } }],
-  ])('starts open for %s', (event, task) => {
-    expect(chatCard(event, task)).toHaveAttribute('data-state', 'open');
+describe('the create card', () => {
+  it('lists the plan items one line each, cut short, with the whole text as its hover label', () => {
+    show('create', feature());
+    const card = screen.getByTestId('task-card');
+    expect(card).toHaveAttribute('data-compact', 'yes');
+    const rows = within(card).getAllByTestId('task-plan-item');
+    expect(rows).toHaveLength(ITEMS_SHOWN);
+    // The whole text is the row's hover label (and is in the detail).
+    expect(rows[0]).toHaveAttribute('data-full', criteria[0]!.text);
+    expect(rows[0]).toHaveAttribute('data-state', 'closed');
+    expect(rows[0]!.querySelector('span')).toHaveClass('truncate');
+  });
+
+  it('shows all of them on Show all N, when there are more than five', () => {
+    show('create', feature());
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 7' }));
+    expect(screen.getAllByTestId('task-plan-item')).toHaveLength(7);
+    fireEvent.click(screen.getByRole('button', { name: 'Show fewer' }));
+    expect(screen.getAllByTestId('task-plan-item')).toHaveLength(5);
+  });
+
+  it('has no Show all for five items or fewer', () => {
+    show('create', feature({ plan: { outcome: 'o', criteria: criteria.slice(0, 5) } }));
+    expect(screen.queryByTestId('task-plan-show-all')).toBeNull();
+  });
+
+  it('ticks its items live and counts them', () => {
+    const checks = { criteria: [{ id: 'c0', met: true, evidence: 'e' }, { id: 'c1', met: false, reason: 'No keys' }] };
+    const live = byNumber([feature({ status: 'in_progress', checks, updatedAt: 5 })]);
+    render(<LiveTasksContext.Provider value={live}><ChatWidgetView widget={{ type: 'task', event: 'create', task: feature() }} /></LiveTasksContext.Provider>);
+    expect(screen.getAllByTestId('task-plan-item').slice(0, 3).map((row) => row.getAttribute('data-met'))).toEqual(['yes', 'no', 'pending']);
+    expect(screen.getByTestId('task-card-counts')).toHaveTextContent('1 of 7 met · 1 missed');
+    // Nothing more than the header and the items: no result, no amend panel.
+    expect(screen.queryByTestId('task-done-summary')).toBeNull();
+    expect(screen.queryByTestId('task-amend')).toBeNull();
   });
 
   it.each([
-    ['start', { status: 'in_progress' as const }],
-    ['unblock', { status: 'in_progress' as const }],
-    ['take', { status: 'in_progress' as const }],
-    ['cancel', { status: 'cancelled' as const }],
-    ['done', { status: 'done' as const, result: { summary: 'ok' } }],
-  ])('starts folded for %s', (event, task) => {
-    expect(chatCard(event, task)).toHaveAttribute('data-state', 'closed');
-    expect(screen.getByText('Do the thing')).toBeInTheDocument();
+    ['visual_bug', { symptom: 'Blurry icons', repro_steps: ['Open'], expected: 'Sharp', actual: 'Blurry', screens: [{ id: 'menu', name: 'Settings menu', how_to_reach: 'Header' }] }, 'Settings menu'],
+    ['render_change', { scenes: [{ id: 'hall', scene: 'Great hall', camera: 'door', change: 'Warmer light', reference: true }] }, 'Great hall'],
+  ])('draws a %s by its items', (type, typePlan, name) => {
+    show('create', makeTask({ type, plan: typePlan }));
+    expect(screen.getByText(type === 'visual_bug' ? 'Visual bug' : 'Render change')).toBeVisible();
+    expect(screen.getByTestId('task-plan-item')).toHaveTextContent(name);
+  });
+});
+
+describe('a later change is one line', () => {
+  it.each([
+    ['start', {}, {}, 'Started'],
+    ['unblock', {}, {}, 'Unblocked'],
+    ['check', {}, { item: 'c1', met: true }, 'Checked “Arrow keys move through the menu” — met'],
+    ['check', {}, { item: 'c3', met: false, reason: 'No sheet yet' }, 'Checked “Phone sheet” — missed: No sheet yet'],
+    ['block', { status: 'blocked' as const, blocked: { cause: 'No key', needed_to_resume: 'A key' } }, { cause: 'No key', needed_to_resume: 'A key' }, 'Blocked: No key'],
+    ['cancel', { status: 'cancelled' as const, cancelReason: 'Not needed' }, { reason: 'Not needed' }, 'Cancelled: Not needed'],
+    ['take', {}, {}, 'Taken by this chat'],
+    ['reopen', {}, { note: 'Clipped' }, 'Reopened: Clipped'],
+    ['approve', {}, {}, 'Approved'],
+    ['approve_amend', {}, {}, 'Plan change approved'],
+    ['reject_amend', {}, {}, 'Plan change rejected'],
+    ['release', {}, {}, 'Released'],
+  ] as const)('%s', (event, over, detail, words) => {
+    show(event, feature(over), detail);
+    expect(screen.queryByTestId('task-card')).toBeNull();
+    const row = screen.getByTestId('task-event');
+    expect(within(row).getByText('#3')).toBeVisible();
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent(words);
+    expect(row.textContent!.length).toBeLessThan(120);
   });
 
-  it('opens and folds from its header', () => {
-    const card = chatCard('start', { status: 'in_progress', title: 'Do the thing' });
-    fireEvent.click(screen.getByTestId('task-card-toggle'));
-    expect(card).toHaveAttribute('data-state', 'open');
-    fireEvent.click(screen.getByTestId('task-card-toggle'));
-    expect(card).toHaveAttribute('data-state', 'closed');
+  it('a done line counts what was met and missed, and starts folded once finished', () => {
+    const result = { summary: 'Shipped', criteria: criteria.map((c, i) => (i === 3 ? { id: c.id, met: false, evidence: 'popover', reason: 'No sheet component' } : { id: c.id, met: true, evidence: 'e2e' })) };
+    show('done', feature({ status: 'done', result, shortfalls: true }));
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent('Done · 6 of 7 met · 1 missed');
+    expect(screen.queryByTestId('task-event-more')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    fireEvent.click(screen.getByTestId('task-event-toggle'));
+    const summary = screen.getByTestId('task-done-summary');
+    expect(within(summary).getAllByTestId('task-missed').map((row) => row.textContent)).toEqual(['Phone sheetNo sheet component']);
+    expect(summary).toHaveTextContent('Shipped');
+    expect(within(summary).queryAllByTestId('task-check')).toHaveLength(0);
+    fireEvent.click(within(summary).getByRole('button', { name: 'Show all 7' }));
+    expect(within(summary).getAllByTestId('task-check')).toHaveLength(7);
+  });
+
+  it('a done line waiting for review starts open, with Approve and Reopen on the line', () => {
+    show('done', feature({ status: 'review', result: { summary: 'Ready', criteria: criteria.map((c) => ({ id: c.id, met: true, evidence: 'e' })) } }));
+    const row = screen.getByTestId('task-event');
+    expect(row).toHaveAttribute('data-waiting', 'yes');
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent('Done, ready for review · 7 of 7 met');
+    expect(screen.getByTestId('task-event-more')).toHaveTextContent('Ready');
+    // The line gives the counts; the summary under it does not repeat them.
+    expect(screen.queryByTestId('task-done-counts')).toBeNull();
+    expect(within(row).getByRole('button', { name: 'Approve' })).toBeVisible();
+    expect(within(row).getByRole('button', { name: 'Reopen' })).toBeVisible();
+  });
+
+  it('opens the task detail in the Tasks tab on a click, as a new history entry', () => {
+    window.history.replaceState(null, '', '/project?id=p1&tab=chat&chat=s1');
+    const length = window.history.length;
+    show('start', feature());
+    fireEvent.click(screen.getByTestId('task-event-text'));
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get('tab')).toBe('tasks');
+    expect(params.get('task')).toBe('3');
+    expect(params.get('chat')).toBe('s1');
+    expect(window.history.length).toBe(length + 1);
+  });
+
+  it('does not open the task when one of its buttons is clicked', () => {
+    window.history.replaceState(null, '', '/project?id=p1&tab=chat');
+    show('done', feature({ status: 'done', result: { summary: 's', criteria: [] } }));
+    fireEvent.click(screen.getByTestId('task-event-toggle'));
+    expect(new URLSearchParams(window.location.search).get('tab')).toBe('chat');
+  });
+
+  it('wraps on a narrow screen rather than overflowing', () => {
+    show('done', feature({ status: 'review', result: { summary: 's', criteria: [] } }));
+    const line = screen.getByTestId('task-event').firstElementChild!;
+    expect(line).toHaveClass('flex-wrap');
+    expect(screen.getByTestId('task-event-text')).toHaveClass('break-words', 'min-w-0');
+    // The text keeps a few words' width, so the buttons wrap under it instead of squeezing it.
+    expect(screen.getByTestId('task-event-open')).toHaveClass('min-w-[min(100%,14rem)]');
+  });
+});
+
+describe('whether a line still waits on the owner', () => {
+  const amend = { outcome: 'o', criteria: criteria.slice(0, 2) };
+  const printed = feature({ status: 'in_progress', pendingAmend: amend });
+
+  it('a plan change waits while the same change is pending, then says how it was answered', () => {
+    expect(waitsOnOwner('amend', printed, printed)).toBe(true);
+    expect(answer('amend', printed, printed)).toBe('');
+    expect(waitsOnOwner('amend', printed, { ...printed, pendingAmend: null, plan: amend })).toBe(false);
+    expect(answer('amend', printed, { ...printed, pendingAmend: null, plan: amend })).toBe('Approved');
+    expect(answer('amend', printed, { ...printed, pendingAmend: null })).toBe('Rejected');
+  });
+
+  it('a finished task waits while the same result is in review', () => {
+    const done = feature({ status: 'review', result: { summary: 's' } });
+    expect(waitsOnOwner('done', done, done)).toBe(true);
+    expect(answer('done', done, { ...done, status: 'done' })).toBe('Approved');
+    expect(answer('done', done, { ...done, status: 'in_progress' })).toBe('Reopened');
+    expect(waitsOnOwner('start', done, done)).toBe(false);
+  });
+
+  it('names a plan change by what it adds', () => {
+    expect(eventText('amend', feature({ pendingAmend: { ...plan, criteria: [...criteria, { id: 'search', text: 'Search box' }] } }))).toBe('Plan change: +1 criterion “Search box”');
   });
 });
 
@@ -57,5 +193,52 @@ describe('the Tasks tab detail', () => {
   it('always shows the whole card, with no toggle', () => {
     render(<TaskCard task={makeTask({ status: 'in_progress' })} />);
     expect(screen.queryByTestId('task-card-toggle')).not.toBeInTheDocument();
+    expect(screen.getByTestId('task-card')).not.toHaveAttribute('data-compact');
+  });
+
+  it('shows a pending plan change as what it changes, not both plans', () => {
+    const amend = { outcome: 'One settings menu', criteria: [...criteria.slice(0, 5).map((c) => (c.id === 'c2' ? { ...c, text: 'Theme switch works without a reload' } : c)), { id: 'search', text: 'Search box' }] };
+    render(<TaskCard task={feature({ status: 'in_progress', pendingAmend: amend })} />);
+    const panel = screen.getByTestId('task-amend');
+    const changes = within(panel).getAllByTestId('task-amend-change').map((row) => row.getAttribute('data-change'));
+    expect(changes).toEqual(['added', 'removed', 'removed', 'changed']);
+    expect(panel).toHaveTextContent('Theme switch works without a reload');
+    expect(panel).not.toHaveTextContent('Arrow keys move through the menu');
+    expect(within(panel).getByRole('button', { name: 'Approve change' })).toBeVisible();
+  });
+});
+
+describe('the visual types, finished', () => {
+  const asset = (c: string) => `/api/presentation-assets/${c.repeat(64)}.png`;
+
+  it('a visual bug shows its root cause and fix, with each screen\'s images behind a toggle', () => {
+    render(<TaskCard task={makeTask({
+      type: 'visual_bug', status: 'review',
+      plan: { symptom: 'Blurry', repro_steps: ['Open'], expected: 'Sharp', actual: 'Blurry', screens: [{ id: 'menu', name: 'Settings menu', how_to_reach: 'Header' }] },
+      result: { summary: 'SVG icons', root_cause: '1x sprites', fix: 'Inline SVG', screens: [{ id: 'menu', before: asset('a'), after: asset('b') }] },
+    })} />);
+    const summary = screen.getByTestId('task-done-summary');
+    expect(summary).toHaveTextContent('1 of 1 met');
+    expect(summary).toHaveTextContent('1x sprites');
+    expect(summary).toHaveTextContent('Inline SVG');
+    fireEvent.click(within(summary).getByRole('button', { name: 'Show all 1' }));
+    // Show all adds the screens, not the root cause and fix a second time.
+    expect(screen.getAllByText('1x sprites')).toHaveLength(1);
+    expect(screen.queryByTestId('image-comparison')).toBeNull();
+    fireEvent.click(screen.getByTestId('task-images-toggle'));
+    expect(screen.getByAltText('Settings menu before')).toHaveAttribute('src', asset('a'));
+    expect(screen.getByAltText('Settings menu after')).toHaveAttribute('src', asset('b'));
+  });
+
+  it('a render change shows the reference image beside before and after', () => {
+    render(<TaskCard task={makeTask({
+      type: 'render_change', status: 'review',
+      plan: { scenes: [{ id: 'hall', scene: 'Great hall', camera: 'door', change: 'Warmer', reference: true }] },
+      result: { summary: 'Warmer', scenes: [{ id: 'hall', before: asset('a'), after: asset('b'), reference: asset('c') }] },
+    })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show before, after and reference' }));
+    expect(screen.getByAltText('Great hall reference')).toHaveAttribute('src', asset('c'));
+    expect(screen.getByAltText('Great hall after')).toHaveAttribute('src', asset('b'));
   });
 });

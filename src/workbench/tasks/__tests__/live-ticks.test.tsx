@@ -65,6 +65,18 @@ const CASES: Array<{ type: string; plan: Record<string, unknown>; checks: Record
     missed: null,
   },
   {
+    type: 'visual_bug',
+    plan: { symptom: 'Blurry', repro_steps: ['Open it'], expected: 'Sharp', actual: 'Blurry', screens: three((id) => ({ name: `Screen ${id}`, how_to_reach: 'Open it' })) },
+    checks: { screens: [{ id: 'a', before: '.atelier/a-before.png', after: '.atelier/a-after.png' }] },
+    missed: null,
+  },
+  {
+    type: 'render_change',
+    plan: { scenes: three((id) => ({ scene: `Scene ${id}`, camera: 'front', change: 'Softer shadows' })) },
+    checks: { scenes: [{ id: 'a', before: '.atelier/a-before.png', after: '.atelier/a-after.png' }] },
+    missed: null,
+  },
+  {
     type: 'investigation',
     plan: { questions: three() },
     checks: { answers: [{ id: 'a', answer: 'Because of the cache' }] },
@@ -140,11 +152,14 @@ describe('plan items ticked while a task is in progress', () => {
     expect(screen.getByText('Fonts are the bulk')).toBeVisible();
   });
 
-  it('ui_change: a checked screen shows its before and after', () => {
-    const { plan, checks } = CASES.find((c) => c.type === 'ui_change')!;
-    render(<TaskCard task={working({ type: 'ui_change', plan, checks })} />);
+  it.each(['ui_change', 'visual_bug', 'render_change'])('%s: a checked item shows its before and after behind a toggle', (type) => {
+    const { plan, checks } = CASES.find((c) => c.type === type)!;
+    render(<TaskCard task={working({ type, plan, checks })} />);
     const a = screen.getAllByTestId('task-plan-item').find((row) => row.getAttribute('data-item') === 'a')!;
+    expect(within(a).queryByTestId('image-comparison')).toBeNull();
+    fireEvent.click(within(a).getByTestId('task-images-toggle'));
     expect(within(a).getByTestId('image-comparison')).toBeInTheDocument();
+    expect(within(a).getByAltText(/before$/)).toHaveAttribute('src', '/api/fs/media?path=%2Frepo%2F.atelier%2Fa-before.png');
   });
 
   it('a card follows a new check without being read again', () => {
@@ -156,12 +171,17 @@ describe('plan items ticked while a task is in progress', () => {
     expect(states(screen.getByTestId('task-card')).c).toBe('yes');
   });
 
-  it("a check's chat card starts folded, labelled Checked", () => {
+  it("a check is one line in a chat, naming the item and how it came out", () => {
     const { plan, checks } = CASES[0]!;
-    render(<ChatWidgetView widget={{ type: 'task', event: 'check', task: working({ title: 'Export', plan, checks }) }} />);
-    const card = screen.getByTestId('task-card');
-    expect(card).toHaveAttribute('data-state', 'closed');
-    expect(card).toHaveTextContent('Checked');
+    const task = working({ title: 'Export', plan, checks });
+    const { unmount } = render(<ChatWidgetView widget={{ type: 'task', event: 'check', task, detail: { item: 'b', met: false, reason: 'No printer' } }} />);
+    expect(screen.queryByTestId('task-card')).toBeNull();
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent('Checked “Item b” — missed: No printer');
+    expect(screen.queryByTestId('task-plan-item')).toBeNull();
+    unmount();
+    // A card printed before the change carried what it recorded.
+    render(<ChatWidgetView widget={{ type: 'task', event: 'check', task }} />);
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent('Checked a plan item');
   });
 
   it('the Tasks tab detail ticks a new check live, and its history says which item', async () => {
@@ -200,12 +220,15 @@ describe("the chat's checklist", () => {
       { id: 'c', text: 'Item c', state: 'open', note: '' },
     ]);
     expect(items[1]!.items).toBeUndefined();
+    // Every task with plan items shows how far it has come.
+    expect(items.map((item) => item.progress)).toEqual([{ met: 1, total: 3 }, { met: 0, total: 3 }]);
 
     render(<TodoPanel items={items} />);
     fireEvent.click(screen.getByRole('button', { name: /Tasks/ }));
     const rows = screen.getAllByTestId('todo-plan-item');
     expect(rows.map((r) => r.getAttribute('data-state'))).toEqual(['met', 'missed', 'open']);
     expect(within(rows[1]!).getByTestId('todo-plan-item-note')).toHaveTextContent('No printer');
+    expect(screen.getAllByTestId('todo-progress').map((count) => count.textContent)).toEqual(['1/3', '0/3']);
   });
 
   it('opens a task from its row, by click or keyboard', () => {

@@ -34,7 +34,7 @@ describe('a task card in a chat', () => {
     expect(box).not.toContain('bg-muted/40');
     expect(box).not.toContain('border-r-2');
     expect(box).not.toContain('px-3');
-    expect(screen.getByTestId('task-card')).toBeInTheDocument();
+    expect(screen.getByTestId('task-event')).toBeInTheDocument();
   });
 
   it('keeps the box when the agent wrote it into a reply', () => {

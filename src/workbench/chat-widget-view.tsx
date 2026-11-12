@@ -19,6 +19,7 @@ import { ImageComparisonView } from '@/workbench/image-comparison';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import type { LookableImage } from '@/workbench/protocol';
 import { StoredImage } from '@/workbench/stored-image';
+import { TaskEventRow } from '@/workbench/tasks/task-event-row';
 // Diagrams bring mermaid, ELK, React Flow and motion — megabytes a chat with
 // no diagram in it never needs, fetched when one is drawn (bw-fbzd.4).
 const VisualArtifactView = dynamic(() => import('@/workbench/visual-artifact-view').then((m) => m.VisualArtifactView), { ssr: false });
@@ -285,6 +286,10 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
     </WidgetFrame>
   );
   if (widget.type === 'explainer') return <Explainer widget={widget} />;
+  // A task prints one card, when it is created; every later change is a line.
+  if (widget.type === 'task' && widget.task && widget.event !== 'create') return (
+    <TaskEventRow task={widget.task} event={widget.event} detail={widget.detail} />
+  );
   if (widget.type === 'task') return (
     <WidgetFrame kind="task" wide>
       {widget.proposal ? <ProposalCard proposal={widget.proposal} /> : <TaskCard task={widget.task} event={widget.event} />}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatWidgetView } from '@/workbench/chat-widget-view';
@@ -7,6 +7,7 @@ import type { TranscriptTool } from '@/workbench/fold';
 import { ranThePresenter, withPresented } from '@/workbench/presented';
 import { makeTask } from '@/workbench/tasks/__tests__/fixtures';
 import { ComposerPrefillContext } from '@/workbench/tasks/composer-prefill';
+import { TaskCard } from '@/workbench/tasks/task-card';
 import type { Task, TaskWidget } from '@/workbench/tasks/types';
 import { LiveTasksContext, byNumber } from '@/workbench/tasks/use-tasks';
 
@@ -107,8 +108,15 @@ describe('task widget validation', () => {
     ['no number', { type: 'task', event: 'create', task: { ...makeTask(), number: 0 } }],
     ['no plan', { type: 'task', event: 'create', task: { ...makeTask(), plan: null } }],
     ['a list for a result', { type: 'task', event: 'create', task: { ...makeTask(), result: [] } }],
+    ['a list for its detail', { type: 'task', event: 'check', task: makeTask(), detail: [] }],
   ])('refuses a card with %s', (_, value) => {
     expect(widget(value)).toBeNull();
+  });
+
+  it('accepts what the change recorded, as an object', () => {
+    const checked = { ...feature, event: 'check', detail: { item: 'md', met: true } };
+    expect(presentableWidget(checked)).toBe(checked);
+    expect(widget({ ...checked, detail: 'met' })).toBeNull();
   });
 
   it('refuses extra top-level fields from the presenter', () => {
@@ -129,32 +137,43 @@ describe('task widget validation', () => {
 });
 
 describe('task card rendering', () => {
+  // A chat shows one card per task, when it is created; a finished task is a
+  // line there, and its whole result is in the detail (TaskCard without event).
+  const detail = (widget: TaskWidget) => render(<TaskCard task={widget.task!} />);
+  const showAll = () => fireEvent.click(screen.getByTestId('task-result-all'));
+
   it('draws an optimization as a table of targets, met and missed', () => {
-    render(<ChatWidgetView widget={optimization} />);
-    expect(screen.getByTestId('chat-widget')).toHaveAttribute('data-widget', 'task');
+    detail(optimization);
     expect(screen.getByText('#4')).toBeVisible();
     expect(screen.getByText('Optimization')).toBeVisible();
     expect(screen.getByTestId('task-status')).toHaveAttribute('data-status', 'done');
+    expect(screen.getByTestId('task-done-counts')).toHaveTextContent('1 of 2 met · 1 missed');
+    // Only the missed target is listed until Show all.
+    expect(screen.getAllByTestId('task-missed').map((row) => row.textContent)).toEqual(['ScrollLayout still thrashes']);
+    expect(screen.queryByTestId('optimization-row')).toBeNull();
+    expect(screen.getByText('abcdef1234')).toBeVisible();
+    showAll();
     const rows = screen.getAllByTestId('optimization-row');
     expect(rows.map((row) => row.getAttribute('data-met'))).toEqual(['yes', 'no']);
     expect(within(rows[0]!).getByText('Met')).toBeVisible();
     expect(within(rows[1]!).getByText('Missed')).toBeVisible();
     expect(screen.getByText('The index is cached')).toBeVisible();
-    expect(screen.getByText('Layout still thrashes')).toBeVisible();
-    expect(screen.getByTestId('task-shortfalls')).toBeVisible();
-    expect(screen.getByText('abcdef1234')).toBeVisible();
   });
 
   it('puts a follow-up into the composer as an @task line', () => {
     const prefill = vi.fn();
-    render(<ComposerPrefillContext.Provider value={prefill}><ChatWidgetView widget={optimization} /></ComposerPrefillContext.Provider>);
+    render(<ComposerPrefillContext.Provider value={prefill}><TaskCard task={optimization.task!} /></ComposerPrefillContext.Provider>);
+    showAll();
     fireEvent.click(within(screen.getByTestId('task-followup')).getByRole('button', { name: 'Create task' }));
     expect(prefill).toHaveBeenCalledWith('@task bug: Fix the layout thrash — Scroll is still slow');
   });
 
-  it('draws a UI change as before and after pictures, read from the chat folder', () => {
-    render(<ChatWidgetView widget={uiChange} />);
+  it('draws a UI change as before and after pictures behind a toggle, read from the chat folder', () => {
+    detail(uiChange);
+    showAll();
     const screenRow = screen.getByTestId('ui-screen');
+    expect(within(screenRow).queryByTestId('image-comparison')).toBeNull();
+    fireEvent.click(within(screenRow).getByTestId('task-images-toggle'));
     expect(within(screenRow).getByTestId('image-comparison')).toBeInTheDocument();
     expect(within(screenRow).getByAltText('Home before')).toHaveAttribute('src', '/api/fs/media?path=%2Frepo%2Fshots%2Fbefore.png');
     expect(within(screenRow).getByAltText('Home after')).toHaveAttribute('src', `/api/presentation-assets/${'c'.repeat(64)}.png`);
@@ -164,7 +183,9 @@ describe('task card rendering', () => {
 
   it('draws a plan as its document, decisions, questions and proposed tasks', () => {
     const prefill = vi.fn();
-    render(<ComposerPrefillContext.Provider value={prefill}><ChatWidgetView widget={plan} /></ComposerPrefillContext.Provider>);
+    render(<ComposerPrefillContext.Provider value={prefill}><TaskCard task={plan.task!} /></ComposerPrefillContext.Provider>);
+    expect(screen.getByText('Wrote it')).toBeVisible();
+    showAll();
     expect(within(screen.getByTestId('plan-document')).getByRole('heading', { name: 'The design' })).toBeVisible();
     expect(screen.getByText('Store in workbench.db')).toBeVisible();
     expect(screen.getByText('Import old cards?')).toBeVisible();
@@ -173,11 +194,15 @@ describe('task card rendering', () => {
   });
 
   it('draws a feature as criteria with evidence, and a missed one in amber with its reason', () => {
-    render(<ChatWidgetView widget={feature} />);
+    detail(feature);
+    const missed = screen.getAllByTestId('task-missed');
+    expect(missed).toHaveLength(1);
+    expect(within(missed[0]!).getByText('Exports images')).toBeVisible();
+    expect(within(missed[0]!).getByText('Needs the asset server')).toHaveClass('text-[var(--color-warning-accent)]');
+    showAll();
     const checks = screen.getAllByTestId('task-check');
     expect(checks.map((row) => row.getAttribute('data-met'))).toEqual(['yes', 'no']);
     expect(within(checks[0]!).getByText('chat-export.spec.ts')).toBeVisible();
-    expect(within(checks[1]!).getByText('Needs the asset server')).toHaveClass('text-[var(--color-warning-accent)]');
   });
 
   it('draws only the plan before the task is finished', () => {
@@ -188,33 +213,49 @@ describe('task card rendering', () => {
 
   it('shows the live status over the snapshot', () => {
     const live = byNumber([makeTask({ ...feature.task, status: 'cancelled', updatedAt: 9 })]);
-    render(<LiveTasksContext.Provider value={live}><ChatWidgetView widget={feature} /></LiveTasksContext.Provider>);
+    render(<LiveTasksContext.Provider value={live}><ChatWidgetView widget={card(feature.task!)} /></LiveTasksContext.Provider>);
     expect(screen.getByTestId('task-status')).toHaveAttribute('data-status', 'cancelled');
   });
 
   it('shows why a task is blocked', () => {
-    render(<ChatWidgetView widget={card({ status: 'blocked', blocked: { cause: 'CI is down', needed_to_resume: 'CI back up' } }, 'block')} />);
+    const blocked = card({ status: 'blocked', blocked: { cause: 'CI is down', needed_to_resume: 'CI back up' } }, 'block');
+    render(<ChatWidgetView widget={{ type: 'task', event: 'block', task: blocked.task!, detail: { cause: 'CI is down', needed_to_resume: 'CI back up' } }} />);
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent('Blocked: CI is down');
+    fireEvent.click(screen.getByTestId('task-event-toggle'));
+    expect(screen.getByTestId('task-event-more')).toHaveTextContent('CI back up');
+    cleanup();
+    detail(blocked);
     expect(screen.getByTestId('task-blocked')).toHaveTextContent('CI is down');
     expect(screen.getByTestId('task-blocked')).toHaveTextContent('CI back up');
   });
 
-  it('lets the owner approve a proposed plan change', async () => {
-    act.mockResolvedValue({ task: makeTask({ ...feature.task, pendingAmend: null, updatedAt: 5 }), widget: null });
-    render(<ChatWidgetView widget={card({ status: 'in_progress', pendingAmend: { outcome: 'Smaller', criteria: [{ id: 'md', text: 'Only markdown' }] } }, 'amend')} />);
-    expect(within(screen.getByTestId('task-amend')).getByText('Only markdown')).toBeVisible();
+  it('lets the owner approve a proposed plan change, and the buttons go once it is answered', async () => {
+    const amend = { outcome: 'Chats export', criteria: [{ id: 'md', text: 'Exports markdown' }, { id: 'img', text: 'Exports images' }, { id: 'pdf', text: 'Exports PDF' }] };
+    act.mockResolvedValue({ task: makeTask({ ...feature.task, status: 'in_progress', result: null, plan: amend, pendingAmend: null, updatedAt: 5 }), widget: null });
+    render(<ChatWidgetView widget={card({ status: 'in_progress', plan: feature.task!.plan, pendingAmend: amend }, 'amend')} />);
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent('Plan change: +1 criterion “Exports PDF”');
+    expect(screen.getByTestId('task-event')).toHaveAttribute('data-waiting', 'yes');
+    fireEvent.click(screen.getByTestId('task-event-toggle'));
+    const changes = screen.getAllByTestId('task-amend-change');
+    expect(changes.map((row) => [row.getAttribute('data-change'), row.textContent])).toEqual([['added', 'Added: Exports PDF']]);
     fireEvent.click(screen.getByRole('button', { name: 'Approve change' }));
     await waitFor(() => expect(act).toHaveBeenCalledWith('p1', 1, 'approve_amend', undefined));
+    await waitFor(() => expect(screen.getByTestId('task-event-answer')).toHaveTextContent('Approved'));
+    expect(screen.queryByRole('button', { name: 'Approve change' })).toBeNull();
   });
 
   it('asks for a note before reopening a task in review', async () => {
     act.mockResolvedValue({ task: makeTask({ ...uiChange.task, status: 'in_progress', updatedAt: 5 }), widget: null });
-    render(<ChatWidgetView widget={uiChange} />);
+    render(<ChatWidgetView widget={{ type: 'task', event: 'done', task: uiChange.task! }} />);
+    // Waiting on the owner's review: the summary starts open, with the buttons on the line.
+    expect(screen.getByTestId('task-event-more')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Reopen' }));
     const submit = screen.getByRole('button', { name: 'Reopen' });
     expect(submit).toBeDisabled();
     fireEvent.change(screen.getByRole('textbox', { name: 'Note' }), { target: { value: 'Header is clipped' } });
     fireEvent.click(submit);
     await waitFor(() => expect(act).toHaveBeenCalledWith('p1', 5, 'reopen', { note: 'Header is clipped' }));
-    await waitFor(() => expect(screen.getByTestId('task-status')).toHaveAttribute('data-status', 'in_progress'));
+    await waitFor(() => expect(screen.getByTestId('task-event-answer')).toHaveTextContent('Reopened'));
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
   });
 });
