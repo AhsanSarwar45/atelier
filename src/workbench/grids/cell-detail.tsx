@@ -22,6 +22,7 @@ import { cellLook, LOOK_LABEL, type Benchmark, type CellDetail, type CellFull, t
 import { gridsChangedFor } from '@/workbench/grids/use-grids';
 import { onWorkbench } from '@/workbench/live-wire';
 import { shotUrl } from '@/workbench/tasks/task-card';
+import { ZoomableImage } from '@/workbench/zoomable-image';
 
 export function failure(e: unknown): string {
   const message = e instanceof Error ? e.message : String(e);
@@ -281,8 +282,7 @@ export function ProofView({ cell }: { cell: Pick<CellFull, 'proof' | 'lastCheck'
           <div className="flex flex-wrap gap-2">
             {evidence.map((path) => {
               const src = shotUrl(path, null);
-              // eslint-disable-next-line @next/next/no-img-element
-              if (src && IMAGE.test(path)) return <img key={path} src={src} alt={path} className="max-h-48 rounded border border-border/60 object-contain" />;
+              if (src && IMAGE.test(path)) return <ZoomableImage key={path} src={src} alt={path} compact />;
               if (src && VIDEO.test(path)) return <video key={path} src={src} controls preload="metadata" className="max-h-60 w-full rounded bg-black" />;
               return <span key={path} className="break-all text-xs text-muted-foreground">{path}</span>;
             })}
