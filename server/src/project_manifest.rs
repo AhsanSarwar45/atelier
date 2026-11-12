@@ -24,6 +24,10 @@ pub struct ProjectManifest {
     /// means the app's own rule.
     #[serde(default, skip_serializing_if = "ChatNameSettings::is_empty")]
     pub chat_name: ChatNameSettings,
+    /// What tasks need to know about the project (docs/tasks.md, "Visual
+    /// files"). Empty means the app's own defaults.
+    #[serde(default, skip_serializing_if = "TaskSettings::is_empty")]
+    pub tasks: TaskSettings,
 }
 
 /// Older manifests also carry `use_beads`, `[git]`, `[beads]`,
@@ -35,6 +39,20 @@ pub struct ProjectSettings {
     pub display_name: String,
     #[serde(default)]
     pub summary: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskSettings {
+    /// The files whose change shows on screen: extensions (`.tsx`) or globs
+    /// (`assets/**/*.svg`). A `feature` or `bug` whose commits change one
+    /// needs screenshots. Empty means the app's own list
+    /// (`workbench::tasks::visual::DEFAULT_VISUAL_FILES`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visual_files: Vec<String>,
+}
+
+impl TaskSettings {
+    pub fn is_empty(&self) -> bool { self.visual_files.is_empty() }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -149,6 +167,7 @@ pub fn migrate_legacy(root: &Path, data_dir: &Path) -> Result<Option<PathBuf>, S
             summary: review.persona.unwrap_or_default(),
         },
         chat_name: ChatNameSettings::default(),
+        tasks: TaskSettings::default(),
     };
     let destination = personal_path(root, data_dir);
     write_atomic(&destination, &manifest)?;
@@ -202,6 +221,7 @@ pub fn infer(root: &Path) -> ProjectManifest {
         schema_version: SCHEMA_VERSION,
         project: ProjectSettings { display_name: name, summary: String::new() },
         chat_name: ChatNameSettings::default(),
+        tasks: TaskSettings::default(),
     }
 }
 
@@ -225,6 +245,7 @@ pub fn named(name: &str) -> ProjectManifest {
         schema_version: SCHEMA_VERSION,
         project: ProjectSettings { display_name: name.into(), summary: String::new() },
         chat_name: ChatNameSettings::default(),
+        tasks: TaskSettings::default(),
     }
 }
 
@@ -445,6 +466,22 @@ mod tests {
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("[[chat_name.parts]]"), "{text}");
         assert!(text.contains(r#"kind = "extract""#), "{text}");
+        assert_eq!(read(&path).unwrap(), manifest);
+    }
+
+    /// A project's own visual files are a short list under `[tasks]`; a
+    /// manifest without one writes no `[tasks]` and gets the defaults.
+    #[test]
+    fn visual_files_round_trip_under_tasks() {
+        let held = tempdir().unwrap();
+        let path = held.path().join("project.toml");
+        let mut manifest = named("Example");
+        write_atomic(&path, &manifest).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("[tasks]"));
+        manifest.tasks.visual_files = vec![".rs".into(), "assets/**/*.svg".into()];
+        write_atomic(&path, &manifest).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[tasks]") && text.contains("visual_files"), "{text}");
         assert_eq!(read(&path).unwrap(), manifest);
     }
 

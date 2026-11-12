@@ -10,6 +10,7 @@
 pub mod cli;
 pub mod git;
 pub mod types;
+pub mod visual;
 
 use super::store::Store;
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -324,6 +325,10 @@ pub struct Request {
     pub missing_commits: HashSet<String>,
     /// The session's folder, for messages about missing commits.
     pub cwd: Option<String>,
+    /// The files the payload's commits change that show on screen
+    /// (`visual::visual_files`), worked out before the write with git: a
+    /// `feature` or `bug` that changes any must carry screenshots.
+    pub visual_files: Vec<String>,
     /// Fingerprints, in the project's folder, of the rows of the grids whose
     /// cells the payload names: a stale proved cell may be claimed.
     pub prints: super::grids::Prints,
@@ -463,11 +468,28 @@ fn check_done(task: &TaskRow, request: &Request) -> Result<(Value, Vec<String>),
             error
         }
     })?;
+    if matches!(task.kind.as_str(), "feature" | "bug") && !request.visual_files.is_empty() && !types::has_screenshots(result) {
+        return refuse(visual_refusal(&task.kind, &request.visual_files));
+    }
     let mut stored = json!({"summary": summary, "commits": commits, "followups": followups});
     for (key, value) in result.as_object().into_iter().flatten() {
         stored[key] = value.clone();
     }
     Ok((stored, unmet))
+}
+
+/// Why a `feature` or `bug` whose commits change what shows on screen is
+/// refused without screenshots, and what to do instead.
+fn visual_refusal(kind: &str, files: &[String]) -> String {
+    const NAMED: usize = 5;
+    let mut named = files.iter().take(NAMED).cloned().collect::<Vec<_>>().join(", ");
+    if files.len() > NAMED {
+        named.push_str(&format!(" and {} more", files.len() - NAMED));
+    }
+    format!(
+        "the commits change visual files ({named}), so a {kind} result needs screenshots: add \"screens\": [{{\"name\", \"before\"?, \"after\"}}] to the result, with after a screenshot or render of what changed (and before where it existed; two different images). Work that shows on screen should use a visual type: {}",
+        types::VISUAL_TYPES.join(", ")
+    )
 }
 
 /// A done result with the entries `atelier task check` recorded added in: an
@@ -1214,6 +1236,7 @@ mod tests {
             number,
             payload,
             missing_commits: HashSet::new(),
+            visual_files: Vec::new(),
             cwd: Some("/repo".into()),
             prints: Default::default(),
             now: 1,
@@ -1332,7 +1355,7 @@ mod tests {
         let mut request = Request {
             action: "done".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(),
             number: Some(one), payload: done_payload("feature"), missing_commits: HashSet::from(["abcdef1".to_string()]),
-            cwd: Some("/repo".into()), prints: Default::default(), now: 2,
+            cwd: Some("/repo".into()), visual_files: Vec::new(), prints: Default::default(), now: 2,
         };
         assert!(refused(apply(&store, &request)).contains("\"abcdef1\" is not a commit in the session's repository (/repo)"));
         request.missing_commits.clear();
@@ -1340,6 +1363,38 @@ mod tests {
         assert_eq!(outcome.task.status, "done");
         assert!(outcome.task.shortfalls, "the example misses one criterion");
         assert!(outcome.summary.contains("done with shortfalls"));
+    }
+
+    #[test]
+    fn a_feature_or_bug_whose_commits_change_visual_files_needs_screenshots() {
+        let (_d, store) = store();
+        let shot = |c: char| json!(format!("{}{}.png", types::SERVED, c.to_string().repeat(64)));
+        for (index, kind) in ["feature", "bug"].iter().enumerate() {
+            let session = format!("n{index}");
+            let one = create(&store, &session, kind);
+            agent(&store, &session, "start", Some(one), json!({})).unwrap();
+            let mut request = Request {
+                action: "done".into(), actor: "agent".into(), session: Some(session.clone()), project: "p".into(),
+                number: Some(one), payload: done_payload(kind), missing_commits: HashSet::new(),
+                cwd: Some("/repo".into()), visual_files: vec!["src/card.tsx".into(), "shaders/sky.wgsl".into()],
+                prints: Default::default(), now: 2,
+            };
+            let error = refused(apply(&store, &request));
+            assert!(error.contains("the commits change visual files (src/card.tsx, shaders/sky.wgsl)"), "{error}");
+            assert!(error.contains("\"screens\""), "{error}");
+            assert!(error.contains("ui_change, ui_feature, visual_bug, render_change, render_feature"), "{error}");
+            // Screenshots are held to the image rule.
+            request.payload["result"]["screens"] = json!([{"name": "Card", "before": shot('a'), "after": shot('a')}]);
+            assert!(refused(apply(&store, &request)).contains("same image"), "{kind}");
+            request.payload["result"]["screens"] = json!([{"name": "Card", "after": shot('b')}]);
+            let outcome = apply(&store, &request).unwrap();
+            assert_eq!(outcome.task.status, "done", "{kind}");
+            assert_eq!(outcome.task.result.as_ref().unwrap()["screens"][0]["name"], "Card");
+        }
+        // Without visual files, no screenshots are needed.
+        let two = create(&store, "n9", "bug");
+        agent(&store, "n9", "start", Some(two), json!({})).unwrap();
+        agent(&store, "n9", "done", Some(two), done_payload("bug")).unwrap();
     }
 
     #[test]

@@ -194,6 +194,13 @@ fn print_types(rest: &[String]) -> Result<i32, String> {
                 println!("  result: {}", kind.result);
             }
             println!("\n`atelier task types TYPE` prints a create and a done payload to copy.");
+            println!(
+                "\nAnything visible on screen or in a render uses a visual type: {}. Pick ui_feature or render_feature for new work you can see (not feature), visual_bug for a bug you can see (not bug). Every item needs real images: an after, and a before (different from it) where the screen or scene already existed.",
+                types::VISUAL_TYPES.join(", ")
+            );
+            println!(
+                "Safety net: done on a feature or bug is refused when its commits change visual files (by default .tsx .jsx .css .scss .html .vue .svelte and shaders; a project sets its own under [tasks] visual_files; tests do not count) unless the result has screens[] {{name, before?, after}} screenshots."
+            );
             Ok(0)
         }
         Some(name) => {

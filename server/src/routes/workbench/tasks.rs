@@ -299,6 +299,7 @@ pub(super) async fn act(
     }
     let mut payload = request.payload;
     let mut missing = HashSet::new();
+    let mut visual = Vec::new();
     if request.action == "check" && request.actor == "agent" {
         // One item's entry carries its evidence the way a done result does.
         if let Some(entry) = payload.get_mut("entry") {
@@ -320,6 +321,14 @@ pub(super) async fn act(
             .collect();
         if let Some(cwd) = cwd.as_deref() {
             missing = missing_commits(cwd, &commits).await;
+            // The safety net under feature and bug: which of the files the
+            // commits change show on screen, by the project's own list.
+            let changed = tasks::git::changed_files(std::path::Path::new(cwd), &commits).await;
+            if !changed.is_empty() {
+                let folder = project_folder(&state, &project).unwrap_or_else(|| cwd.to_string());
+                let patterns = tasks::visual::project_patterns(std::path::Path::new(&folder));
+                visual = tasks::visual::visual_files(&changed, &patterns);
+            }
         }
     }
     let action = request.action.clone();
@@ -334,6 +343,7 @@ pub(super) async fn act(
         payload,
         missing_commits: missing,
         cwd,
+        visual_files: visual,
         prints,
         now: chrono::Utc::now().timestamp_millis(),
     };

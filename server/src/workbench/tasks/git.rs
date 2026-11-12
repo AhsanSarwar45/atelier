@@ -43,6 +43,23 @@ pub async fn base_branch(dir: &Path) -> Option<String> {
     None
 }
 
+/// The files the commits change, each once, in the order git names them.
+/// A commit git does not know adds nothing.
+pub async fn changed_files(dir: &Path, commits: &[String]) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    for sha in commits {
+        let Some(names) = git(dir, &["diff-tree", "--no-commit-id", "--name-only", "-r", "--root", sha]).await else {
+            continue;
+        };
+        for name in names.lines().filter(|line| !line.is_empty()) {
+            if !files.iter().any(|known| known == name) {
+                files.push(name.to_string());
+            }
+        }
+    }
+    files
+}
+
 /// Answers already worked out, by (repository, base tip, commit). A base tip
 /// that moves is a new key, so nothing here goes stale.
 fn known() -> &'static Mutex<HashMap<(String, String, String), bool>> {
@@ -243,6 +260,24 @@ mod tests {
         run(&main, &["worktree", "add", "-q", "-b", "feature", feature.to_str().unwrap()]);
         let sha = commit(&feature, "b");
         (root, main, feature, sha)
+    }
+
+    #[tokio::test]
+    async fn changed_files_lists_what_each_commit_touched_once() {
+        let (_held, repo, _feature, _sha) = repository();
+        let change = |file: &str, text: &str| {
+            let path = repo.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, text).unwrap();
+            run(&repo, &["add", file]);
+            run(&repo, &["commit", "-q", "-m", file]);
+            run(&repo, &["rev-parse", "HEAD"])
+        };
+        let one = change("src/card.tsx", "1");
+        let two = change("src/card.tsx", "2");
+        let three = change("server/a.rs", "3");
+        let files = changed_files(&repo, &[one, two, three, "0000000".into()]).await;
+        assert_eq!(files, vec!["src/card.tsx".to_string(), "server/a.rs".to_string()]);
     }
 
     #[tokio::test]

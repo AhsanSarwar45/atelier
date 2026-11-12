@@ -122,6 +122,7 @@ fn task_create(store: &Store, session: &str, cells: Value, prints: Prints) -> Re
         payload: json!({"type": "chore", "title": "Cells", "why": "Coverage", "plan": plan, "cells": cells}),
         missing_commits: Default::default(),
         cwd: Some("/repo".into()),
+        visual_files: Vec::new(),
         prints,
         now: 2,
     })
@@ -137,6 +138,7 @@ fn task(store: &Store, session: Option<&str>, actor: &str, action: &str, number:
         payload,
         missing_commits: Default::default(),
         cwd: Some("/repo".into()),
+        visual_files: Vec::new(),
         prints: Default::default(),
         now: 3,
     })
