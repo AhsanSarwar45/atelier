@@ -698,9 +698,15 @@ fn check_item(kind: &str, plan_item: &Value, entry: &Row, path: &str) -> Result<
         }
         "ui_change" | "ui_feature" | "visual_bug" | "render_change" | "render_feature" => {
             // A feature's new screen or scene has nothing to show before it.
-            let new = matches!(kind, "ui_feature" | "render_feature")
-                && !plan_item.get("existed").and_then(Value::as_bool).unwrap_or(false);
-            images(entry, path, !new)?;
+            let feature = matches!(kind, "ui_feature" | "render_feature");
+            let existed = plan_item.get("existed").and_then(Value::as_bool).unwrap_or(false);
+            if feature && existed && present(entry, "before").is_none() {
+                return Err(format!(
+                    "{path}: before is required because the plan says this {} existed (existed: true): give an image of how it looked before",
+                    if kind == "ui_feature" { "screen" } else { "scene" }
+                ));
+            }
+            images(entry, path, !feature || existed)?;
             let wanted = plan_item.get("reference").and_then(Value::as_bool).unwrap_or(false);
             match optional_text(entry, "reference", path)? {
                 Some(shot) => image(shot, "reference", path)?,
@@ -1168,7 +1174,7 @@ mod tests {
         assert!(check_result("ui_feature", &plan, &result(list.clone(), json!({"id": "pinned", "after": asset('c')}))).unwrap().is_empty());
         // A screen that existed must show how it was.
         assert_eq!(result_error("ui_feature", plan.clone(), result(json!({"id": "list", "after": asset('b')}), json!({"id": "pinned", "after": asset('c')}))),
-            "result.screens[0] (id \"list\"): before is required (text)");
+            "result.screens[0] (id \"list\"): before is required because the plan says this screen existed (existed: true): give an image of how it looked before");
         // A before given anyway is held to the image rule.
         assert!(result_error("ui_feature", plan.clone(), result(list.clone(), json!({"id": "pinned", "before": "shots/x.png", "after": asset('c')})))
             .contains("missing, or not an image"));
@@ -1196,7 +1202,7 @@ mod tests {
         let new = json!({"id": "new", "after": asset('c'), "reference": asset('d')});
         assert!(check_result("render_feature", &plan, &with(old.clone(), new.clone())).unwrap().is_empty());
         assert_eq!(result_error("render_feature", plan.clone(), with(json!({"id": "old", "after": asset('b')}), new.clone())),
-            "result.scenes[0] (id \"old\"): before is required (text)");
+            "result.scenes[0] (id \"old\"): before is required because the plan says this scene existed (existed: true): give an image of how it looked before");
         assert_eq!(result_error("render_feature", plan.clone(), with(old.clone(), json!({"id": "new", "after": asset('c')}))),
             "result.scenes[1] (id \"new\"): reference is required because the plan asks for a reference image for this scene");
         assert!(result_error("render_feature", plan.clone(), with(json!({"id": "old", "before": asset('b'), "after": asset('b')}), new))
