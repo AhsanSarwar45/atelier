@@ -7,7 +7,7 @@
  * by `+`. `@grid:camera.*.gpu` is a column, `@grid:camera.glare.*` a row and
  * `@grid:camera.glare+sunstar.gpu+perf` a block.
  */
-import { cellLook, type GridCell, type GridColumn, type GridRow } from '@/workbench/grids/types';
+import { NEEDS_CHECK_LABEL, cellLook, needsACheck, type GridCell, type GridColumn, type GridRow } from '@/workbench/grids/types';
 
 /** A grid id, a row id, a column id: what a reference, a URL and a CLI argument hold unquoted. */
 export const GRID_ID = '[a-z0-9][a-z0-9_-]{0,63}';
@@ -98,6 +98,7 @@ export function blocker(cell: GridCell | undefined, row: GridRow | undefined, co
   if (look === 'na') return 'N/A';
   if (look === 'na_pending') return 'N/A pending';
   if (look === 'in_progress') return 'In progress';
+  if (needsACheck(cell)) return NEEDS_CHECK_LABEL;
   return null;
 }
 

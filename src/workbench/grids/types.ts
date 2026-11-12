@@ -72,6 +72,8 @@ export interface GridColumn {
   position: number;
   fromTemplate: boolean;
   retired: boolean;
+  /** Check templates, `{row}` standing for the row id (docs/grids.md, "Column checks"). */
+  checks?: Array<Record<string, unknown>>;
 }
 
 export type RowKind = 'feature' | 'combination' | 'reference';
@@ -110,6 +112,10 @@ export interface GridCell {
   claimedChat?: { id: string; title: string | null } | null;
   /** A reference row's cell: the owner grid's, read-only here. */
   ref?: boolean;
+  /** The cell's resolved checks: its column's templates with `{row}` filled in, then its own. */
+  checks?: Array<Record<string, unknown>>;
+  /** Whether it has no checks at all, so it cannot be claimed or proved. */
+  needsCheck?: boolean;
 }
 
 export interface GridDetail {
@@ -233,6 +239,19 @@ export const cellLook = (cell: Pick<GridCell, 'state' | 'stale'>): CellLook =>
   cell.state === 'proved' && cell.stale ? 'stale' : cell.state;
 
 export const LOOK_LABEL: Record<CellLook, string> = { ...STATE_LABEL, stale: 'Stale' };
+
+/**
+ * Whether a cell waits on a check before it can be worked on: it has none,
+ * and it still needs work (unchecked, a gap, in progress, or a stale proof).
+ * A fresh proof or an N/A needs nothing more.
+ */
+export function needsACheck(cell: Pick<GridCell, 'state' | 'stale' | 'needsCheck' | 'ref'> | undefined): boolean {
+  if (!cell || cell.needsCheck !== true || cell.ref) return false;
+  const look = cellLook(cell);
+  return look === 'unchecked' || look === 'gap' || look === 'in_progress' || look === 'stale';
+}
+
+export const NEEDS_CHECK_LABEL = 'Needs a check';
 
 /* ------------------------------------------------------------------ reading */
 

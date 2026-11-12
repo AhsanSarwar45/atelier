@@ -66,9 +66,11 @@ export function FlagLines({ flags, testId = 'check-flag' }: { flags: readonly Ch
 function Output({ text }: { text: string }) {
   if (!text.trim()) return null;
   return (
-    <pre data-testid="check-output" className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 px-2 py-1 font-mono text-[11px] leading-snug text-muted-foreground">
-      {text}
-    </pre>
+    <Panel asChild inset="xs">
+      <pre data-testid="check-output" className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-snug text-muted-foreground">
+        {text}
+      </pre>
+    </Panel>
   );
 }
 
@@ -127,6 +129,16 @@ export function ItemChecks({ itemId, checks, flags: given }: { itemId: string; c
       </Collapsible>
       <FlagLines flags={flags} />
     </div>
+  );
+}
+
+/** Checks drawn open, each with its name, kind, sentence, command and files: a grid cell's. */
+export function CheckList({ checks, testId = 'check-list' }: { checks: readonly Check[]; testId?: string }) {
+  if (!checks.length) return null;
+  return (
+    <ul data-testid={testId} className="divide-y divide-border/60">
+      {checks.map((check) => <CheckDetail key={check.name} check={check} bench={benchLine(check, undefined, undefined)} />)}
+    </ul>
   );
 }
 

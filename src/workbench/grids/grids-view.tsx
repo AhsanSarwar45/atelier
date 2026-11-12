@@ -24,7 +24,7 @@ import { cellCount, CreateTaskButton } from '@/workbench/grids/create-task';
 import { DraftActions, DraftView } from '@/workbench/grids/grid-card';
 import { GridHeatmap, Legend, orderRows } from '@/workbench/grids/grid-heatmap';
 import { ALL_GAPS, selectedCells, type Selection } from '@/workbench/grids/selection';
-import { draftColumns, draftContent, draftDiff, type GridDetail, type GridSummary, type GridTemplate } from '@/workbench/grids/types';
+import { NEEDS_CHECK_LABEL, draftColumns, draftContent, draftDiff, type GridDetail, type GridSummary, type GridTemplate } from '@/workbench/grids/types';
 import { useGrid, useGrids } from '@/workbench/grids/use-grids';
 
 /** Drafts first, then the rest by lowest percent proved; discarded grids are left out. */
@@ -213,6 +213,8 @@ function SelectionBar({ detail, selection, projectId, onOpenChat, onCreated, onC
   const cells = selectedCells(selection, drawn, detail.columns.filter((c) => !c.retired), detail.cells);
   const claimable = cells.filter((c) => !c.blocker).length;
   const blocked = cells.filter((c) => c.blocker);
+  // Cells with no check are left out of the task; say how many.
+  const unchecked = cells.filter((c) => c.blocker === NEEDS_CHECK_LABEL).length;
   const onlyColumn = selection.rows === '*' && selection.cols !== '*' && selection.cols.length === 1
     ? detail.columns.find((c) => c.id === (selection.cols as string[])[0]) : undefined;
   return (
@@ -237,6 +239,11 @@ function SelectionBar({ detail, selection, projectId, onOpenChat, onCreated, onC
               </ul>
             </PopoverContent>
           </Popover>
+        )}
+        {unchecked > 0 && (
+          <span data-testid="grid-selection-needs-check" className="text-xs text-[var(--color-warning-accent)]">
+            {`${cellCount(unchecked)} ${unchecked === 1 ? 'needs' : 'need'} a check`}
+          </span>
         )}
         <div className="ml-auto flex items-center gap-2">
           <Button type="button" size="xs" variant="ghost" onClick={onClear}>Clear</Button>

@@ -111,6 +111,7 @@ import { SignedOutMark, useStanding } from '@/workbench/account-standing';
 import { workingLine } from '@/workbench/working-line';
 import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { checklistForTasks, finished, type ChecklistItem } from '@/workbench/tasks/checklist';
+import { tallyLine } from '@/workbench/tasks/checks';
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
 import { startTaskIn, takeComposerFocus, takeNewChatLine } from '@/workbench/tasks/new-task';
 import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
@@ -648,6 +649,9 @@ function TodoPlanItem({ item }: { item: NonNullable<ChecklistItem['items']>[numb
       />
       <span className="min-w-0">
         <span className={cn(item.state === 'open' && 'text-muted-foreground')}>{item.text}</span>
+        {item.state === 'open' && item.checks?.ran && (
+          <span data-testid="todo-plan-item-checks" className="block tabular-nums text-muted-foreground">{tallyLine(item.checks)}</span>
+        )}
         {item.state === 'missed' && item.note && (
           <span data-testid="todo-plan-item-note" className="block text-[var(--color-warning-accent)]">{item.note}</span>
         )}

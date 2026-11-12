@@ -20,7 +20,9 @@ import { cn } from '@/lib/utils';
 import { CreateTaskButton } from '@/workbench/grids/create-task';
 import { CellSquare } from '@/workbench/grids/grid-heatmap';
 import { blocker } from '@/workbench/grids/selection';
-import { cellLook, LOOK_LABEL, type Benchmark, type CellDetail, type CellFull, type GridEvent, type GridOwnerAction } from '@/workbench/grids/types';
+import { CheckList } from '@/workbench/tasks/check-views';
+import { readCheck } from '@/workbench/tasks/checks';
+import { cellLook, LOOK_LABEL, NEEDS_CHECK_LABEL, needsACheck, type Benchmark, type CellDetail, type CellFull, type GridEvent, type GridOwnerAction } from '@/workbench/grids/types';
 import { gridsChangedFor } from '@/workbench/grids/use-grids';
 import { onWorkbench } from '@/workbench/live-wire';
 import { shotUrl } from '@/workbench/tasks/task-card';
@@ -388,6 +390,14 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
               {detail.column.proofRule && (
                 <p className="text-xs text-muted-foreground"><span className="font-medium text-foreground">Proof rule: </span>{detail.column.proofRule}</p>
               )}
+              {needsACheck(cell) && (
+                <Panel tone="attention" inset="sm" data-testid="cell-needs-check" className="space-y-0.5">
+                  <div className="text-sm font-medium">{NEEDS_CHECK_LABEL}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {`No check proves this cell, so no task can take it. Add one to the ${detail.column.name} column or to this cell in a grid edit, and approve it.`}
+                  </div>
+                </Panel>
+              )}
               {cell.reason && (
                 <Panel tone={cell.state === 'na_pending' || cell.state === 'na' ? 'attention' : 'danger'} inset="sm" data-testid="cell-reason">
                   <div className="whitespace-pre-wrap break-words text-sm">{cell.reason}</div>
@@ -407,6 +417,12 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
                 </div>
               )}
             </section>
+            {(cell.checks?.length ?? 0) > 0 && (
+              <section className="space-y-1" data-testid="cell-checks">
+                <Label>Checks</Label>
+                <CheckList checks={(cell.checks ?? []).map(readCheck)} />
+              </section>
+            )}
             <section className="space-y-2">
               <Label>Proof</Label>
               <ProofView cell={cell} />

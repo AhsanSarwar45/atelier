@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { rectangle, selects, type Selection } from '@/workbench/grids/selection';
-import { cellLook, LOOK_LABEL, type CellLook, type GridCell, type GridColumn, type GridRow } from '@/workbench/grids/types';
+import { cellLook, LOOK_LABEL, NEEDS_CHECK_LABEL, needsACheck, type CellLook, type GridCell, type GridColumn, type GridRow } from '@/workbench/grids/types';
 
 /** A row as drawn: a combination sits indented under the first row it combines. */
 export interface DrawnRow { row: GridRow; depth: number }
@@ -82,6 +82,9 @@ export function CellSquare({ look, className }: { look: CellLook; className?: st
   );
 }
 
+/** The mark on a cell with no check: a dashed amber ring inside it. */
+export const NEEDS_CHECK_CLASS = 'outline-dashed outline-2 -outline-offset-[3px] outline-[var(--color-warning-accent)]';
+
 /** What each colour means, under the heatmap. */
 export function Legend({ className }: { className?: string }) {
   return (
@@ -89,8 +92,19 @@ export function Legend({ className }: { className?: string }) {
       {(Object.keys(LOOK_CLASS) as CellLook[]).map((look) => (
         <li key={look} className="inline-flex items-center gap-1.5"><CellSquare look={look} />{LOOK_LABEL[look]}</li>
       ))}
+      <li className="inline-flex items-center gap-1.5" data-testid="grid-legend-needs-check">
+        <CellSquare look="unchecked" className={cn(NEEDS_CHECK_CLASS, '-outline-offset-2 outline-1')} />{NEEDS_CHECK_LABEL}
+      </li>
     </ul>
   );
+}
+
+/** A column's header tooltip: its name, proof rule and check templates. */
+export function columnTip(column: Pick<GridColumn, 'name' | 'proofRule' | 'checks'>): string {
+  const head = column.proofRule ? `${column.name}: ${column.proofRule}` : column.name;
+  const commands = (column.checks ?? []).map((check) => (typeof check.command === 'string' ? check.command : '')).filter(Boolean);
+  if (!commands.length) return `${head}\nNo checks: its cells need one`;
+  return `${head}\nChecks: ${commands.join('; ')}`;
 }
 
 const key = (row: string, col: string) => `${row}\u0000${col}`;
@@ -229,7 +243,7 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
             <th className="sticky left-0 z-20 bg-background" style={{ minWidth: names, maxWidth: names }} />
             {columns.map((column) => (
               <th key={column.id} scope="col" className="p-0 align-bottom" style={{ height: header, width: size, minWidth: size }}>
-                <Tooltip label={column.proofRule ? `${column.name}: ${column.proofRule}` : column.name} side="top">
+                <Tooltip label={columnTip(column)} side="top">
                   <Button
                     type="button"
                     variant="foreground"
@@ -305,6 +319,7 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
                 const cell = at.get(key(row.id, column.id));
                 if (!cell) return <td key={column.id} className="p-0" />;
                 const look = cellLook(cell);
+                const needs = needsACheck(cell);
                 const chosen = selects(selection, row.id, column.id) && (!selection?.onlyGaps || look === 'gap');
                 const here = { row: row.id, col: column.id };
                 return (
@@ -318,10 +333,11 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
                       data-col={column.id}
                       data-state={cell.state}
                       data-look={look}
+                      data-needs-check={needs ? 'yes' : undefined}
                       data-ref={cell.ref ? 'yes' : undefined}
                       data-reach="own"
                       aria-pressed={chosen}
-                      aria-label={`${row.name} × ${column.name}: ${LOOK_LABEL[look]}${cell.claimedTask ? `, claimed by #${cell.claimedTask}` : ''}`}
+                      aria-label={`${row.name} × ${column.name}: ${LOOK_LABEL[look]}${needs ? `, ${NEEDS_CHECK_LABEL.toLowerCase()}` : ''}${cell.claimedTask ? `, claimed by #${cell.claimedTask}` : ''}`}
                       onPointerDown={(event) => {
                         if (event.pointerType !== 'mouse' || event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey) return;
                         drag.current = { from: here, moved: false };
@@ -353,6 +369,7 @@ export function GridHeatmap({ rows, columns, cells, selection, onSelect, onOpenC
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         LOOK_CLASS[look],
                         cell.ref && 'opacity-70',
+                        needs && NEEDS_CHECK_CLASS,
                         chosen && 'relative z-[1] ring-2 ring-foreground ring-offset-1 ring-offset-background',
                       )}
                     >

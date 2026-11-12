@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { makeTask } from '@/workbench/tasks/__tests__/fixtures';
 import { checkDiff, checkSentence, benchLine, flagTitle, readCheck, tally, tallyLine, itemRuns } from '@/workbench/tasks/checks';
+import { TodoPanel } from '@/workbench/chat-tab';
+import { checklistForTasks } from '@/workbench/tasks/checklist';
 import { eventText } from '@/workbench/tasks/task-event-row';
 import { itemProgress, withCheckedEntries } from '@/workbench/tasks/progress';
 import { AmendDiff, ProposalCard, TaskCard } from '@/workbench/tasks/task-card';
@@ -18,6 +20,10 @@ vi.mock('@/lib/api', async (original) => ({
 vi.mock('@/workbench/live', async (original) => ({
   ...(await original<typeof import('@/workbench/live')>()),
   useLiveSessions: () => [{ id: 's1', state: 'idle', cwd: '/repo' }],
+}));
+vi.mock('@/workbench/live-wire', async (original) => ({
+  ...(await original<typeof import('@/workbench/live-wire')>()),
+  onWorkbench: () => () => {},
 }));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -205,5 +211,18 @@ describe('screen 4: a plan change shows its reason and the checks it changes', (
     expect(screen.getAllByTestId('amend-check').map((c) => c.getAttribute('data-change'))).toEqual(['added', 'changed', 'added', 'removed']);
     expect(screen.queryByText(/Changed: checks/)).toBeNull();
     expect(screen.getByText('sh tests/mod.sh 7 3')).toBeInTheDocument();
+  });
+});
+
+describe('the chat checklist', () => {
+  it('says how many of the current item\'s checks pass', () => {
+    const items = checklistForTasks([{ ...inProgress, sessionId: 's1' } as Task], 's1');
+    render(<TodoPanel items={items} />);
+    fireEvent.click(screen.getByRole('button', { name: /Tasks/ }));
+    const rows = screen.getAllByTestId('todo-plan-item');
+    expect(rows.map((r) => r.getAttribute('data-state'))).toEqual(['open', 'met']);
+    expect(within(rows[0]!).getByTestId('todo-plan-item-checks').textContent).toBe('2 of 3 checks pass');
+    // A met item needs no count.
+    expect(within(rows[1]!).queryByTestId('todo-plan-item-checks')).toBeNull();
   });
 });
