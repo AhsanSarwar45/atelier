@@ -30,6 +30,7 @@
  * names is really on disk is somebody else's question, answered the same way it
  * is for a bare path (`paths.ts`, `paths-on-disk.ts`).
  */
+import { GRID_ID, parseGridId } from '@/workbench/grids/selection';
 import { resolvePath, type Rooted } from '@/workbench/paths';
 
 /** What a reference names: a place on disk, and the lines of it that matter. */
@@ -351,13 +352,20 @@ export function resolveReference(ref: Reference, root: string | Rooted): string 
  * about the chat's folder (docs/tasks.md, "Merging"). It has an empty id, and
  * `@merge:…` is nothing.
  *
+ * `@grid:camera` is a coverage grid, and `@grid:camera.glare+sunstar.gpu` cells
+ * of it: rows, then columns, each `*` or ids joined by `+` (docs/grids.md). Like
+ * a diff, its id has a grammar of its own (`parseGridId`), read the same way on
+ * the server. A bare `@matrix` asks the agent to draft a grid of the area the
+ * message names, and a bare `@audit` to audit the grid whose slug follows it;
+ * both have an empty id, like `@task`.
+ *
  * Any other `@word:…`, such as one an older transcript wrote, is not a kind and
  * shows as the words it was.
  */
-export type AtelierKind = 'chat' | 'skill' | 'diff' | 'task' | 'merge';
+export type AtelierKind = 'chat' | 'skill' | 'diff' | 'task' | 'merge' | 'grid' | 'matrix' | 'audit';
 
-/** The kinds written with an id after a colon. `@merge` never has one. */
-export const ATELIER_KINDS: readonly AtelierKind[] = ['chat', 'skill', 'diff', 'task'];
+/** The kinds written with an id after a colon. `@merge`, `@matrix` and `@audit` never have one. */
+export const ATELIER_KINDS: readonly AtelierKind[] = ['chat', 'skill', 'diff', 'task', 'grid'];
 
 /** An Atelier reference found inside a larger text, and where in it it sits. */
 export interface FoundAtelierReference {
@@ -377,7 +385,7 @@ export interface FoundAtelierReference {
  */
 const ATELIER_ID = '[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?';
 const KIND_BEGUN = new RegExp('^@(' + ATELIER_KINDS.join('|') + '):');
-const ID_KINDS = ATELIER_KINDS.filter((kind) => kind !== 'diff');
+const ID_KINDS = ATELIER_KINDS.filter((kind) => kind !== 'diff' && kind !== 'grid');
 const ATELIER_AT = new RegExp('@(' + ID_KINDS.join('|') + '):(' + ATELIER_ID + ')(?![A-Za-z0-9_])', 'y');
 /**
  * A diff's id: a path, perhaps a commit before it and lines after it. It starts
@@ -392,6 +400,15 @@ const TASK_NUMBER = /^[1-9][0-9]*$/;
 const NEW_TASK_AT = /@task(?=\s|$)/y;
 /** A bare `@merge`: the word alone, ended by whitespace or the text. */
 const MERGE_AT = /@merge(?=\s|$)/y;
+/** A bare `@matrix` or `@audit`, likewise. */
+const MATRIX_AT = /@matrix(?=\s|$)/y;
+const AUDIT_AT = /@audit(?=\s|$)/y;
+/**
+ * A grid, or cells of it: the slug, then perhaps rows and columns. It ends where
+ * an id cannot go on, so a sentence keeps its full stop.
+ */
+const GRID_PART = `(?:\\*|${GRID_ID}(?:\\+${GRID_ID})*)`;
+const GRID_AT = new RegExp(`@grid:(${GRID_ID}(?:\\.${GRID_PART}\\.${GRID_PART})?)(?![A-Za-z0-9_*+-])`, 'y');
 
 function atelierAt(text: string, at: number): FoundAtelierReference | null {
   DIFF_AT.lastIndex = at;
@@ -400,6 +417,12 @@ function atelierAt(text: string, at: number): FoundAtelierReference | null {
     const id = diff[1]!.replace(/[^A-Za-z0-9]+$/, '');
     if (!id || !parseDiffId(id)) return null;
     return { kind: 'diff', id, start: at, end: at + '@diff:'.length + id.length, run: false };
+  }
+  GRID_AT.lastIndex = at;
+  const grid = GRID_AT.exec(text);
+  if (grid) {
+    if (!parseGridId(grid[1]!)) return null;
+    return { kind: 'grid', id: grid[1]!, start: at, end: at + grid[0].length, run: false };
   }
   ATELIER_AT.lastIndex = at;
   const m = ATELIER_AT.exec(text);
@@ -412,6 +435,10 @@ function atelierAt(text: string, at: number): FoundAtelierReference | null {
   if (NEW_TASK_AT.test(text)) return { kind: 'task', id: '', start: at, end: at + '@task'.length, run: false };
   MERGE_AT.lastIndex = at;
   if (MERGE_AT.test(text)) return { kind: 'merge', id: '', start: at, end: at + '@merge'.length, run: false };
+  MATRIX_AT.lastIndex = at;
+  if (MATRIX_AT.test(text)) return { kind: 'matrix', id: '', start: at, end: at + '@matrix'.length, run: false };
+  AUDIT_AT.lastIndex = at;
+  if (AUDIT_AT.test(text)) return { kind: 'audit', id: '', start: at, end: at + '@audit'.length, run: false };
   return null;
 }
 
@@ -434,7 +461,7 @@ export function findAtelierReferences(text: string): FoundAtelierReference[] {
   return found;
 }
 
-/** The one form this app writes an Atelier reference in. A bare `@task` or `@merge` has no id. */
+/** The one form this app writes an Atelier reference in. A bare `@task`, `@merge`, `@matrix` or `@audit` has no id. */
 export function formatAtelierReference(kind: AtelierKind, id: string): string {
   return id ? `@${kind}:${id}` : `@${kind}`;
 }
@@ -444,6 +471,12 @@ export const NEW_TASK = '@task ';
 
 /** What the `@` menu's "Merge branch" line writes: a bare `@merge` and a space. */
 export const MERGE = '@merge ';
+
+/** What the `@` menu's "Draft a coverage grid" line writes. */
+export const MATRIX = '@matrix ';
+
+/** What the `@` menu's "Audit a grid" line writes; a grid's slug follows it. */
+export const AUDIT = '@audit ';
 
 /**
  * The reference a pasted address of this app stands for (bw-mi3s.5).

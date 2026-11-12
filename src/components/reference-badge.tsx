@@ -1,5 +1,5 @@
 /**
- * One of Atelier's own things — a chat, a skill, a diff, a task — as the one
+ * One of Atelier's own things — a chat, a skill, a diff, a task, a grid — as the one
  * badge it is drawn as wherever it is named.
  *
  * A reference is written into the composer, sent, and read back in the
@@ -22,7 +22,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { FileDiff, GitMerge, ListChecks, ListPlus, MessageSquare, Sparkles } from 'lucide-react';
+import { FileDiff, GitMerge, Grid2x2Plus, Grid3x3, ListChecks, ListPlus, MessageSquare, ScanSearch, Sparkles } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,7 @@ import { addressWith, lineFrom } from '@/lib/address';
 import { classesFor, type Tone } from '@/lib/state-styles';
 import { cn } from '@/lib/utils';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
+import { parseGridId, type Chosen, type GridRef } from '@/workbench/grids/selection';
 import type { Brand } from '@/workbench/protocol';
 import { parseDiffId, type DiffReference } from '@/workbench/references';
 
@@ -74,7 +75,44 @@ export type Reference =
       /** A bare `@merge`: the owner asking the agent to merge this branch. */
       kind: 'merge';
       id: '';
+    }
+  | {
+      /** A coverage grid, or cells of it (docs/grids.md). */
+      kind: 'grid';
+      /** What follows `@grid:`, as written. */
+      id: string;
+      /** The grid's title, or null while it is not known yet. */
+      title?: string | null;
+      /** The grid and the cells the id names, or null for an id that names nothing. */
+      grid: GridRef | null;
+    }
+  | {
+      /** A bare `@matrix`: the owner asking the agent to draft a coverage grid. */
+      kind: 'matrix';
+      id: '';
+    }
+  | {
+      /** A bare `@audit`: the owner asking the agent to audit the grid named after it. */
+      kind: 'audit';
+      id: '';
     };
+
+/** The badge for a grid reference's id. */
+export function gridBadge(id: string, title?: string | null): Reference {
+  return { kind: 'grid', id, grid: parseGridId(id), ...(title ? { title } : {}) };
+}
+
+const chosenLabel = (chosen: Chosen): string => (chosen === '*' ? 'all' : chosen.join(', '));
+
+/** The cells a grid reference names, said in words: `glare, sunstar × gpu`. */
+function gridCells(ref: GridRef): string {
+  if (!ref.selection) return '';
+  const { rows, cols } = ref.selection;
+  if (rows === '*' && cols === '*') return ' · every cell';
+  if (rows === '*') return ` · ${chosenLabel(cols)}`;
+  if (cols === '*') return ` · ${chosenLabel(rows)}`;
+  return ` · ${chosenLabel(rows)} × ${chosenLabel(cols)}`;
+}
 
 /**
  * A task's status, in the colour of the state most like it. A blocked
@@ -121,6 +159,9 @@ export function referenceLabel(ref: Reference): string {
   }
   if (ref.kind === 'task') return ref.id ? `#${ref.id}${ref.title ? ` ${ref.title}` : ''}` : 'New task';
   if (ref.kind === 'merge') return 'Merge branch';
+  if (ref.kind === 'matrix') return 'New grid';
+  if (ref.kind === 'audit') return 'Audit grid';
+  if (ref.kind === 'grid') return ref.grid ? `${ref.title || ref.grid.slug}${gridCells(ref.grid)}` : ref.id;
   return ref.name || ref.id;
 }
 
@@ -136,6 +177,9 @@ export function referenceTitle(ref: Reference): string {
     return `Open tasks · #${ref.id}${ref.status ? ` · ${ref.status.replace('_', ' ')}` : ''}`;
   }
   if (ref.kind === 'merge') return 'Asks the agent to merge this branch into the base branch';
+  if (ref.kind === 'matrix') return 'Asks the agent to draft a coverage grid of the area this message names';
+  if (ref.kind === 'audit') return 'Asks the agent to audit the grid named after it';
+  if (ref.kind === 'grid') return `Open grid · ${ref.id}`;
   return ref.description ? `Skill · ${ref.description}` : 'Skill';
 }
 
@@ -150,7 +194,7 @@ function referenceClass(ref: Reference): string {
   if (ref.kind === 'chat') return cn(ONE_LINE, ref.brand ? BRAND_COLOR[ref.brand] : classesFor(undefined).badge);
   if (ref.kind === 'diff') return cn(ONE_LINE, DIFF_COLOR);
   if (ref.kind === 'task') return cn(ONE_LINE, classesFor(ref.status ? TASK_TONE[ref.status] : undefined).badge);
-  if (ref.kind === 'merge') return cn(ONE_LINE, classesFor(undefined).badge);
+  if (ref.kind === 'merge' || ref.kind === 'matrix' || ref.kind === 'audit' || ref.kind === 'grid') return cn(ONE_LINE, classesFor(undefined).badge);
   return cn(ONE_LINE, SKILL_COLOR);
 }
 
@@ -177,6 +221,12 @@ export function ReferenceFace({ reference }: { reference: Reference }) {
       )
     ) : reference.kind === 'merge' ? (
       <GitMerge className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+    ) : reference.kind === 'grid' ? (
+      <Grid3x3 className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+    ) : reference.kind === 'matrix' ? (
+      <Grid2x2Plus className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+    ) : reference.kind === 'audit' ? (
+      <ScanSearch className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
     ) : reference.kind === 'chat' ? (
       reference.brand ? (
         <BrandIcon brand={reference.brand} className="mr-0.5 size-3" />
@@ -250,8 +300,17 @@ export function ReferenceBadge({
     } else if (reference.kind === 'task') {
       // A bare `@task` names no task yet; there is nothing to open.
       if (reference.id) router.push(addressWith(params, { id: projectId, tab: 'tasks', task: lineFrom(reference.id) }));
-    } else if (reference.kind === 'merge') {
+    } else if (reference.kind === 'merge' || reference.kind === 'matrix' || reference.kind === 'audit') {
       // A request, not a thing: there is nothing to open.
+    } else if (reference.kind === 'grid') {
+      // The grid in the Tasks tab's Grids view, with the cell open when it names one.
+      const grid = reference.grid;
+      if (grid) {
+        const sel = grid.selection;
+        const one = sel && sel.rows !== '*' && sel.cols !== '*' && sel.rows.length === 1 && sel.cols.length === 1
+          ? `${sel.rows[0]}:${sel.cols[0]}` : null;
+        router.push(addressWith(params, { id: projectId, tab: 'tasks', task: null, view: 'grids', grid: grid.slug, cell: one }));
+      }
     } else if (reference.kind === 'chat') {
       router.push(addressWith(params, { id: reference.projectId ?? projectId, tab: 'chat', chat: reference.id }));
     } else {

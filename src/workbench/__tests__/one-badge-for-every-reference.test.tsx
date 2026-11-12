@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
-import { diffBadge, ReferenceBadge, referenceBadgeElement, type Reference } from '@/components/reference-badge';
+import { diffBadge, gridBadge, ReferenceBadge, referenceBadgeElement, type Reference } from '@/components/reference-badge';
 import { openableIn } from '@/workbench/mentions';
 import type { AtelierKind } from '@/workbench/references';
 
@@ -17,7 +17,8 @@ const CHAT = '0b8f6c1e-2d3a-4f5b-9c7d-1e2f3a4b5c6d';
 function describeRef(kind: AtelierKind, id: string): Reference {
   if (kind === 'chat') return { kind, id, name: 'Standup notes', brand: 'claude', projectId: 'p2' };
   if (kind === 'diff') return diffBadge(id);
-  if (kind === 'merge') return { kind, id: '' };
+  if (kind === 'merge' || kind === 'matrix' || kind === 'audit') return { kind, id: '' };
+  if (kind === 'grid') return gridBadge(id, 'Renderer camera');
   return { kind, id, name: 'Standup', description: 'Write the standup' };
 }
 

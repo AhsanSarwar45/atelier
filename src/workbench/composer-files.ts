@@ -54,20 +54,20 @@ import {
 import { Prec, StateEffect, StateField, type EditorState, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, keymap, tooltips, type ViewUpdate } from '@codemirror/view';
 import { formatDistanceToNow } from 'date-fns';
-import { AtSign, File, FileDiff, ListChecks, MessageSquare, Sparkles, type LucideIcon } from 'lucide-react';
+import { AtSign, File, FileDiff, Grid3x3, ListChecks, MessageSquare, Sparkles, type LucideIcon } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { iconForFile, iconForFolder } from '@/components/file-icon';
 import { ICON_FALLBACK, iconUrl } from '@/components/file-icons';
-import { diffBadge, referenceBadgeElement, type Reference } from '@/components/reference-badge';
+import { diffBadge, gridBadge, referenceBadgeElement, type Reference } from '@/components/reference-badge';
 import { tabsListVariants, tabsTriggerVariants } from '@/components/ui/tabs';
 import { mention, type FsFoundPath, type MentionOffer, type MentionPlace } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import type { Brand, CommandInfo } from '@/workbench/protocol';
 import { resolvePath } from '@/workbench/paths';
 import { knownReal } from '@/workbench/paths-on-disk';
-import { learnChat, learnSkill, learnTask, setReferenceAsker } from '@/workbench/reference-names';
-import { canBeginReference, formatAtelierReference, formatReference, MERGE, NEW_TASK, type AtelierKind } from '@/workbench/references';
+import { learnChat, learnGrid, learnSkill, learnTask, setReferenceAsker } from '@/workbench/reference-names';
+import { AUDIT, canBeginReference, formatAtelierReference, formatReference, MATRIX, MERGE, NEW_TASK, type AtelierKind } from '@/workbench/references';
 
 /** How many the menu ever shows. Past this nobody is reading, he is typing. */
 const MOST_OFFERED = 20;
@@ -121,6 +121,7 @@ const HEADINGS: Record<MentionOffer['kind'], string> = {
   task: 'Tasks',
   chat: 'Chats',
   skill: 'Skills',
+  grid: 'Grids',
 };
 
 /**
@@ -134,7 +135,7 @@ const HEADINGS: Record<MentionOffer['kind'], string> = {
 type Scope = 'all' | MentionOffer['kind'];
 const SCOPES: readonly Scope[] = ['all', 'file', 'diff', 'task', 'chat', 'skill'];
 const SCOPE_NAMES: Record<Scope, string> = { all: 'All', ...HEADINGS };
-const TYPED_KIND = /^@(task|chat|skill|diff):/;
+const TYPED_KIND = /^@(task|chat|skill|diff|grid):/;
 
 const setScope = StateEffect.define<Scope>();
 
@@ -200,6 +201,7 @@ const SCOPE_ICONS: Record<Scope, LucideIcon> = {
   task: ListChecks,
   chat: MessageSquare,
   skill: Sparkles,
+  grid: Grid3x3,
 };
 
 /** A key drawn as a key, for the menu's hints. */
@@ -354,9 +356,11 @@ function offer(found: FsFoundPath, rank = 0, cwd = ''): Completion {
 
 /** What the badge for an offered task, chat or skill draws. */
 function referenceOf(found: MentionOffer): Reference {
-  // The menu offers things with an id; `@merge` is its own line (mergeBranch).
-  const kind = found.kind as Exclude<AtelierKind, 'merge'>;
+  // The menu offers things with an id; `@merge`, `@matrix` and `@audit` are
+  // lines of their own (mergeBranch, draftGrid, auditGrid).
+  const kind = found.kind as Exclude<AtelierKind, 'merge' | 'matrix' | 'audit'>;
   if (kind === 'diff') return diffBadge(found.id, found.status);
+  if (kind === 'grid') return gridBadge(found.id, found.label);
   if (kind === 'task') return { kind, id: found.id, title: found.label, status: found.status };
   if (kind === 'chat') {
     return { kind, id: found.id, name: found.label, brand: found.brand as Brand | undefined, projectId: found.projectId ?? null };
@@ -372,6 +376,8 @@ function learn(found: MentionOffer): void {
     learnSkill(found.id, { name: found.label, description: found.detail || undefined });
   } else if (found.kind === 'task') {
     learnTask(found.id, { title: found.label, ...(found.status ? { status: found.status } : {}) });
+  } else if (found.kind === 'grid') {
+    learnGrid(found.id, found.label);
   }
 }
 
@@ -391,13 +397,13 @@ function chatDetail(found: MentionOffer): string {
  * picking it writes — and what tells it apart after it.
  */
 function atelierOffer(found: MentionOffer, rank: number): Completion {
-  const kind = found.kind as Exclude<AtelierKind, 'merge'>;
+  const kind = found.kind as Exclude<AtelierKind, 'merge' | 'matrix' | 'audit'>;
   const insert = formatAtelierReference(kind, found.id);
   return {
     label: insert,
     // Every badge already says its name.
     displayLabel: ' ',
-    detail: kind === 'skill' || kind === 'diff' || kind === 'task' ? found.detail : kind === 'chat' ? chatDetail(found) : '',
+    detail: kind === 'skill' || kind === 'diff' || kind === 'task' || kind === 'grid' ? found.detail : kind === 'chat' ? chatDetail(found) : '',
     type: kind,
     section: { name: HEADINGS[kind], rank },
     apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
@@ -440,6 +446,87 @@ function mergeBranch(): Completion {
     apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
       view.dispatch({ changes: { from, to, insert: MERGE }, selection: { anchor: from + MERGE.length } });
     },
+  };
+}
+
+/**
+ * The menu's lines while what is typed could still be `@matrix` or `@audit`
+ * (docs/grids.md): drafting a coverage grid of the area the message names, and
+ * auditing a grid, whose slug the menu offers next (`auditedGrids`).
+ */
+function draftGrid(): Completion {
+  return {
+    label: MATRIX.trimEnd(),
+    displayLabel: ' ',
+    detail: 'Draft a coverage grid',
+    type: 'matrix',
+    apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+      view.dispatch({ changes: { from, to, insert: MATRIX }, selection: { anchor: from + MATRIX.length } });
+    },
+  };
+}
+
+function auditGrid(): Completion {
+  return {
+    label: AUDIT.trimEnd(),
+    displayLabel: ' ',
+    detail: 'Audit a grid',
+    type: 'audit',
+    apply: (view: EditorView, _completion: Completion, from: number, to: number) => {
+      view.dispatch({ changes: { from, to, insert: AUDIT }, selection: { anchor: from + AUDIT.length } });
+      // The grid it audits comes next.
+      startCompletion(view);
+    },
+  };
+}
+
+/** Whether the word after the `@` could still be `matrix`, on the menu's first tab. */
+export function offersMatrix(typed: string, scope: Scope): boolean {
+  return scope === 'all' && typed.length > 0 && 'matrix'.startsWith(typed.toLowerCase());
+}
+
+/** Whether the word after the `@` could still be `audit`, on the menu's first tab or the Grids one. */
+export function offersAudit(typed: string, scope: Scope): boolean {
+  return (scope === 'all' || scope === 'grid') && typed.length > 0 && 'audit'.startsWith(typed.toLowerCase());
+}
+
+/** A bare `@audit` and the slug being typed after it. */
+const AUDIT_TYPING = /(?:^|\s)@audit\s+([a-z0-9_-]*)$/;
+
+/**
+ * After `@audit `, the project's grids by slug: picking one writes its slug,
+ * which is what the audit reads (docs/grids.md, "Audit").
+ */
+function auditedGrids(placeOf: () => MentionPlace): CompletionSource {
+  return async (context: CompletionContext): Promise<CompletionResult | null> => {
+    const line = context.state.doc.lineAt(context.pos);
+    const typed = AUDIT_TYPING.exec(line.text.slice(0, context.pos - line.from));
+    if (!typed) return null;
+    const place = placeOf();
+    if (!place.cwd || !place.projectId) return null;
+    const from = context.pos - typed[1]!.length;
+    const stale = new AbortController();
+    context.addEventListener('abort', () => stale.abort(), { onDocChange: true });
+    let found;
+    try {
+      found = await mention.search(place, typed[1]!, MOST_OFFERED, stale.signal, 'grid');
+    } catch {
+      return null;
+    }
+    if (context.aborted) return null;
+    const options = found.items.filter((one) => one.kind === 'grid' && !one.id.includes('.')).map((one): Completion => {
+      learn(one);
+      return {
+        label: one.id,
+        detail: one.label,
+        type: 'grid-slug',
+        apply: (view: EditorView, _completion: Completion, at: number, to: number) => {
+          const written = one.id + ' ';
+          view.dispatch({ changes: { from: at, to, insert: written }, selection: { anchor: at + written.length } });
+        },
+      };
+    });
+    return options.length ? { from, options, filter: false } : null;
   };
 }
 
@@ -506,7 +593,11 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
     if (fresh) drawnBadges.set(fresh, { kind: 'task', id: '' });
     const merge = offersMerge(token.text.slice(1), picked) ? mergeBranch() : null;
     if (merge) drawnBadges.set(merge, { kind: 'merge', id: '' });
-    const asked = [fresh, merge].filter((line): line is Completion => line !== null);
+    const matrix = offersMatrix(token.text.slice(1), picked) ? draftGrid() : null;
+    if (matrix) drawnBadges.set(matrix, { kind: 'matrix', id: '' });
+    const audit = offersAudit(token.text.slice(1), picked) ? auditGrid() : null;
+    if (audit) drawnBadges.set(audit, { kind: 'audit', id: '' });
+    const asked = [fresh, merge, matrix, audit].filter((line): line is Completion => line !== null);
     let found;
     try {
       found = await mention.search(place, token.text.slice(1), MOST_OFFERED, stale.signal, picked === 'all' ? undefined : picked);
@@ -929,7 +1020,7 @@ const menuTheme = EditorView.theme({
   },
   '.cm-commandPending': { fontSize: '12px', opacity: '0.6' },
   // A chat's, a skill's and a task's badge is its name, so the line has no words of its own.
-  '.cm-completion-chat .cm-completionLabel, .cm-completion-skill .cm-completionLabel, .cm-completion-task .cm-completionLabel, .cm-completion-new-task .cm-completionLabel, .cm-completion-merge .cm-completionLabel': { display: 'none' },
+  '.cm-completion-chat .cm-completionLabel, .cm-completion-skill .cm-completionLabel, .cm-completion-task .cm-completionLabel, .cm-completion-new-task .cm-completionLabel, .cm-completion-merge .cm-completionLabel, .cm-completion-grid .cm-completionLabel, .cm-completion-matrix .cm-completionLabel, .cm-completion-audit .cm-completionLabel': { display: 'none' },
   // `> ul >` to outrank CodeMirror's own heading rule, which underlines it;
   // the tabs above already rule the list off.
   '.cm-tooltip.cm-tooltip-autocomplete > ul > completion-section': {
@@ -950,7 +1041,7 @@ const menuTheme = EditorView.theme({
   '.cm-completionLabel': { flexShrink: '0' },
   // A skill's description is a sentence, read from its start: cut at the
   // end, unlike a folder, whose end is the part that tells.
-  '.cm-completion-chat .cm-completionDetail, .cm-completion-skill .cm-completionDetail, .cm-completion-task .cm-completionDetail, .cm-completion-new-task .cm-completionDetail, .cm-completion-merge .cm-completionDetail': {
+  '.cm-completion-chat .cm-completionDetail, .cm-completion-skill .cm-completionDetail, .cm-completion-task .cm-completionDetail, .cm-completion-new-task .cm-completionDetail, .cm-completion-merge .cm-completionDetail, .cm-completion-grid .cm-completionDetail, .cm-completion-matrix .cm-completionDetail, .cm-completion-audit .cm-completionDetail, .cm-completion-grid-slug .cm-completionDetail': {
     direction: 'ltr',
     textAlign: 'left',
     marginLeft: '0',
@@ -1050,7 +1141,7 @@ export function mentionCompletions(
   setReferenceAsker(askAboutNames(placeOf));
   return [
     autocompletion({
-      override: [commandsOffering(commands), offering(placeOf)],
+      override: [commandsOffering(commands), offering(placeOf), auditedGrids(placeOf)],
       // The provider's own list can run past a hundred on its own (bw-zldt.1).
       maxRenderedOptions: 400,
       optionClass: (completion: Completion) => 'cm-completion-' + (completion.type ?? 'file'),

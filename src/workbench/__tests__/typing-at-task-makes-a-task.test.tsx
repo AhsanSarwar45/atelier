@@ -114,7 +114,7 @@ describe('the New task line of the @ menu', () => {
 
   it('is not offered once what is typed is something else', async () => {
     answers({ kind: 'file', id: 'src/a.ts', label: 'a.ts', folder: false });
-    const { editor } = await aComposer('@a');
+    const { editor } = await aComposer('@sr');
 
     const menu = await menuOf(editor, 1);
 

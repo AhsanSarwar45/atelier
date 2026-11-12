@@ -31,5 +31,13 @@
   {"text": "@merge", "found": [{"kind": "merge", "id": "", "start": 0, "end": 6, "run": false}]},
   {"text": "ok @merge now", "found": [{"kind": "merge", "id": "", "start": 3, "end": 9, "run": false}]},
   {"text": "@merged and @merge: and @merge:main and @merge.", "found": []},
-  {"text": "`@merge`", "found": []}
+  {"text": "`@merge`", "found": []},
+  {"text": "@matrix the renderer's camera", "found": [{"kind": "matrix", "id": "", "start": 0, "end": 7, "run": false}]},
+  {"text": "@matrixes and @matrix: and @matrix.", "found": []},
+  {"text": "please @audit camera", "found": [{"kind": "audit", "id": "", "start": 7, "end": 13, "run": false}]},
+  {"text": "@audited and @audit:camera", "found": []},
+  {"text": "see @grid:camera.", "found": [{"kind": "grid", "id": "camera", "start": 4, "end": 16, "run": false}]},
+  {"text": "@task @grid:camera.glare+sunstar.gpu+perf now", "found": [{"kind": "task", "id": "", "start": 0, "end": 5, "run": false}, {"kind": "grid", "id": "camera.glare+sunstar.gpu+perf", "start": 6, "end": 41, "run": false}]},
+  {"text": "@grid:camera.*.gpu and @grid:camera.glare.*", "found": [{"kind": "grid", "id": "camera.*.gpu", "start": 0, "end": 18, "run": false}, {"kind": "grid", "id": "camera.glare.*", "start": 23, "end": 43, "run": false}]},
+  {"text": "@grid:Camera and @grid:camera+x and @grid: and `@grid:camera`", "found": []}
 ]

@@ -212,10 +212,10 @@ describe('typing @ in the composer', () => {
 
   it('leaves the writing alone when the search fails', async () => {
     search.mockRejectedValue(new Error('no such checkout'));
-    const { editor } = await aComposer('@a');
+    const { editor } = await aComposer('@sr');
 
     expect(await menuOf(editor, 0)).toEqual([]);
-    expect(editor.state.doc.toString()).toBe('@a');
+    expect(editor.state.doc.toString()).toBe('@sr');
   });
 });
 

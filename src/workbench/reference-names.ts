@@ -16,7 +16,8 @@
  */
 import { useMemo, useSyncExternalStore } from 'react';
 
-import { diffBadge, type Reference } from '@/components/reference-badge';
+import { diffBadge, gridBadge, type Reference } from '@/components/reference-badge';
+import { parseGridId } from '@/workbench/grids/selection';
 import { useChatNames } from '@/workbench/live';
 import type { Brand, CommandInfo } from '@/workbench/protocol';
 import type { AtelierKind } from '@/workbench/references';
@@ -41,6 +42,8 @@ const chats = new Map<string, ChatName>();
 const skills = new Map<string, SkillName>();
 /** By number: the `@` menu only offers the tasks of the project it is in. */
 const tasks = new Map<string, TaskName>();
+/** Grid titles by slug, likewise the project's own. */
+const grids = new Map<string, string>();
 const listeners = new Set<() => void>();
 let version = 0;
 
@@ -73,6 +76,13 @@ export function learnTask(id: string, name: TaskName): void {
   changed();
 }
 
+/** Remember a grid's title, from anything that has seen it. */
+export function learnGrid(slug: string, title: string): void {
+  if (!title || grids.get(slug) === title) return;
+  grids.set(slug, title);
+  changed();
+}
+
 /** A way to ask the server about ids nobody here knows; set by the `@` search. */
 let asker: ((kind: AtelierKind, id: string) => void) | null = null;
 const asked = new Set<string>();
@@ -98,6 +108,7 @@ export function forgetReferenceNames(): void {
   chats.clear();
   skills.clear();
   tasks.clear();
+  grids.clear();
   asked.clear();
   changed();
 }
@@ -119,7 +130,13 @@ export function useDescribeReference(commands: readonly CommandInfo[] | undefine
     }
     return (kind, id) => {
       if (kind === 'diff') return diffBadge(id);
-      if (kind === 'merge') return { kind, id: '' };
+      if (kind === 'merge' || kind === 'matrix' || kind === 'audit') return { kind, id: '' };
+      if (kind === 'grid') {
+        const slug = parseGridId(id)?.slug;
+        const title = slug ? grids.get(slug) : undefined;
+        if (slug && !title) askAbout(kind, slug);
+        return gridBadge(id, title ?? null);
+      }
       if (kind === 'task') {
         if (!id) return { kind, id };
         const known = tasks.get(id);
