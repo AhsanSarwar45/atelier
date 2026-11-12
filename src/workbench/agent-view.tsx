@@ -295,7 +295,7 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
         inset="none"
         className={cn(overlayPanel, 'max-w-4xl outline-none', !isShell && 'sm:h-[85vh]')}
       >
-        <header className="flex items-center gap-3 border-b border-border/60 px-4 py-3">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 px-4 py-3">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground">
             <Icon className="h-4 w-4" aria-hidden="true" />
           </span>
@@ -324,8 +324,8 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
                 clicked — and none of them for a shell, which has no model,
                 spent nothing, and keeps its own clock in the terminal's footer
                 a few pixels below (bw-sb5g.3). */}
-            <div className="mt-1 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-              <Badge variant={state.variant} appearance="light" size="xs" data-testid="agent-view-state">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 whitespace-nowrap font-mono text-[11px] text-muted-foreground">
+              <Badge variant={state.variant} appearance="light" size="xs" className="shrink-0" data-testid="agent-view-state">
                 {state.label}
               </Badge>
               {!isShell && model && (
@@ -357,9 +357,13 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
               )}
             </div>
           </div>
-          <AgentSteering row={row} sessionId={sessionId} controls={controls} placement="header" />
+          {/* On a phone the buttons take a row of their own under the title,
+              which otherwise has no room left beside them. */}
+          <div className="order-last flex w-full justify-end sm:order-none sm:w-auto">
+            <AgentSteering row={row} sessionId={sessionId} controls={controls} placement="header" />
+          </div>
           {steerable(row, controls) && (
-            <span aria-hidden="true" className="h-5 w-px shrink-0 bg-border" />
+            <span aria-hidden="true" className="hidden h-5 w-px shrink-0 bg-border sm:block" />
           )}
           <Button size="sm" mode="icon" variant="ghost" data-testid="agent-view-close" aria-label="Close" onClick={onClose}>
             <X className="h-4 w-4" aria-hidden="true" />
