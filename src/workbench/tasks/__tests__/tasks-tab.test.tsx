@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { makeTask } from '@/workbench/tasks/__tests__/fixtures';
-import TasksTab, { filterTasks, groupTasks } from '@/workbench/tasks/tasks-tab';
+import TasksTab, { filterTasks, groupTasks, historyText, historyTime } from '@/workbench/tasks/tasks-tab';
 import { tasksChangedFor } from '@/workbench/tasks/use-tasks';
 
 const list = vi.fn();
@@ -46,6 +46,11 @@ const tasks = [
   makeTask({ number: 6, title: 'Look at this', status: 'review', sessionId: 's1', type: 'plan', plan: { question: 'Q', scope: 'S', constraints: [] } }),
   makeTask({ number: 7, title: 'Stuck work', status: 'blocked', sessionId: 's2', blocked: { cause: 'CI', needed_to_resume: 'CI up' } }),
 ];
+
+/** Opens the detail's More menu, as a click does. */
+function openMore(detail: HTMLElement) {
+  fireEvent.keyDown(within(detail).getByRole('button', { name: 'More' }), { key: 'Enter' });
+}
 
 beforeEach(() => {
   list.mockReset().mockResolvedValue(tasks);
@@ -100,6 +105,9 @@ describe('the Tasks tab', () => {
     expect(within(line).getByText('Feature')).toBeVisible();
     expect(within(line).getByText('Chat two')).toBeInTheDocument();
     expect(within(line).getByTestId('task-status')).toHaveAttribute('data-status', 'paused');
+    // Under its own group's heading a row does not say the status again.
+    const current = screen.getByText('Current work').closest('[data-testid="task-row"]') as HTMLElement;
+    expect(within(current).queryByTestId('task-status')).toBeNull();
     const loose = screen.getByText('Loose work').closest('[data-testid="task-row"]') as HTMLElement;
     expect(within(loose).getByText('Unassigned')).toBeInTheDocument();
   });
@@ -109,10 +117,23 @@ describe('the Tasks tab', () => {
     fireEvent.click(await screen.findByText('Current work'));
     const detail = await screen.findByTestId('task-detail');
     expect(within(detail).getByTestId('task-card')).toHaveAttribute('data-task-status', 'in_progress');
-    await waitFor(() => expect(within(detail).getByTestId('task-history')).toHaveTextContent('Try again'));
+    await waitFor(() => expect(within(detail).getByTestId('task-history')).toHaveTextContent('Reopened: Try again · Owner'));
     expect(get).toHaveBeenCalledWith('p1', 2);
-    expect(within(detail).getByRole('button', { name: 'Release' })).toBeVisible();
-    expect(within(detail).getByRole('button', { name: 'Cancel task' })).toBeVisible();
+    // The number once, on the card; Release and Cancel task in the More menu, not a row of buttons.
+    expect(within(detail).getAllByText(/#2\b/)).toHaveLength(1);
+    expect(within(detail).queryByRole('button', { name: 'Release' })).toBeNull();
+    openMore(detail);
+    expect(screen.getByRole('menuitem', { name: 'Release' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: 'Cancel task' })).toBeVisible();
+  });
+
+  it('releases a task from the More menu', async () => {
+    act.mockResolvedValue({ task: { ...tasks[1], sessionId: null }, widget: null });
+    render(<TasksTab projectId="p1" />);
+    fireEvent.click(await screen.findByText('Current work'));
+    openMore(await screen.findByTestId('task-detail'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Release' }));
+    await waitFor(() => expect(act).toHaveBeenCalledWith('p1', 2, 'release'));
   });
 
   it('cancels a task with a reason', async () => {
@@ -120,7 +141,8 @@ describe('the Tasks tab', () => {
     render(<TasksTab projectId="p1" />);
     fireEvent.click(await screen.findByText('Current work'));
     const detail = await screen.findByTestId('task-detail');
-    fireEvent.click(within(detail).getByRole('button', { name: 'Cancel task' }));
+    openMore(detail);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Cancel task' }));
     fireEvent.change(within(detail).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Not needed' } });
     fireEvent.click(within(detail).getByRole('button', { name: 'Cancel task' }));
     await waitFor(() => expect(act).toHaveBeenCalledWith('p1', 2, 'cancel', { reason: 'Not needed' }));
@@ -143,7 +165,7 @@ describe('the Tasks tab', () => {
     await waitFor(() => expect(within(detail).getByTestId('task-card')).toHaveAttribute('data-task-status', 'done'));
     fireEvent.click(screen.getByText('Current work'));
     detail = await screen.findByTestId('task-detail');
-    expect(within(detail).getByText('Task #2')).toBeVisible();
+    expect(within(detail).getByText('#2')).toBeVisible();
     expect(within(detail).getByTestId('task-card')).toHaveAttribute('data-task-status', 'in_progress');
     expect(within(detail).getByRole('heading', { name: 'Current work' })).toBeVisible();
   });
@@ -152,7 +174,8 @@ describe('the Tasks tab', () => {
     render(<TasksTab projectId="p1" />);
     fireEvent.click(await screen.findByText('Current work'));
     let detail = await screen.findByTestId('task-detail');
-    fireEvent.click(within(detail).getByRole('button', { name: 'Cancel task' }));
+    openMore(detail);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Cancel task' }));
     expect(within(detail).getByRole('textbox', { name: 'Reason' })).toBeVisible();
     fireEvent.click(screen.getByText('Loose work'));
     detail = await screen.findByTestId('task-detail');
@@ -185,9 +208,54 @@ describe('the Tasks tab', () => {
     expect(list).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps cancelled titles plain and lines the type badges up in one column', async () => {
+    render(<TasksTab projectId="p1" />);
+    const group = (await screen.findAllByTestId('task-group')).find((g) => g.getAttribute('data-status') === 'cancelled')!;
+    fireEvent.click(within(group).getByRole('button', { name: /Cancelled/ }));
+    expect(within(group).getByTestId('task-row-title')).not.toHaveClass('line-through');
+    for (const row of screen.getAllByTestId('task-row')) {
+      expect(within(row).getByText(/^(Feature|Plan)$/).closest('span.sm\\:w-28')).not.toBeNull();
+    }
+  });
+
+  it('switches between Tasks and Grids with the tab switch', async () => {
+    render(<TasksTab projectId="p1" />);
+    const tasksTab = await screen.findByRole('tab', { name: 'Tasks' });
+    expect(tasksTab).toHaveAttribute('aria-selected', 'true');
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Grids' }));
+    expect(await screen.findByTestId('grids-tab')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Grids' })).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('says so when there are no tasks', async () => {
     list.mockResolvedValue([]);
     render(<TasksTab projectId="p1" />);
     expect(await screen.findByText('No tasks yet')).toBeVisible();
+  });
+});
+
+describe('the history', () => {
+  const task = makeTask({
+    number: 2, status: 'in_progress',
+    plan: { outcome: 'O', criteria: [{ id: 'gpu_histogram', text: 'The histogram is built on the GPU' }] },
+  });
+
+  it("uses the chat rows' words, with an item's text instead of its id", () => {
+    expect(historyText({ kind: 'checked', payload: { item: 'gpu_histogram', met: true } }, task)).toBe('Checked “The histogram is built on the GPU” — met');
+    expect(historyText({ kind: 'started', payload: null }, task)).toBe('Started');
+    expect(historyText({ kind: 'created', payload: null }, task)).toBe('Created');
+    expect(historyText({ kind: 'blocked', payload: { cause: 'CI is down' } }, task)).toBe('Blocked: CI is down');
+    expect(historyText({ kind: 'amend_approved', payload: null }, task)).toBe('Plan change approved');
+    expect(historyText({ kind: 'amend_proposed', payload: { plan: task.plan } }, task)).toBe('Plan change proposed');
+  });
+
+  it("shows the time for today's entries and the date for older ones, never the seconds", () => {
+    const now = new Date(2026, 10, 12, 21, 40).getTime();
+    const today = historyTime(new Date(2026, 10, 12, 9, 38, 25).getTime(), now);
+    expect(today).toMatch(/9:38/);
+    expect(today).not.toMatch(/25/);
+    const older = historyTime(new Date(2026, 10, 10, 9, 38).getTime(), now);
+    expect(older).toMatch(/10/);
+    expect(older).not.toMatch(/9:38/);
   });
 });

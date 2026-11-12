@@ -81,7 +81,7 @@ describe('the Tasks tab told which task is open', () => {
   it('opens the detail of the task the address names', async () => {
     render(<TasksTab projectId="p1" selected={2} onSelect={() => {}} />);
     const detail = await screen.findByTestId('task-detail');
-    expect(within(detail).getByText('Task #2')).toBeVisible();
+    expect(within(detail).getByText('#2')).toBeVisible();
   });
 
   it('asks for a picked task, and for none when the detail is closed', async () => {
@@ -105,7 +105,7 @@ describe('the Tasks tab told which task is open', () => {
     const { rerender } = render(<TasksTab projectId="p1" selected={2} onSelect={() => {}} />);
     await screen.findByTestId('task-detail');
     rerender(<TasksTab projectId="p1" selected={3} onSelect={() => {}} />);
-    expect(within(screen.getByTestId('task-detail')).getByText('Task #3')).toBeVisible();
+    expect(within(screen.getByTestId('task-detail')).getByText('#3')).toBeVisible();
     rerender(<TasksTab projectId="p1" selected={null} onSelect={() => {}} />);
     expect(screen.queryByTestId('task-detail')).toBeNull();
   });

@@ -12,7 +12,7 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { AlertTriangle, ArrowDown, ArrowUp, Check, CheckCheck, Circle, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, Ban, ArrowUp, Check, CheckCheck, Circle, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
 
 import { ReferenceBadge } from '@/components/reference-badge';
 import { type Mentions } from '@/components/markdown-body';
@@ -629,7 +629,6 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
 const CHECKLIST_NOTE: Partial<Record<ChecklistItem['status'], string>> = {
   paused: 'Paused',
   blocked: 'Blocked',
-  review: 'In review',
 };
 
 /** One plan item under the task being worked on: ticked, missed, or still open. */
@@ -661,8 +660,10 @@ function TodoPlanItem({ item }: { item: NonNullable<ChecklistItem['items']>[numb
  * the task's detail.
  */
 export function TodoPanel({ items, onOpen }: { items: ChecklistItem[]; onOpen?: (number: number) => void }) {
-  const complete = items.filter(finished).length;
-  const allComplete = complete === items.length;
+  const allComplete = items.every(finished);
+  // A cancelled task is neither done nor still to do, so the count leaves it out.
+  const counted = items.filter((item) => item.status !== 'cancelled');
+  const done = counted.filter((item) => item.status === 'completed').length;
   // An opened chat is opened to be read: the checklist starts as its one-line
   // header, and the reader unfolds it when they want it (bw-i7pg.1).
   const [expanded, setExpanded] = useState(false);
@@ -698,7 +699,9 @@ export function TodoPanel({ items, onOpen }: { items: ChecklistItem[]; onOpen?: 
               .find(Boolean)}
           </span>
         )}
-        <span className="ml-auto text-xs tabular-nums text-muted-foreground">{complete}/{items.length}</span>
+        {counted.length > 0 && (
+          <span data-testid="todo-count" className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{`${done} of ${counted.length} done`}</span>
+        )}
       </Row>
       {/* A long epic is a list, not a wall: it is capped and scrolls itself
           rather than pushing the transcript off the screen (bw-i7pg.1). */}
@@ -714,13 +717,18 @@ export function TodoPanel({ items, onOpen }: { items: ChecklistItem[]; onOpen?: 
             {/* The agent's tick, not the reader's: it shows the state and is
                 not a control, so it is kept out of the tab order. The one the
                 agent is on is the half-ticked box, pulsing. */}
-            <Checkbox
-              checked={finished(t) ? true : t.status === 'in_progress' || t.status === 'paused' ? 'indeterminate' : false}
-              aria-readonly="true"
-              aria-labelledby={`${tickId}-${t.id}`}
-              tabIndex={-1}
-              className={cn(t.status === 'in_progress' && 'animate-pulse')}
-            />
+            {t.status === 'cancelled' ? (
+              // Dropped, not done: no tick for it.
+              <Ban role="img" aria-label="Cancelled" data-testid="todo-cancelled" className="h-4 w-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <Checkbox
+                checked={t.status === 'completed' ? true : t.status === 'in_progress' || t.status === 'paused' ? 'indeterminate' : false}
+                aria-readonly="true"
+                aria-labelledby={`${tickId}-${t.id}`}
+                tabIndex={-1}
+                className={cn(t.status === 'in_progress' && 'animate-pulse')}
+              />
+            )}
             <Button
               variant="ghost"
               size="inherit"
@@ -733,7 +741,6 @@ export function TodoPanel({ items, onOpen }: { items: ChecklistItem[]; onOpen?: 
               className={cn(
                 'min-w-0 truncate',
                 finished(t) && 'text-muted-foreground',
-                t.status === 'cancelled' && 'line-through',
               )}
             >
               {t.text}
@@ -741,26 +748,33 @@ export function TodoPanel({ items, onOpen }: { items: ChecklistItem[]; onOpen?: 
             {t.stale && (
               <Badge variant="warning" appearance="light" size="sm" data-testid="todo-stale" className="shrink-0"><span>Stale</span></Badge>
             )}
+            {/* Its count and where it stands, together at the line's end. */}
+            <span className="ml-auto flex shrink-0 items-center gap-2">
             {t.progress && (
               <span
                 data-testid="todo-progress"
                 aria-label={`${t.progress.met} of ${t.progress.total} met`}
-                className="shrink-0 text-xs tabular-nums text-muted-foreground"
+                className="text-xs tabular-nums text-muted-foreground"
               >
                 {t.progress.met}/{t.progress.total}
               </span>
             )}
+            {/* What waits on the owner says so, as the Tasks tab's rows do. */}
+            {t.planChange && (
+              <Badge variant="warning" appearance="light" size="sm" data-testid="todo-waiting"><span>Plan change</span></Badge>
+            )}
+            {t.status === 'review' && (
+              <Badge variant="primary" appearance="light" size="sm" data-testid="todo-waiting"><span>In review</span></Badge>
+            )}
             {CHECKLIST_NOTE[t.status] && (
               <span
                 data-testid="todo-note"
-                className={cn(
-                  'ml-auto shrink-0 text-xs',
-                  t.status === 'blocked' ? 'text-[var(--color-warning-accent)]' : 'text-muted-foreground',
-                )}
+                className={cn('text-xs', t.status === 'blocked' ? 'text-[var(--color-warning-accent)]' : 'text-muted-foreground')}
               >
                 {CHECKLIST_NOTE[t.status]}
               </span>
             )}
+            </span>
             </Button>
             </div>
             {t.items && (

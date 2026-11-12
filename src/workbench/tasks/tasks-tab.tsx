@@ -7,30 +7,34 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { AlertTriangle, ListTodo, MessageSquarePlus, Plus, X } from 'lucide-react';
+import { AlertTriangle, Ban, ListTodo, LogOut, MessageSquare, MessageSquarePlus, MoreHorizontal, Plus, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Row } from '@/components/ui/row';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tooltip } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
-import { tasks as tasksApi } from '@/lib/api';
 import { cellFrom } from '@/lib/address';
+import { tasks as tasksApi } from '@/lib/api';
 import { copyText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import GridsView from '@/workbench/grids/grids-view';
 import { useLiveSessions, type LiveSession } from '@/workbench/live';
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
 import { lineForNewChat, NEW_TASK_LINE, startTaskIn } from '@/workbench/tasks/new-task';
+import { same } from '@/workbench/tasks/plan-diff';
 import { isStale, STALE_REASON } from '@/workbench/tasks/stale';
-import { MergeBadge, TaskCard, TaskOwnerActions, TaskStatusChip, shownStatus } from '@/workbench/tasks/task-card';
+import { MergeBadge, TaskCard, TaskStatusChip, ownerActions, shownStatus, type ShownStatus } from '@/workbench/tasks/task-card';
+import { eventText } from '@/workbench/tasks/task-event-row';
 import { STATUS_LABEL, typeLabel, type Task, type TaskEvent, type TaskStatus } from '@/workbench/tasks/types';
 import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
 
@@ -68,47 +72,146 @@ function sessionName(task: Task, sessions: ReadonlyMap<string, LiveSession>): st
   return task.sessionTitle || live?.name || live?.title || 'Untitled chat';
 }
 
-const EVENT_LABEL: Record<string, string> = {
-  created: 'Created', started: 'Started', checked: 'Item checked', blocked: 'Blocked', unblocked: 'Unblocked',
-  amend_proposed: 'Plan change proposed', amend_approved: 'Plan change approved', amend_rejected: 'Plan change rejected',
-  done: 'Finished', submitted: 'Submitted for review', approved: 'Approved', reopened: 'Reopened',
-  cancelled: 'Cancelled', taken: 'Moved to chat', released: 'Released',
+/** A stored event's kind, as the chat's task rows name the same change. */
+const CHAT_EVENT: Record<string, string> = {
+  started: 'start', checked: 'check', blocked: 'block', unblocked: 'unblock', amend_proposed: 'amend',
+  amend_approved: 'approve_amend', amend_rejected: 'reject_amend', done: 'done', submitted: 'done',
+  approved: 'approve', reopened: 'reopen', cancelled: 'cancel', released: 'release',
 };
+/** The changes a chat row has no words for, or words that only fit inside the chat. */
+const OWN_LABEL: Record<string, string> = { created: 'Created', taken: 'Moved to another chat' };
 
-/** The words an event carries worth showing: a note, a reason, a cause. */
-function eventDetail(payload: unknown): string {
-  if (typeof payload === 'string') return payload;
-  if (typeof payload !== 'object' || payload === null) return '';
-  const p = payload as Record<string, unknown>;
-  // An item checked: which one, and whether it was met.
-  if (typeof p.item === 'string' && typeof p.met === 'boolean') {
-    const why = typeof p.reason === 'string' && p.reason ? `: ${p.reason}` : '';
-    return p.met ? `"${p.item}" met` : `"${p.item}" not met${why}`;
+const rec = (value: unknown): Record<string, unknown> =>
+  (typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {});
+
+/**
+ * One history line in the chat rows' words (task-event-row.tsx), read
+ * against the task as it is now: a checked item by its text, not its id.
+ */
+export function historyText(event: Pick<TaskEvent, 'kind' | 'payload'>, task: Task): string {
+  if (OWN_LABEL[event.kind]) return OWN_LABEL[event.kind]!;
+  const kind = CHAT_EVENT[event.kind];
+  if (!kind) return event.kind;
+  const payload = rec(event.payload);
+  if (kind === 'amend') {
+    // The proposal against the plan now; once approved the two are the same and there is nothing to show.
+    const plan = rec(payload.plan);
+    return Object.keys(plan).length && !same(task.plan, plan) ? eventText(kind, { ...task, pendingAmend: plan }) : 'Plan change proposed';
   }
-  for (const key of ['note', 'reason', 'cause', 'summary']) {
-    if (typeof p[key] === 'string' && p[key]) return p[key] as string;
-  }
-  return '';
+  if (kind === 'done') return eventText(kind, { ...task, status: event.kind === 'submitted' ? 'review' : 'done' });
+  return eventText(kind, task, payload);
 }
 
-function History({ events }: { events: TaskEvent[] | null }) {
+/** Today's entries by their time, older ones by their date; never the seconds. */
+export function historyTime(at: number, now: number = Date.now()): string {
+  const when = new Date(at);
+  const today = new Date(now);
+  if (when.toDateString() === today.toDateString()) return when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return when.toLocaleDateString([], {
+    month: 'short', day: 'numeric', ...(when.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }),
+  });
+}
+
+function History({ events, task }: { events: TaskEvent[] | null; task: Task }) {
   if (events === null) return <Spinner className="size-4 text-muted-foreground" />;
   if (!events.length) return <p className="text-xs text-muted-foreground">No history</p>;
+  const now = Date.now();
   return (
     <ol data-testid="task-history" className="space-y-1.5">
       {[...events].sort((a, b) => b.seq - a.seq).map((event) => (
-        <li key={event.seq} className="flex gap-2 text-xs">
-          <time className="w-36 shrink-0 tabular-nums text-muted-foreground" dateTime={new Date(event.at).toISOString()}>
-            {new Date(event.at).toLocaleString()}
-          </time>
-          <div className="min-w-0">
-            <span className="font-medium text-foreground">{EVENT_LABEL[event.kind] ?? event.kind}</span>
+        <li key={event.seq} className="flex gap-3 text-xs">
+          <Tooltip label={new Date(event.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}>
+            <time className="w-16 shrink-0 tabular-nums text-muted-foreground" dateTime={new Date(event.at).toISOString()}>
+              {historyTime(event.at, now)}
+            </time>
+          </Tooltip>
+          <p className="min-w-0 whitespace-pre-wrap break-words">
+            <span className="text-foreground">{historyText(event, task)}</span>
             <span className="text-muted-foreground">{` · ${event.actor === 'owner' ? 'Owner' : 'Agent'}`}</span>
-            {eventDetail(event.payload) && <div className="whitespace-pre-wrap break-words text-muted-foreground">{eventDetail(event.payload)}</div>}
-          </div>
+          </p>
         </li>
       ))}
     </ol>
+  );
+}
+
+const failure = (e: unknown) => (e instanceof Error ? e.message : String(e)).replace(/^API error: \d+\s*/, '');
+
+/** The owner's cancel, with its reason: in the detail, and on a stale row. */
+function CancelForm({ task, initial = '', onDone, onBack }: {
+  task: Task;
+  initial?: string;
+  onDone: () => void;
+  onBack: () => void;
+}) {
+  const [reason, setReason] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await tasksApi.act(task.projectId, task.number, 'cancel', { reason: reason.trim() });
+      onDone();
+    } catch (e) {
+      setError(failure(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form
+      className="space-y-2"
+      data-testid="task-cancel-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (reason.trim()) void send();
+      }}
+    >
+      <Textarea autoFocus rows={2} aria-label="Reason" placeholder="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" variant="destructive" disabled={!reason.trim()} loading={busy}>Cancel task</Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onBack}>Back</Button>
+      </div>
+      {error && <div role="alert" className="text-xs text-destructive">{`Couldn't cancel task. ${error}`}</div>}
+    </form>
+  );
+}
+
+/** Release and Cancel task: used now and then, so kept in the header's More menu. */
+function TaskMenu({ task, onCancel, onError }: { task: Task; onCancel: () => void; onError: (message: string | null) => void }) {
+  const can = ownerActions(task);
+  if (!can.includes('release') && !can.includes('cancel')) return null;
+  const release = async () => {
+    onError(null);
+    try {
+      await tasksApi.act(task.projectId, task.number, 'release');
+    } catch (e) {
+      onError(`Couldn't release task. ${failure(e)}`);
+    }
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="ghost" size="icon" aria-label="More" data-testid="task-more" className="size-8">
+          <MoreHorizontal aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {can.includes('release') && (
+          <DropdownMenuItem data-testid="task-release" onSelect={() => void release()}>
+            <LogOut aria-hidden />
+            Release
+          </DropdownMenuItem>
+        )}
+        {can.includes('cancel') && (
+          <DropdownMenuItem data-testid="task-cancel" variant="destructive" onSelect={onCancel}>
+            <Ban aria-hidden />
+            Cancel task
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -118,6 +221,8 @@ function TaskDetail({ task, onClose, onOpenChat }: {
   onOpenChat?: (sessionId: string) => void;
 }) {
   const [events, setEvents] = useState<TaskEvent[] | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     tasksApi.get(task.projectId, task.number)
@@ -143,20 +248,27 @@ function TaskDetail({ task, onClose, onOpenChat }: {
     <ComposerPrefillContext.Provider value={createTask}>
       <div data-testid="task-detail" className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">
-          <span className="text-sm font-medium">{`Task #${task.number}`}</span>
+          {/* The card under it says which task this is; the header holds what is done to it. */}
           {task.sessionId && onOpenChat && (
-            <Button type="button" variant="ghost" size="xs" onClick={() => onOpenChat(task.sessionId!)}>Open chat</Button>
+            <Button type="button" variant="ghost" size="xs" onClick={() => onOpenChat(task.sessionId!)}>
+              <MessageSquare aria-hidden />
+              Open chat
+            </Button>
           )}
-          <Button type="button" variant="ghost" size="icon" aria-label="Close" className="ml-auto size-8" onClick={onClose}>
-            <X />
-          </Button>
+          <span className="ml-auto flex items-center gap-1">
+            <TaskMenu task={task} onCancel={() => { setError(null); setCancelling(true); }} onError={setError} />
+            <Button type="button" variant="ghost" size="icon" aria-label="Close" className="size-8" onClick={onClose}>
+              <X />
+            </Button>
+          </span>
         </div>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+          {cancelling && <CancelForm task={task} onDone={() => setCancelling(false)} onBack={() => setCancelling(false)} />}
+          {error && <div role="alert" className="text-xs text-destructive">{error}</div>}
           <TaskCard task={task} />
-          <TaskOwnerActions task={task} only={['cancel', 'release']} />
           <section className="space-y-2">
             <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">History</h3>
-            <History events={events} />
+            <History events={events} task={task} />
           </section>
         </div>
       </div>
@@ -233,6 +345,7 @@ export function NewTaskButton({ projectId, onOpenChat, onNewChat, line = NEW_TAS
                 onOpenChat(chat.id);
               }}
             >
+              <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <span className="min-w-0 truncate text-sm">{chat.name}</span>
             </Row>
           ))}
@@ -248,69 +361,42 @@ export function NewTaskButton({ projectId, onOpenChat, onNewChat, line = NEW_TAS
  */
 function StaleCancel({ task }: { task: Task }) {
   const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState(STALE_REASON);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const send = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await tasksApi.act(task.projectId, task.number, 'cancel', { reason: reason.trim() });
-      setOpen(false);
-    } catch (e) {
-      setError((e instanceof Error ? e.message : String(e)).replace(/^API error: \d+\s*/, ''));
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) { setReason(STALE_REASON); setError(null); }
-      }}
-    >
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button type="button" size="xs" variant="ghost" className="mx-2 shrink-0" data-testid="task-row-cancel" aria-label={`Cancel task #${task.number}`}>
           Cancel
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="space-y-2">
-        <form
-          className="space-y-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (reason.trim()) void send();
-          }}
-        >
-          <Textarea autoFocus rows={2} aria-label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" variant="destructive" disabled={!reason.trim()} loading={busy}>Cancel task</Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Back</Button>
-          </div>
-          {error && <div role="alert" className="text-xs text-destructive">{`Couldn't cancel task. ${error}`}</div>}
-        </form>
+      <PopoverContent align="end">
+        {/* Mounted afresh on each open, so the reason starts from the written one. */}
+        <CancelForm task={task} initial={STALE_REASON} onDone={() => setOpen(false)} onBack={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   );
 }
 
-/** Tasks | Grids, at the head of the tab (docs/grids.md, "Front end"). */
+/**
+ * Tasks | Grids, at the head of the tab (docs/grids.md, "Front end"): the
+ * same switch as the project's Chat | Tasks | Files above it.
+ */
 function ViewSwitch({ view, onView }: { view: 'tasks' | 'grids'; onView: (view: 'tasks' | 'grids') => void }) {
   return (
-    <ToggleGroup
-      type="single"
-      size="xs"
-      value={view}
-      onValueChange={(next) => { if (next === 'tasks' || next === 'grids') onView(next); }}
-      aria-label="Show"
-      data-testid="tasks-view"
-    >
-      <ToggleGroupItem value="tasks" data-testid="tasks-view-tasks">Tasks</ToggleGroupItem>
-      <ToggleGroupItem value="grids" data-testid="tasks-view-grids">Grids</ToggleGroupItem>
-    </ToggleGroup>
+    <Tabs value={view} onValueChange={(next) => { if (next === 'tasks' || next === 'grids') onView(next); }}>
+      <TabsList aria-label="Show" data-testid="tasks-view">
+        <TabsTrigger value="tasks" data-testid="tasks-view-tasks">Tasks</TabsTrigger>
+        <TabsTrigger value="grids" data-testid="tasks-view-grids">Grids</TabsTrigger>
+      </TabsList>
+    </Tabs>
   );
+}
+
+/** The bar at the head of both views, so switching between them moves nothing. */
+const TOOLBAR = 'flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2';
+
+/** A row's status chip, left out where the group's heading already says it. */
+function RowStatus({ status, group }: { status: ShownStatus; group: TaskStatus }) {
+  return status === group ? null : <TaskStatusChip status={status} className="shrink-0" />;
 }
 
 type GridPlace = { grid: string | null; cell?: string | null };
@@ -345,7 +431,7 @@ export default function TasksTab(props: Omit<Parameters<typeof TaskList>[0], 'sw
   if (view === 'tasks') return <TaskList {...rest} switcher={switcher} />;
   return (
     <div data-testid="grids-tab" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">{switcher}</div>
+      <div className={TOOLBAR}>{switcher}</div>
       <GridsView
         projectId={rest.projectId}
         grid={grid}
@@ -408,10 +494,12 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
     <LiveTasksContext.Provider value={liveTasks}>
       <div data-testid="tasks-tab" className="flex min-h-0 flex-1">
         <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', chosen && 'hidden md:flex')}>
-          <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2">
+          <div className={TOOLBAR}>
             {switcher}
+            {/* On a phone the filter, the count and New task share the line under the switch, the filter taking what is left. */}
+            <div className="flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
             <Select value={filterValue(filter)} onValueChange={(value) => setFilter(filterFrom(value))}>
-              <SelectTrigger className="h-8 w-56" aria-label="Chat" data-testid="tasks-filter">
+              <SelectTrigger className="h-8 min-w-0 flex-1 sm:w-56 sm:flex-none" aria-label="Chat" data-testid="tasks-filter">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -420,11 +508,13 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
                 {holders.map(([id, name]) => <SelectItem key={id} value={`session:${id}`}>{name}</SelectItem>)}
               </SelectContent>
             </Select>
-            <span className="ml-auto text-xs tabular-nums text-muted-foreground">{`${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`}</span>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground sm:ml-auto">{`${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`}</span>
             {onOpenChat && <NewTaskButton projectId={projectId} onOpenChat={onOpenChat} onNewChat={onNewChat} />}
+            </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {/* A container, so a row drops its chat name when the list is narrow (the detail open) before its title gives way. */}
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 [container-type:inline-size]">
             {error && !tasks.length ? (
               <ReadFailed what="Couldn't load tasks." why={error.message} onRetry={refetch} />
             ) : !loaded ? (
@@ -471,9 +561,12 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
                               className="min-h-10 min-w-0 flex-1 flex-wrap gap-y-1 sm:flex-nowrap"
                             >
                               <span className="shrink-0 font-mono text-xs text-muted-foreground sm:w-10">#{task.number}</span>
-                              <Badge variant="secondary" size="sm" className="shrink-0"><span>{typeLabel(task.type)}</span></Badge>
-                              <span data-testid="task-row-title" className={cn('order-last line-clamp-2 min-w-0 basis-full text-sm sm:order-none sm:line-clamp-none sm:flex-1 sm:basis-auto sm:truncate', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</span>
-                              <span className="ml-auto hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground sm:inline">{sessionName(task, sessions)}</span>
+                              {/* A column of its own, so the titles after it line up. */}
+                              <span className="flex shrink-0 sm:w-28">
+                                <Badge variant="secondary" size="sm" className="min-w-0"><span className="truncate">{typeLabel(task.type)}</span></Badge>
+                              </span>
+                              <span data-testid="task-row-title" className={cn('order-last line-clamp-2 min-w-0 basis-full text-sm sm:order-none sm:line-clamp-none sm:flex-1 sm:basis-auto sm:truncate', task.status === 'cancelled' && 'text-muted-foreground')}>{task.title}</span>
+                              <span data-testid="task-row-chat" className="ml-auto hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground [@container(min-width:44rem)]:inline">{sessionName(task, sessions)}</span>
                               <span className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
                                 {stale.has(task.number) && (
                                   <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-stale" className="shrink-0"><span>Stale</span></Badge>
@@ -485,7 +578,7 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
                                   <AlertTriangle role="img" aria-label="Finished with shortfalls" data-testid="task-row-shortfalls" className="size-3.5 shrink-0 text-[var(--color-warning-accent)]" />
                                 )}
                                 <MergeBadge task={task} className="shrink-0" />
-                                <TaskStatusChip status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} className="shrink-0" />
+                                <RowStatus status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} group={group.status} />
                               </span>
                             </Row>
                             {stale.has(task.number) && <StaleCancel task={task} />}

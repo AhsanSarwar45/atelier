@@ -56,13 +56,25 @@ describe('the live checklist', () => {
     expect(screen.getByText('#3 Forgotten').parentElement).toContainElement(screen.getByTestId('todo-stale'));
   });
 
-  it('counts cancelled as finished and strikes it through', () => {
+  it('marks a cancelled task with its own icon, not a tick, and leaves it out of the count', () => {
     render(<TodoPanel items={[...active, { id: '3', text: '#3 Dropped', status: 'cancelled' }, { id: '4', text: '#4 Stuck', status: 'blocked' }]} />);
-    expect(screen.getByText('2/4')).toBeVisible();
+    expect(screen.getByTestId('todo-count')).toHaveTextContent('1 of 3 done');
     fireEvent.click(screen.getByRole('button', { name: /tasks/i }));
-    expect(screen.getByText('#3 Dropped')).toHaveClass('line-through');
-    expect(screen.getByText('#1 Find the cause')).not.toHaveClass('line-through');
+    expect(screen.getByText('#3 Dropped')).not.toHaveClass('line-through');
+    const dropped = screen.getAllByTestId('todo-item').find((item) => item.dataset.todoStatus === 'cancelled')!;
+    expect(dropped.querySelector('[data-testid="todo-cancelled"]')).not.toBeNull();
+    expect(dropped.querySelector('button[role="checkbox"]')).toBeNull();
     expect(screen.getByText('Blocked')).toBeVisible();
+  });
+
+  it('shows a chip on a task waiting on the owner', () => {
+    render(<TodoPanel items={[
+      { id: '1', text: '#1 Changing', status: 'paused', planChange: true },
+      { id: '2', text: '#2 Finished', status: 'review' },
+    ]} />);
+    fireEvent.click(screen.getByRole('button', { name: /tasks/i }));
+    expect(screen.getAllByTestId('todo-waiting').map((chip) => chip.textContent)).toEqual(['Plan change', 'In review']);
+    expect(checklistForTasks([makeTask({ number: 1, status: 'in_progress', pendingAmend: { outcome: 'x', criteria: [] } })], 's1', 'idle', 1)[0]!.planChange).toBe(true);
   });
 
   it('shows the current task on the folded row, paused ones included', () => {
@@ -76,7 +88,7 @@ describe('the live checklist', () => {
     const toggle = screen.getByRole('button', { name: /tasks/i });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByTestId('todo-panel')).toHaveAttribute('data-expanded', 'no');
-    expect(screen.getByText('1/2')).toBeVisible();
+    expect(screen.getByText('1 of 2 done')).toBeVisible();
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -99,7 +111,7 @@ describe('the live checklist', () => {
     view.rerender(<TodoPanel items={active.map((item) => ({ ...item, status: 'completed' as const }))} />);
 
     expect(screen.getByRole('button', { name: /tasks/i })).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByText('2/2')).toBeVisible();
+    expect(screen.getByText('2 of 2 done')).toBeVisible();
   });
 
   it('starts compact when a completed checklist is restored with a chat', () => {

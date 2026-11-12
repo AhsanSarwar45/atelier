@@ -196,8 +196,8 @@ describe('plan items ticked while a task is in progress', () => {
     fireEvent.click(await screen.findByText('Export'));
     const detail = await screen.findByTestId('task-detail');
     expect(states(detail)).toEqual({ a: 'yes', b: 'no', c: 'pending' });
-    await waitFor(() => expect(within(detail).getByTestId('task-history')).toHaveTextContent('Item checked'));
-    expect(within(detail).getByTestId('task-history')).toHaveTextContent('"b" not met: No printer');
+    // The chat row's words, with the item's text rather than its id.
+    await waitFor(() => expect(within(detail).getByTestId('task-history')).toHaveTextContent('Checked “Item b” — missed: No printer'));
 
     list.mockResolvedValue([after]);
     get.mockResolvedValue({ task: after, events: [] });

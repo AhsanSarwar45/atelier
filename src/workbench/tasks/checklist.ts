@@ -15,6 +15,8 @@ export interface ChecklistItem {
    * (`atelier task check`), missed with a reason, or still open.
    */
   items?: ItemProgress[];
+  /** A plan change the agent proposed, waiting on the owner's answer. */
+  planChange?: boolean;
   /** For a task with plan items, how many are met out of all of them (`3/7`). */
   progress?: { met: number; total: number };
 }
@@ -49,6 +51,7 @@ export function checklistForTasks(tasks: Task[], sessionId: string | null, state
         text: `#${task.number} ${task.title}`,
         status,
         ...(isStale(task, now) ? { stale: true } : {}),
+        ...(task.pendingAmend ? { planChange: true } : {}),
         ...(items.length ? { items } : {}),
         ...(total ? { progress: { met, total } } : {}),
       };
