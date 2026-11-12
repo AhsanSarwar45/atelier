@@ -601,4 +601,57 @@ pub(crate) mod tests {
         let outcome = ask(&store, "done", Some(one), done_payload(), Some(gate)).unwrap();
         assert_eq!(outcome.task.status, "done");
     }
+
+    #[tokio::test]
+    async fn done_measures_break_it_and_the_diff_scan_once_every_check_passes() {
+        use crate::workbench::grids::proof::tests::{commit_file, git_run, repository};
+        let root = repository();
+        let dir = root.path();
+        commit_file(dir, "src/value.txt", "1\n");
+        commit_file(dir, "tests/value.sh", "grep -qx 2 src/value.txt || { echo 'value FAILED'; exit 1; }\n");
+        commit_file(dir, "src/a.test.ts", "it('exports', () => {})\n");
+        let start = git_run(dir, &["rev-parse", "HEAD"]);
+        commit_file(dir, "src/value.txt", "2\n");
+        commit_file(dir, "src/a.test.ts", "it.skip('exports', () => {})\n");
+        let real = json!({"name": "real", "command": "sh tests/value.sh", "kind": "test", "given": "g", "when": "w", "then": "t",
+            "red": "value FAILED", "files": ["tests/value.sh"]});
+        let empty = json!({"name": "empty", "command": "test -f tests/value.sh", "kind": "test", "given": "g", "when": "w", "then": "t",
+            "files": ["tests/value.sh"]});
+        let plan = json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [real, empty]}]});
+        let stored = json!({"hashes": {"files": {}, "harness": []}, "startCommit": start});
+        let done = checks::Measure::Done { test_command: None };
+        let gate = checks::measure(dir, "feature", &plan, &stored, done.clone(), 1).await;
+        let kinds: Vec<(String, String)> = gate.flags.iter()
+            .map(|f| (f["kind"].as_str().unwrap().to_string(), f["check"].as_str().unwrap_or("").to_string())).collect();
+        assert!(kinds.contains(&("proves-nothing".into(), "empty".into())), "{kinds:?}");
+        assert!(!kinds.contains(&("proves-nothing".into(), "real".into())), "{kinds:?}");
+        assert!(kinds.iter().any(|(kind, _)| kind == "skip-added"), "{kinds:?}");
+        assert_eq!(git_run(dir, &["status", "--porcelain"]), "", "the checkout is untouched");
+        assert_eq!(git_run(dir, &["worktree", "list"]).lines().count(), 1, "the scratch worktree is gone");
+        // While a check fails the audits do not run.
+        std::fs::write(dir.join("src/value.txt"), "3\n").unwrap();
+        assert!(checks::measure(dir, "feature", &plan, &stored, done, 2).await.flags.is_empty());
+    }
+
+    #[test]
+    fn done_keeps_the_lint_and_adds_break_it_and_diff_flags_for_the_owner() {
+        let (_d, store) = store();
+        let mut gate = measured(&[], &[]);
+        gate.flags = vec![json!({"kind": "weak", "item": "export", "check": "a", "text": "\"a\" has no red pattern"})];
+        let payload = json!({"type": "feature", "title": "T", "why": "W", "plan": plan()});
+        let one = ask(&store, "create", None, payload, Some(gate)).unwrap().task.number;
+        ask(&store, "start", Some(one), json!({}), Some(red())).unwrap();
+        let mut gate = green(&[]);
+        gate.flags = vec![
+            json!({"kind": "proves-nothing", "item": "images", "check": "i", "text": "\"i\" still passes with the task's changes undone, so it proves nothing"}),
+            json!({"kind": "skip-added", "text": "src/a.test.ts adds a skip or only marker: it.skip('exports', () => {"}),
+            json!({"kind": "exit-in-test", "text": "src/a.test.ts adds an exit call in a test file: process.exit(0)"}),
+            json!({"kind": "test-deleted", "text": "the test file tests/old.rs was deleted"}),
+        ];
+        let outcome = ask(&store, "done", Some(one), done_payload(), Some(gate)).unwrap();
+        let shown = super::super::to_json(&store, &outcome.task);
+        let kinds: Vec<&str> = shown["checkFlags"].as_array().unwrap().iter().map(|f| f["kind"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["weak", "proves-nothing", "skip-added", "exit-in-test", "test-deleted"]);
+        assert_eq!(outcome.task.status, "done", "flags inform the owner; they do not refuse done");
+    }
 }
