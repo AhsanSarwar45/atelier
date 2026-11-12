@@ -88,9 +88,9 @@ export function whereFrom(params: URLSearchParams): Where {
   // Naming a file asks for the Files tab, the same way naming a chat asks for
   // the Chat tab: a link that carries one lands where the thing it carries can
   // actually be seen, without every writer of a link having to spell the tab
-  // out as well. An address that names no tab, or an unknown or retired one,
-  // opens on the tasks: that is where a project's work is kept. A named chat
-  // still opens the chat it names.
+  // out as well. An address that names no tab, or an unknown one, opens on
+  // the chat. One that names the retired board or one of its cards opens on
+  // the tasks, which took its place.
   const tab: Tab =
     rawTab === 'chat'
       ? 'chat'
@@ -104,7 +104,9 @@ export function whereFrom(params: URLSearchParams): Where {
               ? 'files'
               : chat
                 ? 'chat'
-                : 'tasks';
+                : RETIRED.some((key) => params.has(key))
+                  ? 'tasks'
+                  : 'chat';
   return {
     id: params.get('id'),
     tab,

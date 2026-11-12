@@ -23,14 +23,14 @@ vi.mock('@/components/shell', () => ({
 }));
 
 describe('retiring reports as a destination', () => {
-  it('shows no report tab and sends an old report address to the tasks', async () => {
-    expect(whereFrom(params).tab).toBe('tasks');
+  it('shows no report tab and sends an old report address to the chat', async () => {
+    expect(whereFrom(params).tab).toBe('chat');
 
     render(<ProjectPage />);
 
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeVisible();
     expect(screen.getByRole('tab', { name: 'Tasks' })).toBeVisible();
     expect(screen.queryByRole('tab', { name: /report/i })).not.toBeInTheDocument();
-    expect(await screen.findByTestId('tasks-tab')).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
   });
 });

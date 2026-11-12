@@ -25,10 +25,10 @@ describe('the address can name a file', () => {
     expect(whereFrom(new URLSearchParams('tab=chat&file=/work/a.ts')).tab).toBe('chat');
   });
 
-  it('opens on the tasks when the address names no tab it knows', () => {
+  it('opens on the chat when the address names no tab it knows', () => {
     expect(whereFrom(new URLSearchParams('chat=s1')).tab).toBe('chat');
-    expect(whereFrom(new URLSearchParams('')).tab).toBe('tasks');
-    expect(whereFrom(new URLSearchParams('tab=reports')).tab).toBe('tasks');
+    expect(whereFrom(new URLSearchParams('')).tab).toBe('chat');
+    expect(whereFrom(new URLSearchParams('tab=reports')).tab).toBe('chat');
   });
 
   // The board is gone. An address saved while it was here still opens, on the
