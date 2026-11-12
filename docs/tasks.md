@@ -88,6 +88,8 @@ todo ──start──▶ in_progress ──done──▶ done
   the task is unassigned or its session already has another task in progress).
 - `amend` stores `pending_amend`. The owner approves (plan replaced) or
   rejects. `done` is validated against the approved plan.
+- The owner's approve, reopen and plan-change answers are told to the chat
+  holding the task (see Owner answers).
 - Done with an unmet plan item is allowed only with a reason for that item.
   The task is then `done` with `shortfalls = 1`.
 
@@ -138,6 +140,42 @@ propose ──▶ pending ──Create task──▶ created (a todo task in the
   the chat is mid-turn the prompt is held and sent when the turn ends; if it
   is not running it is started.
 - Deleting the chat cancels its pending proposals.
+
+### Owner answers
+
+When the owner approves or reopens a task in review, or approves or rejects
+its plan change, and the action succeeds, the chat holding the task is told
+as a prompt, queued like a proposal's answer (held while the chat is
+mid-turn, started if it is not running). A task no chat holds tells nobody;
+the owner's other actions (`cancel`, `release`) tell nobody.
+
+- **approve**: `Owner approved task #N "T".` and where its commits stand,
+  read as for the Merged badge (see Merging) in the holding chat's folder,
+  else the project's:
+  - on the base already: `Its commits are on main already; nothing is left
+    to merge.`
+  - not yet: `Its commits are on branch B, not yet on main. Ask the owner
+    whether to merge B into main, and don't merge without their yes.` (with
+    no branch to name, when the folder is detached or on the base itself:
+    `Its commits are not all on main yet. Ask the owner whether to merge
+    them into main, …`)
+  - no folder, no repository, no base branch or a commit git does not know:
+    `Merge state is unknown: its commits or folder could not be read. Check
+    whether its commits are on the base branch before asking the owner about
+    merging, and don't merge without their yes.`
+  - no commits named: `It names no commits, so nothing is left to merge.`
+
+  The agent asks the owner before merging and never merges without the
+  owner's yes.
+- **reopen**: `Owner reopened task #N "T": NOTE. Continue the work and run
+  done again.` (no `: NOTE` when the note is empty). A reopened task left
+  `todo` says ``Start it again with `atelier task start N`, continue the
+  work and run done again.`` instead.
+- **approve_amend**: `Owner approved the plan change for task #N "T":
+  continue with the new plan.`
+- **reject_amend**: `Owner rejected the plan change for task #N "T": NOTE.
+  Continue with the old plan.`, or `…: continue with the old plan.` with no
+  note.
 
 ### Reconnect
 
@@ -399,6 +437,9 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
    only for a cause outside your control. Finish it with a full result.
    Never leave it in progress at the end of the work.
 4. Plan changes go through `amend`. Never change scope silently.
+   The owner's approve, reopen and plan-change answers arrive as messages;
+   after an approval, ask before merging and never merge without the
+   owner's yes.
 5. Follow-ups are suggestions on the result, not new tasks.
 
 ## Front end

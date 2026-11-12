@@ -94,6 +94,21 @@ screenshots. Pick the visual type up front instead.
    cancel it.
 7. The checklist shows this chat's tasks. Do not keep a separate checklist.
 
+## The owner's answers
+
+The owner's answers to a task arrive as messages:
+
+- **Owner approved task #N.** The task is done. The message says where its
+  commits stand. If they are not yet on the base branch, ask the owner
+  whether to merge them. Never merge without the owner's yes. If merge
+  state is unknown, check whether the commits are on the base branch before
+  asking. If nothing is left to merge, there is nothing more to do.
+- **Owner reopened task #N**, with a note: do what the note asks, then run
+  `done` again. Start the task first if the message says so.
+- **Owner approved the plan change**: continue with the new plan.
+- **Owner rejected the plan change**: continue with the old plan, minding
+  the owner's note if there is one.
+
 ## Grids
 
 A coverage grid lists an area's features (rows) against what each must do
