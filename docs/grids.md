@@ -112,6 +112,11 @@ Every change appends a row. A cell's history is its own events. Kinds:
 (json `[{id, name, proof_rule}]`), `pending` (json, null: a change waiting for
 the owner), `updated_at` and `updated_by`.
 
+`grid_task_cell`: `(project_id, task, slug, row, col)`, the key, one row per
+cell a task ever claimed. A claim is released on done or cancel, so this is
+what the task card reads to keep listing its cells afterwards. A proposal's
+cells wait in a `cells` json column added to `task_proposal`.
+
 ### Derived, never stored
 
 These are worked out each time a grid is read:
@@ -387,7 +392,9 @@ atelier grid template set NAME   {columns: [{id, name, proof_rule}]}
   types, the release happens when the task enters `review`.
 - **Cancel** releases the claims, and each `in_progress` cell goes back to
   `claimed_from`.
-- The task card lists its cells with live states. The cell detail links to
+- The task card lists its cells with live states: task JSON has `cells:
+  [{grid, row, col, state, claimed, reason}]`, and a proposal's JSON has the
+  `cells` it asked for. The cell detail links to
   its claiming task.
 
 ## N/A
@@ -472,10 +479,18 @@ JSON is camelCase.
   are the owner grid's cells for columns with the same id, marked `ref:
   true`. Columns that do not match are left out.
 - `GET /api/workbench/grids/:project/:slug/cells/:row/:col` → `{cell (with
-  full proof and lastCheck), row, column, events: GridEvent[]}`.
+  full proof and lastCheck), row, column, events: GridEvent[]}`. When the
+  proof lists commits, the cell also has `merged: boolean`: every one of them
+  is in the project's base branch.
 - `POST /api/workbench/grid` with `{action, actor, session?, project?, slug?,
-  row?, col?, payload?, files?}` → `{grid?, cell?, widget, summary}` or
-  `400 {error}`. Agent actions: `draft discover prove verify na audit_done
+  row?, col?, payload?, files?}` → `{grid?, cell?, widget, summary, failed?,
+  template?, audit?}` or `400 {error}`. `failed` is set when the action ran
+  but its checks or search failed (a re-check that reopened a cell, a
+  discovery whose search failed; the CLI exits 1). A discovery whose search
+  fails answers `400 {error}` after recording it in `discovery`. Template
+  actions (`template_set`, `approve_template`, `reject_template`) name the
+  template in `slug`. Grid-wide `verify` takes `payload.staleOnly` to re-check
+  only stale cells, and has no widget. Agent actions: `draft discover prove verify na audit_done
   pass reopen template_set`. Owner actions: `approve discard approve_na
   reject_na reopen verify discover approve_template reject_template`. Long
   actions (`prove`, `verify`, `discover`) run their commands before going to
@@ -484,7 +499,10 @@ JSON is camelCase.
   projectId, slug}` on the `workbench` feed. Claim changes also send
   `tasks.changed`.
 - Widget: `{type: "grid", event, grid: GridSummary, cell?, template?,
-  audit?}`, validated in `media.rs` like `task`. `event` is one of `draft`,
+  audit?}`, validated in `media.rs` like `task`. A `template` widget has no
+  `grid`; its `template` is `{name, projectId, columns, pending, updatedAt,
+  change: {added, removed, changed, affects: [slug], clashes: [{grid,
+  column}]}}`. `event` is one of `draft`,
   `template`, `prove`, `na`, `audit`, `reopen`, `pass`, `discover`.
 
 ## Reconnect
@@ -564,7 +582,9 @@ extended to check for `atelier grid prove`.
   validating its output.
 - `server/src/workbench/grids/proof.rs`: proof validation, running checks,
   fingerprints and their cache.
-- `server/src/workbench/grids/watch.rs`: the 60 s HEAD watcher.
+- `server/src/workbench/grids/watch.rs`: the 60 s HEAD watcher's loop and
+  rules; what a tick reads and writes is `watch` in
+  `server/src/routes/workbench/grids.rs`.
 - `server/src/workbench/grids/cli.rs`: `atelier grid`.
 - `server/src/routes/workbench/grids.rs`: routes, `announce`, reuse of
   `tell_chat`, which moves to a shared spot in `routes/workbench`.
