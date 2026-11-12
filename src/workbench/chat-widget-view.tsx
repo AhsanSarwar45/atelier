@@ -3,14 +3,13 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState, type ReactNode } from 'react';
 
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, Circle, Clock, FileCode2, Pause, Play, ZoomIn } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, Circle, Clock, FileCode2, Pause, Play } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTriggerRow } from '@/components/ui/collapsible';
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
-import { Tooltip } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
@@ -18,15 +17,16 @@ import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import type { LookableImage } from '@/workbench/protocol';
-import { StoredImage } from '@/workbench/stored-image';
 import { TaskEventRow } from '@/workbench/tasks/task-event-row';
-// Diagrams bring mermaid, ELK, React Flow and motion — megabytes a chat with
-// no diagram in it never needs, fetched when one is drawn (bw-fbzd.4).
-const VisualArtifactView = dynamic(() => import('@/workbench/visual-artifact-view').then((m) => m.VisualArtifactView), { ssr: false });
+import { ZoomableImage } from '@/workbench/zoomable-image';
 import { useOpenPath } from '@/workbench/open-path';
 import { presentationAssetUrl } from '@/workbench/attachment-store';
 import { GridCard } from '@/workbench/grids/grid-card';
 import { ProposalCard, TaskCard } from '@/workbench/tasks/task-card';
+
+// Diagrams bring mermaid, ELK, React Flow and motion — megabytes a chat with
+// no diagram in it never needs, fetched when one is drawn (bw-fbzd.4).
+const VisualArtifactView = dynamic(() => import('@/workbench/visual-artifact-view').then((m) => m.VisualArtifactView), { ssr: false });
 
 const COLORS = ['var(--color-primary-accent)', 'var(--color-info-accent)', 'var(--color-success-accent)', 'var(--color-warning-accent)'];
 const EXPLAINER_ACCENTS = ['var(--color-info-accent)', 'var(--color-warning-accent)', 'var(--color-success-accent)', 'var(--color-primary-accent)', 'var(--color-destructive-accent)'];
@@ -278,8 +278,6 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
 
 export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   const [looking, setLooking] = useState<LookableImage | null>(null);
-  // A picture a cleanup rule removed has nothing to open full size.
-  const [gone, setGone] = useState(false);
   if (widget.type === 'artifact') return (
     <WidgetFrame kind="artifact" artifactKind={widget.kind} title={widget.title} wide className="overflow-hidden">
       <VisualArtifactView asset={widget.asset} />
@@ -302,21 +300,7 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   );
   if (widget.type === 'image') return (
     <WidgetFrame kind="image" title={widget.title}>
-      <figure>
-        {gone ? (
-          <StoredImage src={presentationAssetUrl(widget.asset)} alt={widget.alt} className="w-full" />
-        ) : (
-        <Tooltip label="Open full size">
-        <Button type="button" variant="foreground" aria-label={`Open ${widget.alt} to zoom`}
-          size="none" className="group relative block w-full whitespace-normal" onClick={() => setLooking({ mime: 'image/*', dataUrl: presentationAssetUrl(widget.asset), alt: widget.alt })}>
-          <StoredImage src={presentationAssetUrl(widget.asset)} alt={widget.alt} onError={() => setGone(true)} className="max-h-[38rem] w-full cursor-zoom-in rounded-md object-contain transition-opacity group-hover:opacity-90" />
-          <span aria-hidden className="absolute right-2 top-2 rounded-full bg-background/90 p-2 shadow"><ZoomIn className="size-4" /></span>
-        </Button>
-        </Tooltip>
-        )}
-        {widget.caption && <figcaption className="mt-2 text-xs text-muted-foreground">{widget.caption}</figcaption>}
-      </figure>
-      {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
+      <ZoomableImage src={presentationAssetUrl(widget.asset)} alt={widget.alt} caption={widget.caption} />
     </WidgetFrame>
   );
   if (widget.type === 'image_compare') {
