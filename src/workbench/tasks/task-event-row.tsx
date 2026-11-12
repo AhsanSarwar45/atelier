@@ -13,7 +13,7 @@
 import { useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 
 import {
-  AlertTriangle, Ban, Check, ChevronRight, CircleCheckBig, Hand, LogOut, PencilLine, Play, RotateCcw, type LucideIcon,
+  AlertTriangle, Ban, Check, ChevronDown, CircleCheckBig, Hand, LogOut, PencilLine, Play, RotateCcw, type LucideIcon,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -52,6 +52,8 @@ export function answer(event: string, printed: Task, now: Task): string {
     if (now.pendingAmend == null) return 'Rejected';
   }
   if (event === 'done' && printed.status === 'review') {
+    // A later done replaced this result, so this one was sent back, whatever the task says now.
+    if (!same(now.result, printed.result)) return 'Reopened';
     if (now.status === 'done') return 'Approved';
     if (now.status !== 'review') return 'Reopened';
   }
@@ -130,8 +132,8 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
   const cwd = (printed.sessionId ? sessions.find((s) => s.id === printed.sessionId)?.cwd : null) ?? null;
   const text = useMemo(() => eventText(event, printed, detail), [event, printed, detail]);
   const answered = answer(event, printed, now);
-  const Icon = ICON[event] ?? Check;
   const item = event === 'check' ? checked(printed, detail) : null;
+  const Icon = item?.met === false ? AlertTriangle : ICON[event] ?? Check;
   const warn = event === 'block' || (event === 'check' && item?.met === false) || (event === 'done' && printed.shortfalls);
 
   // What the line unfolds to, if anything.
@@ -148,6 +150,8 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
     if (entry) more = <ShotPair name={item.name} before={str(entry.before) || undefined} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} />;
   }
 
+  // A bare label (Started, Approved) sits on the task's own line rather than on a line of its own.
+  const short = !more && !waiting && text.length <= 28;
   const only: OwnerAction[] = event === 'amend' ? ['approve_amend', 'reject_amend'] : event === 'done' ? ['approve', 'reopen'] : [];
   // A click anywhere on the line opens the task, except on its buttons.
   const openFromLine = (e: MouseEvent<HTMLDivElement>) => {
@@ -159,30 +163,40 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
     <Panel inset="none" data-testid="task-event" data-event={event} data-task={printed.number} data-waiting={waiting ? 'yes' : 'no'}
       className="my-1 max-w-4xl">
       {/* The line's own button is the keyboard way in; the rest of the line is a bigger target for a pointer. */}
-      {/* The chevron, icon and number on a row of their own, so the text below gets the card's whole width. */}
-      <div className="cursor-pointer space-y-1 px-2 py-1" onClick={openFromLine}>
-        <div className="flex items-center gap-2">
-          {more ? (
-            <Button type="button" variant="ghost" size="none" data-testid="task-event-toggle" aria-expanded={open}
-              aria-label={open ? 'Hide details' : 'Show details'} className="size-7 shrink-0 text-muted-foreground" onClick={() => setOpen((o) => !o)}>
-              <ChevronRight aria-hidden className={cn('size-4 transition-transform', open && 'rotate-90')} />
-            </Button>
-          ) : <span aria-hidden className="size-7 shrink-0" />}
+      <div className="cursor-pointer space-y-1 px-3 py-1.5" onClick={openFromLine}>
+        {/* Which task, always: the icon, number and title, with the chevron at the end when there is more. */}
+        <div className="flex min-h-6 min-w-0 items-center gap-2">
           <Icon aria-hidden className={cn('size-4 shrink-0', warn ? 'text-[var(--color-warning-accent)]'
             : event === 'done' || event === 'approve' || (event === 'check' && item?.met) ? 'text-[var(--color-success-accent)]' : 'text-muted-foreground')} />
-          <span className="font-mono text-xs text-muted-foreground">#{printed.number}</span>
-          {answered && <Badge variant="secondary" appearance="light" size="sm" data-testid="task-event-answer" className="ml-auto"><span>{answered}</span></Badge>}
+          {short && <span data-testid="task-event-text" className="shrink-0 text-sm">{text}</span>}
+          <span className="shrink-0 font-mono text-xs text-muted-foreground">#{printed.number}</span>
+          {short ? (
+            <Button type="button" variant="ghost" size="inherit" data-testid="task-event-open" onClick={() => openTaskDetail(printed.number)}
+              className="block min-w-0 flex-1 truncate text-left text-sm font-normal text-muted-foreground hover:bg-transparent hover:underline">
+              {printed.title}
+            </Button>
+          ) : <span data-testid="task-event-title" className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{printed.title}</span>}
+          {answered && <Badge variant="secondary" appearance="light" size="sm" data-testid="task-event-answer" className="shrink-0"><span>{answered}</span></Badge>}
+          {more && (
+            <Button type="button" variant="ghost" size="none" data-testid="task-event-toggle" aria-expanded={open}
+              aria-label={open ? 'Hide details' : 'Show details'} className="-my-1 size-6 shrink-0 text-muted-foreground" onClick={() => setOpen((o) => !o)}>
+              <ChevronDown aria-hidden className={cn('size-4 transition-transform', open && 'rotate-180')} />
+            </Button>
+          )}
         </div>
-        <Button type="button" variant="ghost" size="inherit" data-testid="task-event-open"
-          onClick={() => openTaskDetail(printed.number)}
-          className="block h-auto w-full whitespace-normal px-1 text-left text-sm font-normal hover:bg-transparent hover:underline">
-          <span data-testid="task-event-text" className="break-words">{text}</span>
-        </Button>
+        {/* What happened, under it across the card's whole width, when it is more than a word or two. */}
+        {!short && (
+          <Button type="button" variant="ghost" size="inherit" data-testid="task-event-open"
+            onClick={() => openTaskDetail(printed.number)}
+            className="block h-auto w-full whitespace-normal text-left text-sm font-normal hover:bg-transparent hover:underline">
+            <span data-testid="task-event-text" className="break-words">{text}</span>
+          </Button>
+        )}
         {waiting && only.length > 0 && (
           <TaskOwnerActions task={now} only={only} onChanged={setActed} className="flex justify-end" />
         )}
       </div>
-      {open && more && <div data-testid="task-event-more" className="border-t border-border/60 px-3 py-2 sm:pl-10">{more}</div>}
+      {open && more && <div data-testid="task-event-more" className="border-t border-border/60 px-3 py-2">{more}</div>}
     </Panel>
   );
 }

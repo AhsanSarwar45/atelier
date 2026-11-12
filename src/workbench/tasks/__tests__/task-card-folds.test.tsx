@@ -154,6 +154,18 @@ describe('a later change is one line', () => {
     expect(new URLSearchParams(window.location.search).get('tab')).toBe('chat');
   });
 
+  it('names the task, and puts a bare label on the same line with no gap before it', () => {
+    show('start', feature({ status: 'in_progress' }));
+    const row = screen.getByTestId('task-event');
+    expect(within(row).getByText('Settings menu')).toBeVisible();
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent('Started');
+    expect(screen.queryByTestId('task-event-toggle')).toBeNull();
+    // One line: the label, number and title share it.
+    const line = screen.getByTestId('task-event-text').parentElement!;
+    expect(line).toContainElement(screen.getByTestId('task-event-open'));
+    expect(line.firstElementChild!.tagName.toLowerCase()).toBe('svg');
+  });
+
   it('gives the text a row of its own, the full width of the card', () => {
     show('done', feature({ status: 'review', result: { summary: 's', criteria: [] } }));
     const text = screen.getByTestId('task-event-text');
@@ -241,5 +253,14 @@ describe('the visual types, finished', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show before, after and reference' }));
     expect(screen.getByAltText('Great hall reference')).toHaveAttribute('src', asset('c'));
     expect(screen.getByAltText('Great hall after')).toHaveAttribute('src', asset('b'));
+  });
+});
+
+describe('the answer a finished line shows', () => {
+  it('says Reopened for a result a later done replaced, even once the task is approved', () => {
+    const first = feature({ status: 'review', result: { summary: 'first', criteria: [] } });
+    const approvedLater = feature({ status: 'done', result: { summary: 'second', criteria: [] } });
+    expect(answer('done', first, approvedLater)).toBe('Reopened');
+    expect(answer('done', first, { ...first, status: 'done' })).toBe('Approved');
   });
 });
