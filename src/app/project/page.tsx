@@ -17,7 +17,7 @@ import { ReadFailed } from '@/components/ui/read-failed';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProject } from '@/hooks/use-project';
 import { useTheme } from '@/hooks/use-theme';
-import { addressWith, showTask, stepsOut, whereFrom } from '@/lib/address';
+import { addressWith, showGrids, showTask, stepsOut, whereFrom } from '@/lib/address';
 import { cn, projectDir } from '@/lib/utils';
 import { SearchOpener } from '@/search/opener';
 // Each tab's code is fetched when that tab is first shown, so the task list
@@ -69,7 +69,7 @@ function ProjectTabs() {
   // The address decides which tab is showing and which chat is drawn in it, so
   // both survive a link, a fresh tab and the Back button
   // (docs/designs/app-shell.md §1.7).
-  const { id: projectId, tab: shownTab, chat: openChat, file: openFile, line: openLine, task: openTask, settings: openSettings, ptab, pitem, retired } = whereFrom(params);
+  const { id: projectId, tab: shownTab, chat: openChat, file: openFile, line: openLine, task: openTask, view: tasksView, grid: openGrid, cell: openCell, settings: openSettings, ptab, pitem, retired } = whereFrom(params);
   const { project, error: projectError, refetch } = useProject(projectId);
   // The folder this screen is showing, which is where a shell opened from
   // its bar starts.
@@ -275,6 +275,13 @@ function ProjectTabs() {
           onSelect={(task) => showTask(params, task)}
           onOpenChat={(chat) => go({ tab: 'chat', chat })}
           onNewChat={() => go({ tab: 'chat', newchat: 'task' })}
+          // The Grids view, its grid and its open cell are the address's too.
+          view={tasksView}
+          onView={(view) => showGrids(params, { view })}
+          grid={openGrid}
+          cell={openCell}
+          onShowGrid={(where) => showGrids(params, where)}
+          onOpenTask={(task) => go({ view: null, grid: null, cell: null, task })}
         />
       )}
 

@@ -95,3 +95,33 @@ const proposal = object({
 export const ProposalResponseSchema = schema(object({ proposal }));
 
 export const ProposalAnswerSchema = schema(object({ proposal, task: nullish(task) }));
+
+/** A grid's summary (docs/grids.md, "HTTP"): the fields every screen that draws one reads. */
+const grid = object({
+  projectId: string,
+  slug: string,
+  title: string,
+  status: string,
+  percent: nullish(number),
+  counts: nullish(object({})),
+  pending: nullish(object({})),
+});
+
+export const GridsResponseSchema = schema(object({
+  grids: array(grid),
+  templates: nullish(array(object({ name: string, columns: nullish(array(object({}))) }))),
+}));
+
+const gridCell = object({ row: string, col: string, state: string });
+
+export const GridDetailSchema = schema(object({
+  grid,
+  columns: array(object({ id: string, name: string })),
+  rows: array(object({ id: string, name: string, kind: string })),
+  cells: array(gridCell),
+}));
+
+export const CellDetailSchema = schema(object({
+  cell: gridCell,
+  events: array(object({ seq: number, at: number, kind: string })),
+}));

@@ -112,7 +112,7 @@ import { workingLine } from '@/workbench/working-line';
 import { AttachmentViewer } from '@/workbench/attachment-viewer';
 import { checklistForTasks, finished, type ChecklistItem } from '@/workbench/tasks/checklist';
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
-import { startTaskIn, takeComposerFocus } from '@/workbench/tasks/new-task';
+import { startTaskIn, takeComposerFocus, takeNewChatLine } from '@/workbench/tasks/new-task';
 import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
 import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
@@ -1157,10 +1157,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // the launch (bw-akk9.1). The server takes the name it is given.
     const id = newId();
     // Asked for from the Tasks tab's New task button: the new chat opens with
-    // `@task ` waiting in its composer.
+    // `@task ` waiting in its composer, or the grid cells it was asked for.
     if (taskInNewChat.current) {
       taskInNewChat.current = false;
-      startTaskIn(id);
+      startTaskIn(id, takeNewChatLine());
     }
     setStarting({ brand, id });
     setStartError(null);

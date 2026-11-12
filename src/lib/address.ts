@@ -9,6 +9,8 @@
  *   …&message=<id>                            a search's jump into the chat, dropped once made
  *   …&diff=<@diff id>                          a diff to show, dropped once shown
  *   …&task=<number>                            the task open in the Tasks tab's detail panel
+ *   …&view=grids                               the Tasks tab showing coverage grids, not tasks
+ *   …&grid=<slug>&cell=<row>:<col>             the grid open there, and the cell whose detail is open
  *   …&newchat=task                             open the New chat dialog; the chat it starts gets `@task `
  *   …&settings=<section>&ptab=<provider tab>   the project's settings, over the top
  *   …&pitem=<plugin or server>                 the page of one item on that tab
@@ -43,6 +45,12 @@ export interface Where {
   diff: string | null;
   /** The task whose detail the Tasks tab shows, by its number. */
   task: number | null;
+  /** What the Tasks tab shows: its tasks, or the project's coverage grids (docs/grids.md). */
+  view: 'tasks' | 'grids';
+  /** The grid open in the Grids view, by its slug. */
+  grid: string | null;
+  /** The cell of that grid whose detail is open, written `ROW:COL`. */
+  cell: string | null;
   /**
    * `task` asks the chat tab to open its New chat dialog and put `@task ` in
    * the chat it starts (the Tasks tab's New task button). Dropped once read.
@@ -107,6 +115,10 @@ export function whereFrom(params: URLSearchParams): Where {
     message: params.get('message'),
     diff: params.get('diff'),
     task: lineFrom(params.get('task')),
+    // A grid named without the view still asks for the grids.
+    view: params.get('view') === 'grids' || (params.get('view') !== 'tasks' && params.has('grid')) ? 'grids' : 'tasks',
+    grid: params.get('grid'),
+    cell: params.get('cell'),
     newchat: params.get('newchat'),
     settings: params.get('settings'),
     ptab: params.get('ptab'),
@@ -119,7 +131,7 @@ export function whereFrom(params: URLSearchParams): Where {
  * so a parameter this file has never heard of survives a tab switch; `null`
  * removes one.
  */
-export function addressWith(params: URLSearchParams, patch: Partial<Omit<Where, 'retired'>>): string {
+export function addressWith(params: URLSearchParams, patch: Partial<Omit<Where, 'retired' | 'view'>> & { view?: Where['view'] | null }): string {
   const q = new URLSearchParams(params.toString());
   // The retired board's parts are dropped on the way out, so one address shape
   // leaves this screen however the reader arrived at it.
@@ -196,4 +208,30 @@ export function stepsOut(leaves: (url: URL) => boolean, counted: number): number
  */
 export function showTask(params: URLSearchParams, task: number | null): void {
   window.history.replaceState(null, '', addressWith(params, { tab: 'tasks', task }));
+}
+
+/** A cell named in the address, `ROW:COL`, read back; null for anything else. */
+export function cellFrom(raw: string | null): { row: string; col: string } | null {
+  if (!raw) return null;
+  const at = raw.indexOf(':');
+  if (at <= 0 || at === raw.length - 1 || raw.indexOf(':', at + 1) >= 0) return null;
+  return { row: raw.slice(0, at), col: raw.slice(at + 1) };
+}
+
+/**
+ * Shows the Grids view, a grid in it, or a cell's detail, in place, the way
+ * `showTask` does: picking through grids and cells adds nothing to the history.
+ * The tasks view is written as no `view` at all, its default.
+ */
+export function showGrids(
+  params: URLSearchParams,
+  where: { view?: 'tasks' | 'grids'; grid?: string | null; cell?: string | null },
+): void {
+  const view = where.view ?? 'grids';
+  window.history.replaceState(null, '', addressWith(params, {
+    tab: 'tasks',
+    view: view === 'grids' ? 'grids' : null,
+    grid: view === 'grids' ? where.grid ?? null : null,
+    cell: view === 'grids' && where.grid ? where.cell ?? null : null,
+  }));
 }

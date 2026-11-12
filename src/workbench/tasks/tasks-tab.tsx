@@ -5,7 +5,7 @@
  * status, with a detail panel holding the card, its history and the owner's
  * actions.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { AlertTriangle, ListTodo, MessageSquarePlus, Plus, X } from 'lucide-react';
 
@@ -19,13 +19,16 @@ import { Row } from '@/components/ui/row';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { toast } from '@/hooks/use-toast';
 import { tasks as tasksApi } from '@/lib/api';
+import { cellFrom } from '@/lib/address';
 import { copyText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
+import GridsView from '@/workbench/grids/grids-view';
 import { useLiveSessions, type LiveSession } from '@/workbench/live';
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
-import { startTaskIn } from '@/workbench/tasks/new-task';
+import { lineForNewChat, NEW_TASK_LINE, startTaskIn } from '@/workbench/tasks/new-task';
 import { isStale, STALE_REASON } from '@/workbench/tasks/stale';
 import { MergeBadge, TaskCard, TaskOwnerActions, TaskStatusChip, shownStatus } from '@/workbench/tasks/task-card';
 import { STATUS_LABEL, typeLabel, type Task, type TaskEvent, type TaskStatus } from '@/workbench/tasks/types';
@@ -160,11 +163,20 @@ function TaskDetail({ task, onClose, onOpenChat }: {
  * The New task button: pick one of this project's chats, or a new one, and it
  * opens with `@task ` waiting in its composer. The agent makes the task from
  * what the owner writes after it (docs/tasks.md, "Principles").
+ *
+ * A grid's selection uses the same button with its own line,
+ * `@task @grid:camera.*.gpu ` (docs/grids.md, "Selection").
  */
-function NewTaskButton({ projectId, onOpenChat, onNewChat }: {
+export function NewTaskButton({ projectId, onOpenChat, onNewChat, line = NEW_TASK_LINE, label = 'New task', disabled, testId = 'new-task', size = 'sm' }: {
   projectId: string;
   onOpenChat: (sessionId: string) => void;
   onNewChat?: () => void;
+  /** What goes into the chat's composer. */
+  line?: string;
+  label?: string;
+  disabled?: boolean;
+  testId?: string;
+  size?: 'sm' | 'xs';
 }) {
   const live = useLiveSessions();
   const chats = useMemo(
@@ -178,15 +190,25 @@ function NewTaskButton({ projectId, onOpenChat, onNewChat }: {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button type="button" size="sm" variant="outline" data-testid="new-task">
+        <Button type="button" size={size} variant="outline" data-testid={testId} disabled={disabled}>
           <Plus aria-hidden />
-          New task
+          {label}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-1" data-testid="new-task-chats">
         <p className="px-2 py-1.5 text-xs text-muted-foreground">Start the task in</p>
         {onNewChat && (
-          <Row gap="md" inset="sm" radius="md" data-testid="new-task-new-chat" onClick={() => { setOpen(false); onNewChat(); }}>
+          <Row
+            gap="md"
+            inset="sm"
+            radius="md"
+            data-testid="new-task-new-chat"
+            onClick={() => {
+              setOpen(false);
+              lineForNewChat(line === NEW_TASK_LINE ? null : line);
+              onNewChat();
+            }}
+          >
             <MessageSquarePlus className="size-4 shrink-0" aria-hidden />
             <span className="text-sm">New chat</span>
           </Row>
@@ -202,7 +224,7 @@ function NewTaskButton({ projectId, onOpenChat, onNewChat }: {
               data-session={chat.id}
               onClick={() => {
                 setOpen(false);
-                startTaskIn(chat.id);
+                startTaskIn(chat.id, line);
                 onOpenChat(chat.id);
               }}
             >
@@ -269,7 +291,70 @@ function StaleCancel({ task }: { task: Task }) {
   );
 }
 
-export default function TasksTab({ projectId, projectPath, selected: shown, onSelect, onOpenChat, onNewChat }: {
+/** Tasks | Grids, at the head of the tab (docs/grids.md, "Front end"). */
+function ViewSwitch({ view, onView }: { view: 'tasks' | 'grids'; onView: (view: 'tasks' | 'grids') => void }) {
+  return (
+    <ToggleGroup
+      type="single"
+      size="xs"
+      value={view}
+      onValueChange={(next) => { if (next === 'tasks' || next === 'grids') onView(next); }}
+      aria-label="Show"
+      data-testid="tasks-view"
+    >
+      <ToggleGroupItem value="tasks" data-testid="tasks-view-tasks">Tasks</ToggleGroupItem>
+      <ToggleGroupItem value="grids" data-testid="tasks-view-grids">Grids</ToggleGroupItem>
+    </ToggleGroup>
+  );
+}
+
+type GridPlace = { grid: string | null; cell?: string | null };
+
+export default function TasksTab(props: Omit<Parameters<typeof TaskList>[0], 'switcher'> & {
+  /** Tasks or coverage grids, when the screen holds it (the address's `view`). */
+  view?: 'tasks' | 'grids';
+  onView?: (view: 'tasks' | 'grids') => void;
+  /** The grid open in the Grids view, and its open cell (`ROW:COL`). */
+  grid?: string | null;
+  cell?: string | null;
+  /** Shows another grid or cell, or the grids list. */
+  onShowGrid?: (where: GridPlace) => void;
+  /** Opens a task from a grid's cell. */
+  onOpenTask?: (task: number) => void;
+}) {
+  const { view: heldView, onView, grid: heldGrid, cell: heldCell, onShowGrid, onOpenTask, ...rest } = props;
+  const [ownView, setOwnView] = useState<'tasks' | 'grids'>('tasks');
+  const [ownPlace, setOwnPlace] = useState<GridPlace>({ grid: null });
+  const view = heldView ?? ownView;
+  const grid = heldView === undefined ? ownPlace.grid : heldGrid ?? null;
+  const cell = heldView === undefined ? ownPlace.cell ?? null : heldCell ?? null;
+  const pickView = (next: 'tasks' | 'grids') => {
+    if (heldView === undefined) setOwnView(next);
+    onView?.(next);
+  };
+  const showGrid = (where: GridPlace) => {
+    if (heldView === undefined) setOwnPlace(where);
+    onShowGrid?.(where);
+  };
+  const switcher = <ViewSwitch view={view} onView={pickView} />;
+  if (view === 'tasks') return <TaskList {...rest} switcher={switcher} />;
+  return (
+    <div data-testid="grids-tab" className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">{switcher}</div>
+      <GridsView
+        projectId={rest.projectId}
+        grid={grid}
+        cell={cellFrom(cell)}
+        onShow={showGrid}
+        onOpenChat={rest.onOpenChat}
+        onNewChat={rest.onNewChat}
+        onOpenTask={onOpenTask ?? ((task) => { pickView('tasks'); rest.onSelect?.(task); })}
+      />
+    </div>
+  );
+}
+
+function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenChat, onNewChat, switcher }: {
   projectId: string;
   /** The project's repository, watched so Merged follows a merge. */
   projectPath?: string | null;
@@ -284,6 +369,8 @@ export default function TasksTab({ projectId, projectPath, selected: shown, onSe
   onOpenChat?: (sessionId: string) => void;
   /** Opens the New chat dialog, whose chat starts with `@task ` in it. */
   onNewChat?: () => void;
+  /** Tasks | Grids, drawn at the head of the list. */
+  switcher?: ReactNode;
 }) {
   const { tasks, loaded, error, refetch } = useTasks(projectId, null, projectPath);
   const live = useLiveSessions();
@@ -316,7 +403,8 @@ export default function TasksTab({ projectId, projectPath, selected: shown, onSe
     <LiveTasksContext.Provider value={liveTasks}>
       <div data-testid="tasks-tab" className="flex min-h-0 flex-1">
         <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', chosen && 'hidden md:flex')}>
-          <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2">
+            {switcher}
             <Select value={filterValue(filter)} onValueChange={(value) => setFilter(filterFrom(value))}>
               <SelectTrigger className="h-8 w-56" aria-label="Chat" data-testid="tasks-filter">
                 <SelectValue />

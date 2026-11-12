@@ -5,8 +5,9 @@
 
 import { apiUrl } from '@/lib/api-base';
 import { onFolder, onRepository } from '@/workbench/live-wire';
-import { ProposalAnswerSchema, ProposalResponseSchema, TaskActionResponseSchema, TaskDetailSchema, TasksResponseSchema } from '@/lib/api-schemas';
+import { CellDetailSchema, GridDetailSchema, GridsResponseSchema, ProposalAnswerSchema, ProposalResponseSchema, TaskActionResponseSchema, TaskDetailSchema, TasksResponseSchema } from '@/lib/api-schemas';
 import type { Project, Tag } from '@/types';
+import type { CellDetail, CellFull, GridDetail, GridOwnerAction, GridsList, GridSummary } from '@/workbench/grids/types';
 import type { OwnerAction, ProposalChoice, Task, TaskEvent, TaskProposal, TaskTypeInfo } from '@/workbench/tasks/types';
 
 /**
@@ -380,10 +381,10 @@ export const projects = {
 
 /** One line of the composer's `@` menu (bw-mi3s.4). */
 export interface MentionOffer {
-  kind: 'file' | 'chat' | 'skill' | 'diff' | 'task';
+  kind: 'file' | 'chat' | 'skill' | 'diff' | 'task' | 'grid';
   /** What goes after `@kind:` — or, for a file, after `@`. A diff's is its path. */
   id: string;
-  /** A file's name, a task's title, a chat's or a skill's name. */
+  /** A file's name, a task's or a grid's title, a chat's or a skill's name. */
   label: string;
   /** Read after it, dimmed: a file's folder, a chat's last activity, a skill's description. */
   detail?: string;
@@ -1653,5 +1654,59 @@ export const tasks = {
       body: JSON.stringify({ action: 'answer_proposal', actor: 'owner', project: projectId, number: id, payload: { choice } }),
     });
     return ProposalAnswerSchema.parse(answer);
+  },
+};
+
+/** How long an owner's Re-check or Discover may take: they run the grid's commands first. */
+const GRID_LONG_MS = 60 * 60_000;
+
+/** What one grid action names: the grid, and for a cell its row and column. */
+export interface GridActionTarget {
+  projectId: string;
+  slug?: string;
+  row?: string;
+  col?: string;
+}
+
+/**
+ * Coverage grids (docs/grids.md, "HTTP"). The screens act as the owner; agents
+ * change grids through `atelier grid`, never through here.
+ */
+export const grids = {
+  list: async (projectId: string, sessionId?: string | null): Promise<GridsList> => {
+    const query = new URLSearchParams({ project: projectId });
+    if (sessionId) query.set('session', sessionId);
+    const answer = await fetchApi<GridsList>(`/api/workbench/grids?${query}`);
+    const parsed = GridsResponseSchema.parse(answer);
+    return { projectId: parsed.projectId ?? projectId, grids: parsed.grids, templates: parsed.templates ?? [] };
+  },
+  get: async (projectId: string, slug: string): Promise<GridDetail> => {
+    const answer = await fetchApi<GridDetail>(
+      `/api/workbench/grids/${encodeURIComponent(projectId)}/${encodeURIComponent(slug)}`,
+    );
+    return GridDetailSchema.parse(answer);
+  },
+  cell: async (projectId: string, slug: string, row: string, col: string): Promise<CellDetail> => {
+    const answer = await fetchApi<CellDetail>(
+      `/api/workbench/grids/${encodeURIComponent(projectId)}/${encodeURIComponent(slug)}/cells/${encodeURIComponent(row)}/${encodeURIComponent(col)}`,
+    );
+    return CellDetailSchema.parse(answer);
+  },
+  /** One owner action. A refusal throws an ApiError carrying the server's sentence. */
+  act: async (action: GridOwnerAction, target: GridActionTarget, payload?: Record<string, unknown>) => {
+    const long = action === 'verify' || action === 'discover';
+    return fetchApi<{ grid?: GridSummary; cell?: CellFull; widget?: string | null; summary?: string }>('/api/workbench/grid', {
+      method: 'POST',
+      ...(long ? { deadlineMs: GRID_LONG_MS } : {}),
+      body: JSON.stringify({
+        action,
+        actor: 'owner',
+        project: target.projectId,
+        ...(target.slug ? { slug: target.slug } : {}),
+        ...(target.row ? { row: target.row } : {}),
+        ...(target.col ? { col: target.col } : {}),
+        ...(payload ? { payload } : {}),
+      }),
+    });
   },
 };
