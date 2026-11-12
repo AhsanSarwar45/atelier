@@ -73,6 +73,7 @@ pub fn start(task: &mut TaskRow, gate: Option<&Gate>) -> Result<Value, TaskError
     let mut runs = json!({});
     let mut baselines = json!({});
     let mut count = 0;
+    let mut kept = 0;
     for (item, checks) in checks::item_checks(&task.kind, &task.plan) {
         if let Err(why) = locked(&stored, &item, &checks, found) {
             problems.push(why);
@@ -92,6 +93,9 @@ pub fn start(task: &mut TaskRow, gate: Option<&Gate>) -> Result<Value, TaskError
                     if let Some(p50) = p50 {
                         baselines[&item][&check.name] = json!({"p50": p50, "samples": run.samples});
                     }
+                    if check.is_characterisation() {
+                        kept += 1;
+                    }
                     runs[&item][&check.name] = recorded(run, check.is_characterisation(), None, "start");
                 }
                 Err(why) => problems.push(format!("{item}: \"{}\" {why}", check.name)),
@@ -110,7 +114,7 @@ pub fn start(task: &mut TaskRow, gate: Option<&Gate>) -> Result<Value, TaskError
     stored["met"] = json!({});
     task.gate = Some(stored);
     task.checks = None;
-    Ok(json!({"red": count, "commit": found.head}))
+    Ok(json!({"red": count - kept, "kept": kept, "commit": found.head}))
 }
 
 /// What `task check N ITEM` found for a gated task.
@@ -137,7 +141,11 @@ pub fn check(task: &mut TaskRow, item: &str, gate: Option<&Gate>) -> Result<Chec
     let mut passing = Vec::new();
     for check in &checks {
         let run = run_of(found, item, check).map_err(TaskError::Refused)?;
-        match checks::judge_green(check, run, baseline(&stored, item, check)) {
+        // A check whose own approved files changed does not count as passing,
+        // whatever it printed: what ran is no longer the check the owner approved.
+        let tampered = !checks::changed_for(&stored["hashes"], std::slice::from_ref(check), &found.hashes).is_empty();
+        let judged = if tampered { Err("ran with an approved file changed".to_string()) } else { checks::judge_green(check, run, baseline(&stored, item, check)) };
+        match judged {
             Ok(()) => {
                 passed += 1;
                 passing.push(check.name.clone());
@@ -433,7 +441,8 @@ pub(crate) mod tests {
         let one = created(&store, json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [keep]}]}));
         let message = refused(ask(&store, "start", Some(one), json!({}), Some(measured(&[("export", "keeps", 1, "1 failed")], &[]))));
         assert!(message.contains("export: \"keeps\" is a characterisation check and must pass before the change"), "{message}");
-        ask(&store, "start", Some(one), json!({}), Some(measured(&[("export", "keeps", 0, "ok")], &[]))).unwrap();
+        let started = ask(&store, "start", Some(one), json!({}), Some(measured(&[("export", "keeps", 0, "ok")], &[]))).unwrap();
+        assert!(started.summary.contains("The characterisation check passes"), "a passing check is not said to fail: {}", started.summary);
     }
 
     #[test]
@@ -457,6 +466,8 @@ pub(crate) mod tests {
         let outcome = ask(&store, "check", Some(one), json!({"item": "export"}), Some(gate)).unwrap();
         assert_eq!(outcome.detail["met"], false);
         assert!(outcome.summary.contains("approved check file changed: tests/a.rs"), "{}", outcome.summary);
+        // The check whose file changed is not counted as passing.
+        assert_eq!(outcome.detail["passed"].as_u64().unwrap() + 1, outcome.detail["total"].as_u64().unwrap(), "{}", outcome.detail);
         let mut gate = green(&[]);
         gate.hashes = hashes(&["tests/i.rs"]);
         let message = refused(ask(&store, "done", Some(one), json!({"summary": "s", "commits": ["abcdef1"], "result": {}}), Some(gate)));

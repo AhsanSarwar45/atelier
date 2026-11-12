@@ -1165,9 +1165,23 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             task.status = "in_progress".into();
             task.started_at.get_or_insert(now);
             let said = match payload["red"].as_u64() {
-                Some(red) => format!(
-                    "#{number} is in progress. All {red} checks fail for their stated reasons on the starting commit; tick each item with `atelier task check {number} ITEM` once its checks pass."
-                ),
+                Some(red) => {
+                    let kept = payload["kept"].as_u64().unwrap_or(0);
+                    let failing = match red {
+                        1 => "The 1 check fails for its stated reason".to_string(),
+                        _ => format!("All {red} checks fail for their stated reasons"),
+                    };
+                    let failing = match (red, kept) {
+                        (0, 1) => "The characterisation check passes".to_string(),
+                        (0, _) => format!("All {kept} characterisation checks pass"),
+                        (_, 0) => failing,
+                        (_, 1) => format!("{failing}, and the characterisation check passes"),
+                        _ => format!("{failing}, and the {kept} characterisation checks pass"),
+                    };
+                    format!(
+                        "#{number} is in progress. {failing} on the starting commit; tick each item with `atelier task check {number} ITEM` once its checks pass."
+                    )
+                }
                 None => format!("#{number} is in progress."),
             };
             ("started", payload, said)
