@@ -435,8 +435,15 @@ async fn owner_create(
         .await
         .map_err(failed)?;
     let title = refused_or(title)?["title"].as_str().unwrap_or_default().to_string();
-    let session = if chat == "new" {
-        start_chat(state, &project, &title, latest.as_ref(), brand).await?
+    // A chat started here is ours to take back: whatever fails from here on
+    // removes it, so a failed create leaves nothing behind.
+    let made = (chat == "new").then(|| uuid::Uuid::new_v4().to_string());
+    let session = if let Some(id) = &made {
+        if let Err(error) = start_chat(state, &project, id, &title, latest.as_ref(), brand).await {
+            discard_chat(state, id).await;
+            return Err(error);
+        }
+        id.clone()
     } else {
         let found = state
             .database()
@@ -458,8 +465,17 @@ async fn owner_create(
                 .map(|(task, grids, prompt)| (tasks::to_json(store, &task), grids, prompt))
         })
         .await
-        .map_err(failed)?;
-    let (task, grids, prompt) = refused_or(outcome)?;
+        .map_err(failed)
+        .and_then(refused_or);
+    let (task, grids, prompt) = match outcome {
+        Ok(created) => created,
+        Err(error) => {
+            if let Some(id) = &made {
+                discard_chat(state, id).await;
+            }
+            return Err(error);
+        }
+    };
     announce(state, &task["projectId"], &task["number"]);
     announce_grids(state, &project, &grids);
     let telling = state.clone();
@@ -468,15 +484,16 @@ async fn owner_create(
     Ok(Json(json!({"task": task, "sessionId": session})))
 }
 
-/// Start a chat in the project for a task the owner created: on the given
+/// Start chat `id` in the project for a task the owner created: on the given
 /// provider, else the project's latest chat's, in the project's folder.
 async fn start_chat(
     state: &WorkbenchState,
     project: &str,
+    id: &str,
     title: &str,
     latest: Option<&crate::workbench::store::Session>,
     brand: Option<String>,
-) -> Result<String, ApiError> {
+) -> Result<(), ApiError> {
     use crate::workbench::protocol::{Command, CommandKind};
     let path = latest
         .map(|session| session.project_path.clone())
@@ -484,6 +501,7 @@ async fn start_chat(
         .ok_or_else(|| format!("the project {project} has no folder to start a chat in"))?;
     let brand = brand.or_else(|| latest.map(|session| session.brand.clone())).unwrap_or_else(|| "claude".into());
     let mut fields = serde_json::Map::from_iter([
+        ("sessionId".into(), json!(id)),
         ("projectId".into(), json!(project)),
         ("projectPath".into(), json!(path)),
         ("brand".into(), json!(brand)),
@@ -498,10 +516,26 @@ async fn start_chat(
         .await
         .map_err(|error| format!("a new chat could not be started: {error}"))?;
     state.publish_holds().await;
-    reply["id"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| failed("the new chat came back without an id".into()))
+    match reply["id"].as_str() {
+        Some(started) if started == id => Ok(()),
+        _ => Err(failed("the new chat came back without its id".into())),
+    }
+}
+
+/// Take back a chat `owner_create` started for a task it then failed to
+/// make: close it if it is running, then delete it as the owner's own delete
+/// does, or, where that is refused, the app's copy of it.
+async fn discard_chat(state: &WorkbenchState, id: &str) {
+    use crate::workbench::protocol::{Command, CommandKind};
+    let named = || serde_json::Map::from_iter([("sessionId".into(), json!(id))]);
+    if state.registry.has_driver(id).await {
+        let _ = state.registry.execute(&Command { kind: CommandKind::SessionClose, fields: named() }).await;
+    }
+    let deleted = state.registry.execute(&Command { kind: CommandKind::SessionDelete, fields: named() }).await;
+    if deleted.is_err() {
+        let _ = state.database().delete_session(id.to_string()).await;
+    }
+    state.publish_holds().await;
 }
 
 fn refused_or<T>(outcome: Result<T, TaskError>) -> Result<T, ApiError> {
@@ -531,4 +565,167 @@ pub(super) fn announce(state: &WorkbenchState, project: &Value, number: &Value) 
         "type": "tasks.changed", "kind": "tasks.changed",
         "projectId": project, "number": number,
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workbench::{
+        actor::ChatDb,
+        grids::search,
+        protocol::Command,
+        registry::{LaunchFuture, LaunchedSession, RegistryPaths, SessionFactory, WorkbenchRegistry},
+        store::Session,
+    };
+    use std::sync::Arc;
+
+    /// A provider that writes the chat's row, as a real start does before its
+    /// process answers, and then either fails (`fail`) or starts with no
+    /// driver; `race` has another task take every cell meanwhile.
+    struct RowFirst {
+        fail: bool,
+        race: bool,
+    }
+
+    impl SessionFactory for RowFirst {
+        fn launch<'a>(&'a self, database: ChatDb, command: &'a Command) -> LaunchFuture<'a> {
+            Box::pin(async move {
+                let text = |key: &str| command.fields.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+                let session = Session {
+                    id: text("sessionId"),
+                    brand: text("brand"),
+                    external_id: None,
+                    project_id: text("projectId"),
+                    project_path: text("projectPath"),
+                    cwd: text("projectPath"),
+                    model: None,
+                    permission_mode: "default".into(),
+                    effort: None,
+                    collaboration_mode: None,
+                    profile: None,
+                    title: Some(text("title")),
+                    state: if self.fail { "errored" } else { "idle" }.into(),
+                    origin: "app".into(),
+                    created_at: "2026-11-12T00:00:00.000Z".into(),
+                    last_active_at: "2026-11-12T00:00:00.000Z".into(),
+                    last_spoke_at: None,
+                    begun_by: Some("person".into()),
+                    named_by_owner: false,
+                    auto_approve: false,
+                };
+                database.create_session(session.clone()).await?;
+                if self.race {
+                    database
+                        .write_tasks(|store| store.connection().execute("UPDATE grid_cell SET state = 'proved'", []).map(|_| ()))
+                        .await?
+                        .map_err(|error| error.to_string())?;
+                }
+                if self.fail {
+                    return Err("the provider would not start".into());
+                }
+                Ok(LaunchedSession {
+                    session_id: session.id.clone(),
+                    reply: serde_json::to_value(&session).unwrap(),
+                    driver: None,
+                })
+            })
+        }
+    }
+
+    /// A project with an approved grid `camera` of two rows and two columns.
+    async fn fixture(factory: RowFirst) -> (tempfile::TempDir, WorkbenchState, String) {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        let paths = RegistryPaths {
+            home: directory.path().to_path_buf(),
+            claude_config: directory.path().join("claude"),
+            codex_home: directory.path().join("codex"),
+            profiles: directory.path().join("profiles"),
+            media: directory.path().join("media"),
+        };
+        let registry = WorkbenchRegistry::new(database, paths, Arc::new(factory));
+        let projects = Arc::new(crate::db::Database::new_in_memory().unwrap());
+        let project = projects
+            .create_project(crate::db::CreateProjectInput {
+                name: "camera-app".into(),
+                path: directory.path().display().to_string(),
+                local_path: None,
+                is_test: false,
+            })
+            .unwrap()
+            .id;
+        let state = WorkbenchState::new(registry).with_projects(projects);
+        let request = |action: &str, actor: &str| grids::Request {
+            action: action.into(),
+            actor: actor.into(),
+            session: (actor == "agent").then(|| "drafter".to_string()),
+            project: project.clone(),
+            now: 1,
+            ..Default::default()
+        };
+        let mut draft = request("draft", "agent");
+        draft.payload = json!({
+            "slug": "camera", "title": "Camera", "area": "An area.",
+            "row_search": {"command": "scripts/rows.sh", "watch": ["camera/"]},
+            "columns": [
+                {"id": "gpu", "name": "Runs on the GPU", "proof_rule": "a GPU test"},
+                {"id": "perf", "name": "Within budget", "proof_rule": "a benchmark check"},
+            ],
+        });
+        let found = |id: &str| search::Found {
+            id: id.into(),
+            name: id.to_uppercase(),
+            paths: vec![format!("camera/{id}.rs")],
+            kind: "feature".into(),
+            of: Vec::new(),
+        };
+        draft.search = Some(Ok(search::Run { rows: vec![found("glare"), found("sunstar")], head: Some("h1".into()) }));
+        let mut approve = request("approve", "owner");
+        approve.slug = Some("camera".into());
+        state
+            .database()
+            .write_tasks(move |store| {
+                grids::apply(store.connection(), &draft).unwrap();
+                grids::apply(store.connection(), &approve).unwrap();
+            })
+            .await
+            .unwrap();
+        (directory, state, project)
+    }
+
+    async fn create_in_a_new_chat(state: &WorkbenchState, project: &str) -> Result<Json<Value>, ApiError> {
+        let grid = json!({"slug": "camera", "rows": ["glare"], "cols": "*", "onlyGaps": false});
+        owner_create(state, project.to_string(), Some(grid), Some("new".into()), Some("claude".into())).await
+    }
+
+    async fn chats(state: &WorkbenchState, project: &str) -> Vec<Session> {
+        state.database().list_sessions(Some(project.to_string())).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_new_chat_that_fails_to_start_is_taken_back() {
+        let (_directory, state, project) = fixture(RowFirst { fail: true, race: false }).await;
+        assert!(create_in_a_new_chat(&state, &project).await.is_err());
+        assert!(chats(&state, &project).await.is_empty());
+        let open = state.database().read_tasks(|store| Ok(tasks::list(store.connection(), None, None)?.len())).await.unwrap();
+        assert_eq!(open, 0);
+    }
+
+    #[tokio::test]
+    async fn a_new_chat_whose_task_is_then_refused_is_taken_back() {
+        let (_directory, state, project) = fixture(RowFirst { fail: false, race: true }).await;
+        assert!(create_in_a_new_chat(&state, &project).await.is_err());
+        assert!(chats(&state, &project).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_new_chat_holds_the_task_it_was_started_for() {
+        let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
+        let Json(created) = create_in_a_new_chat(&state, &project).await.map_err(|_| "refused").unwrap();
+        let started = chats(&state, &project).await;
+        assert_eq!(started.len(), 1);
+        assert_eq!(created["sessionId"], json!(started[0].id));
+        assert_eq!(created["task"]["title"], "camera: GLARE row");
+        assert_eq!(started[0].title.as_deref(), Some("camera: GLARE row"));
+    }
 }
