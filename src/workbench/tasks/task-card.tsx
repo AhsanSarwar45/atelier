@@ -30,6 +30,8 @@ import type { LookableImage, SessionState } from '@/workbench/protocol';
 import { ClaimShapeLink, ProposalCells, TaskCells } from '@/workbench/grids/task-cells';
 import { useComposerPrefill } from '@/workbench/tasks/composer-prefill';
 import { openTaskDetail } from '@/workbench/tasks/open-task';
+import { CheckDiffView, CheckFlagsPanel, CheckGateProvider, FlagLines, ItemChecks, PlanChecks, useCheckGate, type CheckGate } from '@/workbench/tasks/check-views';
+import { checkDiff, flagsFor, itemChecks, readFlags, tallyLine, withoutChecks } from '@/workbench/tasks/checks';
 import { fieldName, planDiff } from '@/workbench/tasks/plan-diff';
 import {
   STATUS_LABEL,
@@ -47,7 +49,7 @@ import {
   type TaskProposal,
   type TaskStatus,
 } from '@/workbench/tasks/types';
-import { ITEM_LISTS, VISUAL_TYPES, entryOutcome, itemCounts, itemProgress, itemText, recordedEntries, type ItemProgress } from '@/workbench/tasks/progress';
+import { ITEM_LISTS, VISUAL_TYPES, entryOutcome, gated, itemCounts, itemProgress, itemText, recordedEntries, withCheckedEntries, type ItemProgress } from '@/workbench/tasks/progress';
 import { tasksChangedFor, useLiveTask } from '@/workbench/tasks/use-tasks';
 import { ZoomableImage } from '@/workbench/zoomable-image';
 
@@ -344,13 +346,22 @@ function PlanItem({ type, item, entries, cwd, text, children }: {
   text: ReactNode;
   children?: ReactNode;
 }) {
+  const gate = useCheckGate();
   const id = str(item.id);
-  const entry = entries?.get(id);
-  const ok = entry ? entryOutcome(type, item, entry).state === 'met' : null;
+  const checks = itemChecks(item);
+  const raw = entries?.get(id);
+  // An item with checks is ticked by them alone: the server's `checkMet`,
+  // never an entry, and one that fails stays open with its tally.
+  const byChecks = checks.length > 0 || gate?.met?.[id] !== undefined;
+  const entry = raw && !(byChecks && Array.isArray(raw.checks)) ? raw : undefined;
+  const ok = byChecks && gate?.met
+    ? (gate.met[id] === true ? true : null)
+    : entry ? entryOutcome(type, item, entry).state === 'met' : null;
   return (
     <CheckRow testId="task-plan-item" itemId={id} ok={ok} text={text}>
       {children}
       {entry && <EntryDetail type={type} item={item} entry={entry} cwd={cwd} />}
+      <ItemChecks itemId={id} checks={checks} />
     </CheckRow>
   );
 }
@@ -368,6 +379,19 @@ function ItemList({ type, items, entries, cwd }: { type: string; items: Loose[];
  * each plan item shows whether it was met, missed or is still open.
  */
 export function PlanView({ type, plan, entries, cwd }: {
+  type: string;
+  plan: unknown;
+  entries?: ReadonlyMap<string, Loose>;
+  cwd?: string | null;
+}) {
+  // bug, plan and review keep their checks on the plan itself.
+  const own = itemChecks(plan);
+  const fields = <PlanFields type={type} plan={plan} entries={entries} cwd={cwd} />;
+  if (!own.length || ITEM_LISTS[type]) return fields;
+  return <div className="space-y-2">{fields}<PlanChecks checks={own} /></div>;
+}
+
+function PlanFields({ type, plan, entries, cwd }: {
   type: string;
   plan: unknown;
   entries?: ReadonlyMap<string, Loose>;
@@ -393,7 +417,7 @@ export function PlanView({ type, plan, entries, cwd }: {
     case 'general':
       return <div className="space-y-2"><Field label="Outcome">{str(p.outcome)}</Field><div><Label>Done when</Label>{items('done_when')}</div></div>;
     case 'ui_change':
-      if (entries?.size) {
+      if (entries?.size || list(p.screens).some((s) => itemChecks(s).length > 0)) {
         return (
           <Checklist>{list(p.screens).map((s) => (
             <PlanItem key={str(s.id)} type={type} item={s} entries={entries} cwd={cwd} text={<span className="font-medium">{str(s.name)}</span>}>
@@ -958,8 +982,13 @@ function fieldValue(value: unknown): string {
  * A proposed plan change: only the items added, removed and changed, and the
  * other fields that changed (plan-diff.ts). Never both whole plans.
  */
-export function AmendDiff({ type, plan, amend }: { type: string; plan: unknown; amend: unknown }) {
-  const diff = planDiff(type, plan, amend);
+export function AmendDiff({ type, plan, amend, reason }: { type: string; plan: unknown; amend: unknown; reason?: string | null }) {
+  // Checks are shown check by check below, not as a changed field.
+  const listKey = ITEM_LISTS[type]?.plan;
+  const diff = planDiff(type, withoutChecks(plan, listKey), withoutChecks(amend, listKey));
+  const checks = checkDiff(plan, amend, listKey);
+  const names = new Map(list(rec(amend)[listKey ?? '']).concat(list(rec(plan)[listKey ?? ''])).map((item) => [str(item.id), itemText(type, item)]));
+  const itemName = (id: string) => (id === 'plan' ? 'The plan' : names.get(id) || id);
   const rows: ReactNode[] = [];
   const row = (key: string, change: string, icon: ReactNode, body: ReactNode) => rows.push(
     <li key={key} data-testid="task-amend-change" data-change={change} className="flex gap-2 py-1">
@@ -991,9 +1020,20 @@ export function AmendDiff({ type, plan, amend }: { type: string; plan: unknown; 
     </>
   ));
   return (
-    <ul data-testid="task-amend-diff" className="divide-y divide-border/60">
-      {rows.length ? rows : <li className="py-1 text-sm text-muted-foreground">No change to the plan</li>}
-    </ul>
+    <div className="space-y-2">
+      {reason && (
+        <div data-testid="task-amend-reason" className="text-sm">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Reason</span>
+          <p className="whitespace-pre-wrap break-words">{reason}</p>
+        </div>
+      )}
+      {(rows.length > 0 || !checks.length) && (
+        <ul data-testid="task-amend-diff" className="divide-y divide-border/60">
+          {rows.length ? rows : <li className="py-1 text-sm text-muted-foreground">No change to the plan</li>}
+        </ul>
+      )}
+      <CheckDiffView diffs={checks} itemName={itemName} />
+    </div>
   );
 }
 
@@ -1065,11 +1105,13 @@ export function DoneSummary({ task, cwd, counted = false }: {
         <Collapsible>
           <CollapsibleTriggerRow size="sm" data-testid="task-result-all">{total ? `Show all ${total}` : 'Show the whole result'}</CollapsibleTriggerRow>
           <CollapsibleContent className="space-y-3 pt-2">
-            <ResultView type={task.type} plan={task.plan} result={result} cwd={cwd} summarised />
+            <ResultView type={task.type} plan={task.plan} result={withCheckedEntries(task)} cwd={cwd} summarised />
             <Followups label="Follow-ups" items={followups as Followup[]} />
           </CollapsibleContent>
         </Collapsible>
       )}
+      {/* What may make the result prove less, read last, right before it is answered. */}
+      <CheckFlagsPanel flags={readFlags(task.checkFlags)} testCommand={task.testCommandRun} />
     </div>
   );
 }
@@ -1109,6 +1151,9 @@ export function CompactPlan({ task }: { task: Task }) {
               <Icon aria-label={item.state === 'met' ? 'Met' : item.state === 'missed' ? 'Missed' : 'Open'} className={cn('size-3.5 shrink-0',
                 item.state === 'open' ? 'text-muted-foreground' : item.state === 'met' ? 'text-[var(--color-success-accent)]' : 'text-[var(--color-warning-accent)]')} />
               <span className={cn('min-w-0 truncate', item.state === 'open' && 'text-muted-foreground')}>{item.text}</span>
+              {item.checks?.ran && item.state !== 'met' && (
+                <span data-testid="task-plan-item-tally" className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{tallyLine(item.checks)}</span>
+              )}
             </li>
             </Tooltip>
           );
@@ -1155,6 +1200,10 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
   // Plan items checked so far, ticked on the plan while the work goes on.
   const checked = useMemo(() => recordedEntries({ type: task.type, result: null, checks: task.checks }), [task.type, task.checks]);
   const counts = countsLine(itemProgress(task));
+  const flags = useMemo(() => readFlags(task.checkFlags), [task.checkFlags]);
+  const gate = useMemo<CheckGate | null>(() => (gated(task) || flags.length
+    ? { runs: task.checkRuns, met: task.checkMet ?? {}, baseline: task.checkBaseline, flags }
+    : null), [task, flags]);
 
   const title = <h4 className={cn('text-sm font-semibold text-foreground', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</h4>;
   const header = (
@@ -1208,7 +1257,7 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
       {task.pendingAmend && (
         <Panel tone="info" inset="sm" data-testid="task-amend" className="space-y-2">
           <Label>Proposed plan change</Label>
-          <AmendDiff type={task.type} plan={task.plan} amend={task.pendingAmend} />
+          <AmendDiff type={task.type} plan={task.plan} amend={task.pendingAmend} reason={task.amendReason} />
           <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve_amend' || a === 'reject_amend')} onChanged={setActed} />
         </Panel>
       )}
@@ -1222,11 +1271,14 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
           )}
           <Collapsible>
             <CollapsibleTriggerRow size="sm">Plan</CollapsibleTriggerRow>
-            <CollapsibleContent className="pt-2"><PlanView type={task.type} plan={task.plan} /></CollapsibleContent>
+            <CollapsibleContent className="pt-2"><CheckGateProvider gate={gate}><PlanView type={task.type} plan={task.plan} /></CheckGateProvider></CollapsibleContent>
           </Collapsible>
         </>
       ) : (
-        <PlanSection type={task.type}><PlanView type={task.type} plan={task.plan} entries={checked} cwd={cwd} /></PlanSection>
+        <PlanSection type={task.type}>
+          <CheckGateProvider gate={gate}><PlanView type={task.type} plan={task.plan} entries={checked} cwd={cwd} /></CheckGateProvider>
+          <FlagLines flags={flagsFor(flags, undefined)} />
+        </PlanSection>
       )}
 
       <TaskCells task={task} />
@@ -1256,6 +1308,7 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
   const [proposal, setProposal] = useState<TaskProposal>(snapshot);
   const pending = proposal.status === 'pending';
   const { projectId, id } = snapshot;
+  const proposalGate = useMemo<CheckGate>(() => ({ flags: readFlags(proposal.checkFlags) }), [proposal.checkFlags]);
 
   // A card printed long ago may have been answered since, here or elsewhere:
   // read it while it is still waiting, and again whenever tasks change.
@@ -1282,7 +1335,10 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
         <h4 className={cn('text-sm font-semibold text-foreground', proposal.status === 'cancelled' && 'text-muted-foreground line-through')}>{proposal.title}</h4>
         {proposal.why && <p className="text-xs text-muted-foreground">{proposal.why}</p>}
       </header>
-      <PlanSection type={proposal.type}><PlanView type={proposal.type} plan={proposal.plan} /></PlanSection>
+      <PlanSection type={proposal.type}>
+        <CheckGateProvider gate={proposalGate}><PlanView type={proposal.type} plan={proposal.plan} /></CheckGateProvider>
+        <FlagLines flags={flagsFor(proposalGate.flags ?? [], undefined)} />
+      </PlanSection>
       <ProposalCells proposal={proposal} />
       {pending ? (
         <ProposalActions projectId={projectId} id={id} onAnswered={setProposal} />

@@ -24,6 +24,7 @@ import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
 import { useLiveSessions } from '@/workbench/live';
 import { openTaskDetail } from '@/workbench/tasks/open-task';
+import { tallyLine } from '@/workbench/tasks/checks';
 import { diffLine, planDiff, same, type PlanDiff } from '@/workbench/tasks/plan-diff';
 import { ITEM_LISTS, VISUAL_TYPES, entryOutcome, itemProgress, itemText, recordedEntries } from '@/workbench/tasks/progress';
 import { AmendDiff, DoneSummary, ShotPair, TaskOwnerActions, countsLine } from '@/workbench/tasks/task-card';
@@ -106,6 +107,14 @@ export function eventText(event: string, task: Task, detail: TaskEventDetail = {
     case 'check': {
       const item = checked(task, detail);
       if (!item) return 'Checked a plan item';
+      // A checked item reports its tally: "2 of 3 checks pass", and why the rest fail.
+      const total = typeof detail.total === 'number' ? detail.total : null;
+      if (total !== null) {
+        const passed = typeof detail.passed === 'number' ? detail.passed : 0;
+        const said = tallyLine({ passed, total, ran: true });
+        if (item.met) return `Checked “${item.name}” — met, ${said}`;
+        return `Checked “${item.name}” — ${said}${item.reason ? `: ${item.reason}` : ''}`;
+      }
       const outcome = item.met === null ? '' : item.met ? ' — met' : ` — missed${item.reason ? `: ${item.reason}` : ''}`;
       return `Checked “${item.name}”${outcome}`;
     }
@@ -157,7 +166,7 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
   // What the line unfolds to, if anything.
   let more: ReactNode = null;
   if (event === 'amend' && printed.pendingAmend) {
-    more = <AmendDiff type={printed.type} plan={printed.plan} amend={printed.pendingAmend} />;
+    more = <AmendDiff type={printed.type} plan={printed.plan} amend={printed.pendingAmend} reason={printed.amendReason} />;
   } else if (event === 'done' && printed.result) {
     // The result as printed, with the merge state as it is now.
     more = <DoneSummary task={same(now.result, printed.result) ? { ...printed, merged: now.merged } : printed} cwd={cwd} counted />;

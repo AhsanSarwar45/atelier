@@ -7,6 +7,7 @@
  */
 
 import type { SessionState } from '@/workbench/protocol';
+import type { CheckFlag } from '@/workbench/tasks/checks';
 
 export const TASK_STATUSES = ['todo', 'in_progress', 'blocked', 'review', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -142,6 +143,21 @@ export interface Task {
    * grid (`Glare row · 5 cells`). Null or absent when they are not.
    */
   claimShape?: ClaimShape | null;
+  /** Whether the plan carries checks the server runs (docs/tasks.md, "Checks"). */
+  checked?: boolean;
+  /** What the server ran of each item's checks: `{ITEM: {CHECK: run}}`. */
+  checkRuns?: Record<string, Record<string, Record<string, unknown>>> | null;
+  /** Which items their checks tick. */
+  checkMet?: Record<string, boolean> | null;
+  /** What the server found worth the owner's eye: weak checks, checks that prove nothing, skips. */
+  checkFlags?: CheckFlag[] | null;
+  /** Each benchmark's start-of-task numbers: `{ITEM: {CHECK: {p50, samples}}}`. */
+  checkBaseline?: Record<string, Record<string, { p50: number; samples?: number[] }>> | null;
+  startCommit?: string | null;
+  /** The project's test command as it ran at done. */
+  testCommandRun?: Record<string, unknown> | null;
+  /** Why the agent asked to change the plan, for a pending amend. */
+  amendReason?: string | null;
 }
 
 /** A task's claimed cells as one row, one column or one whole grid. */
@@ -189,6 +205,8 @@ export interface TaskProposal {
   decidedAt: number | null;
   /** The grid cells the proposed task would claim. */
   cells?: Array<{ grid: string; row: string; col: string }> | null;
+  /** The lint's notes on how the proposed checks are written. */
+  checkFlags?: CheckFlag[] | null;
 }
 
 export type TaskEventKind =

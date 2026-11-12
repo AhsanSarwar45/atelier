@@ -6,6 +6,7 @@
  * them in `checks`, shaped like the type's result list. Once done, the result
  * holds them. Read loosely, like the rest of the card.
  */
+import { itemChecks, itemRuns, tally, type CheckTally } from '@/workbench/tasks/checks';
 import { targetMet, type OptimizationTarget, type Task } from '@/workbench/tasks/types';
 
 type Loose = Record<string, unknown>;
@@ -42,6 +43,18 @@ export interface ItemProgress {
   state: ItemState;
   /** Why it was missed; empty otherwise. */
   note: string;
+  /** For an item with checks: how many pass. */
+  checks?: CheckTally;
+}
+
+type Gated = Pick<Task, 'checked' | 'checkMet' | 'checkRuns'>;
+
+/**
+ * Whether a task's items are ticked by its checks rather than by the agent's
+ * entries: the server ran them, and `checkMet` says which pass.
+ */
+export function gated(task: Partial<Gated>): boolean {
+  return task.checked === true || (typeof task.checkMet === 'object' && task.checkMet !== null && Object.keys(task.checkMet).length > 0);
 }
 
 /** What a plan item is called, by type. */
@@ -103,12 +116,21 @@ export function recordedEntries(task: Pick<Task, 'type' | 'result' | 'checks'>):
 }
 
 /** Each plan item and where it stands. Empty for a type with no items. */
-export function itemProgress(task: Pick<Task, 'type' | 'plan' | 'result' | 'checks'>): ItemProgress[] {
+export function itemProgress(task: Pick<Task, 'type' | 'plan' | 'result' | 'checks'> & Partial<Gated>): ItemProgress[] {
   const lists = ITEM_LISTS[task.type];
   if (!lists) return [];
   const entries = recordedEntries(task);
+  const byChecks = gated(task);
   return list(rec(task.plan)[lists.plan]).map((item) => {
     const id = str(item.id);
+    const checks = itemChecks(item);
+    if (byChecks && (checks.length || task.checkMet?.[id] !== undefined)) {
+      // Ticked only by its checks; one that fails stays open with its tally.
+      return {
+        id, text: itemText(task.type, item), state: task.checkMet?.[id] === true ? 'met' : 'open', note: '',
+        ...(checks.length ? { checks: tally(checks, itemRuns(task.checkRuns, id)) } : {}),
+      };
+    }
     const entry = entries.get(id);
     const outcome = entry ? entryOutcome(task.type, item, entry) : null;
     return { id, text: itemText(task.type, item), state: outcome?.state ?? 'open', note: outcome?.note ?? '' };
@@ -127,4 +149,27 @@ export function itemCounts(items: readonly ItemProgress[]): ItemCounts {
     missed: items.filter((item) => item.state === 'missed').length,
     total: items.length,
   };
+}
+
+/**
+ * A checked task's result with an entry for each item its checks met: such a
+ * result carries no entries of its own, so the result lists would read as
+ * open. The entry says the checks passed, in the type's own words.
+ */
+export function withCheckedEntries<T extends Pick<Task, 'type' | 'result'> & Partial<Gated>>(task: T): T['result'] {
+  const lists = ITEM_LISTS[task.type];
+  if (!task.result || !lists || !gated(task) || VISUAL_TYPES.has(task.type) || task.type === 'optimization') return task.result;
+  const given = list(rec(task.result)[lists.result]);
+  const have = new Set(given.map((entry) => str(entry.id)));
+  const added: Loose[] = [];
+  for (const [id, met] of Object.entries(task.checkMet ?? {})) {
+    if (!met || have.has(id)) continue;
+    const said = 'Its checks pass';
+    added.push({
+      id, met: true, passed: true, done: true, fails_without_code: true, evidence: said, output: said, how_verified: said,
+      what_changed: said, answer: said,
+    });
+  }
+  if (!added.length) return task.result;
+  return { ...task.result, [lists.result]: [...given, ...added] };
 }
