@@ -466,23 +466,27 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
                               data-testid="task-row"
                               data-number={task.number}
                               onClick={() => setSelected(task.number)}
-                              className="min-h-10 min-w-0 flex-1"
+                              // On a phone the title takes a line of its own under the number and badges,
+                              // rather than being cut to a word between them.
+                              className="min-h-10 min-w-0 flex-1 flex-wrap gap-y-1 sm:flex-nowrap"
                             >
-                              <span className="w-10 shrink-0 font-mono text-xs text-muted-foreground">#{task.number}</span>
+                              <span className="shrink-0 font-mono text-xs text-muted-foreground sm:w-10">#{task.number}</span>
                               <Badge variant="secondary" size="sm" className="shrink-0"><span>{typeLabel(task.type)}</span></Badge>
-                              <span className={cn('min-w-0 flex-1 truncate text-sm', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</span>
-                              <span className="hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground sm:inline">{sessionName(task, sessions)}</span>
-                              {stale.has(task.number) && (
-                                <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-stale" className="shrink-0"><span>Stale</span></Badge>
-                              )}
-                              {task.pendingAmend && (
-                                <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-amend" className="shrink-0"><span>Plan change</span></Badge>
-                              )}
-                              {task.shortfalls && (
-                                <AlertTriangle role="img" aria-label="Finished with shortfalls" data-testid="task-row-shortfalls" className="size-3.5 shrink-0 text-[var(--color-warning-accent)]" />
-                              )}
-                              <MergeBadge task={task} className="shrink-0" />
-                              <TaskStatusChip status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} className="shrink-0" />
+                              <span data-testid="task-row-title" className={cn('order-last line-clamp-2 min-w-0 basis-full text-sm sm:order-none sm:line-clamp-none sm:flex-1 sm:basis-auto sm:truncate', task.status === 'cancelled' && 'text-muted-foreground line-through')}>{task.title}</span>
+                              <span className="ml-auto hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground sm:inline">{sessionName(task, sessions)}</span>
+                              <span className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
+                                {stale.has(task.number) && (
+                                  <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-stale" className="shrink-0"><span>Stale</span></Badge>
+                                )}
+                                {task.pendingAmend && (
+                                  <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-amend" className="shrink-0"><span>Plan change</span></Badge>
+                                )}
+                                {task.shortfalls && (
+                                  <AlertTriangle role="img" aria-label="Finished with shortfalls" data-testid="task-row-shortfalls" className="size-3.5 shrink-0 text-[var(--color-warning-accent)]" />
+                                )}
+                                <MergeBadge task={task} className="shrink-0" />
+                                <TaskStatusChip status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} className="shrink-0" />
+                              </span>
                             </Row>
                             {stale.has(task.number) && <StaleCancel task={task} />}
                           </div>
