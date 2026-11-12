@@ -25,19 +25,25 @@ pub struct TaskType {
 pub const TYPES: &[TaskType] = &[
     TaskType { name: "bug", code: true, review: false,
         plan: "symptom, repro_steps[], expected, actual, suspected_area?",
-        result: "root_cause, fix, proof (evidence that it failed before and passes after), regression_checked[]" },
+        result: "root_cause, fix, proof (evidence that it failed before and passes after), regression_checked[], screens[]? {name, before?, after} (required when the commits change visual files; use visual_bug for a bug you can see)" },
     TaskType { name: "feature", code: true, review: false,
         plan: "outcome, criteria[] {id, text}",
-        result: "criteria[] {id, met, evidence, reason?} (reason required when not met)" },
+        result: "criteria[] {id, met, evidence, reason?} (reason required when not met), screens[]? {name, before?, after} (required when the commits change visual files; use ui_feature or render_feature for anything visible)" },
     TaskType { name: "ui_change", code: true, review: true,
         plan: "screens[] {id, name, how_to_reach, change}",
         result: "screens[] {id, before, after, notes?} (before and after are paths to two different images)" },
+    TaskType { name: "ui_feature", code: true, review: true,
+        plan: "outcome, screens[] {id, name, how_to_reach, shows, existed?} (shows: what the screen must show; existed: true when the screen was already there)",
+        result: "screens[] {id, after, before?, notes?} (after is an image of the screen with the feature; before is an image, required when the plan item has existed: true, and different from after)" },
     TaskType { name: "visual_bug", code: true, review: true,
         plan: "symptom, repro_steps[], expected, actual, suspected_area?, screens[] {id, name, how_to_reach}",
         result: "root_cause, fix, screens[] {id, before, after, notes?} (before shows the bug, after shows it fixed: paths to two different images)" },
     TaskType { name: "render_change", code: true, review: true,
         plan: "scenes[] {id, scene, camera, change, reference?} (camera is the camera settings as text; reference: true when a reference image must be given)",
         result: "scenes[] {id, before, after, reference?, notes?} (before and after are renders of the same scene and camera, two different images; reference is an image, required when the plan item has reference: true)" },
+    TaskType { name: "render_feature", code: true, review: true,
+        plan: "outcome, scenes[] {id, name, scene, camera, shows, existed?, reference?} (camera is the camera settings as text; shows: what the render must show; existed: true when the scene already rendered; reference: true when a reference image must be given)",
+        result: "scenes[] {id, after, before?, reference?, notes?} (images: before is required when the plan item has existed: true and differs from after; reference is required when the plan item has reference: true)" },
     TaskType { name: "optimization", code: true, review: false,
         plan: "targets[] {id, name, metric, unit, baseline, target, how_measured, environment, higher_is_better?} (baseline and target are numbers; lower is better unless higher_is_better)",
         result: "method, targets[] {id, before, after, runs, why_faster?, failure_reason?} (met is worked out from after and target; why_faster required when met, failure_reason when not)" },
@@ -129,6 +135,19 @@ fn examples(name: &str) -> (Value, Value) {
         "ui_change" => (
             json!({"screens": [{"id": "settings", "name": "Settings", "how_to_reach": "Sidebar > Settings", "change": "Group toggles under headings"}]}),
             json!({"screens": [{"id": "settings", "before": "shots/settings-before.png", "after": "shots/settings-after.png", "notes": "Dark theme checked too"}]}),
+        ),
+        "ui_feature" => (
+            json!({"outcome": "Owners can pin a chat to the top of the list", "screens": [
+                {"id": "list", "name": "Chat list", "how_to_reach": "Open a project > Chat tab", "shows": "A pin icon on each row; pinned chats first", "existed": true},
+                {"id": "pinned", "name": "Pinned section", "how_to_reach": "Pin a chat from its row menu", "shows": "A Pinned heading above the pinned chats"}]}),
+            json!({"screens": [
+                {"id": "list", "before": "shots/list-before.png", "after": "shots/list-after.png", "notes": "Dark theme checked too"},
+                {"id": "pinned", "after": "shots/pinned-after.png"}]}),
+        ),
+        "render_feature" => (
+            json!({"outcome": "Scenes can use an HDR sky for lighting", "scenes": [
+                {"id": "sponza", "name": "Sponza at noon", "scene": "scenes/sponza.gltf", "camera": "position 0 2 8, look at 0 1 0, fov 60", "shows": "Sky light and soft sky shadows", "existed": true, "reference": true}]}),
+            json!({"scenes": [{"id": "sponza", "before": "renders/sponza-before.png", "after": "renders/sponza-after.png", "reference": "renders/sponza-reference.png", "notes": "1024 samples"}]}),
         ),
         "visual_bug" => (
             json!({"symptom": "Menu icons are blurry on 2x screens", "repro_steps": ["Open the app on a 2x display", "Open the settings menu"], "expected": "Sharp icons", "actual": "Blurry icons", "suspected_area": "src/icons/sprite.png",
@@ -483,6 +502,28 @@ pub fn check_plan(kind: &str, plan: &Value) -> Result<(), String> {
                 text(entry, "change", &path)?;
             }
         }
+        "ui_feature" => {
+            only(row, &["outcome", "screens"], at)?;
+            text(row, "outcome", at)?;
+            for (_, entry, path) in plan_items(row, "screens", at, &["id", "name", "how_to_reach", "shows", "existed"])? {
+                text(entry, "name", &path)?;
+                text(entry, "how_to_reach", &path)?;
+                text(entry, "shows", &path)?;
+                optional_boolean(entry, "existed", &path)?;
+            }
+        }
+        "render_feature" => {
+            only(row, &["outcome", "scenes"], at)?;
+            text(row, "outcome", at)?;
+            let allowed = ["id", "name", "scene", "camera", "shows", "existed", "reference"];
+            for (_, entry, path) in plan_items(row, "scenes", at, &allowed)? {
+                for key in ["name", "scene", "camera", "shows"] {
+                    text(entry, key, &path)?;
+                }
+                optional_boolean(entry, "existed", &path)?;
+                optional_boolean(entry, "reference", &path)?;
+            }
+        }
         "visual_bug" => {
             only(row, &["symptom", "repro_steps", "expected", "actual", "suspected_area", "screens"], at)?;
             text(row, "symptom", at)?;
@@ -608,9 +649,8 @@ pub fn item_lists(kind: &str) -> Option<(&'static str, &'static str)> {
     Some(match kind {
         "feature" => ("criteria", "criteria"),
         "general" => ("done_when", "done_when"),
-        "ui_change" => ("screens", "screens"),
-        "visual_bug" => ("screens", "screens"),
-        "render_change" => ("scenes", "scenes"),
+        "ui_change" | "ui_feature" | "visual_bug" => ("screens", "screens"),
+        "render_change" | "render_feature" => ("scenes", "scenes"),
         "optimization" => ("targets", "targets"),
         "investigation" => ("questions", "answers"),
         "refactor" => ("invariants", "invariants"),
@@ -626,8 +666,8 @@ pub fn item_lists(kind: &str) -> Option<(&'static str, &'static str)> {
 fn entry_fields(kind: &str) -> &'static [&'static str] {
     match kind {
         "feature" | "general" => &["id", "met", "evidence", "reason"],
-        "ui_change" | "visual_bug" => &["id", "before", "after", "notes"],
-        "render_change" => &["id", "before", "after", "reference", "notes"],
+        "ui_change" | "ui_feature" | "visual_bug" => &["id", "before", "after", "notes"],
+        "render_change" | "render_feature" => &["id", "before", "after", "reference", "notes"],
         "optimization" => &["id", "before", "after", "runs", "why_faster", "failure_reason"],
         "investigation" => &["id", "answer", "evidence", "confidence", "recommendation"],
         "refactor" => &["id", "how_verified"],
@@ -656,8 +696,11 @@ fn check_item(kind: &str, plan_item: &Value, entry: &Row, path: &str) -> Result<
             let reason = optional_text(entry, "reason", path)?;
             unmet(met, reason, "reason", "met is false")
         }
-        "ui_change" | "visual_bug" | "render_change" => {
-            before_and_after(entry, path)?;
+        "ui_change" | "ui_feature" | "visual_bug" | "render_change" | "render_feature" => {
+            // A feature's new screen or scene has nothing to show before it.
+            let new = matches!(kind, "ui_feature" | "render_feature")
+                && !plan_item.get("existed").and_then(Value::as_bool).unwrap_or(false);
+            images(entry, path, !new)?;
             let wanted = plan_item.get("reference").and_then(Value::as_bool).unwrap_or(false);
             match optional_text(entry, "reference", path)? {
                 Some(shot) => image(shot, "reference", path)?,
@@ -731,9 +774,13 @@ fn check_item(kind: &str, plan_item: &Value, entry: &Row, path: &str) -> Result<
     }
 }
 
+/// The types whose every item is proved with images: what to use for
+/// anything visible.
+pub const VISUAL_TYPES: &[&str] = &["ui_change", "ui_feature", "visual_bug", "render_change", "render_feature"];
+
 /// Whether a type's every item is proved with before and after images.
 pub fn is_visual(kind: &str) -> bool {
-    matches!(kind, "ui_change" | "visual_bug" | "render_change")
+    VISUAL_TYPES.contains(&kind)
 }
 
 /// One stored image: the served address an uploaded PNG, JPEG, GIF or WebP
@@ -748,15 +795,18 @@ fn image(shot: &str, side: &str, path: &str) -> Result<(), String> {
     ))
 }
 
-/// A visual item's `before` and `after`: two stored images, and not the same
+/// A visual item's `before` and `after`: stored images, and not the same
 /// one. The served address is named by the file's SHA-256, so the same file
-/// given twice has the same address.
-fn before_and_after(entry: &Row, path: &str) -> Result<(), String> {
-    let before = text(entry, "before", path)?;
+/// given twice has the same address. `before` may be left out where it is
+/// not required (a new screen has no before).
+fn images(entry: &Row, path: &str, before_required: bool) -> Result<(), String> {
+    let before = if before_required { Some(text(entry, "before", path)?) } else { optional_text(entry, "before", path)? };
     let after = text(entry, "after", path)?;
-    image(before, "before", path)?;
+    if let Some(before) = before {
+        image(before, "before", path)?;
+    }
     image(after, "after", path)?;
-    if before == after {
+    if before == Some(after) {
         return Err(format!(
             "{path}: before and after are the same image (the same file contents); before shows how it was, after shows the change"
         ));
@@ -834,11 +884,17 @@ pub fn check_result(kind: &str, plan: &Value, result: &Value) -> Result<Vec<Stri
             check_items(kind, plan, row, at, &mut unmet)?;
         }
         "bug" => {
-            only(row, &["root_cause", "fix", "proof", "regression_checked"], at)?;
+            only(row, &["root_cause", "fix", "proof", "regression_checked", "screens"], at)?;
             text(row, "root_cause", at)?;
             text(row, "fix", at)?;
             text(row, "proof", at)?;
             texts(row, "regression_checked", at, 0)?;
+            screenshots(row, at)?;
+        }
+        "feature" => {
+            only(row, &["criteria", "screens"], at)?;
+            check_items(kind, plan, row, at, &mut unmet)?;
+            screenshots(row, at)?;
         }
         "optimization" => {
             only(row, &["method", "targets"], at)?;
@@ -889,6 +945,29 @@ pub fn check_result(kind: &str, plan: &Value, result: &Value) -> Result<Vec<Stri
     Ok(unmet)
 }
 
+/// The optional `screens[] {name, before?, after}` of a `feature` or `bug`
+/// result: screenshots of what the commits changed on screen, held to the
+/// visual types' image rule. Required when the commits change visual files
+/// (`visual_files`).
+fn screenshots(row: &Row, at: &str) -> Result<(), String> {
+    if present(row, "screens").is_none() {
+        return Ok(());
+    }
+    for (index, item) in list(row, "screens", at, 1)?.iter().enumerate() {
+        let path = format!("{at}.screens[{index}]");
+        let entry = object(item, &path)?;
+        only(entry, &["name", "before", "after"], &path)?;
+        text(entry, "name", &path)?;
+        images(entry, &path, false)?;
+    }
+    Ok(())
+}
+
+/// Whether a result carries screenshots (`screenshots`).
+pub fn has_screenshots(result: &Value) -> bool {
+    result["screens"].as_array().is_some_and(|shots| !shots.is_empty())
+}
+
 /// The served form an uploaded image takes in a stored result.
 pub const SERVED: &str = "/api/presentation-assets/";
 
@@ -927,10 +1006,12 @@ mod tests {
         for kind in TYPES {
             let (plan, mut result) = examples(kind.name);
             if let Some((_, key)) = item_lists(kind.name).filter(|_| is_visual(kind.name)) {
-                result[key][0]["before"] = json!(asset('a'));
-                result[key][0]["after"] = json!(asset('b'));
-                if kind.name == "render_change" {
-                    result[key][0]["reference"] = json!(asset('c'));
+                for entry in result[key].as_array_mut().unwrap() {
+                    for (side, shot) in [("before", 'a'), ("after", 'b'), ("reference", 'c')] {
+                        if entry.get(side).is_some() {
+                            entry[side] = json!(asset(shot));
+                        }
+                    }
                 }
             }
             check_plan(kind.name, &plan).unwrap_or_else(|e| panic!("{} plan: {e}", kind.name));
@@ -1078,6 +1159,78 @@ mod tests {
             .contains("reference must be true or false"));
     }
 
+    #[test]
+    fn ui_feature_needs_a_before_only_for_a_screen_that_existed() {
+        let plan = examples("ui_feature").0;
+        let result = |list: Value, pinned: Value| json!({"screens": [list, pinned]});
+        let list = json!({"id": "list", "before": asset('a'), "after": asset('b')});
+        // A new screen has no before: after alone is enough.
+        assert!(check_result("ui_feature", &plan, &result(list.clone(), json!({"id": "pinned", "after": asset('c')}))).unwrap().is_empty());
+        // A screen that existed must show how it was.
+        assert_eq!(result_error("ui_feature", plan.clone(), result(json!({"id": "list", "after": asset('b')}), json!({"id": "pinned", "after": asset('c')}))),
+            "result.screens[0] (id \"list\"): before is required (text)");
+        // A before given anyway is held to the image rule.
+        assert!(result_error("ui_feature", plan.clone(), result(list.clone(), json!({"id": "pinned", "before": "shots/x.png", "after": asset('c')})))
+            .contains("missing, or not an image"));
+        assert!(result_error("ui_feature", plan.clone(), result(list.clone(), json!({"id": "pinned", "before": asset('c'), "after": asset('c')})))
+            .contains("before and after are the same image"));
+        assert!(result_error("ui_feature", plan.clone(), result(list, json!({"id": "pinned", "after": "shots/pinned.png"})))
+            .contains("after must be a path to a PNG"));
+        // The plan says what each screen must show.
+        assert!(plan_error("ui_feature", json!({"outcome": "o", "screens": [{"id": "a", "name": "n", "how_to_reach": "h"}]})).contains("shows is required"));
+        assert_eq!(plan_error("ui_feature", json!({"screens": [{"id": "a", "name": "n", "how_to_reach": "h", "shows": "s"}]})),
+            "plan: outcome is required (text)");
+        assert!(plan_error("ui_feature", json!({"outcome": "o", "screens": [{"id": "a", "name": "n", "how_to_reach": "h", "shows": "s", "existed": "yes"}]}))
+            .contains("existed must be true or false"));
+        assert_eq!(item_lists("ui_feature"), Some(("screens", "screens")));
+        assert!(find("ui_feature").unwrap().review && find("ui_feature").unwrap().code && is_visual("ui_feature"));
+    }
+
+    #[test]
+    fn render_feature_needs_a_before_where_it_existed_and_a_reference_where_asked() {
+        let plan = json!({"outcome": "o", "scenes": [
+            {"id": "old", "name": "Old", "scene": "a.gltf", "camera": "fov 60", "shows": "s", "existed": true},
+            {"id": "new", "name": "New", "scene": "b.gltf", "camera": "fov 40", "shows": "s", "reference": true}]});
+        let with = |old: Value, new: Value| json!({"scenes": [old, new]});
+        let old = json!({"id": "old", "before": asset('a'), "after": asset('b')});
+        let new = json!({"id": "new", "after": asset('c'), "reference": asset('d')});
+        assert!(check_result("render_feature", &plan, &with(old.clone(), new.clone())).unwrap().is_empty());
+        assert_eq!(result_error("render_feature", plan.clone(), with(json!({"id": "old", "after": asset('b')}), new.clone())),
+            "result.scenes[0] (id \"old\"): before is required (text)");
+        assert_eq!(result_error("render_feature", plan.clone(), with(old.clone(), json!({"id": "new", "after": asset('c')}))),
+            "result.scenes[1] (id \"new\"): reference is required because the plan asks for a reference image for this scene");
+        assert!(result_error("render_feature", plan.clone(), with(json!({"id": "old", "before": asset('b'), "after": asset('b')}), new))
+            .contains("same image"));
+        assert!(plan_error("render_feature", json!({"outcome": "o", "scenes": [{"id": "a", "name": "n", "scene": "s", "shows": "s"}]})).contains("camera is required"));
+        assert_eq!(item_lists("render_feature"), Some(("scenes", "scenes")));
+        assert!(find("render_feature").unwrap().review && is_visual("render_feature"));
+        // `check` holds one scene to the same rule.
+        assert!(check_one("render_feature", &plan, "old", &json!({"after": asset('b')})).unwrap_err().contains("before is required"));
+        assert!(check_one("render_feature", &plan, "new", &json!({"after": asset('b'), "reference": asset('c')})).is_ok());
+    }
+
+    #[test]
+    fn feature_and_bug_results_may_carry_screenshots_held_to_the_image_rule() {
+        let (plan, mut result) = examples("feature");
+        result["screens"] = json!([{"name": "Export menu", "after": asset('a')}, {"name": "Chat", "before": asset('b'), "after": asset('c')}]);
+        assert_eq!(check_result("feature", &plan, &result).unwrap().len(), 1, "the example misses one criterion");
+        assert!(has_screenshots(&result));
+        result["screens"] = json!([{"name": "Export menu", "after": "shots/menu.png"}]);
+        assert!(result_error("feature", plan.clone(), result.clone()).contains("result.screens[0]: after must be a path to a PNG"));
+        result["screens"] = json!([{"name": "Export menu", "before": asset('a'), "after": asset('a')}]);
+        assert!(result_error("feature", plan.clone(), result.clone()).contains("result.screens[0]: before and after are the same image"));
+        result["screens"] = json!([{"before": asset('a'), "after": asset('b')}]);
+        assert_eq!(result_error("feature", plan.clone(), result.clone()), "result.screens[0]: name is required (text)");
+        result["screens"] = json!([]);
+        assert!(result_error("feature", plan, result).contains("screens is empty"));
+        let (plan, mut result) = examples("bug");
+        assert!(!has_screenshots(&result));
+        result["screens"] = json!([{"name": "Draft", "before": asset('a'), "after": asset('b')}]);
+        assert!(check_result("bug", &plan, &result).unwrap().is_empty());
+        result["screens"][0]["id"] = json!("x");
+        assert!(result_error("bug", plan, result).contains("id is not a field here"));
+    }
+
     fn optimization_plan(higher: bool) -> Value {
         json!({"targets": [
             {"id": "rps", "name": "Throughput", "metric": "requests/s", "unit": "rps", "baseline": 100, "target": 150, "how_measured": "wrk", "environment": "local", "higher_is_better": true},
@@ -1135,7 +1288,7 @@ mod tests {
     fn plan_type() {
         let plan = examples("plan").0;
         assert_eq!(result_error("plan", plan.clone(), json!({"document": "d", "decisions": [], "open_questions": [], "proposed_tasks": [{"type": "epic", "title": "t", "why": "w"}]})),
-            "result.proposed_tasks[0]: type \"epic\" is not a task type (types: bug, feature, ui_change, visual_bug, render_change, optimization, plan, investigation, refactor, tests, review, qa, docs, chore, general)");
+            "result.proposed_tasks[0]: type \"epic\" is not a task type (types: bug, feature, ui_change, ui_feature, visual_bug, render_change, render_feature, optimization, plan, investigation, refactor, tests, review, qa, docs, chore, general)");
         assert_eq!(result_error("plan", plan, json!({"decisions": [], "open_questions": [], "proposed_tasks": []})),
             "result: document is required (text)");
     }
