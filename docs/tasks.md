@@ -83,7 +83,7 @@ todo ──start──▶ in_progress ──done──▶ done
   (`session_id = null`). Anyone can `take` them.
 - The front end shows an `in_progress` task whose session is not running as
   **paused**. This is a display state, not stored.
-- Review types (`plan`, `ui_change`, `visual_bug`, `render_change`) go to `review` on `done`. The owner
+- Review types (`plan` and the visual types `ui_change`, `ui_feature`, `visual_bug`, `render_change`, `render_feature`) go to `review` on `done`. The owner
   approves (→ `done`) or reopens with a note (→ `in_progress`; → `todo` if
   the task is unassigned or its session already has another task in progress).
 - `amend` stores `pending_amend`. The owner approves (plan replaced) or
@@ -104,7 +104,8 @@ entry. Only the chat holding the task may check, only while it is
 `event: "check"`.
 
 The types with items: `feature` (criteria), `general` (done_when),
-`ui_change` (screens), `visual_bug` (screens), `render_change` (scenes),
+`ui_change` (screens), `ui_feature` (screens), `visual_bug` (screens),
+`render_change` (scenes), `render_feature` (scenes),
 `optimization` (targets), `investigation` (questions,
 answered in answers), `refactor` (invariants), `tests` (behaviors), `qa`
 (scenarios), `docs` (pages), `chore` (steps). `bug`, `plan` and `review`
@@ -271,17 +272,30 @@ The base branch is the branch `origin/HEAD` points at, else `main`, else
 Lists in a plan have an `id` (string, unique in the list). Each result list
 must have exactly one entry per plan id.
 
+Anything you can see on screen or in a render uses a visual type:
+`ui_change`, `ui_feature`, `visual_bug`, `render_change` or
+`render_feature`. New work you can see is `ui_feature` or `render_feature`,
+not `feature`; a bug you can see is `visual_bug`, not `bug`.
+
 ### `bug` (code)
 - plan: `symptom`, `repro_steps[]`, `expected`, `actual`, `suspected_area?`
-- result: `root_cause`, `fix`, `proof` (evidence that it failed before and passes after), `regression_checked[]`
+- result: `root_cause`, `fix`, `proof` (evidence that it failed before and passes after), `regression_checked[]`, `screens[]? {name, before?, after}` (see Visual files)
 
 ### `feature` (code)
 - plan: `outcome`, `criteria[] {id, text}`
-- result: `criteria[] {id, met, evidence, reason?}` (`reason` required when not met)
+- result: `criteria[] {id, met, evidence, reason?}` (`reason` required when not met), `screens[]? {name, before?, after}` (see Visual files)
 
 ### `ui_change` (code, review)
 - plan: `screens[] {id, name, how_to_reach, change}`
 - result: `screens[] {id, before, after, notes?}` (`before` and `after` are images, see below)
+
+### `ui_feature` (code, review)
+- plan: `outcome`, `screens[] {id, name, how_to_reach, shows, existed?}`
+  (`shows`: what the screen must show; `existed: true`: the screen was
+  already there)
+- result: `screens[] {id, after, before?, notes?}`. `before` is required for
+  a screen whose plan item says `existed: true`; a new screen has only an
+  `after`.
 
 ### `visual_bug` (code, review)
 - plan: the `bug` fields (`symptom`, `repro_steps[]`, `expected`, `actual`, `suspected_area?`) and `screens[] {id, name, how_to_reach}`
@@ -292,15 +306,45 @@ must have exactly one entry per plan id.
 - result: `scenes[] {id, before, after, reference?, notes?}`. `reference` is
   optional, and required for a scene whose plan item says `reference: true`.
 
+### `render_feature` (code, review)
+- plan: `outcome`, `scenes[] {id, name, scene, camera, shows, existed?, reference?}`
+- result: `scenes[] {id, after, before?, reference?, notes?}`. `before` is
+  required where the plan item says `existed: true`, `reference` where it
+  says `reference: true`.
+
 ### Before and after images
 
-For `ui_change`, `visual_bug` and `render_change`, `check` and `done` are
-refused unless each item's `before` and `after` (and a `reference`, where
-given or asked for) are images uploaded as presentation assets: the CLI
-uploads files named in the payload, and the server stores them as
+For the visual types, `check` and `done` are refused unless each item's
+`after`, its `before` (always for `ui_change`, `visual_bug` and
+`render_change`; where the screen or scene existed for `ui_feature` and
+`render_feature`) and a `reference` (where given or asked for) are images
+uploaded as presentation assets: the CLI uploads files named in the
+payload, and the server stores them as
 `/api/presentation-assets/<sha256>.<ext>`. A path that is missing or not a
 PNG, JPEG, GIF or WebP is refused, and so are a `before` and `after` with
-the same contents (the same hash).
+the same contents (the same hash). The same rule holds for the screenshots
+on a `feature` or `bug` result.
+
+### Visual files
+
+The safety net under `feature` and `bug`: `done` is refused when any of its
+commits change a visual file, unless the result has `screens[] {name,
+before?, after}` (screenshots, held to the image rule above; `before` where
+the screen existed). The error names the files, the `screens` field and the
+visual types to use instead. The changed files are read with git
+(`git diff-tree --name-only -r --root <sha>`) in the session's folder.
+
+Visual files are, by default, `.tsx .jsx .css .scss .html .vue .svelte` and
+shaders (`.wgsl .glsl .hlsl .frag .vert .comp .metal .slang`). Tests never
+count: anything under `__tests__` or named `*.test.*` or `*.spec.*`. A
+project replaces the list in its manifest (`.atelier/project.toml` or its
+personal one), with extensions or globs over the path from the repository's
+root:
+
+```toml
+[tasks]
+visual_files = [".tsx", ".css", "assets/**/*.svg"]
+```
 
 ### `optimization` (code)
 - plan: `targets[] {id, name, metric, unit, baseline, target, how_measured, environment, higher_is_better?}`. `baseline` and `target` are numbers; lower is better unless `higher_is_better` is true.
@@ -383,13 +427,15 @@ the same contents (the same hash).
   detail's pending change panel.
 - **Done summary**: met and missed counts, only the missed items with their
   reasons, root cause and fix for `bug` and `visual_bug`, the summary, and
-  the commits with the Merged badge. The whole result per type
+  the commits with the Merged badge, and a `feature` or `bug` result's
+  screenshots behind their toggles. The whole result per type
   (optimization as a before/after/target table, the visual types as image
   compares, plan as rendered markdown) is behind **Show all**. Used in the
   done line and the detail.
 - **Images**: a visual type's before and after images sit side by side
-  behind a toggle (with the reference for `render_change`), so they take no
-  room until opened.
+  behind a toggle (with the reference for `render_change` and
+  `render_feature`), so they take no room until opened. An item with no
+  before (a new screen or scene) shows its after alone.
 - **Checklist panel**: the current session's tasks with live statuses and,
   for a task with plan items, how many are met (`3/7`); an active task lists
   its plan items ticked, missed or open. A task's row opens its detail on
