@@ -654,4 +654,57 @@ pub(crate) mod tests {
         assert_eq!(kinds, ["weak", "proves-nothing", "skip-added", "exit-in-test", "test-deleted"]);
         assert_eq!(outcome.task.status, "done", "flags inform the owner; they do not refuse done");
     }
+
+    #[test]
+    fn an_amend_needs_a_reason_and_a_changed_check_must_go_red_again() {
+        let (_d, store) = store();
+        let one = started(&store, plan(), red());
+        ask(&store, "check", Some(one), json!({"item": "export"}), Some(green(&[]))).unwrap();
+        let mut new_plan = plan();
+        new_plan["criteria"][1]["checks"][0]["command"] = json!("cargo test i -- --exact images_are_linked");
+        let message = refused(ask(&store, "amend", Some(one), json!({"plan": new_plan}), None));
+        assert!(message.starts_with("reason is required: amend takes {plan, reason}"), "{message}");
+        let mut unchecked = plan();
+        unchecked["criteria"][1].as_object_mut().unwrap().remove("checks");
+        let message = refused(ask(&store, "amend", Some(one), json!({"plan": unchecked, "reason": "r"}), None));
+        assert!(message.contains("has no checks"), "{message}");
+        let reason = "\"i\" runs every test in the file, and one needs a GPU";
+        let outcome = ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), None).unwrap();
+        assert_eq!(outcome.detail["reason"], reason);
+        assert_eq!(super::super::to_json(&store, &outcome.task)["amendReason"], reason);
+        // The changed check is run against the starting code: still green there, it is refused.
+        assert!(refused(ask(&store, "approve_amend", Some(one), json!({}), None)).contains("could not run the checks"));
+        let mut gate = measured(&[("images", "i", 0, "ok")], &["tests/i.rs"]);
+        let message = refused(ask(&store, "approve_amend", Some(one), json!({}), Some(gate.clone())));
+        assert!(message.contains("images: \"i\" already passes, so it proves nothing (an amended check must fail against the starting code"), "{message}");
+        gate = measured(&[("images", "i", 101, FAILING)], &["tests/i.rs", "tests/a.rs"]);
+        let outcome = ask(&store, "approve_amend", Some(one), json!({}), Some(gate)).unwrap();
+        let stored = outcome.task.gate.clone().unwrap();
+        assert_eq!(stored["hashes"]["files"]["tests/i.rs"], "changed", "the changed check's file is locked anew");
+        assert_eq!(stored["hashes"]["files"]["tests/a.rs"], "approved", "an unchanged check keeps its approval");
+        assert_eq!(stored["met"], json!({"export": true, "images": false}));
+        assert!(stored.get("amendReason").is_none());
+        assert_eq!(outcome.task.plan, new_plan);
+    }
+
+    #[tokio::test]
+    async fn an_amended_check_runs_against_the_starting_code() {
+        use crate::workbench::grids::proof::tests::{commit_file, git_run, repository};
+        let root = repository();
+        let dir = root.path();
+        commit_file(dir, "src/value.txt", "1\n");
+        commit_file(dir, "tests/value.sh", "grep -qx 2 src/value.txt || { echo 'value FAILED'; exit 1; }\n");
+        let start = git_run(dir, &["rev-parse", "HEAD"]);
+        commit_file(dir, "src/value.txt", "2\n");
+        let check = |command: &str| json!({"name": "two", "command": command, "kind": "test", "given": "g", "when": "w", "then": "t",
+            "red": "value FAILED", "files": ["tests/value.sh"]});
+        let old = json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [check("sh tests/value.sh")]}]});
+        let new = json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [check("sh tests/value.sh && test -s src/value.txt")]}]});
+        let stored = json!({"hashes": {"files": {}, "harness": []}, "startCommit": start});
+        let gate = checks::measure(dir, "feature", &old, &stored, checks::Measure::Amend { plan: new }, 1).await;
+        let run = &gate.runs["export"]["two"];
+        assert_eq!(run.exit, 1, "red against the starting code, though it passes at HEAD: {run:?}");
+        assert!(run.output.contains("value FAILED"));
+        assert_eq!(git_run(dir, &["worktree", "list"]).lines().count(), 1);
+    }
 }

@@ -1394,6 +1394,9 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                 TaskError::Refused(format!("#{number} has no plan amendment waiting"))
             })?;
             let note = request.payload.get("note").and_then(Value::as_str).unwrap_or("");
+            if let Some(stored) = task.gate.as_mut().and_then(Value::as_object_mut) {
+                stored.remove("amendReason");
+            }
             ("amend_rejected", json!({"plan": plan, "note": note}), format!("#{number}: the plan amendment is rejected."))
         }
         (true, "release") => {
