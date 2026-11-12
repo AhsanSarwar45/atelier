@@ -62,6 +62,11 @@ pub struct Note {
     pub title: String,
     pub body: String,
     pub href: String,
+    /// What replaces what on the device; the link when not given, so one
+    /// chat keeps one notification. A waiting item gives its own, so it does
+    /// not replace the chat's permission question or another item.
+    #[serde(skip)]
+    pub tag: Option<String>,
     /// True when this is a chat stopped for the owner rather than one that
     /// merely finished, which is the line the two preferences are drawn on.
     #[serde(skip)]
@@ -76,7 +81,7 @@ impl Note {
             "title": self.title,
             "body": self.body,
             "href": self.href,
-            "tag": self.href,
+            "tag": self.tag.as_deref().unwrap_or(&self.href),
         })
         .to_string()
         .into_bytes()
@@ -243,6 +248,7 @@ pub async fn deliver(db: &Database, http: &reqwest::Client, note: &Note) -> Resu
 /// chat on the board a second time, and the owner had no way to stop it: the
 /// clearing he had already done was kept somewhere else entirely (bw-altj).
 pub fn watch(db: Arc<Database>, workbench: crate::routes::workbench::WorkbenchState) {
+    watch_waiting(db.clone(), workbench.clone());
     tokio::spawn(async move {
         use tokio::sync::broadcast::error::RecvError;
 
@@ -312,6 +318,7 @@ pub fn watch(db: Arc<Database>, workbench: crate::routes::workbench::WorkbenchSt
                 title: row.name,
                 body: row.says,
                 href: row.href,
+                tag: None,
                 needs_action: row.needs_action,
             };
             if let Err(why) = deliver(&db, &http, &note).await {
@@ -319,6 +326,87 @@ pub fn watch(db: Arc<Database>, workbench: crate::routes::workbench::WorkbenchSt
             }
         }
     });
+}
+
+/// Push each new thing waiting on the owner besides a chat's question — a
+/// task in review, a proposal, a plan change, a grid draft, an N/A request
+/// (`workbench::waiting`) — once, as a permission question is pushed.
+///
+/// Those change through the task and grid routes, which tell the pages so on
+/// `frames`; each such frame asks which items no device has heard of yet.
+/// What was already waiting when the watcher starts is written down as told
+/// without a push, so a restart, or the first start of a copy that never
+/// pushed these, does not send the whole backlog at once.
+fn watch_waiting(db: Arc<Database>, workbench: crate::routes::workbench::WorkbenchState) {
+    tokio::spawn(async move {
+        use tokio::sync::broadcast::error::RecvError;
+
+        let http = reqwest::Client::new();
+        let mut frames = workbench.frames();
+        let mut quiet = true;
+
+        loop {
+            if !quiet {
+                match frames.recv().await {
+                    Ok(frame) => {
+                        let kind = frame["kind"].as_str().unwrap_or_default();
+                        if kind != "tasks.changed" && kind != "grids.changed" {
+                            continue;
+                        }
+                    }
+                    // A missed frame is a change still waiting to be read, and
+                    // the read below sees everything, so it is not lost.
+                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => break,
+                }
+            }
+            let Some(projects) = workbench.projects() else {
+                quiet = false;
+                continue;
+            };
+            let rows = match crate::workbench::notice::waiting_worth_pushing(workbench.database(), projects).await {
+                Ok(rows) => rows,
+                Err(why) => {
+                    tracing::warn!("what waits on the owner could not be read to push about it: {why}");
+                    quiet = false;
+                    continue;
+                }
+            };
+            for row in rows {
+                let Some(key) = row.item.clone() else { continue };
+                // Written down before it is sent, for the reason `watch` gives.
+                let at = chrono::Utc::now().to_rfc3339();
+                let written = workbench
+                    .database()
+                    .write_tasks(move |store| crate::workbench::waiting::mark_announced(store.connection(), &key, &at))
+                    .await;
+                if !matches!(written, Ok(Ok(()))) {
+                    tracing::warn!("what was announced about a waiting item could not be written down");
+                    continue;
+                }
+                if quiet {
+                    continue;
+                }
+                let note = waiting_note(row);
+                if let Err(why) = deliver(&db, &http, &note).await {
+                    tracing::warn!("a push could not be delivered: {why}");
+                }
+            }
+            quiet = false;
+        }
+    });
+}
+
+/// A waiting item's push: the chat's name over what waits, one notification
+/// per item.
+pub fn waiting_note(row: crate::workbench::notice::Row) -> Note {
+    Note {
+        title: row.name,
+        body: row.says,
+        href: row.href,
+        tag: row.item.map(|key| format!("waiting:{key}")),
+        needs_action: true,
+    }
 }
 
 #[cfg(test)]
@@ -342,6 +430,7 @@ mod tests {
             title: "A chat".into(),
             body: "waiting on you".into(),
             href: "/chat/7".into(),
+            tag: None,
             needs_action: true,
         }
     }

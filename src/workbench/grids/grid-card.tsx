@@ -133,8 +133,15 @@ export function DraftView({ draft, diff }: { draft: DraftContent; diff?: DraftDi
   );
 }
 
-/** Approve and Discard for a draft or an edit. */
-export function DraftActions({ projectId, slug, onDone }: { projectId: string; slug: string; onDone?: () => void }) {
+/** Approve and Discard for a draft or an edit; `approveOnly` leaves Discard to the card. */
+export function DraftActions({ projectId, slug, onDone, approveOnly, extra }: {
+  projectId: string;
+  slug: string;
+  onDone?: () => void;
+  approveOnly?: boolean;
+  /** More buttons for the same row, after these. */
+  extra?: ReactNode;
+}) {
   const [busy, setBusy] = useState<GridOwnerAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const act = async (action: 'approve' | 'discard') => {
@@ -153,7 +160,8 @@ export function DraftActions({ projectId, slug, onDone }: { projectId: string; s
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2" data-testid="grid-draft-actions">
         <Button type="button" size="sm" data-testid="grid-approve" disabled={busy !== null} loading={busy === 'approve'} onClick={() => void act('approve')}>Approve</Button>
-        <Button type="button" size="sm" variant="ghost" data-testid="grid-discard" disabled={busy !== null} loading={busy === 'discard'} onClick={() => void act('discard')}>Discard</Button>
+        {!approveOnly && <Button type="button" size="sm" variant="ghost" data-testid="grid-discard" disabled={busy !== null} loading={busy === 'discard'} onClick={() => void act('discard')}>Discard</Button>}
+        {extra}
       </div>
       {error && <div role="alert" className="text-xs text-destructive">{`Couldn't update grid. ${error}`}</div>}
     </div>
@@ -161,7 +169,7 @@ export function DraftActions({ projectId, slug, onDone }: { projectId: string; s
 }
 
 /** A way to open the grid, or one cell of it, in the Tasks tab's Grids view. */
-function useOpenGrid(grid: Pick<GridSummary, 'projectId' | 'slug'> | null | undefined, cell?: { row: string; col: string }): (() => void) | null {
+export function useOpenGrid(grid: Pick<GridSummary, 'projectId' | 'slug'> | null | undefined, cell?: { row: string; col: string }): (() => void) | null {
   const router = useRouter();
   const params = useSearchParams();
   if (!grid) return null;

@@ -114,6 +114,8 @@ import { checklistForTasks, finished, type ChecklistItem } from '@/workbench/tas
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
 import { startTaskIn, takeComposerFocus, takeNewChatLine } from '@/workbench/tasks/new-task';
 import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
+import { WaitingBar } from '@/workbench/waiting-bar';
+import { useWaiting, waitingInChat } from '@/workbench/waiting';
 import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
 import { useSteadyCallback } from '@/hooks/use-steady-callback';
@@ -1275,6 +1277,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // read so a task card in the transcript can show any task's status live.
   const projectTasks = useTasks(projectId, null, projectPath);
   const liveTasks = useMemo(() => byNumber(projectTasks.tasks), [projectTasks.tasks]);
+  const allWaiting = useWaiting();
+  const waitingHere = useMemo(() => waitingInChat(allWaiting, sessionId), [allWaiting, sessionId]);
   const checklist = useMemo(
     () => checklistForTasks(projectTasks.tasks, reading, view.state),
     [projectTasks.tasks, reading, view.state],
@@ -3518,6 +3522,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             answer it is waiting on. Drawn even while another program holds the
             chat: those messages are still the reader's, and dropping one is
             something they can still do. */}
+        {/* What in this chat waits on the owner's answer — a review, a
+            proposal, a plan change, a grid draft, an N/A request — above
+            everything else here, because the agent is stopped until he gives
+            it (waiting-bar.tsx). */}
+        <WaitingBar items={waitingHere} tasks={liveTasks} />
         {heldList}
         {ownership.kind === 'elsewhere' ? (
           <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-4 py-3 text-xs text-info">

@@ -63,10 +63,10 @@ export async function resendDevicePreferences(preferences: NotificationPreferenc
   await subscribeThisDevice(preferences).catch(() => undefined);
 }
 
-export async function showDeviceNotification(title: string, body: string, href: string) {
+export async function showDeviceNotification(title: string, body: string, href: string, tag: string = href) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   if ('serviceWorker' in navigator) {
     const registration = await navigator.serviceWorker.ready;
-    await registration.showNotification(title, { body, icon: '/icon-192.png', tag: href, data: { href } });
-  } else new Notification(title, { body, icon: '/icon-192.png', tag: href });
+    await registration.showNotification(title, { body, icon: '/icon-192.png', tag, data: { href } });
+  } else new Notification(title, { body, icon: '/icon-192.png', tag });
 }

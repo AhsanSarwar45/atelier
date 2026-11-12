@@ -66,6 +66,7 @@ pub mod summary;
 pub mod grids;
 pub mod tasks;
 pub mod usage;
+pub mod waiting;
 pub mod wire;
 
 pub mod status;

@@ -46,6 +46,8 @@ function worthSaying() {
     .filter((chat) => read.get(chat.id) !== chat.state)
     .map((chat) => ({
       id: chat.id,
+      key: chat.id,
+      item: null,
       name: chat.title,
       projectId: 'project-1',
       projectName: 'Keystone',

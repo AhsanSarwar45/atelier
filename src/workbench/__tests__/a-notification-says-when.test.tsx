@@ -52,6 +52,8 @@ function aRow(over: Record<string, unknown> = {}) {
     needsAction: true,
     at: thisMorning(),
     ...over,
+    key: (over.id as string | undefined) ?? 'chat-1',
+    item: null,
   };
 }
 

@@ -1254,8 +1254,6 @@ const ANSWERED: Record<Exclude<TaskProposal['status'], 'pending'>, (proposal: Ta
  */
 export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal }) {
   const [proposal, setProposal] = useState<TaskProposal>(snapshot);
-  const [busy, setBusy] = useState<ProposalChoice | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const pending = proposal.status === 'pending';
   const { projectId, id } = snapshot;
 
@@ -1274,21 +1272,8 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
     return () => { alive = false; off(); };
   }, [pending, projectId, id]);
 
-  const answer = async (choice: ProposalChoice) => {
-    setBusy(choice);
-    setError(null);
-    try {
-      const answered = await tasksApi.answerProposal(projectId, id, choice);
-      setProposal(answered.proposal);
-    } catch (e) {
-      setError(failure(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
   return (
-    <div data-testid="task-proposal" data-proposal-status={proposal.status} className="space-y-3">
+    <div data-testid="task-proposal" data-proposal-id={id} data-proposal-status={proposal.status} className="space-y-3">
       <header className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">Proposed task</span>
@@ -1300,14 +1285,44 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
       <PlanSection type={proposal.type}><PlanView type={proposal.type} plan={proposal.plan} /></PlanSection>
       <ProposalCells proposal={proposal} />
       {pending ? (
-        <div className="flex flex-wrap gap-2" data-testid="proposal-actions">
-          <Button type="button" size="sm" disabled={busy !== null} loading={busy === 'create'} onClick={() => void answer('create')}>Create task</Button>
-          <Button type="button" size="sm" variant="outline" disabled={busy !== null} loading={busy === 'just_do_it'} onClick={() => void answer('just_do_it')}>Just do it</Button>
-          <Button type="button" size="sm" variant="ghost" disabled={busy !== null} loading={busy === 'cancel'} onClick={() => void answer('cancel')}>Cancel</Button>
-        </div>
+        <ProposalActions projectId={projectId} id={id} onAnswered={setProposal} />
       ) : (
         <p data-testid="proposal-answer" className="text-xs text-muted-foreground">{proposal.status === 'pending' ? '' : ANSWERED[proposal.status](proposal)}</p>
       )}
+    </div>
+  );
+}
+
+/** The owner's three answers to a proposal, wherever it is answered from. */
+export function ProposalActions({ projectId, id, onAnswered, className }: {
+  projectId: string;
+  id: number;
+  onAnswered?: (proposal: TaskProposal) => void;
+  className?: string;
+}) {
+  const [busy, setBusy] = useState<ProposalChoice | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const answer = async (choice: ProposalChoice) => {
+    setBusy(choice);
+    setError(null);
+    try {
+      const answered = await tasksApi.answerProposal(projectId, id, choice);
+      onAnswered?.(answered.proposal);
+    } catch (e) {
+      setError(failure(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className={cn('space-y-2', className)}>
+      <div className="flex flex-wrap gap-2" data-testid="proposal-actions">
+        <Button type="button" size="sm" disabled={busy !== null} loading={busy === 'create'} onClick={() => void answer('create')}>Create task</Button>
+        <Button type="button" size="sm" variant="outline" disabled={busy !== null} loading={busy === 'just_do_it'} onClick={() => void answer('just_do_it')}>Just do it</Button>
+        <Button type="button" size="sm" variant="ghost" disabled={busy !== null} loading={busy === 'cancel'} onClick={() => void answer('cancel')}>Cancel</Button>
+      </div>
       {error && <div role="alert" className="text-xs text-destructive">{`Couldn't answer. ${error}`}</div>}
     </div>
   );

@@ -34,6 +34,7 @@ const ProjectSettingsScreen = dynamic(() => import('@/components/project-setting
 const SearchPanel = dynamic(() => import('@/workbench/search-panel').then((m) => m.SearchPanel), { ssr: false });
 const FileSearchPanel = dynamic(() => import('@/workbench/file-search').then((m) => m.FileSearchPanel), { ssr: false });
 import { WorkbenchStatus } from '@/workbench/globals';
+import { TasksTabCount } from '@/workbench/waiting-count';
 import { PathsOpenProvider } from '@/workbench/open-path';
 import { useShowingFolder } from '@/workbench/terminal-shells';
 
@@ -232,6 +233,7 @@ function ProjectTabs() {
             <TabsTrigger value="tasks" data-testid="tab-tasks" aria-label="Tasks" className={TAB}>
               <ListTodo className={GLYPH} aria-hidden="true" />
               <span className={WORD}>Tasks</span>
+              {projectId && <TasksTabCount projectId={projectId} />}
             </TabsTrigger>
             <TabsTrigger value="files" data-testid="tab-files" aria-label="Files" className={TAB}>
               <Folder className={GLYPH} aria-hidden="true" />

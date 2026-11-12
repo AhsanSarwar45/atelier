@@ -38,6 +38,7 @@ async fn a_note_this_server_sends_is_one_the_push_service_accepts() {
         title: "Atelier".to_string(),
         body: "A chat is waiting on you.".to_string(),
         href: "/workbench".to_string(),
+        tag: None,
         needs_action: true,
     };
 

@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { AlertTriangle, Ban, ListTodo, LogOut, MessageSquare, MessageSquarePlus, MoreHorizontal, Plus, X } from 'lucide-react';
+import { AlertTriangle, Ban, Hand, ListTodo, LogOut, MessageSquare, MessageSquarePlus, MoreHorizontal, Plus, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,10 +35,11 @@ import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-
 import { lineForNewChat, NEW_TASK_LINE, startTaskIn } from '@/workbench/tasks/new-task';
 import { same } from '@/workbench/tasks/plan-diff';
 import { isStale, STALE_REASON } from '@/workbench/tasks/stale';
-import { MergeBadge, TaskCard, TaskStatusChip, ownerActions, shownStatus, type ShownStatus } from '@/workbench/tasks/task-card';
+import { MergeBadge, ProposalActions, TaskCard, TaskStatusChip, ownerActions, shownStatus, type ShownStatus } from '@/workbench/tasks/task-card';
 import { eventText } from '@/workbench/tasks/task-event-row';
 import { STATUS_LABEL, typeLabel, type Task, type TaskEvent, type TaskStatus } from '@/workbench/tasks/types';
 import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
+import { refreshWaiting, useWaiting, waitingInProject, type Waiting } from '@/workbench/waiting';
 
 /** The order the groups are drawn in. */
 export const GROUP_ORDER: TaskStatus[] = ['in_progress', 'review', 'blocked', 'todo', 'done', 'cancelled'];
@@ -390,13 +391,13 @@ function ViewSwitch({ view, onView }: { view: 'tasks' | 'grids'; onView: (view: 
 const TOOLBAR = 'flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2';
 
 /** A row's status chip, left out where the group's heading already says it. */
-function RowStatus({ status, group }: { status: ShownStatus; group: TaskStatus }) {
+function RowStatus({ status, group }: { status: ShownStatus; group?: TaskStatus }) {
   return status === group ? null : <TaskStatusChip status={status} className="shrink-0" />;
 }
 
 type GridPlace = { grid: string | null; cell?: string | null };
 
-export default function TasksTab(props: Omit<Parameters<typeof TaskList>[0], 'switcher'> & {
+export default function TasksTab(props: Omit<Parameters<typeof TaskList>[0], 'switcher' | 'onShowGrid'> & {
   /** Tasks or coverage grids, when the screen holds it (the address's `view`). */
   view?: 'tasks' | 'grids';
   onView?: (view: 'tasks' | 'grids') => void;
@@ -423,7 +424,9 @@ export default function TasksTab(props: Omit<Parameters<typeof TaskList>[0], 'sw
     onShowGrid?.(where);
   };
   const switcher = <ViewSwitch view={view} onView={pickView} />;
-  if (view === 'tasks') return <TaskList {...rest} switcher={switcher} />;
+  if (view === 'tasks') {
+    return <TaskList {...rest} switcher={switcher} onShowGrid={(where) => { showGrid(where); pickView('grids'); }} />;
+  }
   return (
     <div data-testid="grids-tab" className="flex min-h-0 flex-1 flex-col">
       <div className={TOOLBAR}>{switcher}</div>
@@ -439,7 +442,47 @@ export default function TasksTab(props: Omit<Parameters<typeof TaskList>[0], 'sw
   );
 }
 
-function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenChat, onNewChat, switcher }: {
+/** A proposal, grid draft or N/A request in the Waiting for you section. */
+function WaitingRow({ item, chat, onShowGrid }: { item: Waiting; chat?: LiveSession; onShowGrid?: (where: GridPlace) => void }) {
+  return (
+    <div
+      data-testid="task-waiting-row"
+      data-kind={item.kind}
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/40 px-3 py-2 last:border-b-0"
+    >
+      <span className="min-w-0 flex-1 basis-48 truncate text-sm">{item.says}</span>
+      {chat && <span className="hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground sm:inline">{chat.name || chat.title}</span>}
+      {item.kind === 'proposal' && item.proposal !== null ? (
+        <ProposalActions projectId={item.projectId} id={item.proposal} onAnswered={refreshWaiting} />
+      ) : item.grid && onShowGrid ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          data-testid="waiting-open"
+          onClick={() => onShowGrid({ grid: item.grid, cell: item.row && item.col ? `${item.row}:${item.col}` : null })}
+        >
+          Open
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * What in the project waits on the owner, split the way the list draws it: the
+ * tasks (in review, or with a plan change) by number, and the rest as lines.
+ */
+export function waitingSection(items: Waiting[], filter: SessionFilter): { tasks: Set<number>; others: Waiting[] } {
+  const kept = items.filter((item) =>
+    filter === 'all' ? true : filter === 'unassigned' ? !item.sessionId : item.sessionId === filter.session);
+  return {
+    tasks: new Set(kept.flatMap((item) => (item.task !== null ? [item.task] : []))),
+    others: kept.filter((item) => item.task === null),
+  };
+}
+
+function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenChat, onNewChat, switcher, onShowGrid }: {
   projectId: string;
   /** The project's repository, watched so Merged follows a merge. */
   projectPath?: string | null;
@@ -456,8 +499,11 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
   onNewChat?: () => void;
   /** Tasks | Grids, drawn at the head of the list. */
   switcher?: ReactNode;
+  /** Shows a grid, or one cell of it, in the Grids view. */
+  onShowGrid?: (where: GridPlace) => void;
 }) {
   const { tasks, loaded, error, refetch } = useTasks(projectId, null, projectPath);
+  const allWaiting = useWaiting();
   const live = useLiveSessions();
   const sessions = useMemo(() => new Map(live.map((s) => [s.id, s])), [live]);
   const [filter, setFilter] = useState<SessionFilter>('all');
@@ -474,7 +520,18 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
     for (const task of tasks) if (task.sessionId && !seen.has(task.sessionId)) seen.set(task.sessionId, sessionName(task, sessions));
     return [...seen].sort((a, b) => a[1].localeCompare(b[1]));
   }, [tasks, sessions]);
-  const groups = useMemo(() => groupTasks(filterTasks(tasks, filter)), [tasks, filter]);
+  // What waits on the owner comes first, under its own heading, and leaves the
+  // status group it would otherwise sit in, so a task is listed once.
+  const waiting = useMemo(() => waitingSection(waitingInProject(allWaiting, projectId), filter), [allWaiting, projectId, filter]);
+  const waitingTasks = useMemo(
+    () => filterTasks(tasks, filter).filter((task) => waiting.tasks.has(task.number)).sort((a, b) => b.number - a.number),
+    [tasks, filter, waiting],
+  );
+  const groups = useMemo(
+    () => groupTasks(filterTasks(tasks, filter).filter((task) => !waiting.tasks.has(task.number))),
+    [tasks, filter, waiting],
+  );
+  const waitingCount = waitingTasks.length + waiting.others.length;
   const liveTasks = useMemo(() => byNumber(tasks), [tasks]);
   const chosen = selected === null ? null : liveTasks.get(selected) ?? null;
   // Read once per list: a row turning stale while the tab sits open can wait
@@ -483,6 +540,47 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
     const now = Date.now();
     return new Set(tasks.filter((task) => isStale(task, now)).map((task) => task.number));
   }, [tasks]);
+
+  const taskRow = (task: Task, group?: TaskStatus) => (
+    // The row is a button, so a stale row's Cancel sits beside it, not in it.
+    <div key={task.number} className="flex items-center border-b border-border/40 last:border-b-0">
+      <Row
+        gap="md"
+        selected={task.number === selected}
+        data-testid="task-row"
+        data-number={task.number}
+        onClick={() => setSelected(task.number)}
+        // On a phone the title takes a line of its own under the number and badges,
+        // rather than being cut to a word between them.
+        className="min-h-10 min-w-0 flex-1 flex-wrap gap-y-1 sm:flex-nowrap"
+      >
+        <span className="shrink-0 font-mono text-xs text-muted-foreground sm:w-10">#{task.number}</span>
+        {/* A column of its own, so the titles after it line up. */}
+        <span className="flex shrink-0 sm:w-28">
+          <Badge variant="secondary" size="sm" className="min-w-0"><span className="truncate">{typeLabel(task.type)}</span></Badge>
+        </span>
+        <span data-testid="task-row-title" className={cn('order-last line-clamp-2 min-w-0 basis-full text-sm sm:order-none sm:line-clamp-none sm:flex-1 sm:basis-auto sm:truncate', task.status === 'cancelled' && 'text-muted-foreground')}>{task.title}</span>
+        {task.claimShape && (
+          <span data-testid="task-row-shape" className="hidden max-w-56 shrink-0 truncate text-xs text-muted-foreground sm:inline">{claimShapeLabel(task.claimShape)}</span>
+        )}
+        <span data-testid="task-row-chat" className="ml-auto hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground [@container(min-width:44rem)]:inline">{sessionName(task, sessions)}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
+          {stale.has(task.number) && (
+            <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-stale" className="shrink-0"><span>Stale</span></Badge>
+          )}
+          {task.pendingAmend && (
+            <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-amend" className="shrink-0"><span>Plan change</span></Badge>
+          )}
+          {task.shortfalls && (
+            <AlertTriangle role="img" aria-label="Finished with shortfalls" data-testid="task-row-shortfalls" className="size-3.5 shrink-0 text-[var(--color-warning-accent)]" />
+          )}
+          <MergeBadge task={task} className="shrink-0" />
+          <RowStatus status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} group={group} />
+        </span>
+      </Row>
+      {stale.has(task.number) && <StaleCancel task={task} />}
+    </div>
+  );
 
   return (
     <LiveTasksContext.Provider value={liveTasks}>
@@ -513,13 +611,33 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
               <ReadFailed what="Couldn't load tasks." why={error.message} onRetry={refetch} />
             ) : !loaded ? (
               <div className="flex justify-center p-6"><Spinner className="size-5 text-muted-foreground" /></div>
-            ) : !groups.length ? (
+            ) : !groups.length && !waitingCount ? (
               <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-muted-foreground">
                 <ListTodo className="size-6" aria-hidden />
                 {tasks.length ? 'No results' : 'No tasks yet'}
               </div>
             ) : (
               <div className="mx-auto max-w-4xl space-y-4">
+                {waitingCount > 0 && (
+                  <section data-testid="tasks-waiting">
+                    <div className="mb-1 flex items-center gap-2 px-1 text-sm font-medium">
+                      <Hand className="size-3.5 text-warning" aria-hidden="true" />
+                      Waiting for you
+                      <span className="tabular-nums text-muted-foreground">{waitingCount}</span>
+                    </div>
+                    <Panel tone="attention" inset="none" className="overflow-hidden">
+                      {waitingTasks.map((task) => taskRow(task))}
+                      {waiting.others.map((item) => (
+                        <WaitingRow
+                          key={item.key}
+                          item={item}
+                          chat={item.sessionId ? sessions.get(item.sessionId) : undefined}
+                          onShowGrid={onShowGrid}
+                        />
+                      ))}
+                    </Panel>
+                  </section>
+                )}
                 {groups.map((group) => (
                   <Collapsible
                     key={group.status}
@@ -541,46 +659,7 @@ function TaskList({ projectId, projectPath, selected: shown, onSelect, onOpenCha
                     </CollapsibleTriggerRow>
                     <CollapsibleContent>
                       <Panel inset="none" className="overflow-hidden">
-                        {group.tasks.map((task) => (
-                          // The row is a button, so a stale row's Cancel sits beside it, not in it.
-                          <div key={task.number} className="flex items-center border-b border-border/40 last:border-b-0">
-                            <Row
-                              gap="md"
-                              selected={task.number === selected}
-                              data-testid="task-row"
-                              data-number={task.number}
-                              onClick={() => setSelected(task.number)}
-                              // On a phone the title takes a line of its own under the number and badges,
-                              // rather than being cut to a word between them.
-                              className="min-h-10 min-w-0 flex-1 flex-wrap gap-y-1 sm:flex-nowrap"
-                            >
-                              <span className="shrink-0 font-mono text-xs text-muted-foreground sm:w-10">#{task.number}</span>
-                              {/* A column of its own, so the titles after it line up. */}
-                              <span className="flex shrink-0 sm:w-28">
-                                <Badge variant="secondary" size="sm" className="min-w-0"><span className="truncate">{typeLabel(task.type)}</span></Badge>
-                              </span>
-                              <span data-testid="task-row-title" className={cn('order-last line-clamp-2 min-w-0 basis-full text-sm sm:order-none sm:line-clamp-none sm:flex-1 sm:basis-auto sm:truncate', task.status === 'cancelled' && 'text-muted-foreground')}>{task.title}</span>
-                              {task.claimShape && (
-                                <span data-testid="task-row-shape" className="hidden max-w-56 shrink-0 truncate text-xs text-muted-foreground sm:inline">{claimShapeLabel(task.claimShape)}</span>
-                              )}
-                              <span data-testid="task-row-chat" className="ml-auto hidden max-w-48 shrink-0 truncate text-xs text-muted-foreground [@container(min-width:44rem)]:inline">{sessionName(task, sessions)}</span>
-                              <span className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
-                                {stale.has(task.number) && (
-                                  <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-stale" className="shrink-0"><span>Stale</span></Badge>
-                                )}
-                                {task.pendingAmend && (
-                                  <Badge variant="warning" appearance="light" size="sm" data-testid="task-row-amend" className="shrink-0"><span>Plan change</span></Badge>
-                                )}
-                                {task.shortfalls && (
-                                  <AlertTriangle role="img" aria-label="Finished with shortfalls" data-testid="task-row-shortfalls" className="size-3.5 shrink-0 text-[var(--color-warning-accent)]" />
-                                )}
-                                <MergeBadge task={task} className="shrink-0" />
-                                <RowStatus status={shownStatus(task, task.sessionId ? sessions.get(task.sessionId)?.state : undefined)} group={group.status} />
-                              </span>
-                            </Row>
-                            {stale.has(task.number) && <StaleCancel task={task} />}
-                          </div>
-                        ))}
+                        {group.tasks.map((task) => taskRow(task, group.status))}
                       </Panel>
                     </CollapsibleContent>
                   </Collapsible>

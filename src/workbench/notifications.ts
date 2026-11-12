@@ -18,10 +18,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { request } from '@/lib/api';
 import { useLiveSessions } from '@/workbench/live';
+import { onWorkbench } from '@/workbench/live-wire';
+import { changesWaiting } from '@/workbench/waiting';
 
 /** One thing the app has to say, as the server hands it over. */
 export interface Notification {
+  /** The chat this row opens; empty for an item no chat is waiting on. */
   id: string;
+  /**
+   * What the row is about: the chat's id for its own state, a waiting item's
+   * key for a task in review, a proposal, a plan change, a grid draft or an N/A
+   * request. One chat can have both, so rows are keyed by this.
+   */
+  key: string;
+  /** The waiting item's key when this row is one (`waiting.ts`), else null. */
+  item: string | null;
   /**
    * What to call this chat, settled by the server and never nothing: its
    * title, else the folder it works in, else the agent holding it (server,
@@ -55,8 +66,11 @@ export async function readNotifications(): Promise<Notification[]> {
   return (await answer.json()) as Notification[];
 }
 
-/** Tell the server these have been read, in the states they were read in. */
-export async function markRead(chats: { id: string; state: string }[]): Promise<void> {
+/**
+ * Tell the server these have been read, in the states they were read in; a
+ * waiting item is read by its key.
+ */
+export async function markRead(chats: { id: string; state: string; item?: string | null }[]): Promise<void> {
   const answer = await request('/api/workbench/notifications/read', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -117,11 +131,27 @@ export function useNotifications(): {
     void load();
   }, [load, standing]);
 
+  // A task or grid changing can start or end something waiting on the owner,
+  // which no chat's state says; the feed announces those changes, and a
+  // dropped connection may have missed one.
+  useEffect(() => {
+    let missed = false;
+    return onWorkbench({
+      frame: (data) => {
+        if (missed || changesWaiting(data)) {
+          missed = false;
+          void load();
+        }
+      },
+      dropped: () => { missed = true; },
+    });
+  }, [load]);
+
   const clear = useCallback(async () => {
     // Cleared against the states the owner was actually shown, not the states
     // as they stand when the request lands: a chat that moved on in between is
     // still unread, which is the safe way to be wrong.
-    const seen = notifications.map((n) => ({ id: n.id, state: n.state }));
+    const seen = notifications.map((n) => ({ id: n.id, state: n.state, item: n.item }));
     setNotifications([]);
     try {
       await markRead(seen);
@@ -149,11 +179,11 @@ export function useAlreadyToldThisPage(): (rows: Notification[]) => Notification
   const told = useRef<Map<string, string> | null>(null);
   return useCallback((rows: Notification[]) => {
     const before = told.current;
-    told.current = new Map(rows.map((row) => [row.id, row.state]));
+    told.current = new Map(rows.map((row) => [row.key, row.state]));
     // The first answer is not news: opening a page is not a chat changing, and
     // a device that announced everything already sitting there on every load
     // would be unusable.
     if (before === null) return [];
-    return rows.filter((row) => before.get(row.id) !== row.state);
+    return rows.filter((row) => before.get(row.key) !== row.state);
   }, []);
 }

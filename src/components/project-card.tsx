@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { Tag } from "@/lib/db";
 import { projectTitle } from "@/lib/project-title";
+import { WaitingCount } from "@/workbench/waiting-count";
 
 /**
  * Returns the OS-appropriate file manager name
@@ -112,6 +113,7 @@ export function ProjectCard({
           </Link>
         </h3>
         <div className="relative flex flex-wrap items-center justify-end gap-1.5">
+          <WaitingCount projectId={id} />
           {tags.map((tag) => (
             <Badge
               key={tag.id}

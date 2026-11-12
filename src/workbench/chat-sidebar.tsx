@@ -23,7 +23,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ArrowLeftRight, Bot, ChevronDown, Copy, ExternalLink, MoreVertical, Pencil, Plus, Power, Search } from 'lucide-react';
+import { ArrowLeftRight, Bot, ChevronDown, Copy, ExternalLink, Hand, MoreVertical, Pencil, Plus, Power, Search } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -66,6 +66,7 @@ import { formatAtelierReference } from '@/workbench/references';
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
 import { clockTime, dayHeading } from '@/workbench/when';
+import { badgeWord, useWaiting, waitingInChat } from '@/workbench/waiting';
 
 /**
  * How many rows are drawn before the reader asks for more. A 288px rail shows
@@ -356,6 +357,11 @@ interface ChatRowProps {
   onEnter: (row: RestoreRow) => void;
   onEnd: (row: RestoreRow) => void;
   onMenu: (row: RestoreRow, at: PointerAt) => void;
+  /**
+   * What in this chat waits on the owner besides its own question: "Review"
+   * for one review, "Waiting for you" for anything else (`waiting.ts`).
+   */
+  waiting?: string | null;
 }
 
 /**
@@ -377,7 +383,7 @@ function sameRow(a: RestoreRow, b: RestoreRow): boolean {
  * whenever any chat says anything: an agent answering in one chat redrew every
  * row of forty, chips, tooltips and all, on every word (bw-4slk).
  */
-const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd, onMenu }: ChatRowProps) {
+const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd, onMenu, waiting = null }: ChatRowProps) {
   const key = rowKey(row);
   const closable = canClose(row);
   const ownership = sessionOwnership(row.state, row.externalId, row.runningElsewhere === true);
@@ -649,7 +655,7 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
         data-testid="row-line-status"
         className={cn(
           'mt-1 flex min-w-0 items-center gap-1 overflow-hidden',
-          !says && 'md:hidden',
+          !says && !waiting && 'md:hidden',
         )}
       >
         {busy || ending ? (
@@ -679,6 +685,25 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
           says && <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
         )}
         {/*
+          A review, proposal, plan change, grid draft or N/A request in this
+          chat, drawn the way a permission question is: the agent is as
+          stopped, and the owner as needed, whatever the chat's own state
+          says. A sleeping chat's chip draws nothing, so this can be alone.
+        */}
+        {waiting && (
+          <Badge
+            variant="warning"
+            appearance="light"
+            size="sm"
+            shape="circle"
+            data-testid="row-waiting"
+            className="shrink-0 gap-1.5"
+          >
+            <Hand className="size-3 shrink-0 animate-pulse" aria-hidden="true" />
+            <span>{waiting}</span>
+          </Badge>
+        )}
+        {/*
           The clock, on a phone only — the name's line hands it down
           here so a long title keeps that end of the line
           (bw-8kk4.1). Last and unshrinkable, with the chip taking
@@ -699,6 +724,7 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
   && a.onEnter === b.onEnter
   && a.onEnd === b.onEnd
   && a.onMenu === b.onMenu
+  && a.waiting === b.waiting
   && sameRow(a.row, b.row));
 
 interface ChatSidebarProps {
@@ -743,6 +769,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   const holds = useHolds();
   const heldFactsAreOld = useHeldFactsAreOld();
   const outOfStep = useHelperMismatch();
+  const waiting = useWaiting();
   // The order as it was last drawn. Read while rendering and written after, so
   // what he is pointing at is what decides where the rows go (holdStill).
   const settled = useRef<SettledRow[]>([]);
@@ -1246,6 +1273,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                   onEnter={enter}
                   onEnd={end}
                   onMenu={openMenu}
+                  waiting={badgeWord(waitingInChat(waiting, row.sessionId))}
                 />
               );
             })}

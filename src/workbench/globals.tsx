@@ -36,6 +36,8 @@ import { whenItAppeared } from '@/workbench/when';
  * and when it does, that wins: it is the same fact, said more precisely.
  */
 function whatItSays(row: Notification, live: Map<string, string | null>): string {
+  // A waiting item is not the chat's own question, whatever the chat is asking.
+  if (row.item) return row.says;
   return live.get(row.id) ?? row.says;
 }
 
@@ -156,17 +158,20 @@ function WaitingTray({ rows, clear }: { rows: Notification[]; clear: () => void 
         {waiting.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-t-muted">Needs action</div>}
         {waiting.map((row) => (
           <Row
-            key={row.id}
+            key={row.key}
             ruled
             data-testid="tray-row"
             data-session-id={row.id}
+            data-item={row.item ?? undefined}
             onClick={() => {
               setOpen(false);
               router.push(row.href);
             }}
           >
             <div className="flex items-baseline gap-2">
-              <div className="truncate text-sm text-foreground">{row.name}</div>
+              {/* An item leads with what waits — "#11 ready for review · Fix
+                  login" — because one chat can have several. */}
+              <div className="truncate text-sm text-foreground">{row.item ? `${row.says} · ${row.name}` : row.name}</div>
               <Tooltip label={new Date(row.at).toLocaleString()}>
                 <span data-testid="tray-when" className="ml-auto shrink-0 text-[11px] text-t-muted">
                   {whenItAppeared(row.at)}
@@ -177,15 +182,17 @@ function WaitingTray({ rows, clear }: { rows: Notification[]; clear: () => void 
               <span data-testid="tray-project" className="truncate font-medium">
                 {row.projectName}
               </span>
-              <span data-testid="tray-waiting-for" className="truncate">
-                · {whatItSays(row, said)}
-              </span>
+              {!row.item && (
+                <span data-testid="tray-waiting-for" className="truncate">
+                  · {whatItSays(row, said)}
+                </span>
+              )}
             </div>
           </Row>
         ))}
         {updates.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-t-muted">Other updates</div>}
         {updates.map((row) => (
-          <Row key={row.id} ruled data-testid="tray-row" data-notification-type="update" onClick={() => { setOpen(false); router.push(row.href); }}>
+          <Row key={row.key} ruled data-testid="tray-row" data-notification-type="update" onClick={() => { setOpen(false); router.push(row.href); }}>
             <div className="flex items-baseline gap-2">
               <div className="truncate text-sm text-foreground">{row.name}</div>
               <Tooltip label={new Date(row.at).toLocaleString()}>
@@ -232,7 +239,10 @@ export function WorkbenchStatus() {
     }
     for (const row of unheard(notifications)) {
       if (row.needsAction ? preferences.needsAction : preferences.updates) {
-        void showDeviceNotification(row.name, row.says, row.href);
+        // An item carries the tag its push from the server does, so the two
+        // replace each other rather than the chat's own notification.
+        if (row.item) void showDeviceNotification(row.name, row.says, row.href, `waiting:${row.item}`);
+        else void showDeviceNotification(row.name, row.says, row.href);
       }
     }
   }, [loaded, notifications, preferences, unheard]);

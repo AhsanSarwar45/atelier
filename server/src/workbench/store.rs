@@ -4097,6 +4097,9 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     // and number, with one event row per change.
     super::tasks::ensure_schema(transaction)?;
     super::grids::ensure_schema(&transaction)?;
+    // What the owner has read and a device been told of what waits on him
+    // besides a chat's own question (`waiting.rs`).
+    super::waiting::ensure_schema(transaction)?;
 
     one_row_per_external_chat(transaction)
 }

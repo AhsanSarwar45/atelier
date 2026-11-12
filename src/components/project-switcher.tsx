@@ -32,6 +32,7 @@ import { recentOthers } from '@/lib/recent-projects';
 import { usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import type { Project } from '@/types';
+import { WaitingCount } from '@/workbench/waiting-count';
 
 const TITLE = 'Recent projects';
 
@@ -100,6 +101,7 @@ export function ProjectSwitcher({
       <span data-testid="project-name" className={cn('truncate', nameClassName)}>
         {name}
       </span>
+      {projectId && <WaitingCount projectId={projectId} />}
       <ChevronDown
         // The arrow turns over while the list is up, so the control says which
         // of its two states it is in without a second picture.
@@ -136,7 +138,10 @@ export function ProjectSwitcher({
             data-project-id={project.id}
           >
             <Link href={`/project?id=${encodeURIComponent(project.id)}`} onClick={leave}>
-              <span className="block truncate text-sm">{project.name}</span>
+              <span className="flex items-center gap-2">
+                <span className="block min-w-0 flex-1 truncate text-sm">{project.name}</span>
+                <WaitingCount projectId={project.id} />
+              </span>
             </Link>
           </Row>
         ))

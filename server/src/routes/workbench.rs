@@ -574,6 +574,12 @@ impl WorkbenchState {
         }
     }
 
+    /// Every frame the pages are sent about tasks and grids changing, for a
+    /// listener inside the server; unlike a page it starts no poller.
+    pub fn frames(&self) -> broadcast::Receiver<Value> {
+        self.watch_polls.subscribe()
+    }
+
     pub(crate) async fn watch_poll_subscription(
         &self,
     ) -> (broadcast::Receiver<Value>, WatchPollLease) {
@@ -1155,6 +1161,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/sessions", get(sessions))
         .route("/notifications", get(notifications))
         .route("/notifications/read", post(notifications_read))
+        .route("/waiting", get(waiting))
         .route("/restore", get(restore))
         .route("/session/:id", get(session))
         .route("/session/:id/running", get(session_running))
@@ -1538,6 +1545,10 @@ async fn notifications(
 struct ReadChat {
     id: String,
     state: String,
+    /// A waiting item's key (`notice::Row::item`): what was read is the item,
+    /// not the chat it belongs to.
+    #[serde(default)]
+    item: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1558,18 +1569,41 @@ async fn notifications_read(
     Json(request): Json<ReadRequest>,
 ) -> Result<StatusCode, ApiError> {
     let at = chrono::Utc::now().to_rfc3339();
+    let (items, chats): (Vec<ReadChat>, Vec<ReadChat>) =
+        request.chats.into_iter().partition(|chat| chat.item.is_some());
+    if !items.is_empty() {
+        let keys: Vec<String> = items.into_iter().filter_map(|chat| chat.item).collect();
+        let when = at.clone();
+        state
+            .database()
+            .write_tasks(move |store| crate::workbench::waiting::mark_read(store.connection(), &keys, &when))
+            .await?
+            .map_err(|why| format!("what was read could not be written down: {why}"))?;
+    }
     state
         .database()
-        .mark_read(
-            request
-                .chats
-                .into_iter()
-                .map(|chat| (chat.id, chat.state))
-                .collect(),
-            at,
-        )
+        .mark_read(chats.into_iter().map(|chat| (chat.id, chat.state)).collect(), at)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct WaitingQuery {
+    project: Option<String>,
+}
+
+/// Everything waiting on the owner besides a chat's own question, in one
+/// project or all of them (`workbench::waiting`): what the composer bar, the
+/// rail, the Tasks tab and the project list draw.
+async fn waiting(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<WaitingQuery>,
+) -> Result<Json<Vec<crate::workbench::waiting::Waiting>>, ApiError> {
+    let items = state
+        .database()
+        .read_tasks(move |store| crate::workbench::waiting::list(store.connection(), query.project.as_deref()))
+        .await?;
+    Ok(Json(items))
 }
 
 async fn sessions(

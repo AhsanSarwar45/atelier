@@ -112,7 +112,15 @@ pub fn chat_href(project_id: &str, session_id: &str) -> String {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Row {
+    /// The chat this row opens.
     pub id: String,
+    /// What this row is about: the chat's id for a chat's own state, the
+    /// item's key for something waiting on the owner (`waiting.rs`). One chat
+    /// can have both, so the tray keys its rows by this, not by `id`.
+    pub key: String,
+    /// The waiting item's key, when this row is one; clearing it is written
+    /// against the item rather than the chat.
+    pub item: Option<String>,
     /// What to call this chat, already settled: `naming`, never a raw title.
     pub name: String,
     pub project_id: String,
@@ -179,7 +187,8 @@ pub async fn worth_saying(
     let sessions = chats.list_sessions(None).await?;
 
     let mut rows: Vec<Row> = sessions
-        .into_iter()
+        .iter()
+        .cloned()
         .filter(|session| worth_announcing(&session.state))
         // Read already, in the state it is in now. A chat that has since moved
         // on to want something else is not this chat, and says so again.
@@ -202,6 +211,8 @@ pub async fn worth_saying(
                 needs_action: waits_on_you(&session.state),
                 says: wording(&session.state).to_string(),
                 name: crate::workbench::chat_name::name_session(&session),
+                key: session.id.clone(),
+                item: None,
                 id: session.id,
                 project_id: session.project_id,
                 project_name,
@@ -210,11 +221,90 @@ pub async fn worth_saying(
         })
         .collect();
 
+    // What waits on the owner besides the chats' own questions, newest first
+    // among the needs-action rows like everything else, minus what he cleared.
+    let mut items = waiting_rows(chats, &names, &sessions, |noticed| !noticed.read).await?;
+    items.reverse();
+    rows.splice(0..0, items);
+
     // `list_sessions` already hands them back newest first; this only lifts the
     // ones wanting an answer above the ones merely finished, without disturbing
     // the order inside either group.
     rows.sort_by_key(|row| !row.needs_action);
     Ok(rows)
+}
+
+/// The tray's row for each item waiting on the owner (`waiting.rs`) in a
+/// project that can be named, oldest first, keeping those `keep` lets through.
+///
+/// The row opens the chat the answer goes back to, and is named by it; an item
+/// no chat is waiting for (a proposal's chat was deleted, say) opens the
+/// project's Tasks tab and is named by the project.
+async fn waiting_rows(
+    chats: &ChatDb,
+    names: &HashMap<String, String>,
+    sessions: &[crate::workbench::store::Session],
+    keep: impl Fn(&crate::workbench::waiting::Noticed) -> bool,
+) -> Result<Vec<Row>, String> {
+    let (items, noticed) = chats
+        .read_tasks(|store| {
+            let connection = store.connection();
+            Ok((
+                crate::workbench::waiting::list(connection, None)?,
+                crate::workbench::waiting::noticed(connection)?,
+            ))
+        })
+        .await?;
+    let sessions: HashMap<&str, &crate::workbench::store::Session> =
+        sessions.iter().map(|session| (session.id.as_str(), session)).collect();
+    Ok(items
+        .into_iter()
+        .filter(|item| keep(&noticed.get(&item.key).cloned().unwrap_or_default()))
+        .filter_map(|item| {
+            let project_name = names.get(&item.project_id)?.clone();
+            let chat = item.session_id.as_deref().and_then(|id| sessions.get(id).copied());
+            let (id, name, href) = match chat {
+                Some(chat) => (
+                    chat.id.clone(),
+                    crate::workbench::chat_name::name_session(chat),
+                    chat_href(&item.project_id, &chat.id),
+                ),
+                None => (
+                    String::new(),
+                    project_name.clone(),
+                    format!("/project?id={}&tab=tasks", encoded(&item.project_id)),
+                ),
+            };
+            Some(Row {
+                id,
+                key: item.key.clone(),
+                item: Some(item.key),
+                name,
+                project_id: item.project_id,
+                project_name,
+                state: "waiting".into(),
+                says: item.short,
+                href,
+                needs_action: true,
+                at: chrono::DateTime::from_timestamp_millis(item.since)
+                    .unwrap_or_default()
+                    .to_rfc3339(),
+            })
+        })
+        .collect())
+}
+
+/// The items waiting on the owner that no device has been told about and he
+/// has not already read, each as the row a push is made from.
+///
+/// The watcher asks this whenever a task or grid changes. An item is said
+/// once: the watcher writes it down as announced before it sends, and an item
+/// that comes back as a new occurrence (a task handed in for review again) has
+/// a new key, so it is news again.
+pub async fn waiting_worth_pushing(chats: &ChatDb, projects: &Database) -> Result<Vec<Row>, String> {
+    let names = nameable(projects, false)?;
+    let sessions = chats.list_sessions(None).await?;
+    waiting_rows(chats, &names, &sessions, |noticed| !noticed.read && !noticed.announced).await
 }
 
 /// Whether this one chat, in the state it has just reached, is worth telling a
@@ -265,6 +355,8 @@ pub async fn worth_pushing(
         needs_action: waits_on_you(state),
         says: wording(state).to_string(),
         id: session_id.to_string(),
+        key: session_id.to_string(),
+        item: None,
         name: crate::workbench::chat_name::name_session(&session),
         project_id: session.project_id,
         project_name,
@@ -588,5 +680,189 @@ mod tests {
         assert_eq!(row.project_name, "keystone");
         assert!(row.needs_action);
         assert_eq!(row.href, chat_href(&project, "chat-1"));
+    }
+
+    /// Put one of each thing that waits on the owner into the board's task
+    /// and grid tables, as the task and grid commands leave them, all held by
+    /// `chat-1`: #1 in review, #2 with a plan change, proposal 1, the draft
+    /// of grid "data", and an N/A request on grid "io"'s import × bench cell.
+    async fn one_of_each_waiting(board: &ChatDb, project: &str) {
+        let project = project.to_string();
+        board
+            .write_tasks(move |store| {
+                store.connection().execute_batch(&format!(
+                    "INSERT INTO task (project_id, number, type, title, why, status, session_id, plan, pending_amend, created_at, updated_at)
+                       VALUES ('{p}', 1, 'chore', 'Tidy settings', 'w', 'review', 'chat-1', '{{}}', NULL, 1, 1000),
+                              ('{p}', 2, 'chore', 'Refresh deps', 'w', 'in_progress', 'chat-1', '{{}}', '{{}}', 1, 2000);
+                     INSERT INTO task_event (project_id, number, seq, at, kind, session_id, actor)
+                       VALUES ('{p}', 1, 3, 1000, 'submitted', 'chat-1', 'agent'),
+                              ('{p}', 2, 4, 2000, 'amend_proposed', 'chat-1', 'agent');
+                     INSERT INTO task_proposal (project_id, id, session_id, type, title, why, plan, status, created_at)
+                       VALUES ('{p}', 1, 'chat-1', 'chore', 'Search filters', 'w', '{{}}', 'pending', 3000);
+                     INSERT INTO grid (project_id, slug, title, area, status, row_search, pending, created_at, updated_at)
+                       VALUES ('{p}', 'data', 'Data', 'a', 'draft', '{{}}',
+                               '{{\"title\":\"Data coverage\",\"draftedBy\":\"chat-1\",\"draftedAt\":4000}}', 4000, 4000),
+                              ('{p}', 'io', 'IO', 'a', 'approved', '{{}}', NULL, 1, 1);
+                     INSERT INTO grid_row (project_id, slug, id, name, kind, source, added_at)
+                       VALUES ('{p}', 'io', 'import', 'Import', 'feature', 'manual', 1);
+                     INSERT INTO grid_column (project_id, slug, id, name, proof_rule, position)
+                       VALUES ('{p}', 'io', 'bench', 'Benchmark', 'r', 0);
+                     INSERT INTO grid_cell (project_id, slug, row, col, state)
+                       VALUES ('{p}', 'io', 'import', 'bench', 'na_pending');
+                     INSERT INTO grid_event (project_id, slug, seq, at, kind, row, col, session_id, actor)
+                       VALUES ('{p}', 'io', 7, 5000, 'na_asked', 'import', 'bench', 'chat-1', 'agent');",
+                    p = project
+                ))
+            })
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    /// Each kind of thing waiting on the owner is a needs-action row in the
+    /// tray, saying what waits beside the chat it waits in, and opening it.
+    #[tokio::test]
+    async fn each_thing_waiting_on_the_owner_is_a_needs_action_row() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+        let board = a_board(directory.path());
+        board.create_session(a_chat("chat-1", &project, "thinking")).await.unwrap();
+        one_of_each_waiting(&board, &project).await;
+
+        let rows = worth_saying(&board, &projects, false).await.unwrap();
+        let said: Vec<&str> = rows.iter().map(|row| row.says.as_str()).collect();
+        // Newest first, like every other needs-action row.
+        assert_eq!(
+            said,
+            vec!["N/A request waiting", "Grid draft waiting", "Proposal waiting", "Plan change for #2", "#1 ready for review"]
+        );
+        for row in &rows {
+            assert!(row.needs_action, "{} was not under needs action", row.says);
+            assert_eq!(row.name, "Chat chat-1");
+            assert_eq!(row.href, chat_href(&project, "chat-1"));
+            assert_eq!(row.item.as_deref(), Some(row.key.as_str()));
+        }
+        assert_eq!(rows[4].key, format!("review:{project}:1:3"));
+        assert_eq!(rows[4].at, "1970-01-01T00:00:01+00:00", "a review is timed from when it was handed in");
+
+        // What the composer bar and the Tasks tab draw, in their longer words.
+        let items = board
+            .read_tasks(|store| crate::workbench::waiting::list(store.connection(), None))
+            .await
+            .unwrap();
+        let says: Vec<&str> = items.iter().map(|item| item.says.as_str()).collect();
+        assert_eq!(
+            says,
+            vec![
+                "#1 is ready for review",
+                "Plan change for #2",
+                "Proposal: Search filters",
+                "Grid draft: Data coverage",
+                "N/A request: Import × Benchmark"
+            ]
+        );
+    }
+
+    /// Clearing an item in the tray clears that item, not the chat, and not
+    /// the next time the same task is handed in.
+    #[tokio::test]
+    async fn a_waiting_item_read_in_the_tray_stays_read_until_it_comes_back() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+        let board = a_board(directory.path());
+        board.create_session(a_chat("chat-1", &project, "errored")).await.unwrap();
+        one_of_each_waiting(&board, &project).await;
+
+        let review = format!("review:{project}:1:3");
+        let key = review.clone();
+        board
+            .write_tasks(move |store| crate::workbench::waiting::mark_read(store.connection(), &[key], WHEN))
+            .await
+            .unwrap()
+            .unwrap();
+        let rows = worth_saying(&board, &projects, false).await.unwrap();
+        assert!(rows.iter().all(|row| row.key != review), "a review the owner cleared came back");
+        assert!(rows.iter().any(|row| row.key == "chat-1" && row.state == "errored"), "clearing an item cleared its chat");
+
+        // Sent back and handed in again: a new review, so news again.
+        let p = project.clone();
+        board
+            .write_tasks(move |store| {
+                store.connection().execute(
+                    "INSERT INTO task_event (project_id, number, seq, at, kind, session_id, actor)
+                       VALUES (?1, 1, 9, 9000, 'submitted', 'chat-1', 'agent')",
+                    [&p],
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let rows = worth_saying(&board, &projects, false).await.unwrap();
+        assert!(rows.iter().any(|row| row.key == format!("review:{project}:1:9")));
+    }
+
+    /// Each waiting item is pushed once, like a permission question: after
+    /// the watcher writes it down, it is not pushed again, and neither is an
+    /// item the owner already read.
+    #[tokio::test]
+    async fn each_waiting_item_is_pushed_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+        let board = a_board(directory.path());
+        board.create_session(a_chat("chat-1", &project, "thinking")).await.unwrap();
+        one_of_each_waiting(&board, &project).await;
+
+        let first = waiting_worth_pushing(&board, &projects).await.unwrap();
+        let kinds: Vec<&str> = first.iter().map(|row| row.key.split(':').next().unwrap()).collect();
+        assert_eq!(kinds, vec!["review", "amend", "proposal", "grid_draft", "na"]);
+        let note = crate::push::waiting_note(first[0].clone());
+        assert_eq!(note.title, "Chat chat-1");
+        assert_eq!(note.body, "#1 ready for review");
+        assert!(note.needs_action, "a review would not reach a phone that asked for needs-action alerts");
+
+        // The owner read one; the watcher announces the rest.
+        let read = first[1].key.clone();
+        board
+            .write_tasks(move |store| crate::workbench::waiting::mark_read(store.connection(), &[read], WHEN))
+            .await
+            .unwrap()
+            .unwrap();
+        let second = waiting_worth_pushing(&board, &projects).await.unwrap();
+        assert_eq!(second.len(), 4, "an item the owner read was still pushed");
+        for row in second {
+            let key = row.key.clone();
+            board
+                .write_tasks(move |store| crate::workbench::waiting::mark_announced(store.connection(), &key, WHEN))
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        drop(board);
+
+        // Across a restart, too.
+        let after = a_board(directory.path());
+        assert!(
+            waiting_worth_pushing(&after, &projects).await.unwrap().is_empty(),
+            "a waiting item was pushed twice"
+        );
+    }
+
+    /// An item in a project the owner is not working in is neither a row nor
+    /// a push, like a chat in one.
+    #[tokio::test]
+    async fn a_waiting_item_in_an_archived_project_is_not_said() {
+        let directory = tempfile::tempdir().unwrap();
+        let projects = Database::new_in_memory().unwrap();
+        let project = a_project(&projects, "keystone", false);
+        projects.archive_project(&project).unwrap();
+        let board = a_board(directory.path());
+        board.create_session(a_chat("chat-1", &project, "thinking")).await.unwrap();
+        one_of_each_waiting(&board, &project).await;
+
+        assert!(worth_saying(&board, &projects, false).await.unwrap().is_empty());
+        assert!(waiting_worth_pushing(&board, &projects).await.unwrap().is_empty());
     }
 }
