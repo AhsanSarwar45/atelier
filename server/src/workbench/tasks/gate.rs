@@ -206,6 +206,7 @@ pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<(), TaskError> {
     if let Some((command, run)) = &found.test_command {
         let mut value = recorded(run, run.exit == 0, None, "done");
         value["name"] = json!("test_command");
+        value["command"] = json!(command);
         stored["testCommand"] = value;
         if run.exit != 0 {
             let tail = super::super::grids::proof::tail(run.output_tail.as_bytes(), 3);
@@ -460,5 +461,144 @@ pub(crate) mod tests {
         gate.hashes = hashes(&["tests/i.rs"]);
         let message = refused(ask(&store, "done", Some(one), json!({"summary": "s", "commits": ["abcdef1"], "result": {}}), Some(gate)));
         assert!(message.contains("images: approved check file changed: tests/i.rs"), "{message}");
+    }
+
+    fn started(store: &Store, plan: Value, gate: Gate) -> i64 {
+        let one = created(store, plan);
+        ask(store, "start", Some(one), json!({}), Some(gate)).unwrap();
+        one
+    }
+
+    #[test]
+    fn the_server_ticks_an_item_only_when_every_check_passes_and_says_2_of_3() {
+        let (_d, store) = store();
+        let one = started(&store, plan(), red());
+        let message = refused(ask(&store, "check", Some(one), json!({"item": "export", "entry": {"met": true, "evidence": "trust me"}}), Some(green(&[]))));
+        assert!(message.contains("has checks, so check takes no entry"), "{message}");
+        assert!(refused(ask(&store, "check", Some(one), json!({"item": "nope"}), Some(green(&[])))).contains("\"nope\" is not an item in the plan"));
+        let outcome = ask(&store, "check", Some(one), json!({"item": "export"}), Some(green(&["c"]))).unwrap();
+        assert_eq!(outcome.detail, json!({"item": "export", "met": false, "passed": 2, "total": 3,
+            "reason": "\"c\" fails (exit 101): test a ... FAILED"}));
+        assert!(outcome.summary.contains("\"export\" is not met: 2 of 3 checks pass"), "{}", outcome.summary);
+        assert!(outcome.task.checks.is_none(), "nothing is ticked");
+        let runs = &outcome.task.gate.as_ref().unwrap()["runs"]["export"];
+        assert_eq!((runs["a"]["passed"].clone(), runs["a"]["exit"].clone(), runs["a"]["commit"].clone()), (json!(true), json!(0), json!("abc1234")));
+        assert_eq!((runs["c"]["passed"].clone(), runs["c"]["outputTail"].clone()), (json!(false), json!(FAILING)));
+        let outcome = ask(&store, "check", Some(one), json!({"item": "export"}), Some(green(&[]))).unwrap();
+        assert_eq!((outcome.detail["met"].clone(), outcome.detail["passed"].clone()), (json!(true), json!(3)));
+        assert!(outcome.summary.contains("3 of 3 checks pass. 1 of 2 items ticked"), "{}", outcome.summary);
+        assert_eq!(outcome.task.checks.as_ref().unwrap()["criteria"][0], json!({"id": "export", "met": true, "checks": ["a", "b", "c"]}));
+        assert_eq!(super::super::to_json(&store, &outcome.task)["checkMet"], json!({"export": true}));
+        // A later failure unticks it.
+        let outcome = ask(&store, "check", Some(one), json!({"item": "export"}), Some(green(&["a"]))).unwrap();
+        assert!(outcome.task.checks.is_none());
+        assert_eq!(outcome.task.gate.unwrap()["met"]["export"], false);
+    }
+
+    fn done_payload() -> Value {
+        json!({"summary": "s", "commits": ["abcdef1"], "result": {}})
+    }
+
+    #[test]
+    fn done_reruns_every_check_and_the_test_command_and_is_refused_while_one_fails() {
+        let (_d, store) = store();
+        let one = started(&store, plan(), red());
+        let message = refused(ask(&store, "done", Some(one), done_payload(), Some(green(&["i"]))));
+        assert!(message.starts_with("done is refused while a check fails: images: \"i\" fails (exit 101)"), "{message}");
+        let mut gate = green(&[]);
+        let failing = Run { exit: 2, output_tail: "error: 3 tests failed".into(), ..Default::default() };
+        gate.test_command = Some(("npm test".into(), failing));
+        let message = refused(ask(&store, "done", Some(one), done_payload(), Some(gate)));
+        assert!(message.contains("the project's test command `npm test` fails (exit 2): error: 3 tests failed"), "{message}");
+        // Item entries are not given: the checks met them.
+        let mut given = done_payload();
+        given["result"] = json!({"criteria": [{"id": "export", "met": true, "evidence": "e"}]});
+        let message = refused(ask(&store, "done", Some(one), given, Some(green(&[]))));
+        assert!(message.contains("criteria is not given for a task with checks"), "{message}");
+        let mut gate = green(&[]);
+        gate.test_command = Some(("npm test".into(), Run { exit: 0, ..Default::default() }));
+        let outcome = ask(&store, "done", Some(one), done_payload(), Some(gate)).unwrap();
+        assert_eq!(outcome.task.status, "done");
+        let stored = outcome.task.gate.unwrap();
+        assert_eq!((stored["met"]["export"].clone(), stored["met"]["images"].clone()), (json!(true), json!(true)));
+        assert_eq!((stored["testCommand"]["command"].clone(), stored["testCommand"]["passed"].clone()), (json!("npm test"), json!(true)));
+    }
+
+    fn bench(budget: Value) -> Value {
+        json!({"name": "p50", "command": "scripts/bench.sh", "kind": "benchmark", "given": "g", "when": "w", "then": "t",
+            "files": ["tests/a.rs"], "bench": {"value": "p50_ms=([0-9.]+)", "runs": 10, "budget": budget}})
+    }
+
+    fn timed(p50: f64) -> Gate {
+        let mut gate = measured(&[], &[]);
+        let run = Run { exit: 0, value: Some(p50), samples: Some(vec![p50; 10]), output: format!("p50_ms={p50}"), ..Default::default() };
+        gate.runs.entry("export".into()).or_default().insert("p50".into(), run);
+        gate
+    }
+
+    #[test]
+    fn a_benchmark_starts_over_its_absolute_budget_and_is_done_within_it() {
+        let (_d, store) = store();
+        let one = created(&store, json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [bench(json!({"max": 100, "unit": "ms"}))]}]}));
+        let message = refused(ask(&store, "start", Some(one), json!({}), Some(timed(90.0))));
+        assert!(message.contains("export: \"p50\" already meets its budget (p50 90 ms ≤ 100), so it proves nothing"), "{message}");
+        let outcome = ask(&store, "start", Some(one), json!({}), Some(timed(150.0))).unwrap();
+        let stored = outcome.task.gate.unwrap();
+        assert_eq!(stored["baseline"]["export"]["p50"]["p50"], 150.0);
+        assert_eq!(stored["baseline"]["export"]["p50"]["samples"].as_array().unwrap().len(), 10);
+        let message = refused(ask(&store, "done", Some(one), done_payload(), Some(timed(120.0))));
+        assert!(message.contains("p50 120 ms is over the budget of 100"), "{message}");
+        let outcome = ask(&store, "done", Some(one), done_payload(), Some(timed(95.0))).unwrap();
+        assert_eq!(outcome.task.gate.unwrap()["runs"]["export"]["p50"]["value"], 95.0);
+    }
+
+    #[test]
+    fn a_relative_benchmark_is_judged_against_its_start_of_task_baseline() {
+        let (_d, store) = store();
+        let one = created(&store, json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [bench(json!({"improve_pct": 20, "unit": "ms"}))]}]}));
+        ask(&store, "start", Some(one), json!({}), Some(timed(100.0))).unwrap();
+        let outcome = ask(&store, "check", Some(one), json!({"item": "export"}), Some(timed(85.0))).unwrap();
+        assert_eq!(outcome.detail["met"], false);
+        assert!(outcome.summary.contains("p50 85 ms is not 20% under the baseline 100"), "{}", outcome.summary);
+        let outcome = ask(&store, "check", Some(one), json!({"item": "export"}), Some(timed(79.0))).unwrap();
+        assert_eq!(outcome.detail["met"], true);
+        ask(&store, "done", Some(one), done_payload(), Some(timed(80.0))).unwrap();
+    }
+
+    /// The whole path with real commands in a real repository: red at
+    /// start, a fix committed, the server's tick, and done.
+    #[tokio::test]
+    async fn real_checks_go_red_then_green_through_measure() {
+        use crate::workbench::grids::proof::tests::{commit_file, repository};
+        let root = repository();
+        let dir = root.path();
+        commit_file(dir, "src/value.txt", "1\n");
+        commit_file(dir, "tests/value.sh", "grep -qx 2 src/value.txt || { echo 'value FAILED'; exit 1; }\n");
+        let check = json!({"name": "two", "command": "sh tests/value.sh", "kind": "test", "given": "g", "when": "w", "then": "t",
+            "red": "value FAILED", "files": ["tests/value.sh"]});
+        let plan = json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [check]}]});
+        let (_d, store) = store();
+        let draft = checks::draft_gate(dir, "feature", &plan, &[]);
+        let payload = json!({"type": "feature", "title": "T", "why": "W", "plan": plan});
+        let one = ask(&store, "create", None, payload, Some(draft)).unwrap().task.number;
+        let stored = |store: &Store| get(store.connection(), "p", one).unwrap().unwrap();
+        let task = stored(&store);
+        let gate = checks::measure(dir, &task.kind, &task.plan, task.gate.as_ref().unwrap(), checks::Measure::Start, 1).await;
+        ask(&store, "start", Some(one), json!({}), Some(gate)).unwrap();
+        commit_file(dir, "src/value.txt", "2\n");
+        let task = stored(&store);
+        let gate = checks::measure(dir, &task.kind, &task.plan, task.gate.as_ref().unwrap(), checks::Measure::Item("export".into()), 2).await;
+        assert_eq!(ask(&store, "check", Some(one), json!({"item": "export"}), Some(gate)).unwrap().detail["met"], true);
+        // Tampering with the approved check is caught at done.
+        std::fs::write(dir.join("tests/value.sh"), "true\n").unwrap();
+        let task = stored(&store);
+        let done = checks::Measure::Done { test_command: Some("test -f src/value.txt".into()) };
+        let gate = checks::measure(dir, &task.kind, &task.plan, task.gate.as_ref().unwrap(), done.clone(), 3).await;
+        assert!(refused(ask(&store, "done", Some(one), done_payload(), Some(gate))).contains("approved check file changed: tests/value.sh"));
+        std::fs::write(dir.join("tests/value.sh"), "grep -qx 2 src/value.txt || { echo 'value FAILED'; exit 1; }\n").unwrap();
+        let gate = checks::measure(dir, &task.kind, &task.plan, task.gate.as_ref().unwrap(), done, 4).await;
+        assert!(gate.flags.is_empty(), "{:?}", gate.flags);
+        let outcome = ask(&store, "done", Some(one), done_payload(), Some(gate)).unwrap();
+        assert_eq!(outcome.task.status, "done");
     }
 }
