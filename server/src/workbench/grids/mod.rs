@@ -727,15 +727,6 @@ fn latest_owner_words(connection: &Connection, session: &str) -> rusqlite::Resul
     Ok(latest.map(|text| super::metadata::persons_words(&text)))
 }
 
-/// Whether the owner's latest message in this chat has a bare `@matrix`.
-pub fn owner_asked_for_a_grid(connection: &Connection, session: &str) -> rusqlite::Result<bool> {
-    Ok(latest_owner_words(connection, session)?.is_some_and(|words| {
-        super::references::find(&words)
-            .iter()
-            .any(|found| found.kind == super::references::Kind::Matrix && !found.run)
-    }))
-}
-
 /// Whether the owner's latest message in this chat has `@audit SLUG` for this grid.
 pub fn owner_asked_for_an_audit(connection: &Connection, session: &str, slug: &str) -> rusqlite::Result<bool> {
     Ok(latest_owner_words(connection, session)?
@@ -1095,28 +1086,18 @@ fn edit_diff(loaded: &Loaded, pending_rows: &[Value], pending_cols: &[Value]) ->
         "columnsAdded": columns_added, "columnsRetired": columns_retired})
 }
 
-/// Whether this chat may draft grid `slug`: a new (or discarded) slug needs
-/// the owner's bare `@matrix`; another chat's draft is not this chat's to
-/// replace; an approved grid may be edited (the owner approves the edit).
-/// Checked before the row search runs, and again on the writer.
+/// Whether this chat may draft grid `slug`: a new (or discarded) slug is
+/// free to draft; another chat's draft is not this chat's to replace; an
+/// approved grid may be edited (the owner approves the edit). Checked before
+/// the row search runs, and again on the writer.
 pub fn may_draft(connection: &Connection, project: &str, session: &str, slug: &str) -> Result<(), TaskError> {
-    match get_grid(connection, project, slug)? {
-        Some(grid) if grid.status == "draft" => {
-            if grid.created_by.as_deref() != Some(session) {
-                return refuse(format!(
-                    "grid \"{slug}\" is a draft by another chat ({}), still waiting for the owner; pick another slug",
-                    grid.created_by.as_deref().map(|s| chat_name(connection, s)).unwrap_or_else(|| "unknown".into())
-                ));
-            }
-        }
-        Some(grid) if grid.status == "approved" => {}
-        _ => {
-            if !owner_asked_for_a_grid(connection, session)? {
-                return refuse(
-                    "the owner has not asked for a grid: their latest message has no @matrix. Do not draft one yourself; \
-                     suggest it to the owner instead",
-                );
-            }
+    if let Some(grid) = get_grid(connection, project, slug)? {
+        if grid.status == "draft" && grid.created_by.as_deref() != Some(session) {
+            return refuse(format!(
+                "grid \"{slug}\" is a draft by another chat ({}), still waiting for the owner. Pick another slug, \
+                 or ask the owner to approve or discard that draft first",
+                grid.created_by.as_deref().map(|s| chat_name(connection, s)).unwrap_or_else(|| "unknown".into())
+            ));
         }
     }
     Ok(())
@@ -1370,8 +1351,8 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
     append_event(connection, project, slug, now, if edit { "edit_approved" } else { "approved" }, None, None, "owner",
         &json!({"rows": rows_n, "columns": cols_n, "cells": added}))?;
     let summary = format!(
-        "Owner approved {}grid \"{slug}\" ({rows_n} rows × {cols_n} columns). The cells start unchecked; work on them as tasks \
-         (`atelier grid show {slug}`).",
+        "Owner approved {}grid \"{slug}\" ({rows_n} rows × {cols_n} columns). Run `atelier grid next {slug}` to pick the \
+         next gaps, then create a task for them with those cells; or the owner can select cells and press Create task.",
         if edit { "the edit to " } else { "" }
     );
     let tell = pending["draftedBy"].as_str().map(|session| (session.to_string(), summary.clone())).into_iter().collect();
@@ -1613,8 +1594,10 @@ fn claim_is_this_chats(connection: &Connection, project: &str, cell: &Cell, sess
     if let Some((number, holder)) = open_claim(connection, project, cell)? {
         if holder.as_deref() != Some(session) {
             return refuse(format!(
-                "{at} is claimed by {}; only the chat holding that task may {doing} it (or run `atelier task take {number}`)",
-                claim_words(connection, number, holder.as_deref())
+                "{at} is claimed by {}; only the chat holding that task may {doing} it. Work on another cell \
+                 (`atelier grid next {}` lists free ones), or move the task here with `atelier task take {number}`",
+                claim_words(connection, number, holder.as_deref()),
+                at.split('.').next().unwrap_or_default()
             ));
         }
     }
@@ -2117,14 +2100,21 @@ pub fn unclaimable(connection: &Connection, project: &str, cell: &CellRef, print
     };
     let at = cell.name();
     if let Some((number, holder)) = open_claim(connection, project, &found)? {
-        return Ok(Some(format!("{at} is claimed by {}", claim_words(connection, number, holder.as_deref()))));
+        return Ok(Some(format!(
+            "{at} is claimed by {}: pick another cell, or run `atelier grid next {}` for free ones",
+            claim_words(connection, number, holder.as_deref()),
+            cell.grid
+        )));
     }
     Ok(match found.state.as_str() {
         "unchecked" | "gap" | "in_progress" => None,
         "proved" if is_stale(&cell.grid, &found, prints) => None,
-        "proved" => Some(format!("{at} is proved and its proof is fresh; there is nothing to do")),
-        "na" => Some(format!("{at} is N/A")),
-        "na_pending" => Some(format!("{at} is waiting for the owner's N/A answer")),
+        "proved" => Some(format!(
+            "{at} is proved and its proof is fresh; there is nothing to do. Run `atelier grid next {}` for cells that need work",
+            cell.grid
+        )),
+        "na" => Some(format!("{at} is N/A; leave it out")),
+        "na_pending" => Some(format!("{at} is waiting for the owner's N/A answer; leave it out until they answer")),
         other => Some(format!("{at} is {other}")),
     })
 }
@@ -2295,6 +2285,391 @@ pub fn task_cells(connection: &Connection, project: &str, number: i64) -> rusqli
         })?
         .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
+}
+
+/* ---------------------------------------- what to work on next, and picks */
+
+/// Whether every one of these cells is in an approved grid, and there is at
+/// least one: an agent may then create a task for them without `@task`.
+pub fn all_in_approved(connection: &Connection, project: &str, cells: &[CellRef]) -> rusqlite::Result<bool> {
+    if cells.is_empty() {
+        return Ok(false);
+    }
+    let mut known: HashMap<String, bool> = HashMap::new();
+    for cell in cells {
+        let approved = match known.get(&cell.grid) {
+            Some(approved) => *approved,
+            None => {
+                let approved = get_grid(connection, project, &cell.grid)?.is_some_and(|grid| grid.status == "approved");
+                known.insert(cell.grid.clone(), approved);
+                approved
+            }
+        };
+        if !approved {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// A chat as a cell or a task names it: `{id, title}`, the title as the app
+/// shows it (its id when the chat is gone).
+pub fn chat_json(connection: &Connection, session: &str) -> Value {
+    let found = connection
+        .query_row("SELECT * FROM session WHERE id = ?1", [session], super::store::session_from_row)
+        .optional()
+        .ok()
+        .flatten();
+    let title = found.map(|found| super::chat_name::name_session(&found)).unwrap_or_else(|| session.to_string());
+    json!({"id": session, "title": title})
+}
+
+/// Set `claimedChat` on each claimed cell: the chat holding the open task
+/// that claims it, or null when that task has no chat.
+pub fn with_claim_chats(connection: &Connection, project: &str, cells: &mut [Value]) -> rusqlite::Result<()> {
+    let mut holders: HashMap<i64, Value> = HashMap::new();
+    for cell in cells.iter_mut() {
+        let Some(number) = cell["claimedTask"].as_i64() else { continue };
+        if !holders.contains_key(&number) {
+            let chat = task_holder(connection, project, number)?
+                .filter(|(status, _)| open_status(status))
+                .and_then(|(_, session)| session)
+                .map(|session| chat_json(connection, &session))
+                .unwrap_or(Value::Null);
+            holders.insert(number, chat);
+        }
+        cell["claimedChat"] = holders[&number].clone();
+    }
+    Ok(())
+}
+
+/// Every cell that counts, row by row in drawn order, columns in place order.
+fn live_pairs(loaded: &Loaded) -> Vec<(&GridRow, &Column, &Cell)> {
+    let columns: Vec<&Column> = loaded.columns.iter().filter(|col| col.retired_at.is_none()).collect();
+    let mut pairs = Vec::new();
+    for row in loaded.rows.iter().filter(|row| row.counts()) {
+        for col in &columns {
+            if let Some(cell) = loaded.cell(&row.id, &col.id) {
+                pairs.push((row, *col, cell));
+            }
+        }
+    }
+    pairs
+}
+
+/// What a cell is to someone looking for work.
+enum Standing {
+    /// No open task claims it and it needs work: unchecked, a gap, or a stale proof.
+    Free,
+    /// An open task claims it: (task, holding chat).
+    Taken(i64, Option<String>),
+    /// Proved and fresh, N/A, or waiting for the owner's N/A answer.
+    Settled,
+}
+
+fn standing(connection: &Connection, project: &str, slug: &str, cell: &Cell, prints: &Prints) -> rusqlite::Result<Standing> {
+    if let Some((number, holder)) = open_claim(connection, project, cell)? {
+        return Ok(Standing::Taken(number, holder));
+    }
+    Ok(match cell.state.as_str() {
+        "unchecked" | "gap" | "in_progress" => Standing::Free,
+        "proved" if is_stale(slug, cell, prints) => Standing::Free,
+        _ => Standing::Settled,
+    })
+}
+
+/// What a set of picked cells is called in a task's title and in the chat:
+/// a row, a column, one cell, or a count.
+pub struct Label {
+    /// "Glare row", "GPU column", "Glare × GPU"; None for a mixed pick.
+    pub name: Option<String>,
+    pub count: usize,
+    /// "gap" when only gaps were picked, else "cell".
+    pub noun: &'static str,
+}
+
+impl Label {
+    fn counted(&self) -> String {
+        format!("{} {}{}", self.count, self.noun, if self.count == 1 { "" } else { "s" })
+    }
+
+    /// The task's title: "camera: Glare row (5 cells)", "camera: 12 gaps".
+    pub fn title(&self, slug: &str) -> String {
+        let title = match &self.name {
+            Some(name) if self.count == 1 && name.contains('×') => format!("{slug}: {name}"),
+            Some(name) => format!("{slug}: {name} ({})", self.counted()),
+            None => format!("{slug}: {}", self.counted()),
+        };
+        clip(&title, 120)
+    }
+
+    /// For a sentence: "Glare row, 5 cells", "12 gaps".
+    pub fn words(&self) -> String {
+        match &self.name {
+            Some(name) if self.count == 1 && name.contains('×') => name.clone(),
+            Some(name) => format!("{name}, {}", self.counted()),
+            None => self.counted(),
+        }
+    }
+}
+
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut cut: String = text.chars().take(max - 1).collect();
+    cut.push('…');
+    cut
+}
+
+/// The `atelier task create` payload for these cells of one grid: type
+/// `general`, one plan item per cell (id `ROW.COL`, its requirement and proof
+/// rule), and the cells to claim.
+pub fn task_payload(loaded: &Loaded, picked: &[(String, String)], label: &Label) -> Value {
+    let slug = &loaded.grid.slug;
+    let done_when: Vec<Value> = picked
+        .iter()
+        .enumerate()
+        .map(|(index, (row, col))| {
+            let id = format!("{row}.{col}");
+            let id = if id.chars().count() > 64 { format!("cell{}", index + 1) } else { id };
+            let row_name = loaded.row(row).map(|r| r.name.as_str()).unwrap_or(row);
+            let (col_name, rule) = loaded.column(col).map(|c| (c.name.as_str(), c.proof_rule.as_str())).unwrap_or((col, ""));
+            json!({"id": id, "text": format!("{row_name} × {col_name}: {rule}")})
+        })
+        .collect();
+    json!({
+        "type": "general",
+        "title": label.title(slug),
+        "why": clip(&format!("Close {} of the \"{}\" coverage grid.", label.counted(), loaded.grid.title), 300),
+        "plan": {
+            "outcome": "Each cell below is proved with `atelier grid prove`, asked to be N/A, or left as a gap with a reason at done.",
+            "done_when": done_when,
+        },
+        "cells": picked.iter().map(|(row, col)| json!({"grid": slug, "row": row, "col": col})).collect::<Vec<_>>(),
+    })
+}
+
+fn approved_grid(connection: &Connection, project: &str, slug: &str) -> Result<Loaded, TaskError> {
+    let loaded = load(connection, project, slug)?
+        .filter(|loaded| loaded.grid.status != "discarded")
+        .ok_or_else(|| TaskError::Refused(format!("there is no grid \"{slug}\" in this project; run `atelier grid list`")))?;
+    if loaded.grid.status != "approved" {
+        return refuse(format!(
+            "grid \"{slug}\" is a draft waiting for the owner; its cells exist once the owner approves it"
+        ));
+    }
+    Ok(loaded)
+}
+
+/// Which part of a grid `atelier grid next` looks at.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Scope {
+    /// The first row, in drawn order, with a free cell.
+    First,
+    Row(String),
+    Col(String),
+}
+
+/// `atelier grid next`: the free cells of one row (the first with any, or
+/// the one named) or one column, the cells there other tasks hold, how many
+/// free cells the whole grid has left, and a ready `task create` payload.
+pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &Prints, scope: &Scope) -> Result<Value, TaskError> {
+    let loaded = approved_grid(connection, project, slug)?;
+    let pairs = live_pairs(&loaded);
+    let mut standings = Vec::with_capacity(pairs.len());
+    for (_, _, cell) in &pairs {
+        standings.push(standing(connection, project, slug, cell, prints)?);
+    }
+    let left = standings.iter().filter(|s| matches!(s, Standing::Free)).count();
+    let taken_in_grid = standings.iter().filter(|s| matches!(s, Standing::Taken(..))).count();
+    let na_pending = pairs.iter().filter(|(_, _, cell)| cell.state == "na_pending").count();
+    let chosen: Option<(&str, String, String)> = match scope {
+        Scope::Row(id) => {
+            let row = loaded.row(id).filter(|row| row.counts()).ok_or_else(|| {
+                TaskError::Refused(format!("grid \"{slug}\" has no row \"{id}\" with cells; run `atelier grid show {slug}`"))
+            })?;
+            Some(("row", row.id.clone(), row.name.clone()))
+        }
+        Scope::Col(id) => {
+            let col = loaded.column(id).filter(|col| col.retired_at.is_none()).ok_or_else(|| {
+                TaskError::Refused(format!("grid \"{slug}\" has no column \"{id}\"; run `atelier grid show {slug}`"))
+            })?;
+            Some(("col", col.id.clone(), col.name.clone()))
+        }
+        Scope::First => pairs
+            .iter()
+            .zip(&standings)
+            .find(|(_, standing)| matches!(standing, Standing::Free))
+            .map(|((row, _, _), _)| ("row", row.id.clone(), row.name.clone())),
+    };
+    let (mut claimable, mut taken, mut picked) = (Vec::new(), Vec::new(), Vec::new());
+    if let Some((kind, id, _)) = &chosen {
+        for ((row, col, cell), standing) in pairs.iter().zip(&standings) {
+            let inside = if *kind == "row" { row.id == *id } else { col.id == *id };
+            if !inside {
+                continue;
+            }
+            match standing {
+                Standing::Free => {
+                    claimable.push(json!({
+                        "row": row.id, "col": col.id, "rowName": row.name, "colName": col.name,
+                        "state": cell.state, "stale": is_stale(slug, cell, prints), "proofRule": col.proof_rule,
+                    }));
+                    picked.push((row.id.clone(), col.id.clone()));
+                }
+                Standing::Taken(number, holder) => taken.push(json!({
+                    "row": row.id, "col": col.id, "task": number,
+                    "chat": holder.as_deref().map(|session| chat_json(connection, session)),
+                })),
+                Standing::Settled => {}
+            }
+        }
+    }
+    let create = chosen.as_ref().filter(|_| !picked.is_empty()).map(|(kind, _, name)| {
+        let name = if *kind == "row" { format!("{name} row") } else { format!("{name} column") };
+        task_payload(&loaded, &picked, &Label { name: Some(name), count: picked.len(), noun: "cell" })
+    });
+    Ok(json!({
+        "grid": slug, "title": loaded.grid.title,
+        "scope": chosen.as_ref().map(|(kind, id, name)| json!({"kind": kind, "id": id, "name": name})),
+        "claimable": claimable, "taken": taken, "left": left, "takenInGrid": taken_in_grid, "naPending": na_pending,
+        "create": create,
+    }))
+}
+
+/// Cells the owner picked on the Grids screen: `rows` and `cols` are lists of
+/// ids or `"*"`, as in `@grid:SLUG.ROWS.COLS`; `onlyGaps` keeps only cells
+/// with no proof (unchecked or gap), leaving out stale proofs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pick {
+    pub slug: String,
+    pub rows: Option<Vec<String>>,
+    pub cols: Option<Vec<String>>,
+    pub only_gaps: bool,
+}
+
+impl Pick {
+    pub fn parse(value: &Value) -> Result<Pick, String> {
+        const SHAPE: &str = "grid must be {slug, rows, cols, onlyGaps}, with rows and cols a list of ids or \"*\"";
+        let object = value.as_object().ok_or(SHAPE)?;
+        let slug = object.get("slug").and_then(Value::as_str).unwrap_or("");
+        if !valid_id(slug) {
+            return Err(format!("grid.slug \"{slug}\" is not a valid id ({ID_RULE})"));
+        }
+        let ids = |key: &str| -> Result<Option<Vec<String>>, String> {
+            match object.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(all)) if all == "*" => Ok(None),
+                Some(Value::Array(items)) => {
+                    let ids: Vec<String> = items.iter().filter_map(Value::as_str).map(str::to_string).collect();
+                    if ids.len() != items.len() || ids.is_empty() {
+                        return Err(format!("grid.{key} must be a non-empty list of ids, or \"*\""));
+                    }
+                    if let Some(bad) = ids.iter().find(|id| !valid_id(id)) {
+                        return Err(format!("grid.{key} has \"{bad}\", which is not a valid id ({ID_RULE})"));
+                    }
+                    Ok(Some(ids))
+                }
+                Some(_) => Err(SHAPE.into()),
+            }
+        };
+        Ok(Pick {
+            slug: slug.to_string(),
+            rows: ids("rows")?,
+            cols: ids("cols")?,
+            only_gaps: object.get("onlyGaps").and_then(Value::as_bool).unwrap_or(false),
+        })
+    }
+}
+
+/// The cells of a pick that a new task can claim, in drawn order, with the
+/// task payload for them. Refused when none can be claimed.
+pub fn picked_task(connection: &Connection, project: &str, pick: &Pick, prints: &Prints) -> Result<(Value, Label), TaskError> {
+    let slug = pick.slug.as_str();
+    let loaded = approved_grid(connection, project, slug)?;
+    for id in pick.rows.iter().flatten() {
+        if !loaded.row(id).is_some_and(GridRow::counts) {
+            return refuse(format!("grid \"{slug}\" has no row \"{id}\" with cells"));
+        }
+    }
+    for id in pick.cols.iter().flatten() {
+        if !loaded.column(id).is_some_and(|col| col.retired_at.is_none()) {
+            return refuse(format!("grid \"{slug}\" has no column \"{id}\""));
+        }
+    }
+    let mut picked = Vec::new();
+    for (row, col, cell) in live_pairs(&loaded) {
+        if pick.rows.as_ref().is_some_and(|ids| !ids.contains(&row.id)) || pick.cols.as_ref().is_some_and(|ids| !ids.contains(&col.id)) {
+            continue;
+        }
+        if pick.only_gaps && !matches!(cell.state.as_str(), "unchecked" | "gap") {
+            continue;
+        }
+        if matches!(standing(connection, project, slug, cell, prints)?, Standing::Free) {
+            picked.push((row.id.clone(), col.id.clone()));
+        }
+    }
+    if picked.is_empty() {
+        return refuse(format!(
+            "none of the selected cells needs a task: each is proved, N/A, waiting for an N/A answer, or claimed by another \
+             task{}. Select other cells",
+            if pick.only_gaps { ", or not a gap" } else { "" }
+        ));
+    }
+    let one = |ids: &Option<Vec<String>>| ids.as_ref().filter(|ids| ids.len() == 1).map(|ids| ids[0].clone());
+    let name = if picked.len() == 1 {
+        let (row, col) = &picked[0];
+        Some(format!("{} × {}", loaded.row(row).map(|r| r.name.as_str()).unwrap_or(row), loaded.column(col).map(|c| c.name.as_str()).unwrap_or(col)))
+    } else {
+        match (one(&pick.rows), one(&pick.cols), &pick.rows, &pick.cols) {
+            (Some(row), None, _, None) => loaded.row(&row).map(|r| format!("{} row", r.name)),
+            (None, Some(col), None, _) => loaded.column(&col).map(|c| format!("{} column", c.name)),
+            _ => None,
+        }
+    };
+    let label = Label { name, count: picked.len(), noun: if pick.only_gaps { "gap" } else { "cell" } };
+    Ok((task_payload(&loaded, &picked, &label), label))
+}
+
+/// What a task's cells make up, for its card: one whole row, one whole column
+/// or the whole grid, where "whole" means every other cell there is already
+/// proved or N/A. `{grid, kind, id, name, count}`, or null.
+pub fn claim_shape(connection: &Connection, project: &str, number: i64) -> rusqlite::Result<Value> {
+    let mut statement =
+        connection.prepare("SELECT slug, row, col FROM grid_task_cell WHERE project_id = ?1 AND task = ?2")?;
+    let named: Vec<(String, String, String)> = statement
+        .query_map(params![project, number], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let Some((slug, _, _)) = named.first() else { return Ok(Value::Null) };
+    if named.iter().any(|(other, _, _)| other != slug) {
+        return Ok(Value::Null);
+    }
+    let Some(loaded) = load(connection, project, slug)? else { return Ok(Value::Null) };
+    let mine: HashSet<(&str, &str)> = named.iter().map(|(_, row, col)| (row.as_str(), col.as_str())).collect();
+    let pairs = live_pairs(&loaded);
+    let whole = |inside: &dyn Fn(&GridRow, &Column) -> bool| {
+        mine.iter().all(|(row, col)| pairs.iter().any(|(r, c, _)| r.id == *row && c.id == *col && inside(r, c)))
+            && pairs.iter().filter(|(r, c, _)| inside(r, c)).all(|(r, c, cell)| {
+                mine.contains(&(r.id.as_str(), c.id.as_str())) || matches!(cell.state.as_str(), "proved" | "na" | "na_pending")
+            })
+    };
+    let rows: HashSet<&str> = mine.iter().map(|(row, _)| *row).collect();
+    let cols: HashSet<&str> = mine.iter().map(|(_, col)| *col).collect();
+    let shape = if rows.len() == 1 && whole(&|r, _| rows.contains(r.id.as_str())) {
+        let row = loaded.row(rows.iter().next().unwrap()).unwrap();
+        Some(("row", row.id.clone(), row.name.clone()))
+    } else if cols.len() == 1 && whole(&|_, c| cols.contains(c.id.as_str())) {
+        let col = loaded.column(cols.iter().next().unwrap()).unwrap();
+        Some(("col", col.id.clone(), col.name.clone()))
+    } else if rows.len() > 1 && cols.len() > 1 && whole(&|_, _| true) {
+        Some(("grid", loaded.grid.slug.clone(), loaded.grid.title.clone()))
+    } else {
+        None
+    };
+    Ok(shape.map_or(Value::Null, |(kind, id, name)| {
+        json!({"grid": slug, "kind": kind, "id": id, "name": name, "count": mine.len()})
+    }))
 }
 
 /* ------------------------------------------------------------- reconnect */

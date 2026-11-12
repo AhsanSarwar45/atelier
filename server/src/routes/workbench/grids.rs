@@ -170,6 +170,16 @@ async fn grid_detail(state: &WorkbenchState, project: &str, slug: &str) -> Resul
             }
         }
     }
+    let asked = project.to_string();
+    let cells = state
+        .database()
+        .read_tasks(move |store| {
+            let mut cells = cells;
+            grids::with_claim_chats(store.connection(), &asked, &mut cells)?;
+            Ok(cells)
+        })
+        .await
+        .map_err(failed)?;
     Ok(json!({
         "grid": grids::summary(&grid, &prints), "head": head,
         "columns": grid.columns.iter().map(grids::column_json).collect::<Vec<_>>(),
@@ -216,6 +226,17 @@ async fn cell_detail(state: &WorkbenchState, project: &str, slug: &str, row: &st
     };
     let mut full = grids::cell_json(cell, grids::is_stale(slug, cell, &prints), true);
     full["merged"] = json!(merged);
+    let asked = project.to_string();
+    let full = state
+        .database()
+        .read_tasks(move |store| {
+            let mut cells = [full];
+            grids::with_claim_chats(store.connection(), &asked, &mut cells)?;
+            let [full] = cells;
+            Ok(full)
+        })
+        .await
+        .map_err(failed)?;
     Ok(json!({
         "cell": full,
         "row": grid.row(row).map(grids::row_json),
@@ -230,6 +251,37 @@ pub(super) async fn cell(
     Path((project, slug, row, col)): Path<(String, String, String, String)>,
 ) -> Result<Json<Value>, ApiError> {
     Ok(Json(cell_detail(&state, &project, &slug, &row, &col).await?))
+}
+
+#[derive(Deserialize)]
+pub(super) struct NextQuery {
+    row: Option<String>,
+    col: Option<String>,
+}
+
+/// GET /api/workbench/grids/:project/:slug/next[?row=ROW|?col=COL]
+///
+/// The free cells of the first row that has any (or of the row or column
+/// named), the cells there other tasks hold, how many free cells the grid
+/// has left, and a ready `task create` payload for the free ones.
+pub(super) async fn next(
+    State(state): State<WorkbenchState>,
+    Path((project, slug)): Path<(String, String)>,
+    Query(query): Query<NextQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let scope = match (query.row, query.col) {
+        (Some(_), Some(_)) => return Err("give row or col, not both".to_string().into()),
+        (Some(row), None) => grids::Scope::Row(row),
+        (None, Some(col)) => grids::Scope::Col(col),
+        (None, None) => grids::Scope::First,
+    };
+    let prints = prints_for(&state, &project, vec![slug.clone()]).await;
+    let found = state
+        .database()
+        .read_tasks(move |store| Ok(grids::next_cells(store.connection(), &project, &slug, &prints, &scope)))
+        .await
+        .map_err(failed)?;
+    Ok(Json(refused_or(found)?))
 }
 
 #[derive(Deserialize)]
@@ -298,8 +350,8 @@ pub(super) async fn act(
     let slugs = |request: &Request| request.slug.iter().cloned().collect::<Vec<_>>();
     match asked.action.as_str() {
         "draft" => {
-            // Gate before running anything: only the owner's @matrix (or this
-            // chat's own draft, or an approved grid) lets a search run.
+            // Gate before running anything: another chat's draft is not
+            // this chat's to replace, so no search runs for it.
             let slug = request.payload["slug"].as_str().unwrap_or("").to_string();
             if let Some(session) = session.clone() {
                 if grids::valid_id(&slug) {

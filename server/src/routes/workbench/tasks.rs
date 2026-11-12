@@ -8,6 +8,7 @@
 use super::grids::{announce_grids, prints_for};
 use super::tell::tell_chat;
 use super::{decoded, presentation_directory, ApiError, WorkbenchState};
+use crate::workbench::grids;
 use crate::workbench::tasks::{self, types, Request, TaskError};
 use axum::{
     extract::{Path, Query, State},
@@ -160,6 +161,17 @@ pub(super) struct ActionRequest {
     /// Only the app's E2E harness sets this, as for the presenter.
     #[serde(default)]
     ephemeral: bool,
+    /// The owner's `create`: the grid cells picked, `{slug, rows, cols,
+    /// onlyGaps}` with rows and cols a list of ids or `"*"`.
+    #[serde(default)]
+    grid: Option<Value>,
+    /// The owner's `create`: the chat to hold the task, or `"new"`.
+    #[serde(default)]
+    chat: Option<String>,
+    /// The owner's `create` in a new chat: the provider to start it on;
+    /// left off, the project's latest chat's.
+    #[serde(default)]
+    brand: Option<String>,
 }
 
 /// Which of these commits the repository at `cwd` does not have.
@@ -297,6 +309,9 @@ pub(super) async fn act(
         tokio::spawn(async move { tell_chat(&telling, &session, said).await });
         return Ok(Json(json!({"proposal": proposal, "task": task, "summary": prompt})));
     }
+    if request.action == "create" && request.actor == "owner" {
+        return owner_create(&state, project, request.grid, request.chat, request.brand).await;
+    }
     let mut payload = request.payload;
     let mut missing = HashSet::new();
     let mut visual = Vec::new();
@@ -387,6 +402,106 @@ pub(super) async fn act(
         }
     }
     Ok(Json(json!({"task": task, "widget": widget, "summary": summary})))
+}
+
+/// The owner's Create task on the Grids screen: a todo task for the picked
+/// cells that need work, claimed at once, held by an existing chat or one
+/// started for it, which is told to start it.
+async fn owner_create(
+    state: &WorkbenchState,
+    project: String,
+    grid: Option<Value>,
+    chat: Option<String>,
+    brand: Option<String>,
+) -> Result<Json<Value>, ApiError> {
+    let pick = grid
+        .as_ref()
+        .ok_or_else(|| "grid is required: {slug, rows, cols, onlyGaps}".to_string())
+        .and_then(grids::Pick::parse)?;
+    let chat = chat
+        .map(|chat| chat.trim().to_string())
+        .filter(|chat| !chat.is_empty())
+        .ok_or_else(|| "chat is required: a chat's id, or \"new\" for a new chat".to_string())?;
+    let prints = prints_for(state, &project, vec![pick.slug.clone()]).await;
+    // Check before a chat is started for it: nothing is left behind by a
+    // pick with nothing to do.
+    let (asked, checked, checked_prints) = (project.clone(), pick.clone(), prints.clone());
+    let (title, latest) = state
+        .database()
+        .read_tasks(move |store| {
+            let latest = store.list_sessions(Some(&asked))?.into_iter().next();
+            Ok((grids::picked_task(store.connection(), &asked, &checked, &checked_prints).map(|(payload, _)| payload), latest))
+        })
+        .await
+        .map_err(failed)?;
+    let title = refused_or(title)?["title"].as_str().unwrap_or_default().to_string();
+    let session = if chat == "new" {
+        start_chat(state, &project, &title, latest.as_ref(), brand).await?
+    } else {
+        let found = state
+            .database()
+            .get_session(chat.clone())
+            .await
+            .map_err(failed)?
+            .ok_or_else(|| format!("there is no chat {chat}"))?;
+        if found.project_id != project {
+            return Err(format!("chat {chat} belongs to another project").into());
+        }
+        chat
+    };
+    let (asked, held) = (project.clone(), session.clone());
+    let now = chrono::Utc::now().timestamp_millis();
+    let outcome = state
+        .database()
+        .write_tasks(move |store| {
+            tasks::create_from_pick(store, &asked, &held, &pick, &prints, now)
+                .map(|(task, grids, prompt)| (tasks::to_json(store, &task), grids, prompt))
+        })
+        .await
+        .map_err(failed)?;
+    let (task, grids, prompt) = refused_or(outcome)?;
+    announce(state, &task["projectId"], &task["number"]);
+    announce_grids(state, &project, &grids);
+    let telling = state.clone();
+    let told = session.clone();
+    tokio::spawn(async move { tell_chat(&telling, &told, prompt).await });
+    Ok(Json(json!({"task": task, "sessionId": session})))
+}
+
+/// Start a chat in the project for a task the owner created: on the given
+/// provider, else the project's latest chat's, in the project's folder.
+async fn start_chat(
+    state: &WorkbenchState,
+    project: &str,
+    title: &str,
+    latest: Option<&crate::workbench::store::Session>,
+    brand: Option<String>,
+) -> Result<String, ApiError> {
+    use crate::workbench::protocol::{Command, CommandKind};
+    let path = latest
+        .map(|session| session.project_path.clone())
+        .or_else(|| project_folder(state, project))
+        .ok_or_else(|| format!("the project {project} has no folder to start a chat in"))?;
+    let brand = brand.or_else(|| latest.map(|session| session.brand.clone())).unwrap_or_else(|| "claude".into());
+    let mut fields = serde_json::Map::from_iter([
+        ("projectId".into(), json!(project)),
+        ("projectPath".into(), json!(path)),
+        ("brand".into(), json!(brand)),
+        ("title".into(), json!(title)),
+    ]);
+    if let Some(profile) = latest.and_then(|session| session.profile.clone()).filter(|_| latest.is_some_and(|s| s.brand == brand)) {
+        fields.insert("profileId".into(), json!(profile));
+    }
+    let reply = state
+        .registry
+        .execute(&Command { kind: CommandKind::SessionStart, fields })
+        .await
+        .map_err(|error| format!("a new chat could not be started: {error}"))?;
+    state.publish_holds().await;
+    reply["id"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| failed("the new chat came back without an id".into()))
 }
 
 fn refused_or<T>(outcome: Result<T, TaskError>) -> Result<T, ApiError> {

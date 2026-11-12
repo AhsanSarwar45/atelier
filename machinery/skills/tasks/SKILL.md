@@ -22,7 +22,8 @@ a task.
   without a task) or **Cancel** (don't do it).
 - `@task TEXT` from the owner means: pick the type, draft the plan, and run
   `atelier task create`. Do not ask again. `create` is refused unless the
-  owner's latest message has `@task`; otherwise propose.
+  owner's latest message has `@task`, or every cell it names is in an
+  approved grid; otherwise propose.
 - `@merge` from the owner comes with what git says about this folder and the
   steps to merge its branch into the base branch. Follow them exactly.
 - Never create a task on your own to put work off. Suggest it as a follow-up
@@ -108,24 +109,33 @@ The owner's answers to a task arrive as messages:
 - **Owner approved the plan change**: continue with the new plan.
 - **Owner rejected the plan change**: continue with the old plan, minding
   the owner's note if there is one.
+- **The owner created task #N from a grid**: start it and work through its
+  cells.
 
 ## Grids
 
 A coverage grid lists an area's features (rows) against what each must do
 (columns). Each cell is proved, a gap, or N/A, and a proof goes stale when
 the covered code changes. `@matrix AREA` and `@audit SLUG` from the owner
-come with their own steps; `@grid:…` comes with the cells it names.
+come with their own steps; `@grid:…` comes with the cells it names. You may
+draft a grid without `@matrix`; the owner approves or discards it.
 
 ```
 atelier grid list [--rows]
 atelier grid show SLUG [ROW COL]
+atelier grid next SLUG [--row ROW | --col COL]
 atelier grid prove SLUG ROW COL  <<< '{"summary":…,"checks":[{"name":…,"command":…}],"commits":[…]}'
 atelier grid verify SLUG [ROW COL]
 atelier grid na SLUG ROW COL --reason TEXT
 ```
 
+To work through an approved grid: run `atelier grid next SLUG`, create the
+task it prints (no `@task` needed), start it, prove each cell, finish with
+`done`, and repeat until no gaps are left.
+
 1. Prove only with checks that pass, and commit the covered code first.
 2. To work on cells, list them as `cells` in the task's create or propose
    payload. A task with `cells` must end with proof, N/A or a reason for
    every cell (`done` takes `"cells":[{"grid","row","col","reason"}]`).
-3. Never pass or reopen cells outside an `@audit` request.
+3. Leave cells another task claims alone.
+4. Never pass or reopen cells outside an `@audit` request.

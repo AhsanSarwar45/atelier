@@ -1186,6 +1186,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/task-proposals/:project/:id", get(tasks::proposal))
         .route("/grids", get(grids::list))
         .route("/grids/:project/:slug", get(grids::detail))
+        .route("/grids/:project/:slug/next", get(grids::next))
         .route("/grids/:project/:slug/cells/:row/:col", get(grids::cell))
         .route("/grid", post(grids::act))
         // A prompt carries its pictures inline, as base64 inside the JSON, and

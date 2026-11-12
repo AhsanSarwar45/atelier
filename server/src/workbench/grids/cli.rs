@@ -15,9 +15,10 @@ pub const USAGE: &str = "\
 usage: atelier grid <command>
   list [--rows]                   grids with % proved and open counts; --rows adds every owned row id
   show SLUG [ROW COL]             the matrix as text, or one cell with proof and history
+  next SLUG [--row ROW | --col COL]  the free cells to work on next (first row with any), and the task create payload for them
   template list
   template set NAME               {columns:[{id,name,proof_rule}]} on stdin or --input FILE
-  draft                           {slug,title,area,template?,row_search,columns,rows}; only when the owner's message says @matrix
+  draft                           {slug,title,area,template?,row_search,columns,rows}; the owner approves or discards it
   discover SLUG                   rerun the grid's row search now
   prove SLUG ROW COL              {summary,checks,tests?,commits?,benchmarks?,evidence?}
   verify SLUG [ROW COL]           re-run checks (whole grid: every proved cell)
@@ -336,6 +337,75 @@ fn print_cell(slug: &str, value: &Value) {
     }
 }
 
+/// `grid next` as text: the scope, its free cells with their proof rules,
+/// the cells other tasks hold, what is left, and the exact command to run.
+pub fn next_text(value: &Value) -> String {
+    let slug = value["grid"].as_str().unwrap_or("");
+    let left = value["left"].as_u64().unwrap_or(0);
+    let mut out = String::new();
+    let claimable = value["claimable"].as_array().cloned().unwrap_or_default();
+    let taken = value["taken"].as_array().cloned().unwrap_or_default();
+    let scope = &value["scope"];
+    if scope.is_null() {
+        let held = value["takenInGrid"].as_u64().unwrap_or(0);
+        let pending = value["naPending"].as_u64().unwrap_or(0);
+        if held > 0 {
+            out.push_str(&format!(
+                "No free cells left in {slug}: {held} {} claimed by open tasks, and every other cell is proved or N/A.\n",
+                if held == 1 { "is" } else { "are" }
+            ));
+        } else {
+            out.push_str(&format!("No gaps left in {slug}. Every cell is proved or N/A.\n"));
+        }
+        if pending > 0 {
+            out.push_str(&format!("{pending} N/A request(s) wait for the owner's answer.\n"));
+        }
+        return out;
+    }
+    let kind = if scope["kind"] == "col" { "column" } else { "row" };
+    let (id, name) = (scope["id"].as_str().unwrap_or(""), scope["name"].as_str().unwrap_or(""));
+    out.push_str(&format!(
+        "{slug}, {kind} {id} ({name}): {} free cell{}. {left} free in the whole grid.\n",
+        claimable.len(),
+        if claimable.len() == 1 { "" } else { "s" }
+    ));
+    for cell in &claimable {
+        let state = if cell["stale"] == true { "stale".to_string() } else { cell["state"].as_str().unwrap_or("").replace('_', " ") };
+        out.push_str(&format!(
+            "  {slug}.{}.{} [{state}] {} × {}: {}\n",
+            cell["row"].as_str().unwrap_or(""),
+            cell["col"].as_str().unwrap_or(""),
+            cell["rowName"].as_str().unwrap_or(""),
+            cell["colName"].as_str().unwrap_or(""),
+            cell["proofRule"].as_str().unwrap_or("")
+        ));
+    }
+    if !taken.is_empty() {
+        out.push_str("Taken by other tasks (leave these alone):\n");
+        for cell in &taken {
+            let chat = cell["chat"]["title"].as_str().map(|title| format!(" in chat \"{title}\"")).unwrap_or_else(|| " (unassigned)".into());
+            out.push_str(&format!(
+                "  {slug}.{}.{} — #{}{chat}\n",
+                cell["row"].as_str().unwrap_or(""),
+                cell["col"].as_str().unwrap_or(""),
+                cell["task"]
+            ));
+        }
+    }
+    match value.get("create").filter(|create| !create.is_null()) {
+        Some(create) => {
+            out.push_str("\nNext: create a task for these cells (no @task needed for an approved grid), then start it, prove each cell \
+                with `atelier grid prove`, finish with `atelier task done N`, and run `atelier grid next` again:\n");
+            out.push_str(&format!("atelier task create <<'JSON'\n{}\nJSON\n", serde_json::to_string(create).unwrap_or_default()));
+        }
+        None if left > 0 => out.push_str(&format!(
+            "\nNothing free here. Run `atelier grid next {slug}` for the first row with free cells.\n"
+        )),
+        None => out.push_str(&format!("\nNo free cells left in {slug}.\n")),
+    }
+    out
+}
+
 fn cell_body(session: &str, action: &str, slug: &str, row: &str, col: &str, payload: Value) -> Value {
     json!({"action": action, "actor": "agent", "session": session, "slug": slug, "row": row, "col": col, "payload": payload})
 }
@@ -398,6 +468,26 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
                 }
                 _ => return Err("usage: atelier grid show SLUG [ROW COL]".into()),
             }
+            Ok(0)
+        }
+        "next" => {
+            let found = exactly(rest, &["--row", "--col"], &["SLUG"], "next [--row ROW | --col COL]")?;
+            let (row, col) = (flag(rest, "--row")?, flag(rest, "--col")?);
+            if row.is_some() && col.is_some() {
+                return Err("give --row or --col, not both".into());
+            }
+            let session = session()?;
+            let listed = listing(&session).await?;
+            let project = listed["projectId"].as_str().ok_or("Atelier named no project for this session")?;
+            let mut query = Vec::new();
+            if let Some(row) = row {
+                query.push(("row", row));
+            }
+            if let Some(col) = col {
+                query.push(("col", col));
+            }
+            let value = get(&format!("/api/workbench/grids/{}/{}/next", encode(project), encode(found[0])), &query).await?;
+            print!("{}", next_text(&value));
             Ok(0)
         }
         "template" => match rest.first().map(String::as_str) {

@@ -3603,7 +3603,7 @@ fn projection_items_matching(
     found
 }
 
-fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
+pub(crate) fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
     Ok(Session {
         id: row.get("id")?,
         brand: row.get("brand")?,

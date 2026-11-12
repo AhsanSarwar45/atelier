@@ -71,7 +71,7 @@ CREATE INDEX IF NOT EXISTS task_proposal_by_session ON task_proposal(session_id,
 "#;
 
 pub const AGENT_ACTIONS: &[&str] = &["create", "propose", "start", "check", "block", "unblock", "amend", "done", "cancel", "take"];
-pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend", "cancel", "release", "answer_proposal"];
+pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend", "cancel", "release", "answer_proposal", "create"];
 /// The owner's three answers to a proposal (`propose`).
 pub const PROPOSAL_CHOICES: &[&str] = &["create", "just_do_it", "cancel"];
 pub const STATUSES: &[&str] = &["todo", "in_progress", "blocked", "review", "done", "cancelled"];
@@ -307,6 +307,7 @@ pub fn to_json(store: &Store, task: &TaskRow) -> Value {
         "startedAt": task.started_at, "finishedAt": task.finished_at,
         "checks": task.checks,
         "cells": super::grids::task_cells(store.connection(), &task.project_id, task.number).unwrap_or_default(),
+        "claimShape": super::grids::claim_shape(store.connection(), &task.project_id, task.number).unwrap_or(Value::Null),
     })
 }
 
@@ -859,6 +860,35 @@ pub fn answer_prompt(proposal: &ProposalRow) -> String {
     }
 }
 
+/// The owner's Create task on the Grids screen: a todo task, held by
+/// `session`, for the cells of `pick` that need work, claimed at once. The
+/// task, the grids touched, and what the chat is told.
+pub fn create_from_pick(
+    store: &Store,
+    project: &str,
+    session: &str,
+    pick: &super::grids::Pick,
+    prints: &super::grids::Prints,
+    now: i64,
+) -> Result<(TaskRow, Vec<String>, String), TaskError> {
+    let connection = store.connection();
+    let transaction = connection.unchecked_transaction()?;
+    let (payload, label) = super::grids::picked_task(&transaction, project, pick, prints)?;
+    let draft = check_draft(&payload, "create")?;
+    let task = insert_task(&transaction, project, Some(session), &draft, now, "owner", json!({"grid": pick.slug}))?;
+    let grids = super::grids::claim(&transaction, project, task.number, &draft.cells, prints, Some(session), "owner", now)?;
+    transaction.commit()?;
+    let number = task.number;
+    let prompt = format!(
+        "The owner created task #{number} from the {} grid ({}). Start it with `atelier task start {number}` and work \
+         through its cells: prove each with `atelier grid prove`, ask for N/A where a requirement does not apply, and \
+         give a reason at `atelier task done {number}` for any left open.",
+        pick.slug,
+        label.words()
+    );
+    Ok((task, grids, prompt))
+}
+
 /// The owner actions the holding chat's agent is told of (`owner_prompt`).
 pub const TOLD_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend"];
 
@@ -972,12 +1002,19 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
     let actor = request.actor.as_str();
 
     if action == "create" {
+        if owner {
+            return refuse("the owner creates a task from grid cells with {grid, chat}, on its own route");
+        }
         let draft = check_draft(&request.payload, "create")?;
-        if !owner && !owner_asked_for_a_task(connection, caller.unwrap())? {
+        // Cells of approved grids are work the owner already agreed to: a
+        // task for them needs no @task.
+        let agreed = super::grids::all_in_approved(connection, &request.project, &draft.cells)?;
+        if !agreed && !owner_asked_for_a_task(connection, caller.unwrap())? {
             return refuse(
                 "the owner has not asked for a task: their latest message has no @task. Do not create one yourself. \
                  Run `atelier task propose` with this same payload and stop; the owner answers Create task, Just do it or \
-                 Cancel, and the answer comes back to you as a message",
+                 Cancel, and the answer comes back to you as a message. (A task whose cells are all in approved grids \
+                 needs no @task.)",
             );
         }
         super::grids::check_claimable(connection, &request.project, &draft.cells, &request.prints)?;

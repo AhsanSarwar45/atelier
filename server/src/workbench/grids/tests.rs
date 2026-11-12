@@ -190,18 +190,17 @@ fn a_draft_is_what_the_row_search_prints_plus_manual_rows() {
 }
 
 #[test]
-fn a_new_grid_draft_needs_the_owners_matrix() {
+fn a_new_grid_may_be_drafted_without_matrix_but_not_over_another_chats_draft() {
     let (_d, store) = store();
     owner_says(&store, "s1", "make a grid of the camera please");
-    assert!(refused(draft(&store, "s1", draft_payload("camera"), vec![found("glare", &[])])).contains("no @matrix"));
-    owner_says(&store, "s1", "@matrix the camera");
     draft(&store, "s1", draft_payload("camera"), vec![found("glare", &[])]).unwrap();
-    // Redrafting its own draft needs no new @matrix; another chat may not take it.
+    // Redrafting its own draft is fine; another chat may not take it, and is told what to do.
     owner_says(&store, "s1", "add sunstar too");
     draft(&store, "s1", draft_payload("camera"), vec![found("glare", &[]), found("sunstar", &[])]).unwrap();
-    owner_says(&store, "s2", "@matrix the camera");
-    assert!(refused(draft(&store, "s2", draft_payload("camera"), vec![found("glare", &[])])).contains("draft by another chat"));
-    // A discarded draft's slug can be drafted again, with a new @matrix.
+    let refusal = refused(draft(&store, "s2", draft_payload("camera"), vec![found("glare", &[])]));
+    assert!(refusal.contains("draft by another chat") && refusal.contains("Pick another slug"), "{refusal}");
+    assert!(may_draft(store.connection(), "p", "s2", "camera").is_err());
+    // A discarded draft's slug can be drafted again, by any chat.
     apply(store.connection(), &request("discard", "owner", None, "camera")).unwrap();
     assert_eq!(get_grid(store.connection(), "p", "camera").unwrap().unwrap().status, "discarded");
     draft(&store, "s2", draft_payload("camera"), vec![found("glare", &[])]).unwrap();
@@ -215,6 +214,7 @@ fn approving_writes_rows_columns_and_unchecked_cells() {
     let outcome = apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
     assert_eq!(outcome.tell[0].0, "s1");
     assert!(outcome.tell[0].1.contains("Owner approved grid \"camera\" (2 rows × 2 columns)"), "{}", outcome.tell[0].1);
+    assert!(outcome.tell[0].1.contains("Run `atelier grid next camera`") && outcome.tell[0].1.contains("press Create task"), "{}", outcome.tell[0].1);
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert_eq!(loaded.grid.status, "approved");
     assert!(loaded.grid.pending.is_none());
@@ -648,4 +648,189 @@ fn a_grid_selection_is_described_cell_by_cell() {
     }
     assert!(!text.contains("sunstar"));
     assert!(describe("nope", None, &Prints::new(), false).contains("no grid \"nope\""));
+}
+
+fn chat(store: &Store, id: &str, title: &str) {
+    store
+        .connection()
+        .execute(
+            "INSERT INTO session (id, brand, project_id, project_path, cwd, permission_mode, title, state, origin, created_at, last_active_at)
+             VALUES (?1, 'claude', 'p', '/p', '/p', 'default', ?2, 'idle', 'app', '2026', '2026')",
+            rusqlite::params![id, title],
+        )
+        .unwrap();
+}
+
+fn agent_create(store: &Store, session: &str, cells: Value) -> Result<tasks::Outcome, TaskError> {
+    let plan = tasks::types::example("chore").unwrap()["create"]["plan"].clone();
+    tasks::apply(store, &tasks::Request {
+        action: "create".into(),
+        actor: "agent".into(),
+        session: Some(session.into()),
+        project: "p".into(),
+        number: None,
+        payload: json!({"type": "chore", "title": "Cells", "why": "Coverage", "plan": plan, "cells": cells}),
+        missing_commits: Default::default(),
+        cwd: Some("/repo".into()),
+        visual_files: Vec::new(),
+        prints: Prints::new(),
+        now: 2,
+    })
+}
+
+#[test]
+fn an_agent_creates_a_task_for_approved_grid_cells_without_task() {
+    let (_d, store) = store();
+    camera(&store);
+    owner_says(&store, "s1", "keep going on the camera grid");
+    let outcome = agent_create(&store, "s1", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap();
+    assert_eq!(state(&store, "camera", "glare", "gpu").claimed_task, Some(outcome.task.number));
+    // A task with no cells still needs @task.
+    assert!(task_refused(agent_create(&store, "s1", json!([]))).contains("no @task"));
+    // So do cells of a grid still waiting for the owner.
+    owner_says(&store, "s2", "draft the lens grid");
+    draft(&store, "s2", draft_payload("lens"), vec![found("bokeh", &[])]).unwrap();
+    let refusal = task_refused(agent_create(&store, "s2", json!([{"grid": "lens", "row": "bokeh", "col": "gpu"}])));
+    assert!(refusal.contains("no @task") && refusal.contains("approved grids"), "{refusal}");
+    // And a mix of an approved and a draft grid.
+    let refusal = task_refused(agent_create(&store, "s2", json!([
+        {"grid": "camera", "row": "sunstar", "col": "gpu"}, {"grid": "lens", "row": "bokeh", "col": "gpu"}
+    ])));
+    assert!(refusal.contains("no @task"), "{refusal}");
+    assert!(all_in_approved(store.connection(), "p", &parse_cells(Some(&json!([{"grid": "camera", "row": "glare", "col": "perf"}])), false).unwrap()).unwrap());
+}
+
+#[test]
+fn next_lists_one_row_and_names_the_chats_holding_taken_cells() {
+    let (_d, store) = store();
+    camera(&store);
+    chat(&store, "s1", "Glare GPU");
+    let none = Prints::new();
+    // The first row with free cells: glare, both columns.
+    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
+    assert_eq!(next["scope"], json!({"kind": "row", "id": "glare", "name": "GLARE"}));
+    assert_eq!(next["claimable"].as_array().unwrap().len(), 2);
+    assert_eq!(next["left"], 4);
+    assert_eq!(next["claimable"][0]["proofRule"], "a GPU test");
+    let create = &next["create"];
+    assert_eq!(create["type"], "general");
+    assert_eq!(create["title"], "camera: GLARE row (2 cells)");
+    assert_eq!(create["plan"]["done_when"][0], json!({"id": "glare.gpu", "text": "GLARE × Runs on the GPU: a GPU test"}));
+    assert_eq!(create["cells"].as_array().unwrap().len(), 2);
+    // The payload is one an agent can create without @task.
+    owner_says(&store, "s1", "next");
+    let created = tasks::apply(&store, &tasks::Request {
+        action: "create".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(), number: None,
+        payload: json!({"type": "general", "title": "x", "why": "y", "plan": create["plan"], "cells": [create["cells"][0]]}),
+        missing_commits: Default::default(), cwd: None, visual_files: Vec::new(), prints: Prints::new(), now: 2,
+    }).unwrap();
+    let number = created.task.number;
+    // Glare still has a free cell; its taken one names the task and chat.
+    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
+    assert_eq!(next["scope"]["id"], "glare");
+    assert_eq!(next["claimable"].as_array().unwrap().len(), 1);
+    assert_eq!(next["taken"], json!([{"row": "glare", "col": "gpu", "task": number, "chat": {"id": "s1", "title": "Glare GPU"}}]));
+    assert_eq!(next["left"], 3);
+    // A column scope, and a fully worked row moves on to the next.
+    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::Col("gpu".into())).unwrap();
+    assert_eq!(next["claimable"][0]["row"], "sunstar");
+    prove(&store, "s3", "camera", "glare", "perf", "f1").unwrap();
+    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
+    assert_eq!(next["scope"]["id"], "sunstar");
+    assert!(task_refused(next_cells(store.connection(), "p", "camera", &none, &Scope::Row("nope".into()))).contains("no row \"nope\""));
+    // With every cell settled or taken, there is no scope, and the text says so.
+    for col in ["gpu", "perf"] {
+        prove(&store, "s3", "camera", "sunstar", col, "f1").unwrap();
+    }
+    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
+    assert!(next["scope"].is_null());
+    assert_eq!((next["left"].as_i64(), next["takenInGrid"].as_i64()), (Some(0), Some(1)));
+    assert!(cli::next_text(&next).starts_with("No free cells left in camera: 1 is claimed"), "{}", cli::next_text(&next));
+    task(&store, Some("s1"), "agent", "cancel", number, json!({"reason": "done elsewhere"})).unwrap();
+    prove(&store, "s3", "camera", "glare", "gpu", "f1").unwrap();
+    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
+    assert_eq!(cli::next_text(&next), "No gaps left in camera. Every cell is proved or N/A.\n");
+}
+
+#[test]
+fn the_owner_creates_a_task_from_a_selection_and_its_cells_are_claimed() {
+    let (_d, store) = store();
+    camera(&store);
+    chat(&store, "s1", "Glare GPU");
+    chat(&store, "s2", "Camera work");
+    let none = Prints::new();
+    // glare.perf is proved, sunstar.gpu is claimed by another task: a row pick keeps the rest.
+    prove(&store, "s3", "camera", "glare", "perf", "f1").unwrap();
+    let held = agent_create(&store, "s1", json!([{"grid": "camera", "row": "sunstar", "col": "gpu"}])).unwrap().task.number;
+    let pick = Pick::parse(&json!({"slug": "camera", "rows": ["glare"], "cols": "*", "onlyGaps": false})).unwrap();
+    let (task, grids, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 5).unwrap();
+    assert_eq!(grids, ["camera"]);
+    assert_eq!((task.status.as_str(), task.session_id.as_deref(), task.kind.as_str()), ("todo", Some("s2"), "general"));
+    assert_eq!(task.title, "camera: GLARE × Runs on the GPU");
+    let cell = state(&store, "camera", "glare", "gpu");
+    assert_eq!((cell.state.as_str(), cell.claimed_task), ("in_progress", Some(task.number)));
+    assert!(prompt.starts_with(&format!("The owner created task #{} from the camera grid (GLARE × Runs on the GPU).", task.number)), "{prompt}");
+    assert!(prompt.contains(&format!("`atelier task start {}`", task.number)), "{prompt}");
+    // The card's shape: the whole glare row, since its other cell is proved.
+    let json = tasks::to_json(&store, &task);
+    assert_eq!(json["claimShape"], json!({"grid": "camera", "kind": "row", "id": "glare", "name": "GLARE", "count": 1}));
+    // The other task's cell is not a whole row or column (sunstar.perf is open).
+    assert!(tasks::to_json(&store, &tasks::get(store.connection(), "p", held).unwrap().unwrap())["claimShape"].is_null());
+    // A column pick: only sunstar.perf is free; glare.perf is proved.
+    let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": ["perf"], "onlyGaps": true})).unwrap();
+    let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 6).unwrap();
+    assert_eq!(task.title, "camera: SUNSTAR × Within budget");
+    assert!(prompt.contains("(SUNSTAR × Within budget)"), "{prompt}");
+    // Nothing left to pick is refused and writes nothing.
+    let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*", "onlyGaps": false})).unwrap();
+    let refusal = task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &none, 7));
+    assert!(refusal.contains("none of the selected cells needs a task"), "{refusal}");
+    assert!(tasks::get(store.connection(), "p", task.number + 1).unwrap().is_none());
+    // Bad picks.
+    assert!(Pick::parse(&json!({"slug": "camera", "rows": ["Bad Id"]})).unwrap_err().contains("not a valid id"));
+    let pick = Pick::parse(&json!({"slug": "camera", "rows": ["nope"], "cols": "*"})).unwrap();
+    assert!(task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &none, 8)).contains("no row \"nope\""));
+    // A claimed cell in the grid's detail names its chat.
+    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
+    let mut cells: Vec<Value> = loaded.cells.iter().map(|cell| cell_json(cell, false, false)).collect();
+    with_claim_chats(store.connection(), "p", &mut cells).unwrap();
+    let sunstar = cells.iter().find(|c| c["row"] == "sunstar" && c["col"] == "gpu").unwrap();
+    assert_eq!(sunstar["claimedChat"], json!({"id": "s1", "title": "Glare GPU"}));
+    assert!(cells.iter().find(|c| c["row"] == "glare" && c["col"] == "perf").unwrap().get("claimedChat").is_none());
+}
+
+#[test]
+fn a_task_for_several_rows_of_every_open_cell_is_the_whole_grid_and_a_row_pick_is_titled_by_its_row() {
+    let (_d, store) = store();
+    camera(&store);
+    chat(&store, "s2", "Camera work");
+    let none = Prints::new();
+    let pick = Pick::parse(&json!({"slug": "camera", "rows": ["sunstar"], "cols": "*", "onlyGaps": true})).unwrap();
+    let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 5).unwrap();
+    assert_eq!(task.title, "camera: SUNSTAR row (2 gaps)");
+    assert!(prompt.contains("(SUNSTAR row, 2 gaps)"), "{prompt}");
+    assert_eq!(task.plan["done_when"].as_array().unwrap().len(), 2);
+    let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*"})).unwrap();
+    let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 6).unwrap();
+    assert_eq!(task.title, "camera: 2 cells");
+    assert_eq!(tasks::to_json(&store, &task)["claimShape"]["kind"], "row");
+}
+
+#[test]
+fn refusals_say_what_to_do() {
+    let (_d, store) = store();
+    camera(&store);
+    chat(&store, "s1", "Glare GPU");
+    let number = agent_create(&store, "s1", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap().task.number;
+    let refusal = task_refused(agent_create(&store, "s2", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])));
+    assert_eq!(refusal, format!(
+        "camera.glare.gpu is claimed by #{number} in chat \"Glare GPU\": pick another cell, or run `atelier grid next camera` for free ones"
+    ));
+    let refusal = refused(prove(&store, "s2", "camera", "glare", "gpu", "f1"));
+    assert!(refusal.contains("`atelier grid next camera`") && refusal.contains(&format!("`atelier task take {number}`")), "{refusal}");
+    prove(&store, "s3", "camera", "sunstar", "gpu", "f1").unwrap();
+    let fresh: Prints = HashMap::from([(("camera".to_string(), "sunstar".to_string()), "f1".to_string())]);
+    let cells = parse_cells(Some(&json!([{"grid": "camera", "row": "sunstar", "col": "gpu"}])), false).unwrap();
+    let refusal = unclaimable(store.connection(), "p", &cells[0], &fresh).unwrap().unwrap();
+    assert!(refusal.contains("nothing to do") && refusal.contains("atelier grid next camera"), "{refusal}");
 }

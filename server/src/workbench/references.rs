@@ -511,7 +511,10 @@ for features that interact (share energy, a buffer or a pass). Ids are lower-cas
 (`{\"id\", \"name\", \"kind\": \"reference\", \"ref\": {\"grid\", \"row\"}}`), not new rows.
 4. Run `atelier grid draft` with `{slug, title, area, template?, row_search: {command, watch: [path prefixes]}, columns, rows}` \
 on stdin, then stop and end your turn. The owner approves or discards the draft on its card; their answer, or \
-the changes they want (draft again with the same slug), arrives as your next message.";
+the changes they want (draft again with the same slug), arrives as your next message.
+5. Once it is approved, work through it: `atelier grid next SLUG` prints the next free cells and a ready \
+`atelier task create` payload (no @task needed for cells of an approved grid). Create it, start it, prove each cell, \
+finish with `atelier task done N`, and repeat until no gaps are left.";
 
 /// What a bare `@audit SLUG` asks of the agent.
 fn audit_entry(slugs: &[String]) -> String {
@@ -529,7 +532,7 @@ with what is missing. Finish with `atelier grid audit {slug} --done`. You may no
 }
 
 /// What a bare `@task` asks of the agent.
-const NEW_TASK: &str = "@task — The owner asks you to create a task from this message. Pick the type, draft the plan and run `atelier task create` (`atelier task types TYPE` prints the payload); do not ask for confirmation first.";
+const NEW_TASK: &str = "@task — The owner asks you to create a task from this message. Pick the type, draft the plan and run `atelier task create` (`atelier task types TYPE` prints the payload); do not ask for confirmation first. A task for cells of an approved grid needs no @task: `atelier grid next SLUG` prints its payload.";
 
 fn task_entry(id: &str, task: Option<&serde_json::Value>) -> String {
     if id.is_empty() {

@@ -15,7 +15,8 @@ pub const USAGE: &str = "\
 usage: atelier task <command>
   types [TYPE]                 list types, or print one type's create and done payloads
   propose                      {type, title, why, plan, cells?} on stdin or --input FILE: ask the owner first
-  create                       {type, title, why, plan, cells?}; only when the owner's message says @task
+  create                       {type, title, why, plan, cells?}; only when the owner's message says @task,
+                               or when every cell is in an approved grid (`atelier grid next` prints one)
   start N
   check N ITEM                 one plan item's result entry on stdin or --input FILE, as soon as it is met or missed
   block N --cause TEXT --needs TEXT
