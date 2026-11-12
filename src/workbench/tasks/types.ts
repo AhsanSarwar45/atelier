@@ -12,7 +12,7 @@ export const TASK_STATUSES = ['todo', 'in_progress', 'blocked', 'review', 'done'
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export const TASK_TYPES = [
-  'bug', 'feature', 'ui_change', 'optimization', 'plan', 'investigation',
+  'bug', 'feature', 'ui_change', 'visual_bug', 'render_change', 'optimization', 'plan', 'investigation',
   'refactor', 'tests', 'review', 'qa', 'docs', 'chore', 'general',
 ] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
@@ -28,6 +28,14 @@ export interface FeatureResult { criteria: Array<{ id: string; met: boolean; evi
 
 export interface UiChangePlan { screens: Array<{ id: string; name: string; how_to_reach: string; change: string }> }
 export interface UiChangeResult { screens: Array<{ id: string; before: string; after: string; notes?: string }> }
+
+/** A bug you can see: the bug fields, and the screens it shows on. Proved with before and after images. */
+export interface VisualBugPlan extends BugPlan { screens: Array<{ id: string; name: string; how_to_reach: string }> }
+export interface VisualBugResult { root_cause: string; fix: string; screens: Array<{ id: string; before: string; after: string; notes?: string }> }
+
+/** A change to what a 3D scene renders: each scene from one camera. `reference: true` asks for a reference image too. */
+export interface RenderChangePlan { scenes: Array<{ id: string; scene: string; camera: string; change: string; reference?: boolean }> }
+export interface RenderChangeResult { scenes: Array<{ id: string; before: string; after: string; reference?: string; notes?: string }> }
 
 export interface OptimizationTarget {
   id: string; name: string; metric: string; unit: string; baseline: number; target: number;
@@ -166,6 +174,14 @@ export interface TaskEvent {
 
 export interface TaskTypeInfo { name: string; code: boolean; review: boolean; plan: unknown; result: unknown }
 
+/**
+ * What one change recorded, beside the task as it stood after it: the
+ * event's payload without the plans and the full entry, e.g. a check's
+ * `{item, met, reason}` or a block's `{cause, needed_to_resume}`. Absent on
+ * cards printed before it existed.
+ */
+export type TaskEventDetail = Record<string, unknown>;
+
 export type OwnerAction = 'approve' | 'reopen' | 'approve_amend' | 'reject_amend' | 'cancel' | 'release';
 
 /**
@@ -173,7 +189,7 @@ export type OwnerAction = 'approve' | 'reopen' | 'approve_amend' | 'reject_amend
  * by `atelier task propose` the draft with the owner's three buttons.
  */
 export type TaskWidget =
-  | { type: 'task'; title?: string; event: string; task: Task; proposal?: undefined }
+  | { type: 'task'; title?: string; event: string; task: Task; proposal?: undefined; detail?: TaskEventDetail }
   | { type: 'task'; title?: string; event: 'propose'; proposal: TaskProposal; task?: undefined };
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -189,6 +205,8 @@ export const TYPE_LABEL: Record<TaskType, string> = {
   bug: 'Bug',
   feature: 'Feature',
   ui_change: 'UI change',
+  visual_bug: 'Visual bug',
+  render_change: 'Render change',
   optimization: 'Optimization',
   plan: 'Plan',
   investigation: 'Investigation',

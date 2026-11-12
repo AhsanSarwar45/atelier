@@ -1,5 +1,5 @@
 import type { SessionState } from '@/workbench/protocol';
-import { itemProgress, type ItemProgress } from '@/workbench/tasks/progress';
+import { itemCounts, itemProgress, type ItemProgress } from '@/workbench/tasks/progress';
 import { isStale } from '@/workbench/tasks/stale';
 import { sessionStopped, type Task } from '@/workbench/tasks/types';
 
@@ -15,6 +15,8 @@ export interface ChecklistItem {
    * (`atelier task check`), missed with a reason, or still open.
    */
   items?: ItemProgress[];
+  /** For a task with plan items, how many are met out of all of them (`3/7`). */
+  progress?: { met: number; total: number };
 }
 
 const WORKING = new Set<ChecklistItem['status']>(['in_progress', 'paused', 'blocked']);
@@ -39,13 +41,16 @@ export function checklistForTasks(tasks: Task[], sessionId: string | null, state
             : task.status === 'review' ? 'review'
               : task.status === 'cancelled' ? 'cancelled'
                 : 'completed';
-      const items = WORKING.has(status) ? itemProgress(task) : [];
+      const all = itemProgress(task);
+      const items = WORKING.has(status) ? all : [];
+      const { met, total } = itemCounts(all);
       return {
         id: String(task.number),
         text: `#${task.number} ${task.title}`,
         status,
         ...(isStale(task, now) ? { stale: true } : {}),
         ...(items.length ? { items } : {}),
+        ...(total ? { progress: { met, total } } : {}),
       };
     });
 }

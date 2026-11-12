@@ -18,6 +18,8 @@ export const ITEM_LISTS: Readonly<Record<string, { plan: string; result: string 
   feature: { plan: 'criteria', result: 'criteria' },
   general: { plan: 'done_when', result: 'done_when' },
   ui_change: { plan: 'screens', result: 'screens' },
+  visual_bug: { plan: 'screens', result: 'screens' },
+  render_change: { plan: 'scenes', result: 'scenes' },
   optimization: { plan: 'targets', result: 'targets' },
   investigation: { plan: 'questions', result: 'answers' },
   refactor: { plan: 'invariants', result: 'invariants' },
@@ -44,8 +46,11 @@ export interface ItemProgress {
 export function itemText(type: string, item: Loose): string {
   switch (type) {
     case 'ui_change':
+    case 'visual_bug':
     case 'optimization':
       return str(item.name);
+    case 'render_change':
+      return str(item.scene);
     case 'qa':
       return str(item.expected);
     case 'docs':
@@ -74,7 +79,7 @@ export function entryOutcome(type: string, item: Loose, entry: Loose): ItemOutco
       return met ? { state: 'met', note: '' } : missed(entry.failure_reason);
     }
     default:
-      // ui_change, investigation, refactor and docs: an entry is the item done.
+      // The visual types, investigation, refactor and docs: an entry is the item done.
       return { state: 'met', note: '' };
   }
 }
@@ -104,4 +109,18 @@ export function itemProgress(task: Pick<Task, 'type' | 'plan' | 'result' | 'chec
     const outcome = entry ? entryOutcome(task.type, item, entry) : null;
     return { id, text: itemText(task.type, item), state: outcome?.state ?? 'open', note: outcome?.note ?? '' };
   });
+}
+
+/** The types whose items are proved with before and after images. */
+export const VISUAL_TYPES: ReadonlySet<string> = new Set(['ui_change', 'visual_bug', 'render_change']);
+
+export interface ItemCounts { met: number; missed: number; total: number }
+
+/** How many plan items are met and missed, out of all of them. */
+export function itemCounts(items: readonly ItemProgress[]): ItemCounts {
+  return {
+    met: items.filter((item) => item.state === 'met').length,
+    missed: items.filter((item) => item.state === 'missed').length,
+    total: items.length,
+  };
 }

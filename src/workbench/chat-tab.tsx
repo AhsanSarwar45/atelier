@@ -741,6 +741,15 @@ export function TodoPanel({ items, onOpen }: { items: ChecklistItem[]; onOpen?: 
             {t.stale && (
               <Badge variant="warning" appearance="light" size="sm" data-testid="todo-stale" className="shrink-0"><span>Stale</span></Badge>
             )}
+            {t.progress && (
+              <span
+                data-testid="todo-progress"
+                aria-label={`${t.progress.met} of ${t.progress.total} met`}
+                className="shrink-0 text-xs tabular-nums text-muted-foreground"
+              >
+                {t.progress.met}/{t.progress.total}
+              </span>
+            )}
             {CHECKLIST_NOTE[t.status] && (
               <span
                 data-testid="todo-note"
