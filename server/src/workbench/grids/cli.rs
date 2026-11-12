@@ -394,8 +394,8 @@ pub fn next_text(value: &Value) -> String {
     }
     match value.get("create").filter(|create| !create.is_null()) {
         Some(create) => {
-            out.push_str("\nNext: create a task for these cells (no @task needed for an approved grid), then start it, prove each cell \
-                with `atelier grid prove`, finish with `atelier task done N`, and run `atelier grid next` again:\n");
+            out.push_str("\nNext: create a task for these cells (no @task needed for an approved grid), then start it; prove each cell \
+                with `atelier grid prove` and tick its item at once with `atelier task check N ROW.COL`; finish with `atelier task done N`, and run `atelier grid next` again:\n");
             out.push_str(&format!("atelier task create <<'JSON'\n{}\nJSON\n", serde_json::to_string(create).unwrap_or_default()));
         }
         None if left > 0 => out.push_str(&format!(

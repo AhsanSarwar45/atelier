@@ -516,10 +516,18 @@ async fn start_chat(
         .await
         .map_err(|error| format!("a new chat could not be started: {error}"))?;
     state.publish_holds().await;
-    match reply["id"].as_str() {
-        Some(started) if started == id => Ok(()),
-        _ => Err(failed("the new chat came back without its id".into())),
+    if reply["id"].as_str() != Some(id) {
+        return Err(failed("the new chat came back without its id".into()));
     }
+    // Pin the task's title as the owner's own name for the chat, so the name
+    // the provider makes from its first message does not replace it.
+    let fields = serde_json::Map::from_iter([("sessionId".into(), json!(id)), ("title".into(), json!(title))]);
+    state
+        .registry
+        .execute(&Command { kind: CommandKind::SessionRename, fields })
+        .await
+        .map_err(|error| failed(format!("the new chat could not be named: {error}")))?;
+    Ok(())
 }
 
 /// Take back a chat `owner_create` started for a task it then failed to
@@ -727,5 +735,7 @@ mod tests {
         assert_eq!(created["sessionId"], json!(started[0].id));
         assert_eq!(created["task"]["title"], "camera: GLARE row");
         assert_eq!(started[0].title.as_deref(), Some("camera: GLARE row"));
+        // Pinned as the owner's name, so the provider's own title cannot replace it.
+        assert!(started[0].named_by_owner);
     }
 }
