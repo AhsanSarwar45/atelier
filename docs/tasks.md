@@ -83,7 +83,7 @@ todo ──start──▶ in_progress ──done──▶ done
   (`session_id = null`). Anyone can `take` them.
 - The front end shows an `in_progress` task whose session is not running as
   **paused**. This is a display state, not stored.
-- Review types (`plan`, `ui_change`) go to `review` on `done`. The owner
+- Review types (`plan`, `ui_change`, `visual_bug`, `render_change`) go to `review` on `done`. The owner
   approves (→ `done`) or reopens with a note (→ `in_progress`; → `todo` if
   the task is unassigned or its session already has another task in progress).
 - `amend` stores `pending_amend`. The owner approves (plan replaced) or
@@ -104,7 +104,8 @@ entry. Only the chat holding the task may check, only while it is
 `event: "check"`.
 
 The types with items: `feature` (criteria), `general` (done_when),
-`ui_change` (screens), `optimization` (targets), `investigation` (questions,
+`ui_change` (screens), `visual_bug` (screens), `render_change` (scenes),
+`optimization` (targets), `investigation` (questions,
 answered in answers), `refactor` (invariants), `tests` (behaviors), `qa`
 (scenarios), `docs` (pages), `chore` (steps). `bug`, `plan` and `review`
 have none.
@@ -233,8 +234,12 @@ are no commits or git could not tell (see Merging).
   `workbench` feed (the frame also carries `kind: "tasks.changed"`, like the
   feed's other frames). Clients refetch.
 
-The `task` widget is `{type: "task", event, task}`, where `event` is the
-action that produced it and `task` is the snapshot after it. A proposal's
+The `task` widget is `{type: "task", event, task, detail?}`, where `event`
+is the action that produced it and `task` is the snapshot after it.
+`detail` is what the change recorded: its event payload without the plans
+and the full entry, e.g. a check's `{item, met, reason?}`, a block's
+`{cause, needed_to_resume}`, a cancel's `{reason}`. It is left out when
+empty (and on cards printed before it existed). A proposal's
 widget is `{type: "task", event: "propose", proposal}`, with no `task`.
 
 ## Merging
@@ -276,7 +281,26 @@ must have exactly one entry per plan id.
 
 ### `ui_change` (code, review)
 - plan: `screens[] {id, name, how_to_reach, change}`
-- result: `screens[] {id, before, after, notes?}` (`before` and `after` are image paths)
+- result: `screens[] {id, before, after, notes?}` (`before` and `after` are images, see below)
+
+### `visual_bug` (code, review)
+- plan: the `bug` fields (`symptom`, `repro_steps[]`, `expected`, `actual`, `suspected_area?`) and `screens[] {id, name, how_to_reach}`
+- result: `root_cause`, `fix`, `screens[] {id, before, after, notes?}`
+
+### `render_change` (code, review)
+- plan: `scenes[] {id, scene, camera, change, reference?}` (`reference: true` asks for a reference image of that scene)
+- result: `scenes[] {id, before, after, reference?, notes?}`. `reference` is
+  optional, and required for a scene whose plan item says `reference: true`.
+
+### Before and after images
+
+For `ui_change`, `visual_bug` and `render_change`, `check` and `done` are
+refused unless each item's `before` and `after` (and a `reference`, where
+given or asked for) are images uploaded as presentation assets: the CLI
+uploads files named in the payload, and the server stores them as
+`/api/presentation-assets/<sha256>.<ext>`. A path that is missing or not a
+PNG, JPEG, GIF or WebP is refused, and so are a `before` and `after` with
+the same contents (the same hash).
 
 ### `optimization` (code)
 - plan: `targets[] {id, name, metric, unit, baseline, target, how_measured, environment, higher_is_better?}`. `baseline` and `target` are numbers; lower is better unless `higher_is_better` is true.
@@ -335,15 +359,41 @@ must have exactly one entry per plan id.
 
 ## Front end
 
-- **Task card** (widget type `task`): header with `#N`, type, title and
-  status; the plan rendered per type; once done, the result per type
-  (optimization as a before/after/target table, ui_change as image compares,
-  plan as rendered markdown). While in progress, each checked plan item is
-  ticked (met), marked missed with its reason, or left open. The status chip
-  and the ticks are live. A `check` card starts folded.
-- **Checklist panel**: the current session's tasks with live statuses; an
-  active task lists its plan items ticked, missed or open. A task's row
-  opens its detail on the Tasks tab.
+- **Task card in a chat** (widget type `task`, `event: "create"`): the one
+  card a task prints. Header with `#N`, type, title, status and a met count;
+  the plan's items one line each, cut short with an ellipsis (the whole text
+  is the tooltip and is in the detail), five at most until **Show all N**.
+  Ticked live as items are checked. A type without plan items (`bug`,
+  `plan`, `review`) shows its short plan. Clicking the title opens the detail.
+- **Event lines**: every later change (`start`, `check`, `block`, `unblock`,
+  `take`, `amend`, `done`, `cancel`, `approve`, `reopen`, `approve_amend`,
+  `reject_amend`, `release`) is one line: an icon, `#N` and what happened,
+  e.g. `Checked “Button works” — met`, `Blocked: <cause>`,
+  `Plan change: +1 criterion “…”`, `Done · 6 of 7 met · 1 missed`. While the
+  task (live) still waits on the owner for that change, its buttons sit on
+  the line (Approve change / Reject change; Approve / Reopen); once answered
+  they go and the line says how it was answered. A plan change unfolds to
+  its diff, a done line to the done summary; a done line starts folded
+  unless it waits for review. A visual type's check unfolds to its images.
+  Clicking the line (not its buttons) opens the task's detail in the Tasks
+  tab as a new history entry, so Back returns to the chat.
+- **Plan change diff**: only the items added, removed and changed (matched
+  by id in the type's plan list) and the other top-level fields that
+  changed, never both whole plans. The same in an event line and in the
+  detail's pending change panel.
+- **Done summary**: met and missed counts, only the missed items with their
+  reasons, root cause and fix for `bug` and `visual_bug`, the summary, and
+  the commits with the Merged badge. The whole result per type
+  (optimization as a before/after/target table, the visual types as image
+  compares, plan as rendered markdown) is behind **Show all**. Used in the
+  done line and the detail.
+- **Images**: a visual type's before and after images sit side by side
+  behind a toggle (with the reference for `render_change`), so they take no
+  room until opened.
+- **Checklist panel**: the current session's tasks with live statuses and,
+  for a task with plan items, how many are met (`3/7`); an active task lists
+  its plan items ticked, missed or open. A task's row opens its detail on
+  the Tasks tab.
 - **Tasks tab** on the project screen, on every project: tasks grouped by
   status, filters for session and unassigned, a detail panel with history,
   and owner actions: approve or reopen (review), approve or reject an amend,

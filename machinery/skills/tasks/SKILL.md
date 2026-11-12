@@ -52,9 +52,16 @@ Run each `atelier task` command as its own command and leave its output
 alone. It prints the task card the owner sees in the chat. Never send it to
 `/dev/null`, pipe it away, or bundle it into one command with the work.
 
-Types: `bug`, `feature`, `ui_change`, `optimization`, `plan`,
-`investigation`, `refactor`, `tests`, `review`, `qa`, `docs`, `chore`,
-`general`. Use `general` only when no other type fits.
+Types: `bug`, `feature`, `ui_change`, `visual_bug`, `render_change`,
+`optimization`, `plan`, `investigation`, `refactor`, `tests`, `review`,
+`qa`, `docs`, `chore`, `general`. Use `visual_bug` for a bug you can see,
+`render_change` for a change to what a 3D scene renders. Use `general` only
+when no other type fits.
+
+The visual types (`ui_change`, `visual_bug`, `render_change`) need a before
+and an after image file for every item, at `check` and at `done`: real
+screenshots or renders, and different from each other. A `render_change`
+scene whose plan says `reference: true` needs a `reference` image too.
 
 ## Rules
 
