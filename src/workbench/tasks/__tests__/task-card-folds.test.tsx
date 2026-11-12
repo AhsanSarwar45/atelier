@@ -154,13 +154,14 @@ describe('a later change is one line', () => {
     expect(new URLSearchParams(window.location.search).get('tab')).toBe('chat');
   });
 
-  it('wraps on a narrow screen rather than overflowing', () => {
+  it('gives the text a row of its own, the full width of the card', () => {
     show('done', feature({ status: 'review', result: { summary: 's', criteria: [] } }));
-    const line = screen.getByTestId('task-event').firstElementChild!;
-    expect(line).toHaveClass('flex-wrap');
-    expect(screen.getByTestId('task-event-text')).toHaveClass('break-words', 'min-w-0');
-    // The text keeps a few words' width, so the buttons wrap under it instead of squeezing it.
-    expect(screen.getByTestId('task-event-open')).toHaveClass('min-w-[min(100%,14rem)]');
+    const text = screen.getByTestId('task-event-text');
+    expect(text).toHaveClass('break-words');
+    // The text's button is not beside the chevron and icon, but under them.
+    const open = screen.getByTestId('task-event-open');
+    expect(open).toHaveClass('w-full');
+    expect(open.parentElement!.firstElementChild).toContainElement(screen.getByTestId('task-event-toggle'));
   });
 });
 

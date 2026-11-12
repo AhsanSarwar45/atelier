@@ -159,25 +159,27 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
     <Panel inset="none" data-testid="task-event" data-event={event} data-task={printed.number} data-waiting={waiting ? 'yes' : 'no'}
       className="my-1 max-w-4xl">
       {/* The line's own button is the keyboard way in; the rest of the line is a bigger target for a pointer. */}
-      <div className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1" onClick={openFromLine}>
-        {more ? (
-          <Button type="button" variant="ghost" size="none" data-testid="task-event-toggle" aria-expanded={open}
-            aria-label={open ? 'Hide details' : 'Show details'} className="size-7 shrink-0 text-muted-foreground" onClick={() => setOpen((o) => !o)}>
-            <ChevronRight aria-hidden className={cn('size-4 transition-transform', open && 'rotate-90')} />
-          </Button>
-        ) : <span aria-hidden className="w-7 shrink-0" />}
-        {/* At least a few words wide: on a narrow screen the buttons wrap under the text rather than squeezing it. */}
+      {/* The chevron, icon and number on a row of their own, so the text below gets the card's whole width. */}
+      <div className="cursor-pointer space-y-1 px-2 py-1" onClick={openFromLine}>
+        <div className="flex items-center gap-2">
+          {more ? (
+            <Button type="button" variant="ghost" size="none" data-testid="task-event-toggle" aria-expanded={open}
+              aria-label={open ? 'Hide details' : 'Show details'} className="size-7 shrink-0 text-muted-foreground" onClick={() => setOpen((o) => !o)}>
+              <ChevronRight aria-hidden className={cn('size-4 transition-transform', open && 'rotate-90')} />
+            </Button>
+          ) : <span aria-hidden className="size-7 shrink-0" />}
+          <Icon aria-hidden className={cn('size-4 shrink-0', warn ? 'text-[var(--color-warning-accent)]'
+            : event === 'done' || event === 'approve' || (event === 'check' && item?.met) ? 'text-[var(--color-success-accent)]' : 'text-muted-foreground')} />
+          <span className="font-mono text-xs text-muted-foreground">#{printed.number}</span>
+          {answered && <Badge variant="secondary" appearance="light" size="sm" data-testid="task-event-answer" className="ml-auto"><span>{answered}</span></Badge>}
+        </div>
         <Button type="button" variant="ghost" size="inherit" data-testid="task-event-open"
           onClick={() => openTaskDetail(printed.number)}
-          className="flex min-w-[min(100%,14rem)] flex-1 basis-56 items-start justify-start gap-2 whitespace-normal py-1 text-left text-sm font-normal hover:bg-transparent hover:underline">
-          <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', warn ? 'text-[var(--color-warning-accent)]'
-            : event === 'done' || event === 'approve' || (event === 'check' && item?.met) ? 'text-[var(--color-success-accent)]' : 'text-muted-foreground')} />
-          <span className="shrink-0 font-mono text-xs leading-5 text-muted-foreground">#{printed.number}</span>
-          <span data-testid="task-event-text" className="min-w-0 break-words">{text}</span>
+          className="block h-auto w-full whitespace-normal px-1 text-left text-sm font-normal hover:bg-transparent hover:underline">
+          <span data-testid="task-event-text" className="break-words">{text}</span>
         </Button>
-        {answered && <Badge variant="secondary" appearance="light" size="sm" data-testid="task-event-answer"><span>{answered}</span></Badge>}
         {waiting && only.length > 0 && (
-          <TaskOwnerActions task={now} only={only} onChanged={setActed} className="ml-auto max-w-full [&:has(form)]:basis-full" />
+          <TaskOwnerActions task={now} only={only} onChanged={setActed} className="flex justify-end" />
         )}
       </div>
       {open && more && <div data-testid="task-event-more" className="border-t border-border/60 px-3 py-2 sm:pl-10">{more}</div>}
