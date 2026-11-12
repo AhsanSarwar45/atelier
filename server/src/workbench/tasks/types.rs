@@ -90,13 +90,24 @@ pub fn example(name: &str) -> Option<Value> {
         done["commits"] = json!(["<sha of a commit in this worktree>"]);
     }
     done["followups"] = json!([{"type": "chore", "title": "Optional suggestion", "why": "Why it is worth doing"}]);
+    // One plan item's entry, as `atelier task check` takes it while the work
+    // goes on: the same entry the done result would carry, without its id.
+    let check = item_lists(name).and_then(|(_, key)| {
+        let mut entry = result[key][0].clone();
+        let id = entry.as_object_mut()?.remove("id")?;
+        Some(json!({"command": format!("atelier task check N {}", id.as_str().unwrap_or("ID")), "entry": entry}))
+    });
     done["result"] = result;
-    Some(json!({
+    let mut shown = json!({
         "type": kind.name, "code": kind.code, "review": kind.review,
         "plan_fields": kind.plan, "result_fields": kind.result,
         "create": {"type": kind.name, "title": "Short title (≤ 120 chars)", "why": "One line (≤ 300 chars)", "plan": plan},
-        "done": done,
-    }))
+    });
+    if let Some(check) = check {
+        shown["check"] = check;
+    }
+    shown["done"] = done;
+    Some(shown)
 }
 
 fn examples(name: &str) -> (Value, Value) {
@@ -381,7 +392,7 @@ fn covering<'a>(
         .collect();
     if !missing.is_empty() {
         return Err(format!(
-            "{name} does not cover plan id{} {}: every plan id needs exactly one entry",
+            "{name} does not cover plan id{} {}: every plan id needs exactly one entry (record each with `atelier task check` as you go, or give it in the done result)",
             if missing.len() == 1 { "" } else { "s" },
             missing.iter().map(|id| format!("\"{id}\"")).collect::<Vec<_>>().join(", ")
         ));
@@ -553,6 +564,186 @@ pub fn target_met(plan_target: &Value, after: f64) -> (bool, String) {
     (met, format!("after {after} {verb} target {target}"))
 }
 
+/// The plan list a type's result answers one entry per item, as
+/// `(plan key, result key)`: what `atelier task check` ticks. Types without
+/// one (bug, plan, review) have nothing to tick.
+pub fn item_lists(kind: &str) -> Option<(&'static str, &'static str)> {
+    Some(match kind {
+        "feature" => ("criteria", "criteria"),
+        "general" => ("done_when", "done_when"),
+        "ui_change" => ("screens", "screens"),
+        "optimization" => ("targets", "targets"),
+        "investigation" => ("questions", "answers"),
+        "refactor" => ("invariants", "invariants"),
+        "tests" => ("behaviors", "behaviors"),
+        "qa" => ("scenarios", "scenarios"),
+        "docs" => ("pages", "pages"),
+        "chore" => ("steps", "steps"),
+        _ => return None,
+    })
+}
+
+/// The fields one result entry may carry, by type.
+fn entry_fields(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "feature" | "general" => &["id", "met", "evidence", "reason"],
+        "ui_change" => &["id", "before", "after", "notes"],
+        "optimization" => &["id", "before", "after", "runs", "why_faster", "failure_reason"],
+        "investigation" => &["id", "answer", "evidence", "confidence", "recommendation"],
+        "refactor" => &["id", "how_verified"],
+        "tests" => &["id", "test_path", "test_name", "fails_without_code", "reason"],
+        "qa" => &["id", "passed", "evidence", "notes"],
+        "docs" => &["id", "path", "what_changed"],
+        "chore" => &["id", "done", "output", "reason"],
+        _ => &["id"],
+    }
+}
+
+/// Check one result entry against its plan item. Returns the reason when the
+/// item was not met, None when it was.
+fn check_item(kind: &str, plan_item: &Value, entry: &Row, path: &str) -> Result<Option<String>, String> {
+    let unmet = |flag: bool, why: Option<&str>, key: &str, because: &str| -> Result<Option<String>, String> {
+        if flag {
+            return Ok(None);
+        }
+        why.map(|why| Some(why.to_string()))
+            .ok_or_else(|| format!("{path}: {key} is required because {because}"))
+    };
+    match kind {
+        "feature" | "general" => {
+            let met = boolean(entry, "met", path)?;
+            text(entry, "evidence", path)?;
+            let reason = optional_text(entry, "reason", path)?;
+            unmet(met, reason, "reason", "met is false")
+        }
+        "ui_change" => {
+            for side in ["before", "after"] {
+                let shot = text(entry, side, path)?;
+                if !is_served_image(shot) {
+                    return Err(format!(
+                        "{path}: {side} must be a path to a PNG, JPEG, GIF or WebP file in the session's folder; \"{shot}\" could not be read as one"
+                    ));
+                }
+            }
+            optional_text(entry, "notes", path)?;
+            Ok(None)
+        }
+        "optimization" => {
+            number(entry, "before", path)?;
+            let after = number(entry, "after", path)?;
+            integer(entry, "runs", path, 1)?;
+            let why_faster = optional_text(entry, "why_faster", path)?;
+            let failure = optional_text(entry, "failure_reason", path)?;
+            let (met, how) = target_met(plan_item, after);
+            if met {
+                if why_faster.is_none() {
+                    return Err(format!("{path}: why_faster is required because {how}"));
+                }
+                if failure.is_some() {
+                    return Err(format!("{path}: failure_reason is only for a target that was missed, and {how}"));
+                }
+                Ok(None)
+            } else {
+                failure
+                    .map(|why| Some(why.to_string()))
+                    .ok_or_else(|| format!("{path}: failure_reason is required because {how}"))
+            }
+        }
+        "investigation" => {
+            text(entry, "answer", path)?;
+            texts(entry, "evidence", path, 1)?;
+            one_of(entry, "confidence", path, &["low", "medium", "high"])?;
+            optional_text(entry, "recommendation", path)?;
+            Ok(None)
+        }
+        "refactor" => {
+            text(entry, "how_verified", path)?;
+            Ok(None)
+        }
+        "tests" => {
+            text(entry, "test_path", path)?;
+            text(entry, "test_name", path)?;
+            let fails = boolean(entry, "fails_without_code", path)?;
+            let reason = optional_text(entry, "reason", path)?;
+            unmet(fails, reason, "reason", "fails_without_code is false")
+        }
+        "qa" => {
+            let passed = boolean(entry, "passed", path)?;
+            text(entry, "evidence", path)?;
+            let notes = optional_text(entry, "notes", path)?;
+            unmet(passed, notes, "notes", "passed is false")
+        }
+        "docs" => {
+            text(entry, "path", path)?;
+            text(entry, "what_changed", path)?;
+            Ok(None)
+        }
+        "chore" => {
+            let done = boolean(entry, "done", path)?;
+            optional_text(entry, "output", path)?;
+            let reason = optional_text(entry, "reason", path)?;
+            unmet(done, reason, "reason", "done is false")
+        }
+        other => Err(format!("a {other} task has no plan items to check")),
+    }
+}
+
+/// A plan item by its id, from a plan that has already been checked.
+fn plan_item<'a>(plan: &'a Value, key: &str, id: &str) -> Option<&'a Value> {
+    plan[key].as_array()?.iter().find(|item| item["id"].as_str() == Some(id))
+}
+
+/// Check every entry of a type's item list against the plan, adding each
+/// unmet item to `unmet` as `id: reason`.
+fn check_items(kind: &str, plan: &Value, row: &Row, at: &str, unmet: &mut Vec<String>) -> Result<(), String> {
+    let (plan_key, result_key) = item_lists(kind).ok_or_else(|| format!("a {kind} task has no plan items"))?;
+    for (id, entry, path) in covering(&plan_ids(plan, plan_key), row, result_key, at, entry_fields(kind))? {
+        let item = plan_item(plan, plan_key, &id).unwrap_or(&Value::Null);
+        if let Some(reason) = check_item(kind, item, entry, &path)? {
+            unmet.push(format!("{id}: {reason}"));
+        }
+    }
+    Ok(())
+}
+
+/// One plan item's result entry, as `atelier task check N ITEM` records it
+/// while the work goes on: the same shape and the same checks as that entry
+/// in the type's `done` result. Returns the entry with its `id` and, when the
+/// item was not met, the reason.
+pub fn check_one(kind: &str, plan: &Value, item: &str, entry: &Value) -> Result<(Value, Option<String>), String> {
+    let (plan_key, result_key) = item_lists(kind).ok_or_else(|| {
+        format!("a {kind} task has no plan items to check; its whole result is given with `atelier task done`")
+    })?;
+    let ids = plan_ids(plan, plan_key);
+    let planned = plan_item(plan, plan_key, item).ok_or_else(|| {
+        format!("\"{item}\" is not an item in the plan (plan {plan_key} ids: {})", ids.join(", "))
+    })?;
+    let path = format!("{result_key} entry (id \"{item}\")");
+    let row = object(entry, &path)?;
+    match present(row, "id") {
+        None => {}
+        Some(Value::String(id)) if id == item => {}
+        Some(other) => {
+            return Err(format!("{path}: id is {other}, but the command names \"{item}\"; leave id out or make them match"))
+        }
+    }
+    only(row, entry_fields(kind), &path)?;
+    let reason = check_item(kind, planned, row, &path)?;
+    let mut stored = Row::new();
+    stored.insert("id".into(), json!(item));
+    for (key, value) in row {
+        if key != "id" {
+            stored.insert(key.clone(), value.clone());
+        }
+    }
+    Ok((Value::Object(stored), reason))
+}
+
+/// The plan ids a type ticks, in plan order (empty for a type with none).
+pub fn item_ids(kind: &str, plan: &Value) -> Vec<String> {
+    item_lists(kind).map(|(plan_key, _)| plan_ids(plan, plan_key)).unwrap_or_default()
+}
+
 /// Check a result against the (approved) plan. Returns the unmet plan items,
 /// each with its reason; an empty list means no shortfalls.
 pub fn check_result(kind: &str, plan: &Value, result: &Value) -> Result<Vec<String>, String> {
@@ -567,69 +758,10 @@ pub fn check_result(kind: &str, plan: &Value, result: &Value) -> Result<Vec<Stri
             text(row, "proof", at)?;
             texts(row, "regression_checked", at, 0)?;
         }
-        "feature" | "general" => {
-            let key = if kind == "feature" { "criteria" } else { "done_when" };
-            only(row, &[key], at)?;
-            for (id, entry, path) in covering(&plan_ids(plan, key), row, key, at, &["id", "met", "evidence", "reason"])? {
-                let met = boolean(entry, "met", &path)?;
-                text(entry, "evidence", &path)?;
-                let reason = optional_text(entry, "reason", &path)?;
-                if !met {
-                    let reason = reason.ok_or_else(|| {
-                        format!("{path}: reason is required because met is false")
-                    })?;
-                    unmet.push(format!("{id}: {reason}"));
-                }
-            }
-        }
-        "ui_change" => {
-            only(row, &["screens"], at)?;
-            for (_, entry, path) in covering(&plan_ids(plan, "screens"), row, "screens", at, &["id", "before", "after", "notes"])? {
-                for side in ["before", "after"] {
-                    let shot = text(entry, side, &path)?;
-                    if !is_served_image(shot) {
-                        return Err(format!(
-                            "{path}: {side} must be a path to a PNG, JPEG, GIF or WebP file in the session's folder; \"{shot}\" could not be read as one"
-                        ));
-                    }
-                }
-                optional_text(entry, "notes", &path)?;
-            }
-        }
         "optimization" => {
             only(row, &["method", "targets"], at)?;
             text(row, "method", at)?;
-            let targets: HashMap<String, &Value> = plan["targets"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|t| Some((t["id"].as_str()?.to_string(), t)))
-                .collect();
-            let order = plan_ids(plan, "targets");
-            let allowed = ["id", "before", "after", "runs", "why_faster", "failure_reason"];
-            for (id, entry, path) in covering(&order, row, "targets", at, &allowed)? {
-                number(entry, "before", &path)?;
-                let after = number(entry, "after", &path)?;
-                integer(entry, "runs", &path, 1)?;
-                let why_faster = optional_text(entry, "why_faster", &path)?;
-                let failure = optional_text(entry, "failure_reason", &path)?;
-                let (met, how) = target_met(targets[&id], after);
-                if met {
-                    if why_faster.is_none() {
-                        return Err(format!("{path}: why_faster is required because {how}"));
-                    }
-                    if failure.is_some() {
-                        return Err(format!(
-                            "{path}: failure_reason is only for a target that was missed, and {how}"
-                        ));
-                    }
-                } else {
-                    let reason = failure.ok_or_else(|| {
-                        format!("{path}: failure_reason is required because {how}")
-                    })?;
-                    unmet.push(format!("{id}: {reason}"));
-                }
-            }
+            check_items(kind, plan, row, at, &mut unmet)?;
         }
         "plan" => {
             only(row, &["document", "decisions", "open_questions", "proposed_tasks"], at)?;
@@ -640,40 +772,12 @@ pub fn check_result(kind: &str, plan: &Value, result: &Value) -> Result<Vec<Stri
                 check_suggestion(item, &format!("result.proposed_tasks[{index}]"))?;
             }
         }
-        "investigation" => {
-            only(row, &["answers"], at)?;
-            let allowed = ["id", "answer", "evidence", "confidence", "recommendation"];
-            for (_, entry, path) in covering(&plan_ids(plan, "questions"), row, "answers", at, &allowed)? {
-                text(entry, "answer", &path)?;
-                texts(entry, "evidence", &path, 1)?;
-                one_of(entry, "confidence", &path, &["low", "medium", "high"])?;
-                optional_text(entry, "recommendation", &path)?;
-            }
-        }
         "refactor" => {
             only(row, &["invariants", "files_changed", "net_lines", "deviations"], at)?;
-            for (_, entry, path) in covering(&plan_ids(plan, "invariants"), row, "invariants", at, &["id", "how_verified"])? {
-                text(entry, "how_verified", &path)?;
-            }
+            check_items(kind, plan, row, at, &mut unmet)?;
             integer(row, "files_changed", at, 0)?;
             integer(row, "net_lines", at, i64::MIN)?;
             texts(row, "deviations", at, 0)?;
-        }
-        "tests" => {
-            only(row, &["behaviors"], at)?;
-            let allowed = ["id", "test_path", "test_name", "fails_without_code", "reason"];
-            for (id, entry, path) in covering(&plan_ids(plan, "behaviors"), row, "behaviors", at, &allowed)? {
-                text(entry, "test_path", &path)?;
-                text(entry, "test_name", &path)?;
-                let fails = boolean(entry, "fails_without_code", &path)?;
-                let reason = optional_text(entry, "reason", &path)?;
-                if !fails {
-                    let reason = reason.ok_or_else(|| {
-                        format!("{path}: reason is required because fails_without_code is false")
-                    })?;
-                    unmet.push(format!("{id}: {reason}"));
-                }
-            }
         }
         "review" => {
             only(row, &["verdict", "findings"], at)?;
@@ -692,42 +796,13 @@ pub fn check_result(kind: &str, plan: &Value, result: &Value) -> Result<Vec<Stri
                 text(entry, "failure_scenario", &path)?;
             }
         }
-        "qa" => {
-            only(row, &["scenarios"], at)?;
-            for (id, entry, path) in covering(&plan_ids(plan, "scenarios"), row, "scenarios", at, &["id", "passed", "evidence", "notes"])? {
-                let passed = boolean(entry, "passed", &path)?;
-                text(entry, "evidence", &path)?;
-                let notes = optional_text(entry, "notes", &path)?;
-                if !passed {
-                    let notes = notes.ok_or_else(|| {
-                        format!("{path}: notes is required because passed is false")
-                    })?;
-                    unmet.push(format!("{id}: {notes}"));
-                }
-            }
+        other => {
+            let Some((_, result_key)) = item_lists(other) else {
+                return Err(format!("type \"{other}\" is not a task type (types: {})", names()));
+            };
+            only(row, &[result_key], at)?;
+            check_items(kind, plan, row, at, &mut unmet)?;
         }
-        "docs" => {
-            only(row, &["pages"], at)?;
-            for (_, entry, path) in covering(&plan_ids(plan, "pages"), row, "pages", at, &["id", "path", "what_changed"])? {
-                text(entry, "path", &path)?;
-                text(entry, "what_changed", &path)?;
-            }
-        }
-        "chore" => {
-            only(row, &["steps"], at)?;
-            for (id, entry, path) in covering(&plan_ids(plan, "steps"), row, "steps", at, &["id", "done", "output", "reason"])? {
-                let done = boolean(entry, "done", &path)?;
-                optional_text(entry, "output", &path)?;
-                let reason = optional_text(entry, "reason", &path)?;
-                if !done {
-                    let reason = reason.ok_or_else(|| {
-                        format!("{path}: reason is required because done is false")
-                    })?;
-                    unmet.push(format!("{id}: {reason}"));
-                }
-            }
-        }
-        other => return Err(format!("type \"{other}\" is not a task type (types: {})", names())),
     }
     Ok(unmet)
 }
@@ -834,7 +909,7 @@ mod tests {
     fn a_result_covers_every_plan_id_exactly_once() {
         let plan = examples("feature").0;
         assert_eq!(result_error("feature", plan.clone(), json!({"criteria": [{"id": "export", "met": true, "evidence": "e"}]})),
-            "result.criteria does not cover plan id \"images\": every plan id needs exactly one entry");
+            "result.criteria does not cover plan id \"images\": every plan id needs exactly one entry (record each with `atelier task check` as you go, or give it in the done result)");
         assert_eq!(result_error("feature", plan.clone(), json!({"criteria": [
             {"id": "export", "met": true, "evidence": "e"}, {"id": "export", "met": true, "evidence": "e"},
             {"id": "images", "met": true, "evidence": "e"}]})),

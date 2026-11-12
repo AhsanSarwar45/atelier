@@ -153,7 +153,7 @@ pub(super) struct ActionRequest {
     number: Option<i64>,
     #[serde(default)]
     payload: Value,
-    /// Evidence files the CLI read for `done`, by the path the result names,
+    /// Evidence files the CLI read for `done` or `check`, by the path the result names,
     /// base64'd — the presenter's upload, reused.
     #[serde(default)]
     files: BTreeMap<String, String>,
@@ -299,7 +299,13 @@ pub(super) async fn act(
     }
     let mut payload = request.payload;
     let mut missing = HashSet::new();
-    if request.action == "done" && request.actor == "agent" {
+    if request.action == "check" && request.actor == "agent" {
+        // One item's entry carries its evidence the way a done result does.
+        if let Some(entry) = payload.get_mut("entry") {
+            let directory = presentation_directory(&state, request.ephemeral)?;
+            store_evidence(entry, request.files, &directory)?;
+        }
+    } else if request.action == "done" && request.actor == "agent" {
         if let Some(result) = payload.get_mut("result") {
             let directory = presentation_directory(&state, request.ephemeral)?;
             store_evidence(result, request.files, &directory)?;

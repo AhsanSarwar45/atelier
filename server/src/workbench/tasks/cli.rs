@@ -17,6 +17,7 @@ usage: atelier task <command>
   propose                      {type, title, why, plan, cells?} on stdin or --input FILE: ask the owner first
   create                       {type, title, why, plan, cells?}; only when the owner's message says @task
   start N
+  check N ITEM                 one plan item's result entry on stdin or --input FILE, as soon as it is met or missed
   block N --cause TEXT --needs TEXT
   unblock N
   amend N                      {plan} on stdin or --input FILE
@@ -111,9 +112,9 @@ fn payload(rest: &[String], shape: &str) -> Result<Value, String> {
 
 /// Read every image or video the result names by path, for the server to
 /// store. Paths are read relative to this shell's folder.
-fn evidence(payload: &Value) -> Result<BTreeMap<String, String>, String> {
+fn evidence(result: Option<&Value>) -> Result<BTreeMap<String, String>, String> {
     let mut named = Vec::new();
-    if let Some(result) = payload.get("result") {
+    if let Some(result) = result {
         super::media_strings(result, &mut named);
     }
     let mut files = BTreeMap::new();
@@ -256,9 +257,24 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             only_flags(&rest[1..], &["--input"])?;
             let session = session()?;
             let payload = payload(rest, "{summary, commits?, followups?, result}")?;
-            let files = evidence(&payload)?;
+            let files = evidence(payload.get("result"))?;
             post(json!({"action": "done", "actor": "agent", "session": session, "number": number,
                 "payload": payload, "files": files,
+                "ephemeral": std::env::var("ATELIER_PRESENTATION_EPHEMERAL").as_deref() == Ok("1")})).await
+        }
+        "check" => {
+            let number = number(rest.first(), "check N ITEM")?;
+            let item = rest
+                .get(1)
+                .filter(|word| !word.starts_with("--"))
+                .ok_or("usage: atelier task check N ITEM: name the plan item's id (see `atelier task show N`)")?
+                .clone();
+            only_flags(&rest[2..], &["--input"])?;
+            let session = session()?;
+            let entry = payload(rest, "the item's result entry, e.g. {met, evidence, reason?} for a feature criterion")?;
+            let files = evidence(Some(&entry))?;
+            post(json!({"action": "check", "actor": "agent", "session": session, "number": number,
+                "payload": {"item": item, "entry": entry}, "files": files,
                 "ephemeral": std::env::var("ATELIER_PRESENTATION_EPHEMERAL").as_deref() == Ok("1")})).await
         }
         "list" => {

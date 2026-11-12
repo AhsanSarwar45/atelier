@@ -69,11 +69,24 @@ CREATE TABLE IF NOT EXISTS task_proposal (
 CREATE INDEX IF NOT EXISTS task_proposal_by_session ON task_proposal(session_id, status);
 "#;
 
-pub const AGENT_ACTIONS: &[&str] = &["create", "propose", "start", "block", "unblock", "amend", "done", "cancel", "take"];
+pub const AGENT_ACTIONS: &[&str] = &["create", "propose", "start", "check", "block", "unblock", "amend", "done", "cancel", "take"];
 pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend", "cancel", "release", "answer_proposal"];
 /// The owner's three answers to a proposal (`propose`).
 pub const PROPOSAL_CHOICES: &[&str] = &["create", "just_do_it", "cancel"];
 pub const STATUSES: &[&str] = &["todo", "in_progress", "blocked", "review", "done", "cancelled"];
+
+/// Create the task tables, and the column a task keeps its checked plan items
+/// in (`atelier task check`), added to a database made before it.
+pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(SCHEMA)?;
+    let has_checks = connection
+        .prepare("SELECT 1 FROM pragma_table_info('task') WHERE name = 'checks'")?
+        .exists([])?;
+    if !has_checks {
+        connection.execute_batch("ALTER TABLE task ADD COLUMN checks TEXT;")?;
+    }
+    Ok(())
+}
 
 /// When a session is deleted its open tasks become unassigned, each with a
 /// `released` event. Runs inside the session delete's own transaction.
@@ -156,10 +169,14 @@ pub struct TaskRow {
     pub updated_at: i64,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
+    /// Plan items checked while the work goes on (`atelier task check`), as a
+    /// partial result: `{<result list key>: [entry, …]}` in plan order. `done`
+    /// merges them into its result and clears them.
+    pub checks: Option<Value>,
 }
 
 const COLUMNS: &str = "project_id, number, type, title, why, status, session_id, created_by, plan, result,
-    shortfalls, blocked, cancel_reason, pending_amend, created_at, updated_at, started_at, finished_at";
+    shortfalls, blocked, cancel_reason, pending_amend, created_at, updated_at, started_at, finished_at, checks";
 
 fn json_column(row: &Row, index: usize) -> rusqlite::Result<Option<Value>> {
     Ok(row
@@ -187,6 +204,7 @@ fn task_row(row: &Row) -> rusqlite::Result<TaskRow> {
         updated_at: row.get(15)?,
         started_at: row.get(16)?,
         finished_at: row.get(17)?,
+        checks: json_column(row, 18)?,
     })
 }
 
@@ -257,13 +275,13 @@ fn save(connection: &Connection, task: &TaskRow) -> rusqlite::Result<()> {
     connection.execute(
         &format!(
             "INSERT OR REPLACE INTO task ({COLUMNS})
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"
         ),
         params![
             task.project_id, task.number, task.kind, task.title, task.why, task.status,
             task.session_id, task.created_by, task.plan.to_string(), text(&task.result),
             task.shortfalls as i64, text(&task.blocked), task.cancel_reason, text(&task.pending_amend),
-            task.created_at, task.updated_at, task.started_at, task.finished_at,
+            task.created_at, task.updated_at, task.started_at, task.finished_at, text(&task.checks),
         ],
     )?;
     Ok(())
@@ -286,6 +304,7 @@ pub fn to_json(store: &Store, task: &TaskRow) -> Value {
         "blocked": task.blocked, "cancelReason": task.cancel_reason, "pendingAmend": task.pending_amend,
         "createdAt": task.created_at, "updatedAt": task.updated_at,
         "startedAt": task.started_at, "finishedAt": task.finished_at,
+        "checks": task.checks,
         "cells": super::grids::task_cells(store.connection(), &task.project_id, task.number).unwrap_or_default(),
     })
 }
@@ -422,18 +441,100 @@ fn check_done(task: &TaskRow, request: &Request) -> Result<(Value, Vec<String>),
     for (index, item) in followups.iter().enumerate() {
         types::check_suggestion(item, &format!("followups[{index}]"))?;
     }
-    let result = payload.get("result").filter(|value| !value.is_null()).ok_or_else(|| {
+    let given = payload.get("result").filter(|value| !value.is_null());
+    let merged = match (given, &task.checks) {
+        (given, Some(checks)) => Some(merge_checks(&task.kind, &task.plan, given.cloned().unwrap_or_else(|| json!({})), checks)),
+        (Some(given), None) => Some(given.clone()),
+        (None, None) => None,
+    };
+    let result = merged.as_ref().ok_or_else(|| {
         TaskError::Refused(format!(
             "result is required: the {} result is {} (see `atelier task types {}`)",
             task.kind, kind.result, task.kind
         ))
     })?;
-    let unmet = types::check_result(&task.kind, &task.plan, result)?;
+    let unmet = types::check_result(&task.kind, &task.plan, result).map_err(|error| {
+        // Name the items still open the way the agent records them.
+        if error.contains("does not cover plan id") {
+            format!("{error}. Still open: {}", open_items(task, result).join(", "))
+        } else {
+            error
+        }
+    })?;
     let mut stored = json!({"summary": summary, "commits": commits, "followups": followups});
     for (key, value) in result.as_object().into_iter().flatten() {
         stored[key] = value.clone();
     }
     Ok((stored, unmet))
+}
+
+/// A done result with the entries `atelier task check` recorded added in: an
+/// entry the result gives for an item wins over the recorded one. The list
+/// is put in plan order. A result whose list is not a list is left for the
+/// checks to refuse.
+fn merge_checks(kind: &str, plan: &Value, mut result: Value, checks: &Value) -> Value {
+    let Some((_, key)) = types::item_lists(kind) else { return result };
+    let Some(row) = result.as_object_mut() else { return result };
+    let recorded = checks[key].as_array().cloned().unwrap_or_default();
+    let mut entries = match row.get(key) {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items.clone(),
+        Some(_) => return result,
+    };
+    let given: HashSet<String> = entries.iter().filter_map(|e| e["id"].as_str().map(str::to_string)).collect();
+    entries.extend(recorded.into_iter().filter(|e| e["id"].as_str().is_some_and(|id| !given.contains(id))));
+    let order = types::item_ids(kind, plan);
+    entries.sort_by_key(|e| e["id"].as_str().and_then(|id| order.iter().position(|o| o == id)).unwrap_or(usize::MAX));
+    row.insert(key.to_string(), Value::Array(entries));
+    result
+}
+
+/// The plan ids a result (or the recorded checks) has no entry for yet.
+fn open_items(task: &TaskRow, result: &Value) -> Vec<String> {
+    let Some((_, key)) = types::item_lists(&task.kind) else { return Vec::new() };
+    let have: HashSet<&str> = result[key].as_array().into_iter().flatten().filter_map(|e| e["id"].as_str()).collect();
+    types::item_ids(&task.kind, &task.plan)
+        .into_iter()
+        .filter(|id| !have.contains(id.as_str()))
+        .map(|id| format!("\"{id}\""))
+        .collect()
+}
+
+/// Record one checked item in a task's checks, replacing an earlier entry
+/// for it, in plan order. Returns how many items are recorded.
+fn record_check(task: &mut TaskRow, entry: Value) -> usize {
+    let Some((_, key)) = types::item_lists(&task.kind) else { return 0 };
+    let id = entry["id"].as_str().unwrap_or_default().to_string();
+    let mut entries: Vec<Value> = task
+        .checks
+        .as_ref()
+        .and_then(|checks| checks[key].as_array().cloned())
+        .unwrap_or_default();
+    entries.retain(|e| e["id"].as_str() != Some(id.as_str()));
+    entries.push(entry);
+    let order = types::item_ids(&task.kind, &task.plan);
+    entries.sort_by_key(|e| e["id"].as_str().and_then(|id| order.iter().position(|o| o == id)).unwrap_or(usize::MAX));
+    let count = entries.len();
+    task.checks = Some(json!({ key: entries }));
+    count
+}
+
+/// Drop checked entries for items an approved plan no longer has.
+fn prune_checks(task: &mut TaskRow) {
+    let Some((_, key)) = types::item_lists(&task.kind) else {
+        task.checks = None;
+        return;
+    };
+    let ids = types::item_ids(&task.kind, &task.plan);
+    let kept: Vec<Value> = task
+        .checks
+        .as_ref()
+        .and_then(|checks| checks[key].as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|e| e["id"].as_str().is_some_and(|id| ids.iter().any(|i| i == id)))
+        .collect();
+    task.checks = (!kept.is_empty()).then(|| json!({ key: kept }));
 }
 
 /// A checked `{type, title, why, plan, cells?}`: what `create` and `propose` take.
@@ -505,6 +606,7 @@ fn insert_task(
         updated_at: now,
         started_at: None,
         finished_at: None,
+        checks: None,
     };
     save(connection, &task)?;
     payload["type"] = json!(task.kind);
@@ -844,6 +946,48 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             task.started_at.get_or_insert(now);
             ("started", json!({}), format!("#{number} is in progress."))
         }
+        (false, "check") => {
+            held_by(&task, caller.unwrap())?;
+            if task.status == "blocked" {
+                return refuse(format!(
+                    "#{number} is blocked; run `atelier task unblock {number}` once the cause is resolved, then check items as you meet them"
+                ));
+            }
+            status_is(&task, &["in_progress"], "check")?;
+            let item = payload_text(&request.payload, "item", "the plan item's id (atelier task check N ITEM)")?.trim().to_string();
+            let given = request.payload.get("entry").filter(|v| !v.is_null()).ok_or_else(|| {
+                TaskError::Refused(format!(
+                    "entry is required: the item's result entry as JSON on stdin (see `atelier task types {}`)",
+                    task.kind
+                ))
+            })?;
+            let (entry, reason) = types::check_one(&task.kind, &task.plan, &item, given)?;
+            let recorded = record_check(&mut task, entry.clone());
+            let ids = types::item_ids(&task.kind, &task.plan);
+            let have: HashSet<String> = task
+                .checks
+                .as_ref()
+                .and_then(|checks| types::item_lists(&task.kind).and_then(|(_, key)| checks[key].as_array().cloned()))
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|e| e["id"].as_str().map(str::to_string))
+                .collect();
+            let open: Vec<String> = ids.iter().filter(|id| !have.contains(*id)).map(|id| format!("\"{id}\"")).collect();
+            let state = match &reason {
+                None => "met".to_string(),
+                Some(why) => format!("not met ({why})"),
+            };
+            let rest = if open.is_empty() {
+                format!(" All {} items are recorded; finish with `atelier task done {number}`.", ids.len())
+            } else {
+                format!(" {recorded} of {} recorded; still open: {}.", ids.len(), open.join(", "))
+            };
+            let mut payload = json!({"item": item, "met": reason.is_none(), "entry": entry});
+            if let Some(why) = &reason {
+                payload["reason"] = json!(why);
+            }
+            ("checked", payload, format!("#{number}: \"{item}\" is {state}.{rest}"))
+        }
         (false, "block") => {
             held_by(&task, caller.unwrap())?;
             status_is(&task, &["in_progress"], "block")?;
@@ -890,6 +1034,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             let review = types::find(&task.kind).is_some_and(|kind| kind.review);
             let dropped = task.pending_amend.take();
             task.result = Some(result);
+            task.checks = None;
             task.shortfalls = !unmet.is_empty();
             let mut payload = json!({"unmet": unmet});
             if let Some(plan) = dropped {
@@ -965,6 +1110,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                 TaskError::Refused(format!("#{number} has no plan amendment waiting"))
             })?;
             task.plan = plan.clone();
+            prune_checks(&mut task);
             ("amend_approved", json!({"plan": plan}), format!("#{number}: the amended plan is approved."))
         }
         (true, "reject_amend") => {
@@ -1204,7 +1350,8 @@ mod tests {
         agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
         owner(&store, "approve_amend", one, json!({})).unwrap();
         let message = refused(agent(&store, "s1", "done", Some(one), done_payload("general")));
-        assert_eq!(message, "result.done_when does not cover plan id \"shared\": every plan id needs exactly one entry");
+        assert!(message.starts_with("result.done_when does not cover plan id \"shared\": every plan id needs exactly one entry"), "{message}");
+        assert!(message.ends_with("Still open: \"shared\""), "{message}");
         assert!(refused(agent(&store, "s1", "amend", Some(one), json!({"plan": {"outcome": "o"}}))).contains("done_when is required"));
     }
 
@@ -1325,6 +1472,202 @@ mod tests {
         let guidance = crate::workbench::session_policy::with_open_tasks("RULES".into(), &section);
         assert!(guidance.starts_with("RULES\n\nYour open tasks in this chat:"), "{guidance}");
         assert_eq!(crate::workbench::session_policy::with_open_tasks("RULES".into(), ""), "RULES");
+    }
+
+    fn check(store: &Store, session: &str, number: i64, item: &str, entry: Value) -> Result<Outcome, TaskError> {
+        agent(store, session, "check", Some(number), json!({"item": item, "entry": entry}))
+    }
+
+    fn checks_of(store: &Store, number: i64) -> Option<Value> {
+        get(store.connection(), "p", number).unwrap().unwrap().checks
+    }
+
+    #[test]
+    fn check_records_one_item_and_a_rerun_replaces_it() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "feature");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        let outcome = check(&store, "s1", one, "images", json!({"met": true, "evidence": "e2e images.spec.ts"})).unwrap();
+        assert_eq!(outcome.summary, "#1: \"images\" is met. 1 of 2 recorded; still open: \"export\".");
+        assert_eq!(outcome.task.status, "in_progress");
+        assert!(outcome.task.result.is_none(), "a check is not a result");
+        let outcome = check(&store, "s1", one, "export", json!({"id": "export", "met": false, "evidence": "no button yet", "reason": "Menu is being redrawn"})).unwrap();
+        assert!(outcome.summary.contains("\"export\" is not met (Menu is being redrawn). All 2 items are recorded; finish with `atelier task done 1`"), "{}", outcome.summary);
+        // Kept in plan order, whatever order they were checked in.
+        let ids: Vec<String> = checks_of(&store, one).unwrap()["criteria"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, ["export", "images"]);
+        // Running it again replaces the entry.
+        check(&store, "s1", one, "export", json!({"met": true, "evidence": "chat-export.spec.ts"})).unwrap();
+        let checks = checks_of(&store, one).unwrap();
+        assert_eq!(checks["criteria"].as_array().unwrap().len(), 2);
+        assert_eq!(checks["criteria"][0], json!({"id": "export", "met": true, "evidence": "chat-export.spec.ts"}));
+        // Each check is in the history, and the HTTP shape carries the checks.
+        let history = events(store.connection(), "p", one).unwrap();
+        let checked: Vec<&Value> = history.iter().filter(|e| e["kind"] == "checked").collect();
+        assert_eq!(checked.len(), 3);
+        assert_eq!(checked[1]["payload"]["item"], "export");
+        assert_eq!(checked[1]["payload"]["met"], false);
+        assert_eq!(checked[1]["payload"]["reason"], "Menu is being redrawn");
+        let shown = to_json(&store, &get(store.connection(), "p", one).unwrap().unwrap());
+        assert_eq!(shown["checks"]["criteria"][1]["id"], "images");
+        let block = widget("check", &shown).unwrap();
+        assert_eq!(super::super::media::widget_specs(&block)[0]["event"], "check");
+    }
+
+    #[test]
+    fn check_uses_the_types_own_entry_checks() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "feature");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        assert_eq!(refused(check(&store, "s1", one, "images", json!({"met": false, "evidence": "e"}))),
+            "criteria entry (id \"images\"): reason is required because met is false");
+        assert_eq!(refused(check(&store, "s1", one, "nope", json!({"met": true, "evidence": "e"}))),
+            "\"nope\" is not an item in the plan (plan criteria ids: export, images)");
+        assert!(refused(check(&store, "s1", one, "images", json!({"met": true, "evidence": "e", "extra": 1}))).contains("extra is not a field here"));
+        assert!(refused(check(&store, "s1", one, "images", json!({"id": "export", "met": true, "evidence": "e"}))).contains("the command names \"images\""));
+        assert!(refused(check(&store, "s1", one, "images", json!(null))).starts_with("entry is required"));
+        assert!(checks_of(&store, one).is_none(), "nothing is written on refusal");
+    }
+
+    #[test]
+    fn check_works_for_every_type_with_plan_items() {
+        let (_d, store) = store();
+        for (index, kind) in types::TYPES.iter().enumerate() {
+            let session = format!("s{index}");
+            let number = create(&store, &session, kind.name);
+            agent(&store, &session, "start", Some(number), json!({})).unwrap();
+            let example = types::example(kind.name).unwrap();
+            match types::item_lists(kind.name) {
+                Some((_, key)) => {
+                    let mut entry = example["done"]["result"][key][0].clone();
+                    if kind.name == "ui_change" {
+                        entry["before"] = json!(format!("{}{}.png", types::SERVED, "a".repeat(64)));
+                        entry["after"] = json!(format!("{}{}.png", types::SERVED, "b".repeat(64)));
+                    }
+                    let id = entry["id"].as_str().unwrap().to_string();
+                    assert_eq!(example["check"]["command"], format!("atelier task check N {id}"), "{}", kind.name);
+                    check(&store, &session, number, &id, entry).unwrap_or_else(|e| panic!("{}: {}", kind.name, e.message()));
+                    assert_eq!(checks_of(&store, number).unwrap()[key][0]["id"], json!(id), "{}", kind.name);
+                }
+                None => {
+                    let message = refused(check(&store, &session, number, "x", json!({})));
+                    assert!(message.contains("has no plan items to check"), "{}: {message}", kind.name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ui_change_checks_need_stored_images() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "ui_change");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        let message = refused(check(&store, "s1", one, "settings", json!({"before": "a.png", "after": "b.png"})));
+        assert!(message.starts_with("screens entry (id \"settings\"): before must be a path to a PNG"), "{message}");
+    }
+
+    #[test]
+    fn optimization_checks_work_out_met_from_the_target() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "optimization");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        assert_eq!(refused(check(&store, "s1", one, "p95", json!({"before": 140, "after": 120, "runs": 50}))),
+            "targets entry (id \"p95\"): failure_reason is required because after 120 does not meet target 100");
+        let outcome = check(&store, "s1", one, "p95", json!({"before": 140, "after": 120, "runs": 50, "failure_reason": "IO bound"})).unwrap();
+        assert!(outcome.summary.contains("not met (IO bound)"), "{}", outcome.summary);
+    }
+
+    #[test]
+    fn check_is_only_for_the_holding_chat_while_in_progress() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "chore");
+        let entry = json!({"done": true, "output": "ok"});
+        assert_eq!(refused(check(&store, "s1", one, "deps", entry.clone())), "#1 is todo; check needs a task that is in_progress");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        assert!(refused(check(&store, "s2", one, "deps", entry.clone())).contains("is held by session s1"));
+        assert!(refused(ask(&store, "owner", None, "check", Some(one), json!({"item": "deps", "entry": entry}))).contains("not an owner action"));
+        agent(&store, "s1", "block", Some(one), json!({"cause": "c", "needed_to_resume": "n"})).unwrap();
+        assert!(refused(check(&store, "s1", one, "deps", entry.clone())).contains("is blocked; run `atelier task unblock 1`"));
+        agent(&store, "s1", "unblock", Some(one), json!({})).unwrap();
+        check(&store, "s1", one, "deps", entry.clone()).unwrap();
+        agent(&store, "s1", "done", Some(one), json!({"summary": "s", "commits": ["abcdef1"]})).unwrap();
+        assert!(refused(check(&store, "s1", one, "deps", entry)).contains("#1 is done; check needs"));
+    }
+
+    #[test]
+    fn done_merges_checked_items_and_its_own_entries_win() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "feature");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        check(&store, "s1", one, "export", json!({"met": false, "evidence": "e", "reason": "later"})).unwrap();
+        check(&store, "s1", one, "images", json!({"met": true, "evidence": "linked.spec.ts"})).unwrap();
+        // The payload's entry for "export" wins; "images" comes from the check.
+        let outcome = agent(&store, "s1", "done", Some(one), json!({"summary": "s", "commits": ["abcdef1"],
+            "result": {"criteria": [{"id": "export", "met": true, "evidence": "chat-export.spec.ts"}]}})).unwrap();
+        let result = outcome.task.result.unwrap();
+        assert_eq!(result["criteria"], json!([
+            {"id": "export", "met": true, "evidence": "chat-export.spec.ts"},
+            {"id": "images", "met": true, "evidence": "linked.spec.ts"}]));
+        assert!(!outcome.task.shortfalls);
+        assert!(outcome.task.checks.is_none(), "the result holds them now");
+
+        // With every item checked, done needs no result at all; a missed one is a shortfall.
+        let two = create(&store, "s1", "general");
+        agent(&store, "s1", "start", Some(two), json!({})).unwrap();
+        check(&store, "s1", two, "posted", json!({"met": false, "evidence": "e", "reason": "site down"})).unwrap();
+        let outcome = agent(&store, "s1", "done", Some(two), json!({"summary": "s"})).unwrap();
+        assert!(outcome.task.shortfalls);
+        assert_eq!(outcome.summary, "#2 is done with shortfalls: posted: site down");
+    }
+
+    #[test]
+    fn done_is_refused_while_an_item_has_no_entry_and_names_it() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "general");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        let plan = json!({"outcome": "o", "done_when": [{"id": "posted", "text": "t"}, {"id": "shared", "text": "u"}, {"id": "linked", "text": "v"}]});
+        agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
+        owner(&store, "approve_amend", one, json!({})).unwrap();
+        check(&store, "s1", one, "shared", json!({"met": true, "evidence": "e"})).unwrap();
+        let message = refused(agent(&store, "s1", "done", Some(one), json!({"summary": "s"})));
+        assert!(message.contains("does not cover plan ids \"posted\", \"linked\""), "{message}");
+        assert!(message.ends_with("Still open: \"posted\", \"linked\""), "{message}");
+        assert!(checks_of(&store, one).is_some(), "a refused done keeps the checks");
+        // A type with an item list and other fields still needs those.
+        let two = create(&store, "s1", "optimization");
+        agent(&store, "s1", "block", Some(one), json!({"cause": "c", "needed_to_resume": "n"})).unwrap();
+        agent(&store, "s1", "start", Some(two), json!({})).unwrap();
+        check(&store, "s1", two, "p95", json!({"before": 140, "after": 90, "runs": 50, "why_faster": "cached"})).unwrap();
+        assert_eq!(refused(agent(&store, "s1", "done", Some(two), json!({"summary": "s", "commits": ["abcdef1"]}))),
+            "result: method is required (text)");
+        agent(&store, "s1", "done", Some(two), json!({"summary": "s", "commits": ["abcdef1"], "result": {"method": "Cached the fold"}})).unwrap();
+    }
+
+    #[test]
+    fn an_approved_amend_drops_checks_for_removed_items_and_keeps_the_rest() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "general");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        check(&store, "s1", one, "posted", json!({"met": true, "evidence": "e"})).unwrap();
+        // Proposed but not approved: nothing is dropped yet.
+        let plan = json!({"outcome": "o", "done_when": [{"id": "shared", "text": "u"}]});
+        agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
+        owner(&store, "reject_amend", one, json!({})).unwrap();
+        assert!(checks_of(&store, one).is_some());
+        let plan = json!({"outcome": "o", "done_when": [{"id": "posted", "text": "t"}, {"id": "shared", "text": "u"}]});
+        agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
+        owner(&store, "approve_amend", one, json!({})).unwrap();
+        assert_eq!(checks_of(&store, one).unwrap()["done_when"][0]["id"], "posted", "kept");
+        let plan = json!({"outcome": "o", "done_when": [{"id": "shared", "text": "u"}]});
+        agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
+        owner(&store, "approve_amend", one, json!({})).unwrap();
+        assert!(checks_of(&store, one).is_none(), "posted is no longer in the plan");
+        check(&store, "s1", one, "shared", json!({"met": true, "evidence": "e"})).unwrap();
+        assert!(refused(owner(&store, "approve_amend", one, json!({}))).contains("no plan amendment waiting"));
+        let plan = json!({"outcome": "o", "done_when": [{"id": "shared", "text": "u"}, {"id": "new", "text": "w"}]});
+        agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
+        owner(&store, "approve_amend", one, json!({})).unwrap();
+        assert_eq!(checks_of(&store, one).unwrap()["done_when"], json!([{"id": "shared", "met": true, "evidence": "e"}]));
     }
 
     fn refused_proposal<T>(result: Result<T, TaskError>) -> String {
