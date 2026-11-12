@@ -7,7 +7,7 @@ import { apiUrl } from '@/lib/api-base';
 import { onFolder, onRepository } from '@/workbench/live-wire';
 import { CellDetailSchema, GridDetailSchema, GridsResponseSchema, ProposalAnswerSchema, ProposalResponseSchema, TaskActionResponseSchema, TaskDetailSchema, TasksResponseSchema } from '@/lib/api-schemas';
 import type { Project, Tag } from '@/types';
-import type { CellDetail, CellFull, GridDetail, GridOwnerAction, GridsList, GridSummary } from '@/workbench/grids/types';
+import type { CellDetail, GridActionAnswer, GridDetail, GridOwnerAction, GridsList } from '@/workbench/grids/types';
 import type { OwnerAction, ProposalChoice, Task, TaskEvent, TaskProposal, TaskTypeInfo } from '@/workbench/tasks/types';
 
 /**
@@ -1695,7 +1695,7 @@ export const grids = {
   /** One owner action. A refusal throws an ApiError carrying the server's sentence. */
   act: async (action: GridOwnerAction, target: GridActionTarget, payload?: Record<string, unknown>) => {
     const long = action === 'verify' || action === 'discover';
-    return fetchApi<{ grid?: GridSummary; cell?: CellFull; widget?: string | null; summary?: string }>('/api/workbench/grid', {
+    return fetchApi<GridActionAnswer>('/api/workbench/grid', {
       method: 'POST',
       ...(long ? { deadlineMs: GRID_LONG_MS } : {}),
       body: JSON.stringify({

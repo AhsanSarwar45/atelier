@@ -125,12 +125,17 @@ function GridToolbar({ detail, onDone }: { detail: GridDetail; onDone: () => voi
   const grid = detail.grid;
   const [busy, setBusy] = useState<'discover' | 'verify' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // What the last re-check said: how many passed, and each cell that failed.
+  const [rechecked, setRechecked] = useState<{ summary: string; failed: boolean } | null>(null);
   const run = grid.discovery;
   const act = async (action: 'discover' | 'verify') => {
     setBusy(action);
     setError(null);
+    setRechecked(null);
     try {
-      await gridsApi.act(action, { projectId: grid.projectId, slug: grid.slug });
+      // Re-check stale re-runs only the stale cells' checks, not every proof.
+      const answer = await gridsApi.act(action, { projectId: grid.projectId, slug: grid.slug }, action === 'verify' ? { staleOnly: true } : undefined);
+      if (action === 'verify' && answer.summary) setRechecked({ summary: answer.summary, failed: !!answer.failed });
       onDone();
     } catch (e) {
       setError(failure(e));
@@ -157,6 +162,15 @@ function GridToolbar({ detail, onDone }: { detail: GridDetail; onDone: () => voi
       </div>
       {run?.skipped && run.skipped.length > 0 && (
         <p className="text-xs text-muted-foreground">{`Owned by other grids: ${run.skipped.map((s) => `${s.id} (${s.owner})`).join(', ')}`}</p>
+      )}
+      {rechecked && (
+        <p
+          data-testid="grid-recheck-answer"
+          data-failed={rechecked.failed ? 'yes' : 'no'}
+          className={cn('whitespace-pre-wrap text-xs', rechecked.failed ? 'text-[var(--color-destructive-accent)]' : 'text-muted-foreground')}
+        >
+          {rechecked.summary}
+        </p>
       )}
       {error && <div role="alert" className="text-xs text-destructive">{`Couldn't update grid. ${error}`}</div>}
     </div>

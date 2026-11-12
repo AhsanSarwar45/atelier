@@ -26,6 +26,7 @@ import { useLiveSessions } from '@/workbench/live';
 import { onWorkbench } from '@/workbench/live-wire';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import type { LookableImage, SessionState } from '@/workbench/protocol';
+import { ProposalCells, TaskCells } from '@/workbench/grids/task-cells';
 import { useComposerPrefill } from '@/workbench/tasks/composer-prefill';
 import {
   STATUS_LABEL,
@@ -781,6 +782,8 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
         <Section label="Plan"><PlanView type={task.type} plan={task.plan} /></Section>
       )}
 
+      <TaskCells task={task} />
+
       {reviewing && (
         <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve' || a === 'reopen')} onChanged={setActed} />
       )}
@@ -879,6 +882,7 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
         {proposal.why && <p className="text-xs text-muted-foreground">{proposal.why}</p>}
       </header>
       <Section label="Plan"><PlanView type={proposal.type} plan={proposal.plan} /></Section>
+      <ProposalCells proposal={proposal} />
       {pending ? (
         <div className="flex flex-wrap gap-2" data-testid="proposal-actions">
           <Button type="button" size="sm" disabled={busy !== null} loading={busy === 'create'} onClick={() => void answer('create')}>Create task</Button>

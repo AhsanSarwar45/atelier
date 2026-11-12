@@ -183,7 +183,10 @@ function OpenGrid({ grid, cell }: { grid: Pick<GridSummary, 'projectId' | 'slug'
 
 /* ------------------------------------------------------------------ cards */
 
-function DraftCard({ widget }: { widget: GridWidget }) {
+/** A card about one grid: every card but a template's. */
+type GridCardWidget = GridWidget & { grid: GridSummary };
+
+function DraftCard({ widget }: { widget: GridCardWidget }) {
   const snapshot = widget.grid;
   const { data, refetch } = useGrid(snapshot.projectId, snapshot.slug);
   const grid = data?.grid ?? snapshot;
@@ -296,7 +299,7 @@ function useLiveCell(projectId: string, slug: string, row: string, col: string):
   return [detail, () => setRound((n) => n + 1)];
 }
 
-function CellCard({ widget, owner }: { widget: GridWidget; owner: boolean }) {
+function CellCard({ widget, owner }: { widget: GridCardWidget; owner: boolean }) {
   const snapshot = widget.cell!;
   const grid = widget.grid;
   const [detail, reread] = useLiveCell(grid.projectId, grid.slug, snapshot.row, snapshot.col);
@@ -319,7 +322,7 @@ function CellCard({ widget, owner }: { widget: GridWidget; owner: boolean }) {
   );
 }
 
-function AuditCard({ widget }: { widget: GridWidget }) {
+function AuditCard({ widget }: { widget: GridCardWidget }) {
   const audit = widget.audit;
   return (
     <div className="space-y-2" data-testid="grid-audit">
@@ -339,7 +342,7 @@ function AuditCard({ widget }: { widget: GridWidget }) {
   );
 }
 
-function DiscoverCard({ widget, live }: { widget: GridWidget; live: GridSummary }) {
+function DiscoverCard({ widget, live }: { widget: GridCardWidget; live: GridSummary }) {
   const run = widget.grid.discovery ?? live.discovery;
   return (
     <div className="space-y-1 text-sm" data-testid="grid-discover">
@@ -367,9 +370,12 @@ const EVENT_LABEL: Record<string, string> = {
   reopen: 'Reopened', pass: 'Audit passed', discover: 'Discovery',
 };
 
-/** Draft and N/A cards wait on the owner and start open; the rest start folded. */
+/**
+ * Draft, template and N/A cards wait on the owner and start open; the rest
+ * are updates and start folded.
+ */
 export function gridOpensByDefault(event: string): boolean {
-  return event === 'draft' || event === 'na';
+  return event === 'draft' || event === 'template' || event === 'na';
 }
 
 export function GridCard({ widget }: { widget: GridWidget }) {
@@ -377,12 +383,15 @@ export function GridCard({ widget }: { widget: GridWidget }) {
   const template = widget.event === 'template';
   const { data } = useGrids(template ? null : widget.grid?.projectId ?? null);
   const live = data?.grids.find((g) => g.slug === widget.grid?.slug) ?? widget.grid;
-  const body = widget.event === 'draft' ? <DraftCard widget={widget} />
-    : template ? <TemplateCard widget={widget} />
-      : widget.event === 'audit' ? <AuditCard widget={widget} />
-        : widget.event === 'discover' ? <DiscoverCard widget={widget} live={live} />
-          : widget.cell ? <CellCard widget={widget} owner={widget.event === 'na'} />
-            : <OpenGrid grid={widget.grid} />;
+  // Every card but a template's is about a grid; the reader refuses one without.
+  const about = widget.grid ? widget as GridCardWidget : null;
+  const body = template ? <TemplateCard widget={widget} />
+    : !about || !live ? null
+      : widget.event === 'draft' ? <DraftCard widget={about} />
+        : widget.event === 'audit' ? <AuditCard widget={about} />
+          : widget.event === 'discover' ? <DiscoverCard widget={about} live={live} />
+            : widget.cell ? <CellCard widget={about} owner={widget.event === 'na'} />
+              : <OpenGrid grid={about.grid} />;
   return (
     <Collapsible open={open} onOpenChange={setOpen} data-testid="grid-card" data-event={widget.event}>
       <CollapsibleTrigger

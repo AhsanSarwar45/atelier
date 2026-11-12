@@ -101,6 +101,21 @@ export interface Task {
    * a card printed by the CLI.
    */
   merged?: boolean | null;
+  /**
+   * The grid cells the task ever claimed, with their live states
+   * (docs/grids.md, "Claims"). `claimed` is false once the claim is released.
+   */
+  cells?: TaskCell[];
+}
+
+/** One grid cell a task claimed. `state` is null if the cell is gone. */
+export interface TaskCell {
+  grid: string;
+  row: string;
+  col: string;
+  state: string | null;
+  claimed: boolean;
+  reason: string | null;
 }
 
 /** Where a proposal stands: waiting, or the owner's answer. */
@@ -126,6 +141,8 @@ export interface TaskProposal {
   taskNumber: number | null;
   createdAt: number;
   decidedAt: number | null;
+  /** The grid cells the proposed task would claim. */
+  cells?: Array<{ grid: string; row: string; col: string }> | null;
 }
 
 export type TaskEventKind =

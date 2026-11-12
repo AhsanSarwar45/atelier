@@ -69,6 +69,8 @@ export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = tr
   const [asking, setAsking] = useState<'reject_na' | 'reopen' | null>(null);
   const [words, setWords] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // A re-check that ran and failed reopens the cell; say why.
+  const [checkFailed, setCheckFailed] = useState<string | null>(null);
   const naPending = cell.state === 'na_pending';
   const reopens = cell.state === 'proved' || cell.state === 'na';
   const hasProof = !!cell.proof || !!cell.proofSummary;
@@ -77,8 +79,10 @@ export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = tr
   const act = async (action: GridOwnerAction, payload?: Record<string, unknown>) => {
     setBusy(action);
     setError(null);
+    setCheckFailed(null);
     try {
-      await gridsApi.act(action, { projectId, slug, row, col }, payload);
+      const answer = await gridsApi.act(action, { projectId, slug, row, col }, payload);
+      if (answer.failed) setCheckFailed(answer.failed);
       setAsking(null);
       setWords('');
       onDone?.();
@@ -131,6 +135,7 @@ export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = tr
           )}
         </div>
       )}
+      {checkFailed && <div role="alert" data-testid="cell-check-failed" className="text-xs text-destructive">{`Re-check failed: ${checkFailed}`}</div>}
       {error && <div role="alert" className="text-xs text-destructive">{`Couldn't update cell. ${error}`}</div>}
     </div>
   );

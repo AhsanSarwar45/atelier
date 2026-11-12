@@ -192,12 +192,27 @@ export interface GridWidget {
   type: 'grid';
   title?: string;
   event: GridWidgetEvent | string;
-  /** The grid the change is about. A template change may carry none. */
-  grid: GridSummary;
+  /** The grid the change is about. A template card has none. */
+  grid?: GridSummary;
   cell?: Partial<CellFull> & { row: string; col: string };
   /** A template change: the template, and what approving it does. */
   template?: GridTemplate & { projectId?: string; change?: TemplateChange | null };
   audit?: AuditSummary;
+}
+
+/**
+ * What `POST /api/workbench/grid` answers. `failed` is set when the action ran
+ * but its checks failed: a re-check that reopened a cell, or, for a grid-wide
+ * re-check, each cell that failed. A grid-wide re-check has no widget.
+ */
+export interface GridActionAnswer {
+  grid?: GridSummary | null;
+  cell?: CellFull | null;
+  widget?: string | null;
+  summary?: string;
+  failed?: string | null;
+  template?: (GridTemplate & { projectId?: string; change?: TemplateChange | null }) | null;
+  audit?: AuditSummary | null;
 }
 
 export const STATE_LABEL: Record<CellState, string> = {
