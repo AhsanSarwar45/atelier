@@ -99,8 +99,9 @@ fn passing() -> Vec<proof::CheckResult> {
     vec![proof::CheckResult { name: "unit".into(), exit: 0, ms: 5, tail: String::new() }]
 }
 
+/// A prove payload for a cell with approved checks: the server runs those.
 fn proof_payload() -> Value {
-    json!({"summary": "glare matches the reference", "checks": [{"name": "unit", "command": "true"}]})
+    json!({"summary": "glare matches the reference"})
 }
 
 fn prove(store: &Store, session: &str, slug: &str, row: &str, col: &str, print: &str) -> Result<Outcome, TaskError> {
@@ -952,4 +953,86 @@ fn a_cell_without_checks_needs_one_is_listed_apart_and_cannot_be_claimed() {
     let pick = Pick::parse(&json!({"slug": "camera", "rows": ["sunstar"], "cols": ["perf"], "onlyGaps": false})).unwrap();
     let refusal = task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &Prints::new(), None, 5));
     assert!(refusal.contains("camera.sunstar.perf has no check"), "{refusal}");
+}
+
+#[test]
+fn prove_runs_the_cells_approved_checks_and_refuses_the_agents_own() {
+    let (_d, store) = store();
+    camera(&store);
+    let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
+    asked.payload = json!({"summary": "s", "checks": [{"name": "mine", "command": "true"}]});
+    asked.checks = passing();
+    asked.fingerprint = Some("f1".into());
+    let refusal = refused(apply(store.connection(), &asked));
+    assert!(refusal.contains("camera.glare.gpu has checks the owner approved, so prove runs those and takes no checks"), "{refusal}");
+    let (approved, _) = approved_for(store.connection(), &asked).unwrap();
+    assert_eq!(approved[0]["command"], "cargo test glare_on_gpu");
+    // The route runs the approved ones; their results stand for the proof.
+    asked.payload = proof_payload();
+    asked.checks = vec![];
+    assert!(refused(apply(store.connection(), &asked)).contains("the checks were not run"));
+    asked.checks = passing();
+    apply(store.connection(), &asked).unwrap();
+    let proof = state(&store, "camera", "glare", "gpu").proof.unwrap();
+    assert_eq!(proof["checks"][0]["command"], "cargo test glare_on_gpu", "the proof records the approved check");
+}
+
+#[test]
+fn approval_locks_the_check_files_and_a_changed_one_refuses_prove() {
+    let (_d, store) = store();
+    owner_says(&store, "s1", "@matrix the camera area");
+    let mut payload = draft_payload("camera");
+    payload["columns"][0]["checks"][0]["files"] = json!(["tests/{row}_gpu.rs"]);
+    draft(&store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
+    let pending = load(store.connection(), "p", "camera").unwrap().unwrap().grid.pending.clone().unwrap();
+    assert_eq!(pending_check_files(&pending), ["tests/glare_gpu.rs", "tests/sunstar_gpu.rs"]);
+    let mut approve = request("approve", "owner", None, "camera");
+    approve.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a1", "tests/sunstar_gpu.rs": "b1"}}));
+    apply(store.connection(), &approve).unwrap();
+    let grid = load(store.connection(), "p", "camera").unwrap().unwrap().grid;
+    assert_eq!(grid.hashes.unwrap()["files"]["tests/glare_gpu.rs"], "a1", "the hashes are stored with the grid");
+
+    let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
+    asked.payload = proof_payload();
+    asked.checks = passing();
+    asked.fingerprint = Some("f1".into());
+    asked.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a2"}}));
+    let refusal = refused(apply(store.connection(), &asked));
+    assert!(refusal.starts_with("camera.glare.gpu: approved check file changed: tests/glare_gpu.rs"), "{refusal}");
+    // Another row's file is not this cell's business; put back, it proves.
+    asked.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a1", "tests/sunstar_gpu.rs": "changed"}}));
+    apply(store.connection(), &asked).unwrap();
+    assert_eq!(state(&store, "camera", "glare", "gpu").state, "proved");
+}
+
+#[test]
+fn a_grid_from_before_checks_keeps_working_with_the_agents_own_checks() {
+    let (_d, store) = store();
+    owner_says(&store, "s1", "@matrix the camera area");
+    let mut payload = draft_payload("camera");
+    for column in payload["columns"].as_array_mut().unwrap() {
+        column.as_object_mut().unwrap().remove("checks");
+    }
+    draft(&store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
+    apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
+    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
+    assert!(loaded.grid.hashes.is_none());
+    // A cell proved before checks gives its own; verify re-runs what it stored.
+    let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
+    asked.payload = json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]});
+    asked.checks = passing();
+    asked.fingerprint = Some("f1".into());
+    assert!(refused(apply(store.connection(), &{ let mut bare = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
+        bare.payload = proof_payload(); bare })).contains("checks"));
+    apply(store.connection(), &asked).unwrap();
+    let cell = state(&store, "camera", "glare", "gpu");
+    assert_eq!((cell.state.as_str(), cell.proof.unwrap()["checks"][0]["command"].clone()), ("proved", json!("cargo test glare")));
+    let (approved, _) = approved_for(store.connection(), &on(request("verify", "owner", None, "camera"), "glare", "gpu")).unwrap();
+    assert!(approved.is_empty(), "verify falls back to the proof's stored checks");
+    let mut verify = on(request("verify", "owner", None, "camera"), "glare", "gpu");
+    verify.checks = passing();
+    verify.fingerprint = Some("f1".into());
+    apply(store.connection(), &verify).unwrap();
+    // The grid shows these cells as needing a check, but nothing it had is lost.
+    assert_eq!(with_checks(&loaded, "glare", "gpu", json!({}))["needsCheck"], true);
 }

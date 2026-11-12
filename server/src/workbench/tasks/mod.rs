@@ -1849,6 +1849,25 @@ mod tests {
     }
 
     #[test]
+    fn a_proposal_made_before_checks_still_becomes_a_task_under_the_old_rules() {
+        let (_d, store) = store();
+        propose(&store, "p", "s1", &draft("chore"), &Default::default(), None, 1).unwrap();
+        // As stored before checks: the plan has none.
+        let old = without_checks(&draft("chore")["plan"]);
+        assert!(!checks::is_checked(&old));
+        store.connection().execute("UPDATE task_proposal SET plan = ?1 WHERE id = 1", [old.to_string()]).unwrap();
+        let (_, task, _) = answer_proposal(&store, "p", 1, "create", &Default::default(), None, 2).unwrap();
+        let task = task.unwrap();
+        assert!(task.gate.is_none(), "nothing is locked for a plan without checks");
+        assert_eq!(to_json(&store, &task)["checked"], false);
+        // It starts without a red run and takes an entry per item.
+        agent(&store, "s1", "start", Some(task.number), json!({})).unwrap();
+        check(&store, "s1", task.number, "deps", json!({"done": true, "output": "ok"})).unwrap();
+        agent(&store, "s1", "done", Some(task.number), done_payload("chore")).unwrap();
+        assert_eq!(get(store.connection(), "p", task.number).unwrap().unwrap().status, "done");
+    }
+
+    #[test]
     fn a_proposal_waits_for_the_owner_and_create_makes_it_a_task_in_that_chat() {
         let (_d, store) = store();
         assert!(refused_proposal(propose(&store, "p", "s1", &json!({"type": "epic"}), &Default::default(), None, 1)).contains("not a task type"));

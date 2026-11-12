@@ -11,7 +11,7 @@ use super::tasks::{project_folder, store_evidence};
 use super::tell::tell_chat;
 use super::{presentation_directory, ApiError, WorkbenchState};
 use crate::workbench::grids::{self, proof, search, watch, Loaded, Prints, Request};
-use crate::workbench::tasks::TaskError;
+use crate::workbench::tasks::{checks, TaskError};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -381,6 +381,19 @@ pub(super) async fn act(
         "pass" => {
             request.prints = prints_for(&state, &project, slugs(&request)).await;
         }
+        "approve" => {
+            // Approval locks every cell's check files as they are now in the project.
+            let (asked, slug) = (project.clone(), request.slug.clone().unwrap_or_default());
+            let pending = state
+                .database()
+                .read_tasks(move |store| Ok(grids::get_grid(store.connection(), &asked, &slug)?.and_then(|grid| grid.pending)))
+                .await
+                .map_err(failed)?;
+            if let (Some(pending), Some(folder)) = (pending, folder_path(&state, &project)) {
+                let files = grids::pending_check_files(&pending);
+                request.hashes = Some(json!({"files": checks::hash_files(&folder, &files)}));
+            }
+        }
         _ => {}
     }
     let outcome = apply(&state, request).await?;
@@ -496,6 +509,39 @@ async fn respond(state: &WorkbenchState, project: &str, outcome: grids::Outcome)
     })))
 }
 
+/// Run a cell's approved checks in `folder` as test-first checks are run (a
+/// benchmark repeated and judged on its budget), as proof results.
+async fn run_approved(folder: &std::path::Path, approved: &[Value]) -> Vec<proof::CheckResult> {
+    let mut results = Vec::new();
+    for value in approved {
+        let name = value["name"].as_str().unwrap_or("?").to_string();
+        let check = match checks::parse_check(value, &name) {
+            Ok(check) => check,
+            Err(error) => {
+                results.push(proof::CheckResult { name, exit: -1, ms: 0, tail: error });
+                continue;
+            }
+        };
+        let run = checks::run_check(folder, &check, None, now()).await;
+        let (exit, tail) = match checks::judge_green(&check, &run, None) {
+            Ok(()) => (0, run.output_tail),
+            Err(why) => (if run.exit == 0 { 1 } else { run.exit }, format!("{}\n{why}", run.output_tail)),
+        };
+        results.push(proof::CheckResult { name, exit, ms: run.ms, tail });
+    }
+    results
+}
+
+/// The sha256 of each file the approved checks name, in `folder`.
+fn approved_hashes(folder: &std::path::Path, approved: &[Value]) -> Value {
+    let paths: Vec<String> = approved
+        .iter()
+        .flat_map(|check| check["files"].as_array().cloned().unwrap_or_default())
+        .filter_map(|path| path.as_str().map(str::to_string))
+        .collect();
+    json!({"files": checks::hash_files(folder, &paths)})
+}
+
 /// `prove`: check the shape and the claim, then the covered code (committed,
 /// commits present), then run the checks in the chat's folder and take the
 /// fingerprint there. Then the writer.
@@ -526,11 +572,32 @@ async fn prove(
         .await
         .map_err(failed)?;
     let (checked, paths) = refused_or(checked)?;
+    let asked = Request {
+        action: request.action.clone(),
+        project: request.project.clone(),
+        slug: request.slug.clone(),
+        row: request.row.clone(),
+        col: request.col.clone(),
+        ..Default::default()
+    };
+    let approved = state
+        .database()
+        .read_tasks(move |store| Ok(grids::approved_for(store.connection(), &asked)))
+        .await
+        .map_err(failed)?;
+    let (approved, _) = refused_or(approved)?;
     let folder = PathBuf::from(request.cwd.clone().unwrap_or_default());
     request.dirty = proof::dirty(&folder, &paths).await.map_err(ApiError::from)?;
     request.missing_commits = proof::missing_commits(&folder, &checked.commits).await;
+    if !approved.is_empty() {
+        request.hashes = Some(approved_hashes(&folder, &approved));
+    }
     if request.dirty.is_empty() && request.missing_commits.is_empty() {
-        request.checks = proof::run_checks(&folder, &checked.checks).await;
+        request.checks = if approved.is_empty() {
+            proof::run_checks(&folder, &checked.checks).await
+        } else {
+            run_approved(&folder, &approved).await
+        };
         if request.checks.iter().all(proof::CheckResult::passed) {
             request.head = proof::head(&folder).await;
             if let Some(head) = &request.head {
@@ -555,8 +622,14 @@ async fn verify_one(state: &WorkbenchState, base: &Request, row: &str, col: &str
     let cell = grid.cell(row, col).ok_or_else(|| format!("there is no cell {slug}.{row}.{col}"))?;
     let folder = folder_path(state, &project).ok_or_else(|| "the project's folder does not exist".to_string())?;
     let (prints, head) = prints_of(Some(&folder), &loaded).await;
+    // The cell's approved checks; a cell proved before checks re-runs its proof's own.
+    let approved = grid.cell_checks(row, col);
     let checks = cell.proof.as_ref().map(proof::stored_checks).unwrap_or_default();
-    let results = if cell.state == "proved" && !checks.is_empty() { proof::run_checks(&folder, &checks).await } else { Vec::new() };
+    let results = match (cell.state == "proved", approved.is_empty()) {
+        (true, false) => run_approved(&folder, &approved).await,
+        (true, true) if !checks.is_empty() => proof::run_checks(&folder, &checks).await,
+        _ => Vec::new(),
+    };
     let fingerprint = prints.get(&(slug.clone(), row.to_string())).cloned();
     apply(state, Request {
         action: "verify".into(),

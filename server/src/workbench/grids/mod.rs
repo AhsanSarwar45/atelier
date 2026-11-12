@@ -207,10 +207,13 @@ pub struct Grid {
     pub updated_at: i64,
     pub approved_at: Option<i64>,
     pub discovery: Option<Value>,
+    /// What approval locked: `{files: {path: sha256}}` for the check files
+    /// of every cell, taken in the project's folder.
+    pub hashes: Option<Value>,
 }
 
 const GRID_COLUMNS: &str = "project_id, slug, title, area, status, template, row_search, pending, created_by, drafted_by,
-    created_at, updated_at, approved_at, discovery";
+    created_at, updated_at, approved_at, discovery, hashes";
 
 fn grid_record(row: &Row) -> rusqlite::Result<Grid> {
     Ok(Grid {
@@ -228,6 +231,7 @@ fn grid_record(row: &Row) -> rusqlite::Result<Grid> {
         updated_at: row.get(11)?,
         approved_at: row.get(12)?,
         discovery: json_column(row, 13)?,
+        hashes: json_column(row, 14)?,
     })
 }
 
@@ -258,11 +262,11 @@ pub fn projects_with_grids(connection: &Connection) -> rusqlite::Result<Vec<Stri
 fn save_grid(connection: &Connection, grid: &Grid) -> rusqlite::Result<()> {
     let text = |value: &Option<Value>| value.as_ref().map(Value::to_string);
     connection.execute(
-        &format!("INSERT OR REPLACE INTO grid ({GRID_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"),
+        &format!("INSERT OR REPLACE INTO grid ({GRID_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"),
         params![
             grid.project_id, grid.slug, grid.title, grid.area, grid.status, grid.template,
             grid.row_search.to_string(), text(&grid.pending), grid.created_by, grid.drafted_by,
-            grid.created_at, grid.updated_at, grid.approved_at, text(&grid.discovery),
+            grid.created_at, grid.updated_at, grid.approved_at, text(&grid.discovery), text(&grid.hashes),
         ],
     )?;
     Ok(())
@@ -1295,6 +1299,7 @@ fn draft(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
             updated_at: now,
             approved_at: None,
             discovery: None,
+            hashes: None,
         },
     };
     save_grid(connection, &grid)?;
@@ -1452,7 +1457,7 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
         }
     }
     if let Some(hashes) = &request.hashes {
-        connection.execute("UPDATE grid SET hashes = ?3 WHERE project_id = ?1 AND slug = ?2", params![project, slug, hashes.to_string()])?;
+        grid.hashes = Some(hashes.clone());
     }
 
     grid.title = pending["title"].as_str().unwrap_or(&grid.title).to_string();
@@ -1732,8 +1737,83 @@ pub fn prove_precheck(connection: &Connection, request: &Request) -> Result<(pro
         return refuse(format!("{at} is {}; a cell the owner is asked to mark N/A is not proved", cell.state.replace('_', " ")));
     }
     claim_is_this_chats(connection, &request.project, &cell, session, &at, "prove")?;
-    let proof = proof::check_proof(&request.payload)?;
+    let approved = loaded.cell_checks(&cell.row, &cell.col);
+    let proof = if approved.is_empty() {
+        // A cell claimed before checks: the agent gives its own.
+        proof::check_proof(&request.payload)?
+    } else {
+        if request.payload.get("checks").is_some_and(|checks| !checks.is_null()) {
+            return refuse(format!(
+                "{at} has checks the owner approved, so prove runs those and takes no checks: give {{summary, commits?, tests?, evidence?}}"
+            ));
+        }
+        let mut payload = request.payload.clone();
+        if let Some(row) = payload.as_object_mut() {
+            row.insert("checks".into(), json!(approved.iter().map(as_proof_check).collect::<Vec<_>>()));
+        }
+        proof::check_proof(&payload)?
+    };
     Ok((proof, loaded.covered(&cell.row)))
+}
+
+/// An approved cell check in the shape a proof stores: `{name, command, timeout_s}`.
+fn as_proof_check(check: &Value) -> Value {
+    json!({"name": check["name"], "command": check["command"],
+        "timeout_s": check["timeout_s"].as_u64().unwrap_or(proof::CHECK_TIMEOUT_S)})
+}
+
+/// The approved checks of the cell a prove or verify request names (none for
+/// a cell from before checks), and the grid's locked hashes.
+pub fn approved_for(connection: &Connection, request: &Request) -> Result<(Vec<Value>, Option<Value>), TaskError> {
+    let (loaded, cell) = live_cell(connection, request, &request.action)?;
+    Ok((loaded.cell_checks(&cell.row, &cell.col), loaded.grid.hashes.clone()))
+}
+
+/// Every file the checks of a grid draft name, `{row}` filled in for each row.
+pub fn pending_check_files(pending: &Value) -> Vec<String> {
+    let rows: Vec<&str> = pending["rows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| row["kind"] != "reference")
+        .filter_map(|row| row["id"].as_str())
+        .collect();
+    let mut files = std::collections::BTreeSet::new();
+    let mut add = |check: &Value| {
+        for file in check["files"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            files.insert(file.to_string());
+        }
+    };
+    for column in pending["columns"].as_array().into_iter().flatten() {
+        for template in column["checks"].as_array().into_iter().flatten() {
+            for row in &rows {
+                add(&fill_row(template, row));
+            }
+        }
+    }
+    for cell in pending["cells"].as_array().into_iter().flatten() {
+        for template in cell["checks"].as_array().into_iter().flatten() {
+            add(&fill_row(template, cell["row"].as_str().unwrap_or_default()));
+        }
+    }
+    files.into_iter().collect()
+}
+
+/// The approved check files of a cell whose hash in `current` differs from
+/// the one approval locked.
+fn changed_check_files(approved: &[Value], locked: Option<&Value>, current: Option<&Value>) -> Vec<String> {
+    let (Some(locked), Some(current)) = (locked, current) else { return Vec::new() };
+    let mut changed = Vec::new();
+    for check in approved {
+        for path in check["files"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            let Some(then) = locked["files"][path].as_str() else { continue };
+            let now = current["files"][path].as_str().unwrap_or(crate::workbench::tasks::checks::MISSING);
+            if now != then && !changed.iter().any(|known| known == path) {
+                changed.push(path.to_string());
+            }
+        }
+    }
+    changed
 }
 
 fn prove(connection: &Connection, request: &Request) -> Result<Outcome, TaskError> {
@@ -1743,6 +1823,14 @@ fn prove(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
     let slug = loaded.grid.slug.clone();
     let at = format!("{slug}.{}.{}", cell.row, cell.col);
     let folder = request.cwd.as_deref().unwrap_or("this chat's folder");
+    let approved = loaded.cell_checks(&cell.row, &cell.col);
+    let changed = changed_check_files(&approved, loaded.grid.hashes.as_ref(), request.hashes.as_ref());
+    if !changed.is_empty() {
+        return refuse(format!(
+            "{at}: approved check file changed: {}. Put it back as approved; to change a check, draft the grid again for the owner to approve",
+            changed.join(", ")
+        ));
+    }
     if !request.dirty.is_empty() {
         return refuse(format!(
             "commit the covered code first: {} uncommitted in {folder}. A proof describes committed code",
