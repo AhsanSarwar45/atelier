@@ -2386,6 +2386,10 @@ pub struct Label {
     pub count: usize,
     /// "gap" when only gaps were picked, else "cell".
     pub noun: &'static str,
+    /// The cells make up a whole row, column or grid (`claim_shape`): the
+    /// task's card names the shape and its count, so the title leaves the
+    /// count out.
+    pub shaped: bool,
 }
 
 impl Label {
@@ -2393,10 +2397,12 @@ impl Label {
         format!("{} {}{}", self.count, self.noun, if self.count == 1 { "" } else { "s" })
     }
 
-    /// The task's title: "camera: Glare row (5 cells)", "camera: 12 gaps".
+    /// The task's title: "camera: Glare row" for a whole row, column or
+    /// grid, "camera: Glare row (5 gaps)" for part of one, "camera: 12 gaps".
     pub fn title(&self, slug: &str) -> String {
         let title = match &self.name {
             Some(name) if self.count == 1 && name.contains('×') => format!("{slug}: {name}"),
+            Some(name) if self.shaped => format!("{slug}: {name}"),
             Some(name) => format!("{slug}: {name} ({})", self.counted()),
             None => format!("{slug}: {}", self.counted()),
         };
@@ -2527,8 +2533,9 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
         }
     }
     let create = chosen.as_ref().filter(|_| !picked.is_empty()).map(|(kind, _, name)| {
-        let name = if *kind == "row" { format!("{name} row") } else { format!("{name} column") };
-        task_payload(&loaded, &picked, &Label { name: Some(name), count: picked.len(), noun: "cell" })
+        let shape = shape_named(&loaded, &picked);
+        let name = shape.clone().unwrap_or_else(|| if *kind == "row" { format!("{name} row") } else { format!("{name} column") });
+        task_payload(&loaded, &picked, &Label { name: Some(name), count: picked.len(), noun: "cell", shaped: shape.is_some() })
     });
     Ok(json!({
         "grid": slug, "title": loaded.grid.title,
@@ -2628,7 +2635,13 @@ pub fn picked_task(connection: &Connection, project: &str, pick: &Pick, prints: 
             _ => None,
         }
     };
-    let label = Label { name, count: picked.len(), noun: if pick.only_gaps { "gap" } else { "cell" } };
+    let shape = (picked.len() > 1).then(|| shape_named(&loaded, &picked)).flatten();
+    let label = Label {
+        shaped: shape.is_some(),
+        name: shape.or(name),
+        count: picked.len(),
+        noun: if pick.only_gaps { "gap" } else { "cell" },
+    };
     Ok((task_payload(&loaded, &picked, &label), label))
 }
 
@@ -2647,7 +2660,26 @@ pub fn claim_shape(connection: &Connection, project: &str, number: i64) -> rusql
     }
     let Some(loaded) = load(connection, project, slug)? else { return Ok(Value::Null) };
     let mine: HashSet<(&str, &str)> = named.iter().map(|(_, row, col)| (row.as_str(), col.as_str())).collect();
-    let pairs = live_pairs(&loaded);
+    Ok(shape_of(&loaded, &mine).map_or(Value::Null, |(kind, id, name)| {
+        json!({"grid": slug, "kind": kind, "id": id, "name": name, "count": mine.len()})
+    }))
+}
+
+/// What cells about to be claimed will make up, in a title's words: "Glare
+/// row", "GPU column", "whole grid"; None when they are no such shape.
+fn shape_named(loaded: &Loaded, picked: &[(String, String)]) -> Option<String> {
+    let mine: HashSet<(&str, &str)> = picked.iter().map(|(row, col)| (row.as_str(), col.as_str())).collect();
+    shape_of(loaded, &mine).map(|(kind, _, name)| match kind {
+        "row" => format!("{name} row"),
+        "col" => format!("{name} column"),
+        _ => "whole grid".to_string(),
+    })
+}
+
+/// The row, column or grid `mine` makes up whole, every other cell there
+/// being proved or N/A: `(kind, id, name)`.
+fn shape_of(loaded: &Loaded, mine: &HashSet<(&str, &str)>) -> Option<(&'static str, String, String)> {
+    let pairs = live_pairs(loaded);
     let whole = |inside: &dyn Fn(&GridRow, &Column) -> bool| {
         mine.iter().all(|(row, col)| pairs.iter().any(|(r, c, _)| r.id == *row && c.id == *col && inside(r, c)))
             && pairs.iter().filter(|(r, c, _)| inside(r, c)).all(|(r, c, cell)| {
@@ -2656,7 +2688,7 @@ pub fn claim_shape(connection: &Connection, project: &str, number: i64) -> rusql
     };
     let rows: HashSet<&str> = mine.iter().map(|(row, _)| *row).collect();
     let cols: HashSet<&str> = mine.iter().map(|(_, col)| *col).collect();
-    let shape = if rows.len() == 1 && whole(&|r, _| rows.contains(r.id.as_str())) {
+    if rows.len() == 1 && whole(&|r, _| rows.contains(r.id.as_str())) {
         let row = loaded.row(rows.iter().next().unwrap()).unwrap();
         Some(("row", row.id.clone(), row.name.clone()))
     } else if cols.len() == 1 && whole(&|_, c| cols.contains(c.id.as_str())) {
@@ -2666,10 +2698,7 @@ pub fn claim_shape(connection: &Connection, project: &str, number: i64) -> rusql
         Some(("grid", loaded.grid.slug.clone(), loaded.grid.title.clone()))
     } else {
         None
-    };
-    Ok(shape.map_or(Value::Null, |(kind, id, name)| {
-        json!({"grid": slug, "kind": kind, "id": id, "name": name, "count": mine.len()})
-    }))
+    }
 }
 
 /* ------------------------------------------------------------- reconnect */

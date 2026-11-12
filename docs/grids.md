@@ -397,8 +397,10 @@ atelier grid template set NAME   {columns: [{id, name, proof_rule}]}
   gap, or stale and not claimed by an open task. It also lists the cells
   there other tasks hold, with their task and chat, and how many free cells
   the whole grid has left. It ends with a ready `atelier task create`
-  payload for the free cells: type `general`, title like `camera: Glare row
-  (5 cells)`, one `done_when` item per cell, id `ROW.COL`, text `<row> ×
+  payload for the free cells: type `general`, title like `camera: Glare row`
+  (a whole row, column or grid is named without a count, since the task's
+  card shows its shape and count; part of one keeps it, `camera: Glare row
+  (3 cells)`, and an irregular pick is a count, `camera: 12 gaps`), one `done_when` item per cell, id `ROW.COL`, text `<row> ×
   <column>: <proof rule>`. With nothing free it says so: `No gaps left in
   camera. Every cell is proved or N/A.`
 - **The work-through loop.** `grid next` → `task create` with those cells →

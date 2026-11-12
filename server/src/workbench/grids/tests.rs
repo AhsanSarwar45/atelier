@@ -714,7 +714,7 @@ fn next_lists_one_row_and_names_the_chats_holding_taken_cells() {
     assert_eq!(next["claimable"][0]["proofRule"], "a GPU test");
     let create = &next["create"];
     assert_eq!(create["type"], "general");
-    assert_eq!(create["title"], "camera: GLARE row (2 cells)");
+    assert_eq!(create["title"], "camera: GLARE row");
     assert_eq!(create["plan"]["done_when"][0], json!({"id": "glare.gpu", "text": "GLARE × Runs on the GPU: a GPU test"}));
     assert_eq!(create["cells"].as_array().unwrap().len(), 2);
     // The payload is one an agent can create without @task.
@@ -807,13 +807,45 @@ fn a_task_for_several_rows_of_every_open_cell_is_the_whole_grid_and_a_row_pick_i
     let none = Prints::new();
     let pick = Pick::parse(&json!({"slug": "camera", "rows": ["sunstar"], "cols": "*", "onlyGaps": true})).unwrap();
     let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 5).unwrap();
-    assert_eq!(task.title, "camera: SUNSTAR row (2 gaps)");
+    // A whole row: the card names its shape and count, so the title has no count.
+    assert_eq!(task.title, "camera: SUNSTAR row");
     assert!(prompt.contains("(SUNSTAR row, 2 gaps)"), "{prompt}");
     assert_eq!(task.plan["done_when"].as_array().unwrap().len(), 2);
+    // Every open cell left is the glare row: titled by that row, as its card is.
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*"})).unwrap();
     let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 6).unwrap();
-    assert_eq!(task.title, "camera: 2 cells");
+    assert_eq!(task.title, "camera: GLARE row");
     assert_eq!(tasks::to_json(&store, &task)["claimShape"]["kind"], "row");
+}
+
+#[test]
+fn a_whole_grid_is_titled_without_a_count_and_an_irregular_pick_keeps_it() {
+    let (_d, store) = store();
+    camera(&store);
+    chat(&store, "s2", "Camera work");
+    let none = Prints::new();
+    let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*", "onlyGaps": true})).unwrap();
+    let (task, _, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 5).unwrap();
+    assert_eq!(task.title, "camera: whole grid");
+    assert!(prompt.contains("(whole grid, 4 gaps)"), "{prompt}");
+    assert_eq!(tasks::to_json(&store, &task)["claimShape"]["kind"], "grid");
+}
+
+#[test]
+fn part_of_a_row_and_an_irregular_pick_keep_their_count() {
+    let (_d, store) = store();
+    camera(&store);
+    chat(&store, "s2", "Camera work");
+    let none = Prints::new();
+    // glare.gpu is held by another task, so the glare row is not whole.
+    agent_create(&store, "s2", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap();
+    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
+    assert_eq!(next["create"]["title"], "camera: GLARE row (1 cell)");
+    // The three cells left, over two rows and columns, are no shape.
+    let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*", "onlyGaps": true})).unwrap();
+    let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, 6).unwrap();
+    assert_eq!(task.title, "camera: 3 gaps");
+    assert!(tasks::to_json(&store, &task)["claimShape"].is_null());
 }
 
 #[test]
