@@ -1123,6 +1123,9 @@ const MessageRow = memo(function MessageRow({
   // Right-click, or a long press on a phone, for what can be done with it
   // (bw-yszdw).
   const actions = useMessageActions(item);
+  // A task card printed by `atelier task` is a card of its own, not a reply:
+  // no message box around it, so it is not a card inside a card.
+  const bare = !!item.presentedBy && !!item.widgets?.length && item.widgets.every((widget) => widget.type === 'task');
   return (
     <>
     <div
@@ -1156,8 +1159,8 @@ const MessageRow = memo(function MessageRow({
       // the right edge by exactly that indent and gave the whole conversation a
       // sideways scrollbar (bw-n6yh.14).
       className={cn(
-        'rounded-lg px-3 py-2 text-sm leading-relaxed',
-        item.role === 'user'
+        bare ? 'space-y-2 text-sm [&_[data-testid=chat-widget]]:my-0' : 'rounded-lg px-3 py-2 text-sm leading-relaxed',
+        bare ? null : item.role === 'user'
           ? 'ml-auto max-w-[75ch] border-l-2 border-primary/70 bg-primary/15 text-foreground'
           : 'border-r-2 border-muted-foreground/40 bg-muted/40 text-foreground',
         sentOff(sentBy) && rail,
