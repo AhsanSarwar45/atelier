@@ -625,7 +625,7 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
         "explainer" => &[
             "type", "layout", "title", "summary", "nodes", "edges", "steps", "evidence",
         ][..],
-        "task" => &["type", "event", "task", "proposal"][..],
+        "task" => &["type", "event", "task", "proposal", "detail"][..],
         "grid" => &["type", "title", "event", "grid", "cell", "template", "audit"][..],
         other => {
             return Err(format!(

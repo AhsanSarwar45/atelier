@@ -340,12 +340,14 @@ pub(super) async fn act(
     let outcome = state
         .database()
         .write_tasks(move |store| {
-            tasks::apply(store, &asked).map(|outcome| (tasks::to_json(store, &outcome.task), outcome.summary, outcome.grids))
+            tasks::apply(store, &asked).map(|outcome| {
+                (tasks::to_json(store, &outcome.task), outcome.summary, outcome.grids, outcome.detail)
+            })
         })
         .await
         .map_err(failed)?;
-    let (task, summary, grids) = refused_or(outcome)?;
-    let widget = tasks::widget(&action, &task).map_err(failed)?;
+    let (task, summary, grids, detail) = refused_or(outcome)?;
+    let widget = tasks::widget(&action, &task, &detail).map_err(failed)?;
     announce(&state, &task["projectId"], &task["number"]);
     announce_grids(&state, &announced, &grids);
     Ok(Json(json!({"task": task, "widget": widget, "summary": summary})))

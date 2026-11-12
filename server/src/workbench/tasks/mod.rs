@@ -335,6 +335,8 @@ pub struct Outcome {
     pub summary: String,
     /// The grids whose cells the change claimed or released.
     pub grids: Vec<String>,
+    /// What the change's event recorded, for the card's one-line summary.
+    pub detail: Value,
 }
 
 fn payload_text<'a>(payload: &'a Value, key: &str, what: &str) -> Result<&'a str, TaskError> {
@@ -916,7 +918,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                 if draft.cells.len() == 1 { "" } else { "s" }
             ));
         }
-        return Ok(Outcome { task, summary, grids });
+        return Ok(Outcome { task, summary, grids, detail: json!({}) });
     }
     if action == "propose" || action == "answer_proposal" {
         return refuse(format!("{action} is answered by its own route, not as a task change"));
@@ -1142,12 +1144,31 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         other => other.into(),
     })?;
     append_event(connection, &task.project_id, number, now, kind, session.as_deref(), actor, &payload)?;
-    Ok(Outcome { task, summary, grids })
+    Ok(Outcome { task, summary, grids, detail: widget_detail(&payload) })
 }
 
-/// The `atelier-widget` block for a task card.
-pub fn widget(event: &str, task: &Value) -> Result<String, String> {
-    super::media::widget_block(&json!({"type": "task", "event": event, "task": task}))
+/// What a card says of its own change beside the task: the event's payload
+/// without the plans and the entry, which the task itself carries (an
+/// amend's plan is the task's `pendingAmend`). For a check, `{item, met,
+/// reason?}`; for a block, `{cause, needed_to_resume}`; for done, `{unmet}`.
+pub fn widget_detail(payload: &Value) -> Value {
+    let mut detail = payload.clone();
+    if let Some(row) = detail.as_object_mut() {
+        for heavy in ["plan", "droppedAmend", "entry"] {
+            row.remove(heavy);
+        }
+    }
+    detail
+}
+
+/// The `atelier-widget` block for a task card. `detail` is what the change
+/// recorded (`widget_detail`); an empty one is left out.
+pub fn widget(event: &str, task: &Value, detail: &Value) -> Result<String, String> {
+    let mut card = json!({"type": "task", "event": event, "task": task});
+    if detail.as_object().is_some_and(|row| !row.is_empty()) {
+        card["detail"] = detail.clone();
+    }
+    super::media::widget_block(&card)
 }
 
 /// Every string in a result that names an image or video, depth first.
@@ -1510,8 +1531,11 @@ mod tests {
         assert_eq!(checked[1]["payload"]["reason"], "Menu is being redrawn");
         let shown = to_json(&store, &get(store.connection(), "p", one).unwrap().unwrap());
         assert_eq!(shown["checks"]["criteria"][1]["id"], "images");
-        let block = widget("check", &shown).unwrap();
-        assert_eq!(super::super::media::widget_specs(&block)[0]["event"], "check");
+        let block = widget("check", &shown, &outcome_detail(&history[history.len() - 1]["payload"])).unwrap();
+        let spec = &super::super::media::widget_specs(&block)[0];
+        assert_eq!(spec["event"], "check");
+        // The card names the item it checked, without carrying the entry again.
+        assert_eq!(spec["detail"], json!({"item": "export", "met": true}));
     }
 
     #[test]
@@ -1540,9 +1564,12 @@ mod tests {
             match types::item_lists(kind.name) {
                 Some((_, key)) => {
                     let mut entry = example["done"]["result"][key][0].clone();
-                    if kind.name == "ui_change" {
+                    if types::is_visual(kind.name) {
                         entry["before"] = json!(format!("{}{}.png", types::SERVED, "a".repeat(64)));
                         entry["after"] = json!(format!("{}{}.png", types::SERVED, "b".repeat(64)));
+                        if entry.get("reference").is_some() {
+                            entry["reference"] = json!(format!("{}{}.png", types::SERVED, "c".repeat(64)));
+                        }
                     }
                     let id = entry["id"].as_str().unwrap().to_string();
                     assert_eq!(example["check"]["command"], format!("atelier task check N {id}"), "{}", kind.name);
@@ -1683,9 +1710,66 @@ mod tests {
         let (_d, store) = store();
         let one = create(&store, "s1", "chore");
         let task = to_json(&store, &get(store.connection(), "p", one).unwrap().unwrap());
-        let block = widget("create", &task).unwrap();
+        let block = widget("create", &task, &json!({})).unwrap();
         let specs = super::super::media::widget_specs(&block);
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0]["task"]["number"], 1);
+        assert!(specs[0].get("detail").is_none(), "an empty detail is left out");
+    }
+
+    fn outcome_detail(payload: &Value) -> Value {
+        widget_detail(payload)
+    }
+
+    #[test]
+    fn a_change_says_what_it_recorded_without_the_plans() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "general");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        let blocked = agent(&store, "s1", "block", Some(one), json!({"cause": "No key", "needed_to_resume": "A key"})).unwrap();
+        assert_eq!(blocked.detail, json!({"cause": "No key", "needed_to_resume": "A key"}));
+        agent(&store, "s1", "unblock", Some(one), json!({})).unwrap();
+        let plan = json!({"outcome": "o", "done_when": [{"id": "posted", "text": "t"}]});
+        let amended = agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
+        assert_eq!(amended.detail, json!({}), "the amend's plan is the task's pendingAmend");
+        let checked = agent(&store, "s1", "check", Some(one), json!({"item": "posted", "entry": {"met": false, "evidence": "e", "reason": "r"}})).unwrap();
+        assert_eq!(checked.detail, json!({"item": "posted", "met": false, "reason": "r"}));
+        let done = agent(&store, "s1", "done", Some(one), json!({"summary": "s"})).unwrap();
+        assert_eq!(done.detail, json!({"unmet": ["posted: r"]}));
+    }
+
+    #[test]
+    fn visual_tasks_are_refused_without_two_different_images() {
+        let (_d, store) = store();
+        let shot = |c: char| json!(format!("{}{}.png", types::SERVED, c.to_string().repeat(64)));
+        for (index, kind) in ["ui_change", "visual_bug", "render_change"].iter().enumerate() {
+            let session = format!("v{index}");
+            let one = create(&store, &session, kind);
+            agent(&store, &session, "start", Some(one), json!({})).unwrap();
+            let key = types::item_lists(kind).unwrap().1;
+            let mut entry = types::example(kind).unwrap()["done"]["result"][key][0].clone();
+            let id = entry.as_object_mut().unwrap().remove("id").unwrap();
+            let id = id.as_str().unwrap().to_string();
+            if entry.get("reference").is_some() {
+                entry["reference"] = shot('c');
+            }
+            // A file that was not uploaded: missing, or not an image.
+            entry["before"] = json!("shots/gone.png");
+            entry["after"] = shot('b');
+            assert!(refused(check(&store, &session, one, &id, entry.clone())).contains("missing, or not an image"), "{kind}");
+            entry["before"] = shot('b');
+            assert!(refused(check(&store, &session, one, &id, entry.clone())).contains("same image"), "{kind}");
+            // done is held to the same rule.
+            let mut done = done_payload(kind);
+            done["result"][key][0]["before"] = shot('a');
+            done["result"][key][0]["after"] = shot('a');
+            if done["result"][key][0].get("reference").is_some() {
+                done["result"][key][0]["reference"] = shot('c');
+            }
+            assert!(refused(agent(&store, &session, "done", Some(one), done.clone())).contains("same image"), "{kind}");
+            done["result"][key][0]["after"] = shot('b');
+            let outcome = agent(&store, &session, "done", Some(one), done).unwrap();
+            assert_eq!(outcome.task.status, "review", "{kind} is a review type");
+        }
     }
 }
