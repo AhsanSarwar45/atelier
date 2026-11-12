@@ -44,6 +44,7 @@ Stored in `workbench.db`.
 | `blocked` | json, null | `{cause, needed_to_resume}` |
 | `cancel_reason` | text, null | |
 | `pending_amend` | json, null | a proposed new plan waiting for the owner |
+| `checks` | json, null | plan items checked while in progress: `{<result list>: [entry, …]}` in plan order (see Checking items) |
 | `created_at`, `updated_at`, `started_at`, `finished_at` | integer ms | |
 
 `task_proposal`: a task an agent asked to make, kept apart from tasks so it
@@ -60,7 +61,7 @@ takes no number and is in no list until the owner says yes.
 
 `task_event`: `(project_id, number, seq, at, kind, session_id, actor, payload)`.
 `actor` is `agent` or `owner`. Every state change appends one row. Kinds:
-`created`, `started`, `blocked`, `unblocked`, `amend_proposed`,
+`created`, `started`, `checked`, `blocked`, `unblocked`, `amend_proposed`,
 `amend_approved`, `amend_rejected`, `done`, `submitted`, `approved`,
 `reopened`, `cancelled`, `taken`, `released`.
 
@@ -89,6 +90,32 @@ todo ──start──▶ in_progress ──done──▶ done
   rejects. `done` is validated against the approved plan.
 - Done with an unmet plan item is allowed only with a reason for that item.
   The task is then `done` with `shortfalls = 1`.
+
+### Checking items
+
+`atelier task check N ITEM` records one plan item's result entry while the
+task is `in_progress`, so the card ticks items as they are met instead of all
+at the end. The entry is the one the type's result has for that item (its
+`id` may be left out) and is checked the same way; evidence files are
+uploaded as for `done`. Running it again for the same item replaces the
+entry. Only the chat holding the task may check, only while it is
+`in_progress` (a blocked task is unblocked first). Each check appends a
+`checked` event `{item, met, entry, reason?}` and prints the card with
+`event: "check"`.
+
+The types with items: `feature` (criteria), `general` (done_when),
+`ui_change` (screens), `optimization` (targets), `investigation` (questions,
+answered in answers), `refactor` (invariants), `tests` (behaviors), `qa`
+(scenarios), `docs` (pages), `chore` (steps). `bug`, `plan` and `review`
+have none.
+
+- `done` merges the recorded entries into its result; an entry in the done
+  payload wins for the same item, so done only has to give the missing ones
+  (and the type's other fields). It is refused while any item has no entry,
+  naming the open ones. Once done, the result holds them and `checks` is
+  cleared.
+- An approved amend drops the entries of items the new plan no longer has
+  and keeps the rest.
 
 ### Proposals
 
@@ -138,6 +165,7 @@ atelier task types [TYPE]          list types, or print one type's plan and resu
 atelier task create                {type, title, why, plan}   only after the owner's @task
 atelier task propose               {type, title, why, plan}   ask the owner instead
 atelier task start N
+atelier task check N ITEM          one plan item's result entry   as soon as it is met or missed
 atelier task block N --cause TEXT --needs TEXT
 atelier task unblock N
 atelier task amend N               {plan}
@@ -170,7 +198,7 @@ JSON is camelCase. A task:
   "projectId": "…", "number": 12, "type": "optimization", "title": "…", "why": "…",
   "status": "in_progress", "sessionId": "…", "sessionTitle": "…", "createdBy": "…",
   "plan": {}, "result": null, "shortfalls": false, "blocked": null,
-  "cancelReason": null, "pendingAmend": null,
+  "cancelReason": null, "pendingAmend": null, "checks": null,
   "createdAt": 0, "updatedAt": 0, "startedAt": null, "finishedAt": null,
   "merged": null
 }
@@ -190,7 +218,8 @@ are no commits or git could not tell (see Merging).
 - `POST /api/workbench/task` with `{action, actor, session?, project?, number?, payload?}`
   → `{task, widget, summary}` or `400 {error}`. `actor` is `agent` (the CLI; `session`
   required, project comes from the session) or `owner` (the UI; `project`
-  required). Agent actions: `create propose start block unblock amend done cancel take`.
+  required). Agent actions: `create propose start check block unblock amend done cancel take`.
+  `check` takes `{item, entry}` and, like `done`, `files`.
   Owner actions: `approve reopen approve_amend reject_amend cancel release answer_proposal`.
   `widget` is the fenced `atelier-widget` text the CLI prints.
   `propose` answers `{proposal, widget, summary}`. `answer_proposal` takes
@@ -297,9 +326,10 @@ must have exactly one entry per plan id.
    the owner's choice arrives.
 2. `@task <text>` from the owner means: pick the type, draft the plan, run
    `atelier task create`. Don't ask again.
-3. Start the task before working on it. Block it only for a cause outside
-   your control. Finish it with a full result. Never leave it in progress at
-   the end of the work.
+3. Start the task before working on it. Run `atelier task check` for each
+   plan item as soon as it is met or missed, not all at the end. Block it
+   only for a cause outside your control. Finish it with a full result.
+   Never leave it in progress at the end of the work.
 4. Plan changes go through `amend`. Never change scope silently.
 5. Follow-ups are suggestions on the result, not new tasks.
 
@@ -308,8 +338,12 @@ must have exactly one entry per plan id.
 - **Task card** (widget type `task`): header with `#N`, type, title and
   status; the plan rendered per type; once done, the result per type
   (optimization as a before/after/target table, ui_change as image compares,
-  plan as rendered markdown). The status chip is live.
-- **Checklist panel**: the current session's tasks with live statuses.
+  plan as rendered markdown). While in progress, each checked plan item is
+  ticked (met), marked missed with its reason, or left open. The status chip
+  and the ticks are live. A `check` card starts folded.
+- **Checklist panel**: the current session's tasks with live statuses; an
+  active task lists its plan items ticked, missed or open. A task's row
+  opens its detail on the Tasks tab.
 - **Tasks tab** on the project screen, on every project: tasks grouped by
   status, filters for session and unassigned, a detail panel with history,
   and owner actions: approve or reopen (review), approve or reject an amend,

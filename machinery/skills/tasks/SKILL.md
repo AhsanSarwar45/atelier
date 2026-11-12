@@ -39,6 +39,7 @@ atelier task show N
 atelier task create            <<< '{"type":…,"title":…,"why":…,"plan":{…}}'
 atelier task propose           <<< '{"type":…,"title":…,"why":…,"plan":{…}}'
 atelier task start N
+atelier task check N ITEM      <<< '{…one plan item's result entry…}'
 atelier task block N --cause TEXT --needs TEXT
 atelier task unblock N
 atelier task amend N           <<< '{"plan":{…}}'
@@ -59,16 +60,20 @@ Types: `bug`, `feature`, `ui_change`, `optimization`, `plan`,
 
 1. Start a task before working on it. A chat holds one task in progress at a
    time.
-2. Block only for a cause you cannot remove yourself, and say what is needed
+2. As soon as a plan item is met or missed, run `atelier task check N ITEM`
+   with that item's result entry (the shape `atelier task types TYPE` shows
+   under `check`), not all at the end. Running it again replaces the entry.
+3. Block only for a cause you cannot remove yourself, and say what is needed
    to resume.
-3. To change the plan, run `amend`. The owner approves it. Never change scope
+4. To change the plan, run `amend`. The owner approves it. Never change scope
    silently.
-4. Finish with `done` and a full result: one entry for every item in the plan.
-   If an item was not met, say why in that entry. Types that change code need
+5. Finish with `done`: its result only needs the items you have not checked
+   (an entry given there wins), so every plan item ends with an entry. If an
+   item was not met, say why in that entry. Types that change code need
    the commit SHAs, and the commits must exist.
-5. Never leave a task in progress when the work stops. Finish, block or
+6. Never leave a task in progress when the work stops. Finish, block or
    cancel it.
-6. The checklist shows this chat's tasks. Do not keep a separate checklist.
+7. The checklist shows this chat's tasks. Do not keep a separate checklist.
 
 ## Grids
 
