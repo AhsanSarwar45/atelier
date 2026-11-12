@@ -49,6 +49,7 @@ import {
 } from '@/workbench/tasks/types';
 import { ITEM_LISTS, entryOutcome, itemCounts, itemProgress, itemText, recordedEntries, type ItemProgress } from '@/workbench/tasks/progress';
 import { tasksChangedFor, useLiveTask } from '@/workbench/tasks/use-tasks';
+import { ZoomableImage } from '@/workbench/zoomable-image';
 
 /* ------------------------------------------------------------------ reading */
 
@@ -154,8 +155,7 @@ function Evidence({ value, cwd }: { value: string; cwd?: string | null }) {
   if (!trimmed) return null;
   if (!/\s/.test(trimmed) && IMAGE.test(trimmed)) {
     const src = shotUrl(trimmed, cwd);
-    // eslint-disable-next-line @next/next/no-img-element
-    if (src) return <img src={src} alt={trimmed} className="mt-1 max-h-48 rounded border border-border/60 object-contain" />;
+    if (src) return <ZoomableImage src={src} alt={trimmed} className="mt-1" compact />;
   }
   if (!/\s/.test(trimmed) && VIDEO.test(trimmed)) {
     const src = shotUrl(trimmed, cwd);
@@ -219,18 +219,13 @@ function OptimizationPlanTable({ targets }: { targets: OptimizationTarget[] }) {
  * reference image. Folded behind a toggle, so a card with many takes no room
  * until they are wanted; open, they sit side by side and open large on a click.
  */
-/** One image with its caption, opened full size on a click. */
-function Still({ name, caption, src, onLook }: { name: string; caption: string; src: string; onLook: (image: LookableImage) => void }) {
-  const alt = `${name} ${caption.toLowerCase()}`;
+/** One image with its caption above it, opened full size on a click. */
+function Still({ name, caption, src }: { name: string; caption: string; src: string }) {
   return (
-    <figure className="space-y-1">
-      <figcaption className="text-xs text-muted-foreground">{caption}</figcaption>
-      <Button type="button" variant="foreground" size="none" className="block" aria-label={`Open ${alt}`}
-        onClick={() => onLook({ mime: 'image/*', dataUrl: src, alt })}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt} className="max-h-48 rounded border border-border/60 object-contain" />
-      </Button>
-    </figure>
+    <div className="space-y-1">
+      <div className="text-xs text-muted-foreground">{caption}</div>
+      <ZoomableImage src={src} alt={`${name} ${caption.toLowerCase()}`} compact />
+    </div>
   );
 }
 
@@ -262,8 +257,8 @@ export function ShotPair({ name, before, after, reference, cwd }: { name: string
               }}
               onLook={setLooking}
             />
-          ) : <Still name={name} caption="After" src={shotUrl(after, cwd)} onLook={setLooking} />}
-          {reference && <Still name={name} caption="Reference" src={shotUrl(reference, cwd)} onLook={setLooking} />}
+          ) : <Still name={name} caption="After" src={shotUrl(after, cwd)} />}
+          {reference && <Still name={name} caption="Reference" src={shotUrl(reference, cwd)} />}
         </div>
       )}
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
