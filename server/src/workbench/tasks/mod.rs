@@ -859,6 +859,62 @@ pub fn answer_prompt(proposal: &ProposalRow) -> String {
     }
 }
 
+/// The owner actions the holding chat's agent is told of (`owner_prompt`).
+pub const TOLD_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend"];
+
+/// The chat to tell of an action that succeeded: the holding chat, when the
+/// owner approved or reopened the task or answered its plan change.
+pub fn told_chat<'a>(actor: &str, action: &str, task: &'a TaskRow) -> Option<&'a str> {
+    (actor == "owner" && TOLD_ACTIONS.contains(&action)).then_some(())?;
+    task.session_id.as_deref()
+}
+
+/// A note as the end of a sentence: a full stop added unless it has one.
+fn sentence(note: &str) -> String {
+    let note = note.trim();
+    if note.ends_with(['.', '!', '?']) { note.to_string() } else { format!("{note}.") }
+}
+
+/// What the holding chat's agent is told when the owner approves or reopens
+/// its task, or answers its plan change. `task` is the task after the action;
+/// `note` is the owner's, if any; `merge` only matters to `approve`. None for
+/// any other action.
+pub fn owner_prompt(action: &str, task: &TaskRow, note: &str, merge: &git::MergeState) -> Option<String> {
+    let number = task.number;
+    let named = format!("task #{number} \"{}\"", task.title);
+    let note = note.trim();
+    Some(match action {
+        "approve" => {
+            let state = match merge {
+                git::MergeState::NoCommits => "It names no commits, so nothing is left to merge.".to_string(),
+                git::MergeState::Merged { base } => format!("Its commits are on {base} already; nothing is left to merge."),
+                git::MergeState::Unmerged { branch: Some(branch), base } => format!(
+                    "Its commits are on branch {branch}, not yet on {base}. Ask the owner whether to merge {branch} into {base}, and don't merge without their yes."
+                ),
+                git::MergeState::Unmerged { branch: None, base } => format!(
+                    "Its commits are not all on {base} yet. Ask the owner whether to merge them into {base}, and don't merge without their yes."
+                ),
+                git::MergeState::Unknown => "Merge state is unknown: its commits or folder could not be read. Check whether its commits are on the base branch before asking the owner about merging, and don't merge without their yes.".to_string(),
+            };
+            format!("Owner approved {named}. {state}")
+        }
+        "reopen" => {
+            let said = if note.is_empty() { format!("Owner reopened {named}.") } else { format!("Owner reopened {named}: {}", sentence(note)) };
+            if task.status == "todo" {
+                format!("{said} Start it again with `atelier task start {number}`, continue the work and run done again.")
+            } else {
+                format!("{said} Continue the work and run done again.")
+            }
+        }
+        "approve_amend" => format!("Owner approved the plan change for {named}: continue with the new plan."),
+        "reject_amend" if note.is_empty() => {
+            format!("Owner rejected the plan change for {named}: continue with the old plan.")
+        }
+        "reject_amend" => format!("Owner rejected the plan change for {named}: {} Continue with the old plan.", sentence(note)),
+        _ => return None,
+    })
+}
+
 /// What a chat is told of its open tasks when its agent is connected: one line
 /// each, or nothing when there are none.
 pub fn open_section(connection: &Connection, session: &str) -> rusqlite::Result<String> {
@@ -1043,7 +1099,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             }
             task.pending_amend = Some(plan.clone());
             ("amend_proposed", json!({"plan": plan}),
-                format!("#{number}: plan amendment proposed; the owner approves or rejects it. `done` is checked against the approved plan."))
+                format!("#{number}: plan amendment proposed; the owner approves or rejects it, and their answer arrives as a message. `done` is checked against the approved plan."))
         }
         (false, "done") => {
             held_by(&task, caller.unwrap())?;
@@ -1066,7 +1122,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             }
             if review {
                 task.status = "review".into();
-                ("submitted", payload, format!("#{number} is submitted for review; the owner approves it or reopens it with a note."))
+                ("submitted", payload, format!("#{number} is submitted for review; the owner approves it or reopens it with a note, and their answer arrives as your next message."))
             } else {
                 task.status = "done".into();
                 task.finished_at = Some(now);
@@ -1411,6 +1467,76 @@ mod tests {
         let outcome = owner(&store, "approve", one, json!({})).unwrap();
         assert_eq!(outcome.task.status, "done");
         assert!(outcome.task.finished_at.is_some());
+    }
+
+    #[test]
+    fn the_owners_approve_reopen_and_plan_answers_are_told_to_the_holding_chat() {
+        use git::MergeState;
+        let (_d, store) = store();
+        let one = create(&store, "s1", "plan");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        let done = agent(&store, "s1", "done", Some(one), done_payload("plan")).unwrap();
+        assert_eq!(told_chat("agent", "done", &done.task), None, "only the owner's answers are told");
+
+        let reopened = owner(&store, "reopen", one, json!({"note": "more detail"})).unwrap();
+        assert_eq!(told_chat("owner", "reopen", &reopened.task), Some("s1"));
+        assert_eq!(
+            owner_prompt("reopen", &reopened.task, "more detail", &MergeState::Unknown).unwrap(),
+            "Owner reopened task #1 \"T\": more detail. Continue the work and run done again."
+        );
+        assert_eq!(
+            owner_prompt("reopen", &reopened.task, "  ", &MergeState::Unknown).unwrap(),
+            "Owner reopened task #1 \"T\". Continue the work and run done again."
+        );
+        let mut waiting = reopened.task.clone();
+        waiting.status = "todo".into();
+        assert_eq!(
+            owner_prompt("reopen", &waiting, "Fix it!", &MergeState::Unknown).unwrap(),
+            "Owner reopened task #1 \"T\": Fix it! Start it again with `atelier task start 1`, continue the work and run done again."
+        );
+
+        let plan = types::example("plan").unwrap()["create"]["plan"].clone();
+        let mut changed = plan.clone();
+        changed["scope"] = json!("Server only");
+        agent(&store, "s1", "amend", Some(one), json!({"plan": changed})).unwrap();
+        let rejected = owner(&store, "reject_amend", one, json!({"note": "keep the scope"})).unwrap();
+        assert_eq!(told_chat("owner", "reject_amend", &rejected.task), Some("s1"));
+        assert_eq!(
+            owner_prompt("reject_amend", &rejected.task, "keep the scope", &MergeState::Unknown).unwrap(),
+            "Owner rejected the plan change for task #1 \"T\": keep the scope. Continue with the old plan."
+        );
+        assert_eq!(
+            owner_prompt("reject_amend", &rejected.task, "", &MergeState::Unknown).unwrap(),
+            "Owner rejected the plan change for task #1 \"T\": continue with the old plan."
+        );
+        agent(&store, "s1", "amend", Some(one), json!({"plan": changed})).unwrap();
+        let approved = owner(&store, "approve_amend", one, json!({})).unwrap();
+        assert_eq!(told_chat("owner", "approve_amend", &approved.task), Some("s1"));
+        assert_eq!(
+            owner_prompt("approve_amend", &approved.task, "", &MergeState::Unknown).unwrap(),
+            "Owner approved the plan change for task #1 \"T\": continue with the new plan."
+        );
+
+        agent(&store, "s1", "done", Some(one), done_payload("plan")).unwrap();
+        let task = owner(&store, "approve", one, json!({})).unwrap().task;
+        assert_eq!(told_chat("owner", "approve", &task), Some("s1"));
+        let said = |merge: MergeState| owner_prompt("approve", &task, "", &merge).unwrap();
+        assert_eq!(said(MergeState::Merged { base: "main".into() }),
+            "Owner approved task #1 \"T\". Its commits are on main already; nothing is left to merge.");
+        assert_eq!(said(MergeState::Unmerged { branch: Some("fix".into()), base: "main".into() }),
+            "Owner approved task #1 \"T\". Its commits are on branch fix, not yet on main. Ask the owner whether to merge fix into main, and don't merge without their yes.");
+        assert_eq!(said(MergeState::Unmerged { branch: None, base: "main".into() }),
+            "Owner approved task #1 \"T\". Its commits are not all on main yet. Ask the owner whether to merge them into main, and don't merge without their yes.");
+        assert_eq!(said(MergeState::Unknown),
+            "Owner approved task #1 \"T\". Merge state is unknown: its commits or folder could not be read. Check whether its commits are on the base branch before asking the owner about merging, and don't merge without their yes.");
+        assert_eq!(said(MergeState::NoCommits), "Owner approved task #1 \"T\". It names no commits, so nothing is left to merge.");
+
+        // Nothing for the other owner actions, nor for a task no chat holds.
+        assert_eq!(owner_prompt("cancel", &task, "", &MergeState::Unknown), None);
+        assert_eq!(told_chat("owner", "release", &task), None);
+        let mut unheld = task.clone();
+        unheld.session_id = None;
+        assert_eq!(told_chat("owner", "approve", &unheld), None);
     }
 
     #[test]

@@ -332,6 +332,8 @@ pub(super) async fn act(
         }
     }
     let action = request.action.clone();
+    let actor = request.actor.clone();
+    let note = payload["note"].as_str().unwrap_or_default().to_string();
     let prints = if request.action == "create" { prints_for(&state, &project, cell_grids(&payload)).await } else { Default::default() };
     let announced = project.clone();
     let asked = Request {
@@ -351,15 +353,39 @@ pub(super) async fn act(
         .database()
         .write_tasks(move |store| {
             tasks::apply(store, &asked).map(|outcome| {
-                (tasks::to_json(store, &outcome.task), outcome.summary, outcome.grids, outcome.detail)
+                let folder = folder_of(store, &outcome.task);
+                let json = tasks::to_json(store, &outcome.task);
+                (json, outcome.summary, outcome.grids, outcome.detail, outcome.task, folder)
             })
         })
         .await
         .map_err(failed)?;
-    let (task, summary, grids, detail) = refused_or(outcome)?;
+    let (task, summary, grids, detail, row, folder) = refused_or(outcome)?;
     let widget = tasks::widget(&action, &task, &detail).map_err(failed)?;
     announce(&state, &task["projectId"], &task["number"]);
     announce_grids(&state, &announced, &grids);
+    // The owner's approve, reopen and plan-change answers are told to the
+    // chat holding the task, like a proposal's answer.
+    if let Some(session) = tasks::told_chat(&actor, &action, &row).map(str::to_string) {
+        let merge = if action == "approve" {
+            let commits: Vec<String> = task["result"]["commits"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+            let folder = folder.or_else(|| project_folder(&state, &announced));
+            tasks::git::merge_state(folder.as_deref().map(std::path::Path::new), &commits).await
+        } else {
+            tasks::git::MergeState::Unknown
+        };
+        if let Some(said) = tasks::owner_prompt(&action, &row, &note, &merge) {
+            // Queued behind a turn still running, as a proposal's answer is.
+            let telling = state.clone();
+            tokio::spawn(async move { tell_chat(&telling, &session, said).await });
+        }
+    }
     Ok(Json(json!({"task": task, "widget": widget, "summary": summary})))
 }
 

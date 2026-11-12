@@ -104,6 +104,35 @@ pub async fn merged(dir: &Path, commits: &[String]) -> Option<bool> {
     Some(true)
 }
 
+/// Where an approved task's commits stand, for what its chat is told.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeState {
+    /// The task names no commits.
+    NoCommits,
+    /// Every commit is in the base branch.
+    Merged { base: String },
+    /// Some commit is not; `branch` is the folder's own branch when it is
+    /// another than the base (None when detached or on the base itself).
+    Unmerged { branch: Option<String>, base: String },
+    /// No folder, no repository, no base branch, or git could not tell.
+    Unknown,
+}
+
+pub async fn merge_state(dir: Option<&Path>, commits: &[String]) -> MergeState {
+    if commits.is_empty() {
+        return MergeState::NoCommits;
+    }
+    let Some(dir) = dir.filter(|dir| dir.is_dir()) else { return MergeState::Unknown };
+    let (Some(merged), Some(base)) = (merged(dir, commits).await, base_branch(dir).await) else {
+        return MergeState::Unknown;
+    };
+    if merged {
+        return MergeState::Merged { base };
+    }
+    let branch = git(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]).await.filter(|branch| *branch != base);
+    MergeState::Unmerged { branch, base }
+}
+
 /// What `@merge` needs to know about the chat's folder, worked out when the
 /// message is sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -290,6 +319,27 @@ mod tests {
         assert_eq!(merged(&feature, &[sha.clone()]).await, Some(true));
         assert_eq!(merged(&feature, &[sha[..10].to_string()]).await, Some(true), "a short SHA is read too");
         assert_eq!(merged(&feature, &["0123456789abcdef".into()]).await, None, "an unknown commit is unknown");
+    }
+
+    #[tokio::test]
+    async fn merge_state_says_where_an_approved_tasks_commits_stand() {
+        let (root, main, feature, sha) = repository();
+        let commits = [sha.clone()];
+        assert_eq!(merge_state(Some(&feature), &[]).await, MergeState::NoCommits);
+        assert_eq!(merge_state(None, &commits).await, MergeState::Unknown, "no folder");
+        assert_eq!(merge_state(Some(&root.path().join("gone")), &commits).await, MergeState::Unknown, "a folder that is gone");
+        assert_eq!(merge_state(Some(&feature), &["0123456789abcdef".into()]).await, MergeState::Unknown, "a commit git does not know");
+        assert_eq!(
+            merge_state(Some(&feature), &commits).await,
+            MergeState::Unmerged { branch: Some("feature".into()), base: "main".into() }
+        );
+        assert_eq!(
+            merge_state(Some(&main), &commits).await,
+            MergeState::Unmerged { branch: None, base: "main".into() },
+            "asked from the base itself there is no other branch to name"
+        );
+        run(&main, &["merge", "-q", "--ff-only", "feature"]);
+        assert_eq!(merge_state(Some(&feature), &commits).await, MergeState::Merged { base: "main".into() });
     }
 
     #[tokio::test]
