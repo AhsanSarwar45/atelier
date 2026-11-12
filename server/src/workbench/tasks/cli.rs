@@ -18,11 +18,14 @@ usage: atelier task <command>
   create                       {type, title, why, plan, cells?}; only when the owner's message says @task,
                                or when every cell is in an approved grid (`atelier grid next` prints one)
   start N
-  check N ITEM                 one plan item's result entry on stdin or --input FILE, as soon as it is met or missed
+  check N ITEM                 the server runs the item's checks and ticks it when every one passes (no input);
+                               a task made before checks takes the item's result entry on stdin or --input FILE
   block N --cause TEXT --needs TEXT
   unblock N
-  amend N                      {plan} on stdin or --input FILE
-  done N                       {summary, commits?, followups?, result, cells?} on stdin or --input FILE
+  amend N                      {plan, reason} on stdin or --input FILE: the whole new plan, and why a check is
+                               wrong or impossible as approved; the owner approves it
+  done N                       {summary, commits?, followups?, result?, cells?} on stdin or --input FILE; the server
+                               re-runs every check and the project's test command first
   cancel N --reason TEXT
   take N
   list [--all]                 this session's tasks (or the project's)
@@ -111,6 +114,24 @@ fn payload(rest: &[String], shape: &str) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|error| format!("the payload is not valid JSON ({error}); it is {shape}"))
 }
 
+/// The payload when one is given: `--input FILE`, or stdin when it is not a
+/// terminal and has something on it.
+fn optional_payload(rest: &[String], shape: &str) -> Result<Option<Value>, String> {
+    if flag(rest, "--input")?.is_some() {
+        return payload(rest, shape).map(Some);
+    }
+    use std::io::{IsTerminal, Read};
+    if std::io::stdin().is_terminal() {
+        return Ok(None);
+    }
+    let mut text = String::new();
+    std::io::stdin().read_to_string(&mut text).map_err(|error| format!("stdin: {error}"))?;
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str(&text).map(Some).map_err(|error| format!("the payload is not valid JSON ({error}); it is {shape}"))
+}
+
 /// Read every image or video the result names by path, for the server to
 /// store. Paths are read relative to this shell's folder.
 fn evidence(result: Option<&Value>) -> Result<BTreeMap<String, String>, String> {
@@ -144,7 +165,8 @@ async fn post(body: Value) -> Result<i32, String> {
     print!("{}", value["widget"].as_str().unwrap_or_default());
     println!("{}", value["summary"].as_str().unwrap_or_default());
     println!("{PRESENTED}");
-    Ok(0)
+    // A check that left its item unmet was recorded, but did not pass.
+    Ok(if value["failed"] == true { 1 } else { 0 })
 }
 
 async fn get(path: &str, query: &[(&str, String)]) -> Result<Value, String> {
@@ -261,7 +283,7 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             let number = number(rest.first(), "amend N")?;
             only_flags(&rest[1..], &["--input"])?;
             let session = session()?;
-            let payload = payload(rest, "{plan}")?;
+            let payload = payload(rest, "{plan, reason}")?;
             post(json!({"action": "amend", "actor": "agent", "session": session, "number": number, "payload": payload})).await
         }
         "done" => {
@@ -283,8 +305,9 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
                 .clone();
             only_flags(&rest[2..], &["--input"])?;
             let session = session()?;
-            let entry = payload(rest, "the item's result entry, e.g. {met, evidence, reason?} for a feature criterion")?;
-            let files = evidence(Some(&entry))?;
+            // A task with checks takes no entry: the server runs the item's checks.
+            let entry = optional_payload(rest, "the item's result entry (only for a task made before checks)")?;
+            let files = evidence(entry.as_ref())?;
             post(json!({"action": "check", "actor": "agent", "session": session, "number": number,
                 "payload": {"item": item, "entry": entry}, "files": files,
                 "ephemeral": std::env::var("ATELIER_PRESENTATION_EPHEMERAL").as_deref() == Ok("1")})).await

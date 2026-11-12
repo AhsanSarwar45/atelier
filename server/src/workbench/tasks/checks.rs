@@ -680,6 +680,116 @@ pub struct Gate {
     pub flags: Vec<Value>,
     /// Check files a draft names that are not in the folder.
     pub missing: Vec<String>,
+    /// Why the checks could not be run at all (no folder, no worktree).
+    pub error: Option<String>,
+}
+
+/// What a task change needs measured, outside the writer.
+#[derive(Clone, Debug)]
+pub enum Measure {
+    /// `task start`: every check, on the starting commit.
+    Start,
+    /// `task check N ITEM`: that item's checks.
+    Item(String),
+    /// `task done`: every check, the project's test command, and, when all
+    /// pass, break-it and the diff scan.
+    Done { test_command: Option<String> },
+    /// The owner approves an amend: the new plan's changed checks, against
+    /// the code as it was at start, and its files' hashes.
+    Amend { plan: Value },
+}
+
+/// The checks of `new` that are not, as they are, in `old`: what an amend
+/// changed, by item.
+pub fn changed_checks(kind: &str, old: &Value, new: &Value) -> Vec<(String, Vec<Check>)> {
+    let before: BTreeMap<String, Value> = plan_items(kind, old).into_iter().collect();
+    plan_items(kind, new)
+        .into_iter()
+        .filter_map(|(item, listed)| {
+            let had = before.get(&item).and_then(Value::as_array).cloned().unwrap_or_default();
+            let changed: Vec<Check> = listed
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|check| !had.contains(check))
+                .filter_map(|check| parse_check(check, "").ok())
+                .collect();
+            (!changed.is_empty()).then_some((item, changed))
+        })
+        .collect()
+}
+
+/// Measure, in the task's folder, what `measure` needs for a task with
+/// checks whose stored gate is `stored` (`{hashes, startCommit?, baseline?}`).
+pub async fn measure(folder: &Path, kind: &str, plan: &Value, stored: &Value, measure: Measure, at: i64) -> Gate {
+    let harness: Vec<String> =
+        stored["hashes"]["harness"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+    let mut gate = Gate { harness: harness.clone(), ..Default::default() };
+    if !folder.is_dir() {
+        gate.error = Some(format!("the task's folder {} is not there", folder.display()));
+        return gate;
+    }
+    let head = proof::head(folder).await;
+    gate.head = head.clone();
+    let start = stored["startCommit"].as_str().map(str::to_string);
+    match measure {
+        Measure::Start => {
+            gate.hashes = hash_files(folder, &locked_paths(kind, plan, &harness));
+            for (item, checks) in item_checks(kind, plan) {
+                gate.runs.insert(item, run_all(folder, &checks, head.as_deref(), at).await);
+            }
+        }
+        Measure::Item(item) => {
+            gate.hashes = hash_files(folder, &locked_paths(kind, plan, &harness));
+            if let Some(checks) = checks_of(kind, plan, &item) {
+                gate.runs.insert(item, run_all(folder, &checks, head.as_deref(), at).await);
+            }
+        }
+        Measure::Done { test_command } => {
+            gate.hashes = hash_files(folder, &locked_paths(kind, plan, &harness));
+            let items = item_checks(kind, plan);
+            let mut green = true;
+            for (item, checks) in &items {
+                let runs = run_all(folder, checks, head.as_deref(), at).await;
+                green &= checks.iter().all(|check| {
+                    let baseline = stored["baseline"][item][&check.name]["p50"].as_f64();
+                    runs.get(&check.name).is_some_and(|run| judge_green(check, run, baseline).is_ok())
+                });
+                gate.runs.insert(item.clone(), runs);
+            }
+            if let Some(command) = test_command.filter(|command| !command.trim().is_empty()) {
+                let (exit, output, ms) = shell(folder, &command, MAX_TIMEOUT_S).await;
+                green &= exit == 0;
+                let run = Run {
+                    command: command.clone(), exit, output_tail: proof::tail(output.as_bytes(), proof::TAIL_LINES),
+                    output, ms, commit: head.clone(), at, ..Default::default()
+                };
+                gate.test_command = Some((command, run));
+            }
+            // The audits only mean something once every check passes.
+            if let (true, Some(start)) = (green, start.as_deref()) {
+                gate.flags.extend(break_it(folder, start, &items, &stored["baseline"], at).await);
+                gate.flags.extend(diff_flags(folder, start).await);
+            }
+        }
+        Measure::Amend { plan: new } => {
+            gate.hashes = hash_files(folder, &locked_paths(kind, &new, &harness));
+            let changed = changed_checks(kind, plan, &new);
+            let keep = check_files(kind, &new);
+            for (item, checks) in changed {
+                match run_reverted(folder, start.as_deref(), &checks, &keep, at).await {
+                    Ok(runs) => {
+                        gate.runs.insert(item, runs);
+                    }
+                    Err(error) => {
+                        gate.error = Some(format!("the changed checks could not be run against the starting code: {error}"));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    gate
 }
 
 /// The project's `[tasks]` settings (harness, test_command), read from its

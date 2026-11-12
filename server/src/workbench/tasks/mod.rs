@@ -9,6 +9,7 @@
 
 pub mod checks;
 pub mod cli;
+pub mod gate;
 pub mod git;
 pub mod types;
 pub mod visual;
@@ -325,6 +326,11 @@ pub fn to_json(store: &Store, task: &TaskRow) -> Value {
         "checked": task.gate.is_some() || checks::is_checked(&task.plan),
         "checkRuns": task.gate.as_ref().map(|gate| gate["runs"].clone()).filter(|runs| !runs.is_null()).unwrap_or_else(|| json!({})),
         "checkFlags": task.gate.as_ref().map(|gate| gate["flags"].clone()).filter(|flags| !flags.is_null()).unwrap_or_else(|| json!([])),
+        "checkMet": task.gate.as_ref().map(|gate| gate["met"].clone()).filter(|met| !met.is_null()).unwrap_or_else(|| json!({})),
+        "checkBaseline": task.gate.as_ref().map(|gate| gate["baseline"].clone()).unwrap_or(Value::Null),
+        "startCommit": task.gate.as_ref().map(|gate| gate["startCommit"].clone()).unwrap_or(Value::Null),
+        "testCommandRun": task.gate.as_ref().map(|gate| gate["testCommand"].clone()).unwrap_or(Value::Null),
+        "amendReason": task.gate.as_ref().map(|gate| gate["amendReason"].clone()).unwrap_or(Value::Null),
         "cells": super::grids::task_cells(store.connection(), &task.project_id, task.number).unwrap_or_default(),
         "claimShape": super::grids::claim_shape(store.connection(), &task.project_id, task.number).unwrap_or(Value::Null),
     })
@@ -1154,9 +1160,17 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             }
             status_is(&task, &["todo"], "start")?;
             one_in_progress(connection, session, &task)?;
+            // A task with checks starts only when every check is red.
+            let payload = if gate::gated(&task) { gate::start(&mut task, request.gate.as_ref())? } else { json!({}) };
             task.status = "in_progress".into();
             task.started_at.get_or_insert(now);
-            ("started", json!({}), format!("#{number} is in progress."))
+            let said = match payload["red"].as_u64() {
+                Some(red) => format!(
+                    "#{number} is in progress. All {red} checks fail for their stated reasons on the starting commit; tick each item with `atelier task check {number} ITEM` once its checks pass."
+                ),
+                None => format!("#{number} is in progress."),
+            };
+            ("started", payload, said)
         }
         (false, "check") => {
             held_by(&task, caller.unwrap())?;
@@ -1167,6 +1181,29 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             }
             status_is(&task, &["in_progress"], "check")?;
             let item = payload_text(&request.payload, "item", "the plan item's id (atelier task check N ITEM)")?.trim().to_string();
+            if gate::gated(&task) {
+                if request.payload.get("entry").is_some_and(|entry| !entry.is_null()) {
+                    return refuse(format!(
+                        "#{number} has checks, so check takes no entry: the server runs the item's checks and ticks it when every one passes. Run `atelier task check {number} {item}` with no input"
+                    ));
+                }
+                let found = gate::check(&mut task, &item, request.gate.as_ref())?;
+                let (ticked, items) = gate::ticked(&task);
+                let mut payload = json!({"item": item, "met": found.met, "passed": found.passed, "total": found.total});
+                let said = if found.met {
+                    let rest = if ticked == items {
+                        format!(" All {items} items are ticked; finish with `atelier task done {number}`.")
+                    } else {
+                        format!(" {ticked} of {items} items ticked.")
+                    };
+                    format!("#{number}: \"{item}\" is met: {} of {} checks pass.{rest}", found.passed, found.total)
+                } else {
+                    let why = found.problems.join("; ");
+                    payload["reason"] = json!(why);
+                    format!("#{number}: \"{item}\" is not met: {} of {} checks pass. {why}", found.passed, found.total)
+                };
+                ("checked", payload, said)
+            } else {
             let given = request.payload.get("entry").filter(|v| !v.is_null()).ok_or_else(|| {
                 TaskError::Refused(format!(
                     "entry is required: the item's result entry as JSON on stdin (see `atelier task types {}`)",
@@ -1199,6 +1236,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                 payload["reason"] = json!(why);
             }
             ("checked", payload, format!("#{number}: \"{item}\" is {state}.{rest}"))
+            }
         }
         (false, "block") => {
             held_by(&task, caller.unwrap())?;
@@ -1229,14 +1267,34 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             if *plan == task.plan {
                 return refuse(format!("the proposed plan is the same as #{number}'s current plan"));
             }
+            let reason = request.payload.get("reason").and_then(Value::as_str).map(str::trim).filter(|r| !r.is_empty());
+            let mut payload = json!({"plan": plan});
+            if gate::gated(&task) {
+                // A check is changed only for a reason the owner reads.
+                let reason = reason.ok_or_else(|| {
+                    TaskError::Refused(
+                        "reason is required: amend takes {plan, reason}, with why a check is wrong or impossible as approved".into(),
+                    )
+                })?;
+                checks::require_checks(&task.kind, plan)?;
+                if let Some(stored) = task.gate.as_mut() {
+                    stored["amendReason"] = json!(reason);
+                }
+            }
+            if let Some(reason) = reason {
+                payload["reason"] = json!(reason);
+            }
             task.pending_amend = Some(plan.clone());
-            ("amend_proposed", json!({"plan": plan}),
+            ("amend_proposed", payload,
                 format!("#{number}: plan amendment proposed; the owner approves or rejects it, and their answer arrives as a message. `done` is checked against the approved plan."))
         }
         (false, "done") => {
             held_by(&task, caller.unwrap())?;
             status_is(&task, &["in_progress"], "done")?;
             let (mut result, unmet) = check_done(&task, request)?;
+            if gate::gated(&task) {
+                gate::done(&mut task, request.gate.as_ref())?;
+            }
             let cells = super::grids::parse_cells(request.payload.get("cells"), true)?;
             super::grids::check_done_cells(connection, &request.project, number, &cells)?;
             grids = super::grids::finish(connection, &request.project, number, &cells, caller, actor, now)?;
@@ -1321,6 +1379,12 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             let plan = task.pending_amend.take().ok_or_else(|| {
                 TaskError::Refused(format!("#{number} has no plan amendment waiting"))
             })?;
+            if gate::gated(&task) {
+                gate::approve_amend(&mut task, &plan, request.gate.as_ref())?;
+                if let Some(stored) = task.gate.as_mut().and_then(Value::as_object_mut) {
+                    stored.remove("amendReason");
+                }
+            }
             task.plan = plan.clone();
             prune_checks(&mut task);
             ("amend_approved", json!({"plan": plan}), format!("#{number}: the amended plan is approved."))
@@ -1416,8 +1480,9 @@ mod tests {
     }
 
     fn ask(store: &Store, actor: &str, session: Option<&str>, action: &str, number: Option<i64>, payload: Value) -> Result<Outcome, TaskError> {
+        let task = number.and_then(|number| get(store.connection(), "p", number).ok().flatten());
         apply(store, &Request {
-            gate: None,
+            gate: gate::tests::simulated(task.as_ref(), action),
             action: action.into(),
             actor: actor.into(),
             session: session.map(str::to_string),

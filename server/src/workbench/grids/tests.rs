@@ -132,8 +132,9 @@ fn task_create(store: &Store, session: &str, cells: Value, prints: Prints) -> Re
 }
 
 fn task(store: &Store, session: Option<&str>, actor: &str, action: &str, number: i64, payload: Value) -> Result<tasks::Outcome, TaskError> {
+    let held = tasks::get(store.connection(), "p", number).ok().flatten();
     tasks::apply(store, &tasks::Request {
-        gate: None,
+        gate: tasks::gate::tests::simulated(held.as_ref(), action),
         action: action.into(),
         actor: actor.into(),
         session: session.map(str::to_string),

@@ -191,6 +191,52 @@ async fn draft_gate(state: &WorkbenchState, project: &str, folder: Option<&str>,
     tokio::task::spawn_blocking(move || checks::draft_gate(std::path::Path::new(&folder), &kind, &plan, &harness)).await.ok()
 }
 
+/// For start, check, done and an approved amend of a task with checks: run
+/// what the writer judges (checks.rs `measure`), in the task's folder (the
+/// agent's chat, or for the owner the holding chat's). `None` for a task
+/// made before checks, or another action.
+async fn task_gate(
+    state: &WorkbenchState,
+    project: &str,
+    number: Option<i64>,
+    action: &str,
+    actor: &str,
+    cwd: Option<&str>,
+    payload: &Value,
+) -> Option<checks::Gate> {
+    if !matches!((actor, action), ("agent", "start" | "check" | "done") | ("owner", "approve_amend")) {
+        return None;
+    }
+    let (asked, number) = (project.to_string(), number?);
+    let (task, holder) = state
+        .database()
+        .read_tasks(move |store| {
+            Ok(tasks::get(store.connection(), &asked, number)?.map(|task| {
+                let folder = folder_of(store, &task);
+                (task, folder)
+            }))
+        })
+        .await
+        .ok()
+        .flatten()?;
+    if !tasks::gate::gated(&task) {
+        return None;
+    }
+    let folder = cwd.map(str::to_string).or(holder).or_else(|| project_folder(state, project));
+    let Some(folder) = folder else {
+        return Some(checks::Gate { error: Some("the task's chat has no folder".into()), ..Default::default() });
+    };
+    let measure = match action {
+        "start" => checks::Measure::Start,
+        "check" => checks::Measure::Item(payload["item"].as_str().unwrap_or_default().trim().to_string()),
+        "done" => checks::Measure::Done { test_command: task_settings(state, project, Some(&folder)).test_command },
+        _ => checks::Measure::Amend { plan: task.pending_amend.clone()? },
+    };
+    let stored = task.gate.clone().unwrap_or(Value::Null);
+    let at = chrono::Utc::now().timestamp_millis();
+    Some(checks::measure(std::path::Path::new(&folder), &task.kind, &task.plan, &stored, measure, at).await)
+}
+
 /// A session's folder.
 async fn session_folder(state: &WorkbenchState, session: &str) -> Option<String> {
     state.database().get_session(session.to_string()).await.ok().flatten().map(|session| session.cwd)
@@ -383,7 +429,7 @@ pub(super) async fn act(
     let gate = if request.action == "create" && request.actor == "agent" {
         draft_gate(&state, &project, cwd.as_deref(), &payload["type"], &payload["plan"]).await
     } else {
-        None
+        task_gate(&state, &project, request.number, &request.action, &request.actor, cwd.as_deref(), &payload).await
     };
     let announced = project.clone();
     let asked = Request {
@@ -437,7 +483,9 @@ pub(super) async fn act(
             tokio::spawn(async move { tell_chat(&telling, &session, said).await });
         }
     }
-    Ok(Json(json!({"task": task, "widget": widget, "summary": summary})))
+    // A check that leaves its item unmet is recorded, and the CLI exits non-zero.
+    let failed = action == "check" && detail["met"] == false;
+    Ok(Json(json!({"task": task, "widget": widget, "summary": summary, "failed": failed})))
 }
 
 /// The owner's Create task on the Grids screen: a todo task for the picked
