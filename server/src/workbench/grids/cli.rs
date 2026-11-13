@@ -15,7 +15,11 @@ pub const USAGE: &str = "\
 usage: atelier grid <command>
   list [--rows]                   grids with % proved and open counts; --rows adds every owned row id
   show SLUG [ROW COL]             the matrix as text, or one cell with proof and history
-  next SLUG [--row ROW | --col COL]  the free cells to work on next (first row with any), and the task create payload for them
+  next SLUG [--row ROW | --col COL] [--batch N]
+                                  the next cell to work on, in the grid's order, and the task create payload for it;
+                                  --batch N hands out up to N ready cells at once
+  order SLUG                      {rows?:[{id,after}],columns?:[{id,after}]}: what must be proved or N/A first; a column's
+                                  after holds back its cell in each row, a row's after its cell in each column
   template list
   template set NAME               {columns:[{id,name,proof_rule,checks?}]} on stdin or --input FILE
   draft                           {slug,title,area,template?,row_search,columns,rows,cells?}; the owner approves or discards it
@@ -373,6 +377,39 @@ pub fn next_exit(value: &Value) -> i32 {
     }
 }
 
+/// The cells that wait for others to be proved or N/A, and what each waits for.
+fn waiting_text(value: &Value) -> String {
+    let slug = value["grid"].as_str().unwrap_or("");
+    let cells = value["waiting"].as_array().cloned().unwrap_or_default();
+    let count = value["waitingInGrid"].as_u64().unwrap_or(cells.len() as u64);
+    if cells.is_empty() {
+        return String::new();
+    }
+    let waits = if count == 1 { "cell waits" } else { "cells wait" };
+    // With a cell handed out the list is noise; say only how many wait.
+    if !value["create"].is_null() {
+        return format!("{count} {waits} for other cells to be proved or N/A first (`atelier grid order {slug}`).\n");
+    }
+    let mut out = format!("{count} {waits} for other cells to be proved or N/A first (set with `atelier grid order {slug}`):\n");
+    const SHOWN: usize = 20;
+    for cell in cells.iter().take(SHOWN) {
+        let after: Vec<String> = cell["after"].as_array().into_iter().flatten()
+            .filter_map(Value::as_str).map(|at| format!("{slug}.{at}")).collect();
+        out.push_str(&format!(
+            "  {slug}.{}.{} {} × {}: after {}\n",
+            cell["row"].as_str().unwrap_or(""),
+            cell["col"].as_str().unwrap_or(""),
+            cell["rowName"].as_str().unwrap_or(""),
+            cell["colName"].as_str().unwrap_or(""),
+            after.join(", ")
+        ));
+    }
+    if cells.len() > SHOWN {
+        out.push_str(&format!("  … and {} more\n", cells.len() - SHOWN));
+    }
+    out
+}
+
 /// `grid next` as text: the scope, its free cells with their proof rules,
 /// the cells other tasks hold, what is left, and the exact command to run.
 pub fn next_text(value: &Value) -> String {
@@ -386,9 +423,10 @@ pub fn next_text(value: &Value) -> String {
         let held = value["takenInGrid"].as_u64().unwrap_or(0);
         let pending = value["naPending"].as_u64().unwrap_or(0);
         let needing = value["needsCheckInGrid"].as_u64().unwrap_or(0);
+        let waiting = value["waitingInGrid"].as_u64().unwrap_or(0);
         if value["finished"] == true {
             out.push_str(&format!("No gaps left in {slug}. Every cell is proved or N/A.\n"));
-        } else if held > 0 && needing == 0 && pending == 0 {
+        } else if held > 0 && needing == 0 && pending == 0 && waiting == 0 {
             out.push_str(&format!(
                 "No free cells left in {slug}: {held} {} claimed by open tasks, and every other cell is proved or N/A.\n",
                 if held == 1 { "is" } else { "are" }
@@ -410,6 +448,7 @@ pub fn next_text(value: &Value) -> String {
                 if needing == 1 { "it" } else { "they" }
             ));
         }
+        out.push_str(&waiting_text(value));
         return out;
     }
     let kind = if scope["kind"] == "col" { "column" } else { "row" };
@@ -434,20 +473,17 @@ pub fn next_text(value: &Value) -> String {
             out.push('\n');
         }
     }
-    let needing = value["needsCheck"].as_array().cloned().unwrap_or_default();
-    if !needing.is_empty() {
-        out.push_str("Needs a check (cannot be claimed until the owner approves a check for its column or cell; draft the grid again with one):\n");
-        for cell in &needing {
-            out.push_str(&format!(
-                "  {slug}.{}.{} {} × {}: {}\n",
-                cell["row"].as_str().unwrap_or(""),
-                cell["col"].as_str().unwrap_or(""),
-                cell["rowName"].as_str().unwrap_or(""),
-                cell["colName"].as_str().unwrap_or(""),
-                cell["proofRule"].as_str().unwrap_or("")
-            ));
-        }
+    let needing = value["needsCheck"].as_array().map(Vec::len).unwrap_or(0);
+    if needing > 0 {
+        let place = if kind == "column" { "column" } else { "row" };
+        out.push_str(&format!(
+            "{needing} other {} in this {place} {} a check and cannot be claimed yet; add check templates to their columns with \
+             `atelier grid checks {slug}` for the owner to approve.\n",
+            if needing == 1 { "cell" } else { "cells" },
+            if needing == 1 { "needs" } else { "need" }
+        ));
     }
+    out.push_str(&waiting_text(value));
     if !taken.is_empty() {
         out.push_str("Taken by other tasks (leave these alone):\n");
         for cell in &taken {
@@ -462,8 +498,9 @@ pub fn next_text(value: &Value) -> String {
     }
     match value.get("create").filter(|create| !create.is_null()) {
         Some(create) => {
-            out.push_str("\nNext: create a task for these cells (no @task needed for an approved grid), then start it; prove each cell \
-                with `atelier grid prove` and tick its item at once with `atelier task check N ROW.COL`; finish with `atelier task done N`, and run `atelier grid next` again:\n");
+            let these = if claimable.len() == 1 { "this cell" } else { "these cells" };
+            out.push_str(&format!("\nNext: create a task for {these} (no @task needed for an approved grid), then start it; prove each cell \
+                with `atelier grid prove` and tick its item at once with `atelier task check N ROW.COL`; finish with `atelier task done N`, and run `atelier grid next` again:\n"));
             out.push_str(&format!("atelier task create <<'JSON'\n{}\nJSON\n", serde_json::to_string(create).unwrap_or_default()));
         }
         None if left > 0 => out.push_str(&format!(
@@ -539,20 +576,27 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             Ok(0)
         }
         "next" => {
-            let found = exactly(rest, &["--row", "--col"], &["SLUG"], "next [--row ROW | --col COL]")?;
+            let found = exactly(rest, &["--row", "--col", "--batch"], &["SLUG"], "next [--row ROW | --col COL] [--batch N]")?;
             let (row, col) = (flag(rest, "--row")?, flag(rest, "--col")?);
+            let batch = match flag(rest, "--batch")? {
+                Some(n) => Some(n.parse::<usize>().ok().filter(|n| *n >= 1).ok_or("--batch N takes a whole number, 1 or more")?),
+                None => None,
+            };
             if row.is_some() && col.is_some() {
                 return Err("give --row or --col, not both".into());
             }
             let session = session()?;
             let listed = listing(&session).await?;
             let project = listed["projectId"].as_str().ok_or("Atelier named no project for this session")?;
-            let mut query = Vec::new();
+            let mut query: Vec<(&str, String)> = Vec::new();
             if let Some(row) = row {
                 query.push(("row", row));
             }
             if let Some(col) = col {
                 query.push(("col", col));
+            }
+            if let Some(batch) = batch {
+                query.push(("batch", batch.to_string()));
             }
             let value = get(&format!("/api/workbench/grids/{}/{}/next", encode(project), encode(found[0])), &query).await?;
             print!("{}", next_text(&value));
@@ -599,6 +643,12 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             let session = session()?;
             let payload = payload(rest, "{columns: [{id, checks}]}")?;
             post(json!({"action": "checks", "actor": "agent", "session": session, "slug": found[0], "payload": payload})).await
+        }
+        "order" => {
+            let found = exactly(rest, &["--input"], &["SLUG"], "order")?;
+            let session = session()?;
+            let payload = payload(rest, "{rows?: [{id, after}], columns?: [{id, after}]}")?;
+            post(json!({"action": "order", "actor": "agent", "session": session, "slug": found[0], "payload": payload})).await
         }
         "discover" => {
             let found = exactly(rest, &[], &["SLUG"], "discover")?;

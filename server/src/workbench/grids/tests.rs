@@ -729,8 +729,8 @@ fn next_lists_one_row_and_names_the_chats_holding_taken_cells() {
     camera(&store);
     chat(&store, "s1", "Glare GPU");
     let none = Prints::new();
-    // The first row with free cells: glare, both columns.
-    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
+    // A batch of two from the first row with free cells: glare, both columns.
+    let next = next_batch(store.connection(), "p", "camera", &none, &Scope::First, 2).unwrap();
     assert_eq!(next["scope"], json!({"kind": "row", "id": "glare", "name": "GLARE"}));
     assert_eq!(next["claimable"].as_array().unwrap().len(), 2);
     assert_eq!(next["left"], 4);
@@ -754,7 +754,7 @@ fn next_lists_one_row_and_names_the_chats_holding_taken_cells() {
     }).unwrap();
     let number = created.task.number;
     // Glare still has a free cell; its taken one names the task and chat.
-    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
+    let next = next_batch(store.connection(), "p", "camera", &none, &Scope::Row("glare".into()), 2).unwrap();
     assert_eq!(next["scope"]["id"], "glare");
     assert_eq!(next["claimable"].as_array().unwrap().len(), 1);
     assert_eq!(next["taken"], json!([{"row": "glare", "col": "gpu", "task": number, "chat": {"id": "s1", "title": "Glare GPU"}}]));
@@ -868,7 +868,7 @@ fn part_of_a_row_and_an_irregular_pick_keep_their_count() {
     // glare.gpu is held by another task, so the glare row is not whole.
     agent_create(&store, "s2", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap();
     let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
-    assert_eq!(next["create"]["title"], "camera: GLARE row (1 cell)");
+    assert_eq!(next["create"]["title"], "camera: GLARE × Within budget");
     // The three cells left, over two rows and columns, are no shape.
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*", "onlyGaps": true})).unwrap();
     let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 6).unwrap();

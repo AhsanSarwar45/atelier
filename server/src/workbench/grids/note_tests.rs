@@ -65,7 +65,7 @@ fn refused<T>(result: Result<T, TaskError>) -> String {
 }
 
 fn next(store: &Store) -> Value {
-    next_cells(store.connection(), "p", "camera", &Prints::default(), &Scope::First).unwrap()
+    next_batch(store.connection(), "p", "camera", &Prints::default(), &Scope::First, 2).unwrap()
 }
 
 fn cell<'a>(value: &'a Value, row: &str, col: &str) -> &'a Value {

@@ -134,7 +134,8 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
     }
     // Check templates on columns and a cell's own checks (docs/grids.md,
     // "Checks"); the files they lock, hashed when the owner approves.
-    for (table, column) in [("grid_column", "checks"), ("grid_cell", "checks"), ("grid", "hashes")] {
+    // What a row or column comes after (docs/grids.md, "Order").
+    for (table, column) in [("grid_column", "checks"), ("grid_cell", "checks"), ("grid", "hashes"), ("grid_column", "after"), ("grid_row", "after")] {
         let has = connection
             .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'"))?
             .exists([])?;
@@ -145,9 +146,9 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-pub const AGENT_ACTIONS: &[&str] = &["draft", "checks", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set", "note"];
+pub const AGENT_ACTIONS: &[&str] = &["draft", "checks", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set", "note", "order"];
 pub const OWNER_ACTIONS: &[&str] = &[
-    "approve", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template", "note",
+    "approve", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template", "note", "order",
 ];
 /// What a `grid` widget's `event` may be.
 pub const WIDGET_EVENTS: &[&str] = &["draft", "template", "prove", "na", "audit", "reopen", "pass", "discover"];
@@ -282,11 +283,13 @@ pub struct Column {
     pub retired_at: Option<i64>,
     /// Check templates, `{row}` standing for the row id.
     pub checks: Vec<Value>,
+    /// Columns whose cell in the same row must be proved or N/A first.
+    pub after: Vec<String>,
 }
 
 pub fn columns(connection: &Connection, project: &str, slug: &str) -> rusqlite::Result<Vec<Column>> {
     let mut statement = connection.prepare(
-        "SELECT id, name, proof_rule, position, from_template, retired_at, checks FROM grid_column
+        "SELECT id, name, proof_rule, position, from_template, retired_at, checks, after FROM grid_column
           WHERE project_id = ?1 AND slug = ?2 ORDER BY position, id",
     )?;
     let rows = statement
@@ -299,6 +302,7 @@ pub fn columns(connection: &Connection, project: &str, slug: &str) -> rusqlite::
                 from_template: row.get::<_, i64>(4)? != 0,
                 retired_at: row.get(5)?,
                 checks: json_column(row, 6)?.and_then(|v| v.as_array().cloned()).unwrap_or_default(),
+                after: strings(&json_column(row, 7)?.unwrap_or(Value::Null)),
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -320,6 +324,8 @@ pub struct GridRow {
     pub added_at: i64,
     pub missing_since: Option<i64>,
     pub removed_at: Option<i64>,
+    /// Rows whose cell in the same column must be proved or N/A first.
+    pub after: Vec<String>,
 }
 
 impl GridRow {
@@ -332,7 +338,7 @@ impl GridRow {
 
 pub fn rows(connection: &Connection, project: &str, slug: &str) -> rusqlite::Result<Vec<GridRow>> {
     let mut statement = connection.prepare(
-        "SELECT id, name, kind, paths, of, ref, source, added_at, missing_since, removed_at FROM grid_row
+        "SELECT id, name, kind, paths, of, ref, source, added_at, missing_since, removed_at, after FROM grid_row
           WHERE project_id = ?1 AND slug = ?2 ORDER BY rowid",
     )?;
     let rows = statement
@@ -348,6 +354,7 @@ pub fn rows(connection: &Connection, project: &str, slug: &str) -> rusqlite::Res
                 added_at: row.get(7)?,
                 missing_since: row.get(8)?,
                 removed_at: row.get(9)?,
+                after: strings(&json_column(row, 10)?.unwrap_or(Value::Null)),
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -961,6 +968,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         "template_set" => template_set(connection, request),
         "approve_template" | "reject_template" => answer_template(connection, request),
         "note" => note(connection, request),
+        "order" => order(connection, request),
         _ => refuse(format!("{action} is not a grid action")),
     }
 }
@@ -2297,6 +2305,99 @@ fn note(connection: &Connection, request: &Request) -> Result<Outcome, TaskError
 
 pub const NOTE_MAX: usize = 4000;
 
+/// `atelier grid order`: what rows and columns come after. A column's
+/// `after` holds back its cell in each row until that row's cells in the
+/// named columns are proved or N/A; a row's `after` does the same down each
+/// column. Each id given replaces its list; ids not given keep theirs.
+fn order(connection: &Connection, request: &Request) -> Result<Outcome, TaskError> {
+    let slug = need(&request.slug, "slug", "order")?;
+    let loaded = approved_grid(connection, &request.project, slug)?;
+    const SHAPE: &str = "order takes {rows?: [{id, after: [ROW…]}], columns?: [{id, after: [COLUMN…]}]}";
+    let object = request.payload.as_object().ok_or(TaskError::Refused(SHAPE.into()))?;
+    if let Some(unknown) = object.keys().find(|key| !["rows", "columns"].contains(&key.as_str())) {
+        return refuse(format!("order takes only rows and columns, not \"{unknown}\"; {SHAPE}"));
+    }
+    let mut row_after: BTreeMap<String, Vec<String>> = loaded.rows.iter().map(|row| (row.id.clone(), row.after.clone())).collect();
+    let mut col_after: BTreeMap<String, Vec<String>> = loaded.columns.iter().map(|col| (col.id.clone(), col.after.clone())).collect();
+    let mut changed = (Vec::new(), Vec::new());
+    for (key, noun, lists, named) in [("rows", "row", &mut row_after, &mut changed.0), ("columns", "column", &mut col_after, &mut changed.1)] {
+        let Some(items) = object.get(key) else { continue };
+        let items = items.as_array().ok_or_else(|| TaskError::Refused(SHAPE.into()))?;
+        for item in items {
+            let id = item.get("id").and_then(Value::as_str).ok_or_else(|| TaskError::Refused(SHAPE.into()))?;
+            if !lists.contains_key(id) {
+                return refuse(format!("grid \"{slug}\" has no {noun} \"{id}\"; run `atelier grid show {slug}`"));
+            }
+            let after = item.get("after").and_then(Value::as_array).ok_or_else(|| TaskError::Refused(format!("{noun} \"{id}\" needs after: a list of {noun} ids")))?;
+            let mut ids = Vec::new();
+            for other in after {
+                let other = other.as_str().ok_or_else(|| TaskError::Refused(format!("{noun} \"{id}\": after must list {noun} ids")))?;
+                if !lists.contains_key(other) {
+                    return refuse(format!("{noun} \"{id}\" comes after \"{other}\", but grid \"{slug}\" has no {noun} \"{other}\""));
+                }
+                if !ids.iter().any(|seen: &String| seen == other) {
+                    ids.push(other.to_string());
+                }
+            }
+            lists.insert(id.to_string(), ids);
+            named.push(id.to_string());
+        }
+    }
+    for (noun, lists) in [("row", &row_after), ("column", &col_after)] {
+        if let Some(cycle) = cycle_in(lists) {
+            return refuse(format!("that order makes a cycle: {noun}s {}; nothing changed", cycle.join(" after ")));
+        }
+    }
+    let (rows_named, cols_named) = changed;
+    for id in &rows_named {
+        connection.execute("UPDATE grid_row SET after = ?4 WHERE project_id = ?1 AND slug = ?2 AND id = ?3",
+            params![request.project, slug, id, json!(row_after[id]).to_string()])?;
+    }
+    for id in &cols_named {
+        connection.execute("UPDATE grid_column SET after = ?4 WHERE project_id = ?1 AND slug = ?2 AND id = ?3",
+            params![request.project, slug, id, json!(col_after[id]).to_string()])?;
+    }
+    let order = json!({"rows": rows_named.iter().map(|id| json!({"id": id, "after": row_after[id]})).collect::<Vec<_>>(),
+        "columns": cols_named.iter().map(|id| json!({"id": id, "after": col_after[id]})).collect::<Vec<_>>()});
+    connection.execute(
+        "INSERT INTO grid_event (project_id, slug, seq, at, kind, row, col, session_id, actor, payload)
+         VALUES (?1, ?2, (SELECT COALESCE(MAX(seq), 0) + 1 FROM grid_event WHERE project_id = ?1 AND slug = ?2),
+                 ?3, 'order', NULL, NULL, ?4, ?5, ?6)",
+        params![request.project, slug, request.now, request.session, request.actor, order.to_string()],
+    )?;
+    Ok(Outcome {
+        slug: Some(slug.to_string()),
+        summary: format!("Order of {slug} set for {} row(s) and {} column(s).", rows_named.len(), cols_named.len()),
+        grids: vec![slug.to_string()],
+        ..Default::default()
+    })
+}
+
+/// A cycle in "comes after" lists, as the ids around it, first repeated.
+fn cycle_in(lists: &BTreeMap<String, Vec<String>>) -> Option<Vec<String>> {
+    fn visit(id: &str, lists: &BTreeMap<String, Vec<String>>, path: &mut Vec<String>, done: &mut HashSet<String>) -> Option<Vec<String>> {
+        if let Some(at) = path.iter().position(|seen| seen == id) {
+            let mut cycle = path[at..].to_vec();
+            cycle.push(id.to_string());
+            return Some(cycle);
+        }
+        if done.contains(id) {
+            return None;
+        }
+        path.push(id.to_string());
+        for next in lists.get(id).into_iter().flatten() {
+            if let Some(cycle) = visit(next, lists, path, done) {
+                return Some(cycle);
+            }
+        }
+        path.pop();
+        done.insert(id.to_string());
+        None
+    }
+    let mut done = HashSet::new();
+    lists.keys().find_map(|id| visit(id, lists, &mut Vec::new(), &mut done))
+}
+
 /// Every note on a grid, oldest first: `{row, col, actor, sessionId, at, text}`.
 pub fn notes(connection: &Connection, project: &str, slug: &str) -> rusqlite::Result<Vec<Value>> {
     let mut statement = connection.prepare(
@@ -2975,11 +3076,21 @@ pub enum Scope {
     Col(String),
 }
 
-/// `atelier grid next`: the free cells of one row (the first with any, or
-/// the one named) or one column, the cells there other tasks hold, how many
-/// free cells the whole grid has left, and a ready `task create` payload.
+/// `atelier grid next`: one cell, the first ready one in the grid's order.
 pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &Prints, scope: &Scope) -> Result<Value, TaskError> {
+    next_batch(connection, project, slug, prints, scope, 1)
+}
+
+/// `atelier grid next --batch N`: up to `batch` ready cells in the grid's
+/// order (rows as drawn, columns by position), over the whole grid or the
+/// row or column named. A free cell is ready when every cell its row or
+/// column comes after is proved or N/A; otherwise it waits. Also: the cells
+/// there other tasks hold or that need a check, the waiting cells and what
+/// each waits for, how many free cells the grid has left, and a ready
+/// `task create` payload.
+pub fn next_batch(connection: &Connection, project: &str, slug: &str, prints: &Prints, scope: &Scope, batch: usize) -> Result<Value, TaskError> {
     let loaded = approved_grid(connection, project, slug)?;
+    let batch = batch.max(1);
     let pairs = live_pairs(&loaded);
     let mut standings = Vec::with_capacity(pairs.len());
     for (_, _, cell) in &pairs {
@@ -2989,42 +3100,71 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
     let taken_in_grid = standings.iter().filter(|s| matches!(s, Standing::Taken(..))).count();
     let needs_check_in_grid = standings.iter().filter(|s| matches!(s, Standing::NeedsCheck)).count();
     let na_pending = pairs.iter().filter(|(_, _, cell)| cell.state == "na_pending").count();
-    let chosen: Option<(&str, String, String)> = match scope {
-        Scope::Row(id) => {
-            let row = loaded.row(id).filter(|row| row.counts()).ok_or_else(|| {
-                TaskError::Refused(format!("grid \"{slug}\" has no row \"{id}\" with cells; run `atelier grid show {slug}`"))
-            })?;
-            Some(("row", row.id.clone(), row.name.clone()))
-        }
-        Scope::Col(id) => {
-            let col = loaded.column(id).filter(|col| col.retired_at.is_none()).ok_or_else(|| {
-                TaskError::Refused(format!("grid \"{slug}\" has no column \"{id}\"; run `atelier grid show {slug}`"))
-            })?;
-            Some(("col", col.id.clone(), col.name.clone()))
-        }
-        Scope::First => pairs
-            .iter()
-            .zip(&standings)
-            .find(|(_, standing)| matches!(standing, Standing::Free))
-            .map(|((row, _, _), _)| ("row", row.id.clone(), row.name.clone())),
+    // A cell is done for whoever comes after it when it is N/A or proved and fresh.
+    let done: HashSet<(&str, &str)> = pairs
+        .iter()
+        .filter(|(_, _, cell)| cell.state == "na" || (cell.state == "proved" && !is_stale(slug, cell, prints)))
+        .map(|(row, col, _)| (row.id.as_str(), col.id.as_str()))
+        .collect();
+    let live: HashSet<(&str, &str)> = pairs.iter().map(|(row, col, _)| (row.id.as_str(), col.id.as_str())).collect();
+    let waits_for = |row: &GridRow, col: &Column| -> Vec<String> {
+        let before = col.after.iter().map(|other| (row.id.as_str(), other.as_str()))
+            .chain(row.after.iter().map(|other| (other.as_str(), col.id.as_str())));
+        before.filter(|at| live.contains(at) && !done.contains(at)).map(|(r, c)| format!("{r}.{c}")).collect()
     };
-    let (mut claimable, mut taken, mut picked, mut needs_check) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let inside = |row: &GridRow, col: &Column| match scope {
+        Scope::First => true,
+        Scope::Row(id) => row.id == *id,
+        Scope::Col(id) => col.id == *id,
+    };
+    match scope {
+        Scope::Row(id) if !loaded.row(id).is_some_and(GridRow::counts) => {
+            return refuse(format!("grid \"{slug}\" has no row \"{id}\" with cells; run `atelier grid show {slug}`"));
+        }
+        Scope::Col(id) if !loaded.column(id).is_some_and(|col| col.retired_at.is_none()) => {
+            return refuse(format!("grid \"{slug}\" has no column \"{id}\"; run `atelier grid show {slug}`"));
+        }
+        _ => {}
+    }
     let all_notes = notes(connection, project, slug)?;
+    let (mut picked, mut claimable, mut waiting) = (Vec::new(), Vec::new(), Vec::new());
+    let mut waiting_in_grid = 0;
+    for ((row, col, cell), standing) in pairs.iter().zip(&standings) {
+        if !matches!(standing, Standing::Free) {
+            continue;
+        }
+        let before = waits_for(row, col);
+        if !before.is_empty() {
+            waiting_in_grid += 1;
+            if inside(row, col) {
+                waiting.push(json!({"row": row.id, "col": col.id, "rowName": row.name, "colName": col.name, "after": before}));
+            }
+            continue;
+        }
+        if inside(row, col) && picked.len() < batch {
+            claimable.push(json!({
+                "row": row.id, "col": col.id, "rowName": row.name, "colName": col.name,
+                "state": cell.state, "stale": is_stale(slug, cell, prints), "proofRule": col.proof_rule,
+                "notes": notes_for(&all_notes, &row.id, &col.id),
+            }));
+            picked.push((row.id.clone(), col.id.clone()));
+        }
+    }
+    // What the cells handed out sit in: the named row or column, or the
+    // row of the first cell.
+    let chosen: Option<(&str, String, String)> = match scope {
+        Scope::Row(id) => loaded.row(id).map(|row| ("row", row.id.clone(), row.name.clone())),
+        Scope::Col(id) => loaded.column(id).map(|col| ("col", col.id.clone(), col.name.clone())),
+        Scope::First => picked.first().and_then(|(row, _)| loaded.row(row)).map(|row| ("row", row.id.clone(), row.name.clone())),
+    };
+    let (mut taken, mut needs_check) = (Vec::new(), Vec::new());
     if let Some((kind, id, _)) = &chosen {
         for ((row, col, cell), standing) in pairs.iter().zip(&standings) {
-            let inside = if *kind == "row" { row.id == *id } else { col.id == *id };
-            if !inside {
+            let here = if *kind == "row" { row.id == *id } else { col.id == *id };
+            if !here {
                 continue;
             }
             match standing {
-                Standing::Free => {
-                    claimable.push(json!({
-                        "row": row.id, "col": col.id, "rowName": row.name, "colName": col.name,
-                        "state": cell.state, "stale": is_stale(slug, cell, prints), "proofRule": col.proof_rule,
-                        "notes": notes_for(&all_notes, &row.id, &col.id),
-                    }));
-                    picked.push((row.id.clone(), col.id.clone()));
-                }
                 Standing::Taken(number, holder) => taken.push(json!({
                     "row": row.id, "col": col.id, "task": number,
                     "chat": holder.as_deref().map(|session| chat_json(connection, session)),
@@ -3033,20 +3173,28 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
                     "row": row.id, "col": col.id, "rowName": row.name, "colName": col.name,
                     "state": cell.state, "proofRule": col.proof_rule,
                 })),
-                Standing::Settled => {}
+                _ => {}
             }
         }
     }
-    let create = chosen.as_ref().filter(|_| !picked.is_empty()).map(|(kind, _, name)| {
-        let shape = shape_named(&loaded, &picked);
-        let name = shape.clone().unwrap_or_else(|| if *kind == "row" { format!("{name} row") } else { format!("{name} column") });
-        task_payload(&loaded, &picked, &Label { name: Some(name), count: picked.len(), noun: "cell", shaped: shape.is_some() })
+    let create = (!picked.is_empty()).then(|| {
+        let name = match picked.as_slice() {
+            [(row, col)] => Some(format!(
+                "{} × {}",
+                loaded.row(row).map(|r| r.name.as_str()).unwrap_or(row),
+                loaded.column(col).map(|c| c.name.as_str()).unwrap_or(col)
+            )),
+            _ => shape_named(&loaded, &picked),
+        };
+        let shaped = picked.len() > 1 && name.is_some();
+        task_payload(&loaded, &picked, &Label { name, count: picked.len(), noun: "cell", shaped })
     });
     Ok(json!({
         "grid": slug, "title": loaded.grid.title,
         "scope": chosen.as_ref().map(|(kind, id, name)| json!({"kind": kind, "id": id, "name": name})),
         "claimable": claimable, "taken": taken, "left": left, "takenInGrid": taken_in_grid, "naPending": na_pending,
         "needsCheck": needs_check, "needsCheckInGrid": needs_check_in_grid,
+        "waiting": waiting, "waitingInGrid": waiting_in_grid,
         "create": create,
         // Finished only when every cell is proved or N/A: none free, claimed,
         // waiting on a check or on the owner's N/A answer.

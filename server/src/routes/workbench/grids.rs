@@ -262,13 +262,15 @@ pub(super) async fn cell(
 pub(super) struct NextQuery {
     row: Option<String>,
     col: Option<String>,
+    batch: Option<usize>,
 }
 
-/// GET /api/workbench/grids/:project/:slug/next[?row=ROW|?col=COL]
+/// GET /api/workbench/grids/:project/:slug/next[?row=ROW|?col=COL][&batch=N]
 ///
-/// The free cells of the first row that has any (or of the row or column
-/// named), the cells there other tasks hold, how many free cells the grid
-/// has left, and a ready `task create` payload for the free ones.
+/// The next ready cell in the grid's order (up to `batch` of them), over the
+/// whole grid or the row or column named; the cells there other tasks hold,
+/// the cells waiting on others, how many free cells the grid has left, and a
+/// ready `task create` payload.
 pub(super) async fn next(
     State(state): State<WorkbenchState>,
     Path((project, slug)): Path<(String, String)>,
@@ -280,10 +282,11 @@ pub(super) async fn next(
         (None, Some(col)) => grids::Scope::Col(col),
         (None, None) => grids::Scope::First,
     };
+    let batch = query.batch.unwrap_or(1);
     let prints = prints_for(&state, &project, vec![slug.clone()]).await;
     let found = state
         .database()
-        .read_tasks(move |store| Ok(grids::next_cells(store.connection(), &project, &slug, &prints, &scope)))
+        .read_tasks(move |store| Ok(grids::next_batch(store.connection(), &project, &slug, &prints, &scope, batch)))
         .await
         .map_err(failed)?;
     Ok(Json(refused_or(found)?))
