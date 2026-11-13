@@ -802,9 +802,12 @@ pub enum Measure {
     /// `task done`: every check, the project's test command, and, when all
     /// pass, break-it and the diff scan.
     Done { test_command: Option<String> },
-    /// The owner approves an amend: the new plan's changed checks, against
-    /// the code as it was at start, and its files' hashes.
+    /// The agent files an amend: the new plan's changed checks, against the
+    /// code as it was at start, and its files' hashes.
     Amend { plan: Value },
+    /// The owner approves an amend: only the new plan's files' hashes, to
+    /// confirm they are as they were when it was filed.
+    Approve { plan: Value },
 }
 
 /// The checks of `new` that are not, as they are, in `old`: what an amend
@@ -882,6 +885,9 @@ pub async fn measure(folder: &Path, kind: &str, plan: &Value, stored: &Value, me
                     gate.flags.extend(mutation_flags(folder, start, &items, at).await);
                 }
             }
+        }
+        Measure::Approve { plan: new } => {
+            gate.hashes = hash_files(folder, &widened(folder, &locked_paths(kind, &new, &harness)));
         }
         Measure::Amend { plan: new } => {
             gate.hashes = hash_files(folder, &widened(folder, &locked_paths(kind, &new, &harness)));

@@ -191,7 +191,7 @@ async fn draft_gate(state: &WorkbenchState, project: &str, folder: Option<&str>,
     tokio::task::spawn_blocking(move || checks::draft_gate(std::path::Path::new(&folder), &kind, &plan, &harness)).await.ok()
 }
 
-/// For start, check, done and an approved amend of a task with checks: run
+/// For start, check, done, an amend and its approval, of a task with checks: run
 /// what the writer judges (checks.rs `measure`), in the task's folder (the
 /// agent's chat, or for the owner the holding chat's). `None` for a task
 /// made before checks, or another action.
@@ -204,7 +204,7 @@ async fn task_gate(
     cwd: Option<&str>,
     payload: &Value,
 ) -> Option<checks::Gate> {
-    if !matches!((actor, action), ("agent", "start" | "check" | "done") | ("owner", "approve_amend")) {
+    if !matches!((actor, action), ("agent", "start" | "check" | "done" | "amend") | ("owner", "approve_amend")) {
         return None;
     }
     let (asked, number) = (project.to_string(), number?);
@@ -230,7 +230,8 @@ async fn task_gate(
         "start" => checks::Measure::Start,
         "check" => checks::Measure::Item(payload["item"].as_str().unwrap_or_default().trim().to_string()),
         "done" => checks::Measure::Done { test_command: task_settings(state, project, Some(&folder)).test_command },
-        _ => checks::Measure::Amend { plan: task.pending_amend.clone()? },
+        "amend" => checks::Measure::Amend { plan: payload.get("plan").filter(|plan| !plan.is_null())?.clone() },
+        _ => checks::Measure::Approve { plan: task.pending_amend.clone()? },
     };
     let stored = task.gate.clone().unwrap_or(Value::Null);
     let at = chrono::Utc::now().timestamp_millis();

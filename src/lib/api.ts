@@ -1623,9 +1623,6 @@ export const storage = {
  * Tasks (docs/tasks.md, "HTTP"). The screens act as the owner; agents change
  * tasks through `atelier task`, never through here.
  */
-/** How long an owner action that runs checks may take: Re-check, Discover, or approving a plan change. */
-const LONG_RUN_MS = 60 * 60_000;
-
 export const tasks = {
   list: async (projectId: string, sessionId?: string | null) => {
     const query = new URLSearchParams({ project: projectId });
@@ -1644,8 +1641,6 @@ export const tasks = {
   act: async (projectId: string, number: number, action: OwnerAction, payload?: Record<string, unknown>) => {
     const answer = await fetchApi<{ task: Task; widget: string | null; summary?: string }>('/api/workbench/task', {
       method: 'POST',
-      // Approving a plan change runs the changed checks against the starting code.
-      ...(action === 'approve_amend' ? { deadlineMs: LONG_RUN_MS } : {}),
       body: JSON.stringify({ action, actor: 'owner', project: projectId, number, ...(payload ? { payload } : {}) }),
     });
     return TaskActionResponseSchema.parse(answer);
@@ -1687,6 +1682,8 @@ export interface GridTaskCells {
   onlyGaps: boolean;
 }
 
+/** How long an owner's Re-check or Discover may take: they run the grid's commands first. */
+const GRID_LONG_MS = 60 * 60_000;
 
 /** What one grid action names: the grid, and for a cell its row and column. */
 export interface GridActionTarget {
@@ -1725,7 +1722,7 @@ export const grids = {
     const long = action === 'verify' || action === 'discover';
     return fetchApi<GridActionAnswer>('/api/workbench/grid', {
       method: 'POST',
-      ...(long ? { deadlineMs: LONG_RUN_MS } : {}),
+      ...(long ? { deadlineMs: GRID_LONG_MS } : {}),
       body: JSON.stringify({
         action,
         actor: 'owner',

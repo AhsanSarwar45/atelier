@@ -1293,6 +1293,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                     )
                 })?;
                 checks::require_checks(&task.kind, plan)?;
+                gate::file_amend(&mut task, plan, request.gate.as_ref())?;
                 if let Some(stored) = task.gate.as_mut() {
                     stored["amendReason"] = json!(reason);
                 }
@@ -1412,6 +1413,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             let note = request.payload.get("note").and_then(Value::as_str).unwrap_or("");
             if let Some(stored) = task.gate.as_mut().and_then(Value::as_object_mut) {
                 stored.remove("amendReason");
+                stored.remove("amendProof");
             }
             ("amend_rejected", json!({"plan": plan, "note": note}), format!("#{number}: the plan amendment is rejected."))
         }

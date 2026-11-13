@@ -251,25 +251,29 @@ pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<(), TaskError> {
     Ok(())
 }
 
-/// The owner approves an amend of a gated task: its new plan needs checks
-/// on every item, a changed check must have its files and, once the task
-/// has started, fail against the starting code for its stated reason. The
-/// changed checks' files are locked anew; the rest keep their approval.
-pub fn approve_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Result<(), TaskError> {
-    checks::require_checks(&task.kind, plan)?;
+/// The agent files an amend of a gated task: a changed check must have its
+/// files and, once the task has started, fail against the starting code for
+/// its stated reason. The runs and the changed checks' file hashes are kept
+/// with the amend, so the owner's approval needs no runs.
+pub fn file_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Result<(), TaskError> {
     let found = measured(gate, "the amend")?;
     let mut stored = stored(task);
     let changed = checks::changed_checks(&task.kind, &task.plan, plan);
     let started = stored["startCommit"].is_string();
     let mut problems = Vec::new();
-    let mut fresh = Vec::new();
+    let (mut runs, mut baseline, mut files) = (json!({}), json!({}), serde_json::Map::new());
     for (item, checks) in &changed {
         for check in checks {
             for path in &check.files {
-                if found.hashes.get(path).map(String::as_str) == Some(checks::MISSING) {
-                    problems.push(format!("{item}: \"{}\" names {path}, which is not in the chat's folder", check.name));
+                match found.hashes.get(path) {
+                    Some(sha) if sha == checks::MISSING => {
+                        problems.push(format!("{item}: \"{}\" names {path}, which is not in the chat's folder", check.name))
+                    }
+                    Some(sha) => {
+                        files.insert(path.clone(), json!(sha));
+                    }
+                    None => {}
                 }
-                fresh.push(path.clone());
             }
             if !started {
                 continue;
@@ -283,13 +287,13 @@ pub fn approve_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> R
             };
             match checks::judge_red(check, run) {
                 Ok(p50) => {
-                    stored["runs"][item][&check.name] = recorded(run, check.is_characterisation(), None, "amend");
+                    runs[item][&check.name] = recorded(run, check.is_characterisation(), None, "amend");
                     if let Some(p50) = p50 {
-                        stored["baseline"][item][&check.name]["p50"] = json!(p50);
-                        stored["baseline"][item][&check.name]["samples"] = json!(run.samples);
+                        baseline[item][&check.name]["p50"] = json!(p50);
+                        baseline[item][&check.name]["samples"] = json!(run.samples);
                     }
                     if let Some(tests) = checks::tests_ran(&run.output) {
-                        stored["baseline"][item][&check.name]["tests"] = json!(tests);
+                        baseline[item][&check.name]["tests"] = json!(tests);
                     }
                 }
                 Err(why) => problems.push(format!("{item}: \"{}\" {why} (an amended check must fail against the starting code, as at start)", check.name)),
@@ -297,8 +301,44 @@ pub fn approve_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> R
         }
     }
     if !problems.is_empty() {
-        return refuse(format!("the amend cannot be approved: {}", problems.join("; ")));
+        return refuse(format!("the amend cannot be filed: {}", problems.join("; ")));
     }
+    stored["amendProof"] = json!({"runs": runs, "baseline": baseline, "files": files});
+    task.gate = Some(stored);
+    Ok(())
+}
+
+/// The owner approves an amend of a gated task. Its changed checks were
+/// proved when it was filed; approval only confirms their files are as they
+/// were then, keeps those runs, and locks the changed checks' files anew
+/// while the rest keep their approval.
+pub fn approve_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Result<(), TaskError> {
+    checks::require_checks(&task.kind, plan)?;
+    let found = measured(gate, "the amend")?;
+    let mut stored = stored(task);
+    let changed = checks::changed_checks(&task.kind, &task.plan, plan);
+    let proof = stored.as_object_mut().and_then(|stored| stored.remove("amendProof")).unwrap_or(Value::Null);
+    if !changed.is_empty() && proof.is_null() {
+        return refuse("the amend cannot be approved: it was filed before amends were checked when filed; the agent must file it again".to_string());
+    }
+    let moved: Vec<String> = proof["files"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(path, sha)| found.hashes.get(path.as_str()).map(|now| json!(now)) != Some((*sha).clone()))
+        .map(|(path, _)| format!("{path} changed since the amend was filed"))
+        .collect();
+    if !moved.is_empty() {
+        return refuse(format!("the amend cannot be approved: {}; the agent must file it again", moved.join("; ")));
+    }
+    for key in ["runs", "baseline"] {
+        for (item, checks) in proof[key].as_object().into_iter().flatten() {
+            for (name, value) in checks.as_object().into_iter().flatten() {
+                stored[key][item][name] = value.clone();
+            }
+        }
+    }
+    let fresh: Vec<String> = changed.iter().flat_map(|(_, checks)| checks.iter().flat_map(|check| check.files.clone())).collect();
     let harness: Vec<String> =
         stored["hashes"]["harness"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
     let mut files = serde_json::Map::new();
@@ -704,15 +744,15 @@ pub(crate) mod tests {
         let message = refused(ask(&store, "amend", Some(one), json!({"plan": unchecked, "reason": "r"}), None));
         assert!(message.contains("has no checks"), "{message}");
         let reason = "\"i\" runs every test in the file, and one needs a GPU";
-        let outcome = ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), None).unwrap();
+        // The changed check is run against the starting code when the amend is filed: still green there, it is refused.
+        assert!(refused(ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), None)).contains("could not run the checks"));
+        let gate = measured(&[("images", "i", 0, "ok")], &["tests/i.rs"]);
+        let message = refused(ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), Some(gate)));
+        assert!(message.contains("images: \"i\" already passes, so it proves nothing (an amended check must fail against the starting code"), "{message}");
+        let gate = measured(&[("images", "i", 101, FAILING)], &["tests/i.rs", "tests/a.rs"]);
+        let outcome = ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), Some(gate.clone())).unwrap();
         assert_eq!(outcome.detail["reason"], reason);
         assert_eq!(super::super::to_json(&store, &outcome.task)["amendReason"], reason);
-        // The changed check is run against the starting code: still green there, it is refused.
-        assert!(refused(ask(&store, "approve_amend", Some(one), json!({}), None)).contains("could not run the checks"));
-        let mut gate = measured(&[("images", "i", 0, "ok")], &["tests/i.rs"]);
-        let message = refused(ask(&store, "approve_amend", Some(one), json!({}), Some(gate.clone())));
-        assert!(message.contains("images: \"i\" already passes, so it proves nothing (an amended check must fail against the starting code"), "{message}");
-        gate = measured(&[("images", "i", 101, FAILING)], &["tests/i.rs", "tests/a.rs"]);
         let outcome = ask(&store, "approve_amend", Some(one), json!({}), Some(gate)).unwrap();
         let stored = outcome.task.gate.clone().unwrap();
         assert_eq!(stored["hashes"]["files"]["tests/i.rs"], "changed", "the changed check's file is locked anew");
