@@ -153,10 +153,12 @@ on; they are locked when the owner approves.
   pass.
 - When a check is wrong or impossible to meet, run `atelier task amend N`
   with the corrected checks and a `reason` that says what you ran and what
-  it printed. Wait for the owner; don't work around it. An amended check
+  it printed. It applies at once; the owner can undo it. An amended check
   must go red again: filing the amend runs it against the starting code
-  and refuses it if it doesn't. Don't touch its files until the owner
-  answers, or the approval is refused and you must file again.
+  and refuses it if it doesn't. When the reply says the change may weaken
+  what the owner approved (an item or check removed, an approved check
+  changed), make sure it doesn't: the approved checks are the proof the
+  work is done. If it does, amend it back.
 
 ## Rules
 
@@ -164,8 +166,8 @@ on; they are locked when the owner approves.
    time.
 2. Block only for a cause you cannot remove yourself, and say what is needed
    to resume.
-3. To change the plan or its checks, run `amend`. The owner approves it.
-   Never change scope silently.
+3. To change the plan or its checks, run `amend`. It applies at once, and
+   the owner sees it. Never change scope silently.
 4. `done` is refused while an item's checks fail. If an item cannot be met,
    amend it or block; don't finish around it.
 5. Never leave a task in progress when the work stops. Finish, block or
@@ -186,10 +188,8 @@ The owner's answers to a task arrive as messages:
   asking. If nothing is left to merge, there is nothing more to do.
 - **Owner reopened task #N**, with a note: do what the note asks, then run
   `done` again. Start the task first if the message says so.
-- **Owner approved the plan change**: continue with the new plan and its
-  checks.
-- **Owner rejected the plan change**: continue with the old plan, minding
-  the owner's note if there is one.
+- **Owner undid the plan change**: continue with the plan as it was
+  before the change.
 - **The owner created task #N from a grid**: start it and work through its
   cells.
 

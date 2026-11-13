@@ -48,7 +48,7 @@ Stored in `workbench.db`.
 | `shortfalls` | integer | 1 when done but some plan item was not met |
 | `blocked` | json, null | `{cause, needed_to_resume}` |
 | `cancel_reason` | text, null | |
-| `pending_amend` | json, null | a proposed new plan waiting for the owner |
+| `pending_amend` | json, null | unused: plan changes once waited for the owner here |
 | `checks` | json, null | plan items checked while in progress: `{<result list>: [entry, …]}` in plan order (see Checking items) |
 | `approved_hashes` | json, null | per item, per check: sha256 of each of its `files` and of the harness files, taken at approval (see Checks) |
 | `check_runs` | json, null | the last run of each check: `{ITEM: {CHECK: run}}` |
@@ -69,8 +69,9 @@ takes no number and is in no list until the owner says yes.
 
 `task_event`: `(project_id, number, seq, at, kind, session_id, actor, payload)`.
 `actor` is `agent` or `owner`. Every state change appends one row. Kinds:
-`created`, `started`, `checked`, `blocked`, `unblocked`, `amend_proposed`,
-`amend_approved`, `amend_rejected`, `done`, `submitted`, `approved`,
+`created`, `started`, `checked`, `blocked`, `unblocked`, `amended`,
+`amend_undone` (older histories: `amend_proposed`, `amend_approved`,
+`amend_rejected`), `done`, `submitted`, `approved`,
 `reopened`, `cancelled`, `taken`, `released`.
 
 ## Lifecycle
@@ -94,9 +95,9 @@ todo ──start──▶ in_progress ──done──▶ done
 - Review types (`plan` and the visual types `ui_change`, `ui_feature`, `visual_bug`, `render_change`, `render_feature`) go to `review` on `done`. The owner
   approves (→ `done`) or reopens with a note (→ `in_progress`; → `todo` if
   the task is unassigned or its session already has another task in progress).
-- `amend` stores `pending_amend`. The owner approves (plan replaced) or
-  rejects. `done` is validated against the approved plan.
-- The owner's approve, reopen and plan-change answers are told to the chat
+- `amend` applies at once: the plan is replaced and `done` is validated
+  against it. The owner can undo the last change (`undo_amend`).
+- The owner's approve, reopen and undo answers are told to the chat
   holding the task (see Owner answers).
 - Done with an unmet plan item is allowed only with a reason for that item.
   The task is then `done` with `shortfalls = 1`.
@@ -130,8 +131,8 @@ have none.
   (and the type's other fields). It is refused while any item has no entry,
   naming the open ones. Once done, the result holds them and `checks` is
   cleared.
-- An approved amend drops the entries of items the new plan no longer has
-  and keeps the rest.
+- An amend drops the entries of items the new plan no longer has and keeps
+  the rest; an undo brings them back.
 
 ### Proposals
 
@@ -155,8 +156,8 @@ propose ──▶ pending ──Create task──▶ created (a todo task in the
 
 ### Owner answers
 
-When the owner approves or reopens a task in review, or approves or rejects
-its plan change, and the action succeeds, the chat holding the task is told
+When the owner approves or reopens a task in review, or undoes its plan
+change, and the action succeeds, the chat holding the task is told
 as a prompt, queued like a proposal's answer (held while the chat is
 mid-turn, started if it is not running). A task no chat holds tells nobody;
 the owner's other actions (`cancel`, `release`) tell nobody.
@@ -183,11 +184,8 @@ the owner's other actions (`cancel`, `release`) tell nobody.
   done again.` (no `: NOTE` when the note is empty). A reopened task left
   `todo` says ``Start it again with `atelier task start N`, continue the
   work and run done again.`` instead.
-- **approve_amend**: `Owner approved the plan change for task #N "T":
-  continue with the new plan.`
-- **reject_amend**: `Owner rejected the plan change for task #N "T": NOTE.
-  Continue with the old plan.`, or `…: continue with the old plan.` with no
-  note.
+- **undo_amend**: `Owner undid the plan change for task #N "T": continue
+  with the plan as it was before.`
 
 ### Reconnect
 
@@ -294,7 +292,7 @@ pytest summaries). A later run that reports fewer fails with, for example,
 
 From then on, before any run, the hashes are compared. A changed file fails
 the item with `approved check file changed: tests/x.rs` (flag
-`hash-changed`) until the owner approves an amend that re-hashes it.
+`hash-changed`) until it is put back, or an amend re-hashes it.
 
 Before the card reaches the owner, a lint reads each proposed check and
 flags weak ones on the proposal card (flag `weak`), for example "only
@@ -375,13 +373,23 @@ checks, since they pass before and after.
 
 When a check is wrong or cannot be met, the agent runs `atelier task amend
 N` with the whole new plan and a `reason` (what it ran, what it printed).
-It must not work around it. Filing it runs the changed checks against the
-starting code: a changed check must go red again (characterisation: pass),
-or the amend is refused there and then. The owner approves or rejects on the
-card, and the waiting-on-you bar shows it. Approval runs nothing, so it
-answers at once: it confirms the changed checks' files are as they were when
-the amend was filed (refused, naming the file, if not), keeps the runs from
-filing and locks those files anew.
+It applies at once; the owner does not approve it. Filing it runs the
+changed checks against the starting code: a changed check must go red again
+(characterisation: pass), or the amend is refused there and then. Once it
+applies, the runs from filing are kept, the changed checks' files are locked
+anew and the changed items are unmet.
+
+A change that may weaken what the owner approved still applies, since the
+test can be wrong. The server compares the plans: an item removed, a check
+removed, or an approved check changed (its command, files, red pattern or
+kind) may weaken it. The reply names each one and asks the agent to make
+sure it doesn't, and to amend it back if it does. A change that only adds
+says nothing of weakening.
+
+The chat line shows the change and what may weaken, with **Undo change**.
+`undo_amend` restores the plan, the stored runs and the recorded entries as
+they were before the last change, while the plan is still the one that
+change made. It is refused with `no plan change to undo` otherwise.
 
 ### Agent rules for checks
 
@@ -494,7 +502,7 @@ are no commits or git could not tell (see Merging).
   required, project comes from the session) or `owner` (the UI; `project`
   required). Agent actions: `create propose start check block unblock amend done cancel take`.
   `check` takes `{item, entry}` and, like `done`, `files`.
-  Owner actions: `approve reopen approve_amend reject_amend cancel release answer_proposal`.
+  Owner actions: `approve reopen undo_amend cancel release answer_proposal`.
   `widget` is the fenced `atelier-widget` text the CLI prints.
   `propose` answers `{proposal, widget, summary}`. `answer_proposal` takes
   the proposal id as `number` and `{choice: create|just_do_it|cancel}` as
@@ -673,7 +681,7 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
    `done`. Never leave it in progress at the end of the work.
 4. Plan and check changes go through `amend`. Never change scope silently,
    and never edit an approved check file.
-   The owner's approve, reopen and plan-change answers arrive as messages;
+   The owner's approve, reopen and undo answers arrive as messages;
    after an approval, ask before merging and never merge without the
    owner's yes.
 5. Follow-ups are suggestions on the result, not new tasks.
@@ -689,14 +697,15 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
   command, with the last run) unfold under it. A type without plan items (`bug`,
   `plan`, `review`) shows its short plan. Clicking the title opens the detail.
 - **Event lines**: every later change (`start`, `check`, `block`, `unblock`,
-  `take`, `amend`, `done`, `cancel`, `approve`, `reopen`, `approve_amend`,
-  `reject_amend`, `release`) is one line: an icon, `#N` and what happened,
+  `take`, `amend`, `done`, `cancel`, `approve`, `reopen`, `undo_amend`,
+  `release`) is one line: an icon, `#N` and what happened,
   e.g. `Checked “Button works” — met`, `Blocked: <cause>`,
-  `Plan change: +1 criterion “…”`, `Done · 6 of 7 met · 1 missed`. While the
-  task (live) still waits on the owner for that change, its buttons sit on
-  the line (Approve change / Reject change; Approve / Reopen); once answered
-  they go and the line says how it was answered. A plan change unfolds to
-  its diff, a done line to the done summary; a done line starts folded
+  `Plan changed: +1 criterion “…”`, `Done · 6 of 7 met · 1 missed`. While the
+  task (live) still waits on the owner for a done, its buttons sit on
+  the line (Approve / Reopen); once answered they go and the line says how
+  it was answered. A plan change unfolds to its diff, its reason and what it
+  may weaken, with **Undo change** while the plan is still the one it made;
+  once undone the line says `Undone`. A done line unfolds to the done summary; a done line starts folded
   unless it waits for review. A visual type's check unfolds to its images.
   Clicking the line (not its buttons) opens the task's detail in the Tasks
   tab as a new history entry, so Back returns to the chat.
@@ -722,7 +731,7 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
   the Tasks tab.
 - **Tasks tab** on the project screen, on every project: tasks grouped by
   status, filters for session and unassigned, a detail panel with history,
-  and owner actions: approve or reopen (review), approve or reject an amend,
+  and owner actions: approve or reopen (review),
   cancel, release (unassign), and turn a follow-up into a task (this puts
   `@task <type>: <title> — <why>` in the composer of a chat).
 - **`@task`** in the composer: a menu entry that inserts `@task `. `@task:N`
