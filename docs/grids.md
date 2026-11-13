@@ -74,14 +74,16 @@ CLI argument without quoting. A `.` or a `+` in an id is refused.
 `grid_column`: `(project_id, slug, id)` is the key. Other columns: `name`,
 `proof_rule` (text: what counts as proof for this requirement, ≤ 1000 chars),
 `checks` (json: check templates, see Column checks), `position`,
-`from_template` (0/1) and `retired_at` (null while it counts).
+`from_template` (0/1), `retired_at` (null while it counts) and `after`
+(json array of column ids; see Order).
 
 `grid_row`: `(project_id, slug, id)` is the key. Other columns: `name`;
 `kind` (`feature`, `combination` or `reference`); `paths` (json array of
 repo-relative files or folders); `of` (json array of row ids, combinations
 only); `ref` (json `{grid, row}`, references only); `source` (`search` or
 `manual`); `added_at`; `missing_since` (null while the row search still
-prints it); `removed_at` (set when an approved edit drops a manual row).
+prints it); `removed_at` (set when an approved edit drops a manual row);
+`after` (json array of row ids; see Order).
 
 - Ownership index:
   `CREATE UNIQUE INDEX grid_row_owner ON grid_row(project_id, id) WHERE kind <> 'reference' AND removed_at IS NULL`.
@@ -470,19 +472,35 @@ atelier grid template set NAME   {columns: [{id, name, proof_rule, checks}]}
   approved grid (`grids::all_in_approved`): approving the grid is the
   owner's yes to working on it. Cells of a draft grid, or a task with no
   cells, still need `@task` (or a proposal).
-- **Next cells.** `atelier grid next SLUG [--row ROW | --col COL]` (`GET
-  /grids/:project/:slug/next`) lists the free cells of the first row, in
-  drawn order, that has any (or of the row or column named): unchecked,
-  gap, or stale and not claimed by an open task. It also lists the cells
-  there other tasks hold, with their task and chat, and how many free cells
-  the whole grid has left. It ends with a ready `atelier task create`
-  payload for the free cells: type `general`, title like `camera: Glare row`
-  (a whole row, column or grid is named without a count, since the task's
-  card shows its shape and count; part of one keeps it, `camera: Glare row
-  (3 cells)`, and an irregular pick is a count, `camera: 12 gaps`), one `done_when` item per cell, id `ROW.COL`, text `<row> ×
+- **Next cell.** `atelier grid next SLUG [--row ROW | --col COL] [--batch N]`
+  (`GET /grids/:project/:slug/next[?row=|?col=][&batch=N]`) hands out one cell at a time:
+  the first ready cell in the grid's order, over the whole grid or the row
+  or column named. The order is rows as drawn and columns by position. A
+  free cell (unchecked, gap, or stale, and not claimed by an open task) is
+  ready when every cell it comes after is proved or N/A; otherwise it
+  waits, and `next` lists it with what it waits for. `--batch N` hands out
+  up to N ready cells in that order, for cells that are cheap to do
+  together. `next` also lists the cells there other tasks hold, with their
+  task and chat, and how many free cells the whole grid has left. It ends
+  with a ready `atelier task create` payload for the cells handed out:
+  type `general`, title like `camera: Glare × Runs on the GPU` for one
+  cell (a batch that makes a whole row, column or grid is named without a
+  count, `camera: Glare row`; any other batch is a count, `camera: 3
+  cells`), one `done_when` item per cell, id `ROW.COL`, text `<row> ×
   <column>: <proof rule>`, with the cell's resolved checks as its `checks`.
-  Cells that need a check are not free; `next` lists them apart. With nothing free it says so: `No gaps left in
-  camera. Every cell is proved or N/A.`
+  Cells that need a check are not free; `next` lists them apart. When
+  nothing is ready it says why (cells claimed, waiting, or needing a
+  check) and exits 3; only a grid whose every cell is proved or N/A gets
+  `No gaps left in camera. Every cell is proved or N/A.`
+- **Order.** `atelier grid order SLUG` takes
+  `{"rows": [{"id": ROW, "after": [ROW…]}], "columns": [{"id": COLUMN, "after": [COLUMN…]}]}`
+  on stdin or `--input FILE`. A column's `"after"` holds back its cell in
+  each row until that row's cells in the named columns are proved or N/A
+  (glare's GPU cell waits for glare's iris cell); a row's `"after"` does
+  the same down each column. Each id given replaces its list, so
+  `"after": []` clears it; ids not given keep theirs. Unknown ids and
+  cycles are refused, and nothing changes. The owner or any agent may set
+  it at any time; each change is a grid event of kind `order`.
 - **The work-through loop.** `grid next` → `task create` with those cells →
   `task start` (the cells' checks go red) → `grid prove` each cell, which
   runs its checks, and `task check N ROW.COL` (or N/A, or a reason at
@@ -578,7 +596,8 @@ non-zero and name the field that is wrong.
 ```
 atelier grid list [--rows]                   grids with % proved and open counts; --rows adds every owned row id
 atelier grid show SLUG [ROW COL]             the matrix as text, or one cell with proof and history
-atelier grid next SLUG [--row ROW | --col COL]  free cells to work on next, and the task create payload for them
+atelier grid next SLUG [--row ROW | --col COL] [--batch N]  the next ready cell (or N), and the task create payload for it
+atelier grid order SLUG                      {rows?:[{id,after}],columns?:[{id,after}]}  what must be proved or N/A first
 atelier grid template list
 atelier grid template set NAME               {columns:[{id,name,proof_rule}]}
 atelier grid draft                           {slug,title,area,template?,row_search,columns,rows}
@@ -592,8 +611,9 @@ atelier grid pass SLUG ROW COL [--note TEXT]
 atelier grid reopen SLUG ROW COL --reason TEXT
 ```
 
-`next` prints the scope, its free cells with their proof rules, the cells
-other tasks hold, and what is left, and ends with the exact `atelier task
+`next` prints the cell (or batch) it hands out with its proof rule, the
+cells waiting and what each waits for, the cells other tasks hold, and
+what is left, and ends with the exact `atelier task
 create` command to run.
 
 `show` prints one line per row: one character per column (`·` unchecked,

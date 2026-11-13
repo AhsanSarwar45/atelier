@@ -209,7 +209,8 @@ with no check shows "Needs a check" and cannot be claimed.
 ```
 atelier grid list [--rows]
 atelier grid show SLUG [ROW COL]
-atelier grid next SLUG [--row ROW | --col COL]
+atelier grid next SLUG [--row ROW | --col COL] [--batch N]
+atelier grid order SLUG        <<< '{"columns":[{"id":…,"after":[…]}],"rows":[…]}'
 atelier grid prove SLUG ROW COL  <<< '{"summary":…,"commits":[…]}'
 atelier grid verify SLUG [ROW COL]
 atelier grid na SLUG ROW COL --reason TEXT
@@ -221,6 +222,12 @@ A grid approved before checks shows every cell as "Needs a check". Add
 column check templates with `atelier grid checks SLUG`; the owner approves
 just those, and the grid's rows, cells and history stay. A check may list
 extra paths in `watch`, so its cell's proof goes stale when they change.
+
+`grid next` hands out one cell at a time, the first ready one in the
+grid's order (rows as drawn, columns by position). A cell waits until the
+cells its row or column comes after are proved or N/A; set that with
+`atelier grid order SLUG`. Use `--batch N` only for cells cheap to do
+together.
 
 To work through an approved grid: run `atelier grid next SLUG`, create the
 task it prints (no `@task` needed), start it (each cell's checks must go
