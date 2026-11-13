@@ -102,14 +102,13 @@ test('the worktree badge lists, moves and deletes worktrees', async ({ page, req
     await row.waitFor({ timeout: WAIT });
     await row.getByTestId('row-name').click();
     await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', sessionId, { timeout: WAIT });
-    const badge = page.getByTestId('worktree-badge');
+    const badge = page.getByTestId('chat-folder-chip');
     await expect(badge).toBeVisible({ timeout: WAIT });
     await expect(page.getByTestId('memory-badge')).toBeVisible();
     const before = (await badge.innerText()).trim();
     console.log('badge before:', before);
     // The folder chip is the badge: it names the folder, and the sizes are in its list.
     expect(before).toBe('main');
-    await expect(badge.getByTestId('chat-folder-chip')).toBeVisible();
     const line = page.getByTestId('chat-status-line');
     await line.screenshot({ path: join(SHOTS, 'header.png') });
 

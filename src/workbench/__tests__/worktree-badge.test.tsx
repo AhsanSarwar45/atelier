@@ -42,7 +42,15 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 function badge() {
-  render(<WorktreeBadge sessionId="chat-1" projectPath="/work/shop" cwd="/work/trees/search" />);
+  render(<WorktreeBadge sessionId="chat-1" projectPath="/work/shop" cwd="/work/trees/search">
+    <button type="button" data-testid="worktree-badge">search</button>
+  </WorktreeBadge>);
+}
+
+/** The chip, once the list has loaded and it opens it. */
+async function chip() {
+  await waitFor(() => expect(screen.getByTestId('worktree-badge')).toHaveAttribute('aria-haspopup', 'dialog'));
+  return screen.getByTestId('worktree-badge');
 }
 
 const row = (name: string) =>
@@ -51,11 +59,11 @@ const row = (name: string) =>
 describe('worktree badge', () => {
   it('opens the worktree list from the folder chip, with the size of the chat\'s own worktree inside', async () => {
     badge();
-    const chip = await screen.findByTestId('worktree-badge');
+    const opener = await chip();
     // The chip names the folder; the sizes live in the list it opens.
-    expect(chip).toHaveTextContent('search');
-    expect(chip).not.toHaveTextContent('GB');
-    fireEvent.click(chip);
+    expect(opener).toHaveTextContent('search');
+    expect(opener).not.toHaveTextContent('GB');
+    fireEvent.click(opener);
     await screen.findByTestId('worktree-popup');
     expect(row('search')).toHaveTextContent('1.5 GB');
     expect(sentOf('worktrees.list')[0]).toMatchObject({ projectPath: '/work/shop' });
@@ -63,7 +71,7 @@ describe('worktree badge', () => {
 
   it('lists the project\'s worktrees with their size, branch and chats', async () => {
     badge();
-    fireEvent.click(await screen.findByTestId('worktree-badge'));
+    fireEvent.click(await chip());
     await screen.findByTestId('worktree-popup');
     expect(screen.getAllByTestId('worktree-row').map((one) => one.getAttribute('data-name'))).toEqual(['shop', 'search', 'cart']);
     expect(row('shop')).toHaveTextContent('2.0 GB');
@@ -76,7 +84,7 @@ describe('worktree badge', () => {
 
   it('moves the chat to another worktree', async () => {
     badge();
-    fireEvent.click(await screen.findByTestId('worktree-badge'));
+    fireEvent.click(await chip());
     await screen.findByTestId('worktree-popup');
     expect(within(row('search')).queryByRole('button', { name: 'Move here' })).toBeNull();
     fireEvent.click(within(row('cart')).getByRole('button', { name: 'Move here' }));
@@ -87,7 +95,7 @@ describe('worktree badge', () => {
 
   it('deletes a worktree only after it is confirmed, and never the project\'s own folder', async () => {
     badge();
-    fireEvent.click(await screen.findByTestId('worktree-badge'));
+    fireEvent.click(await chip());
     await screen.findByTestId('worktree-popup');
     expect(within(row('shop')).queryByRole('button', { name: 'Delete' })).toBeNull();
 
@@ -103,7 +111,7 @@ describe('worktree badge', () => {
 
   it('warns that uncommitted changes will be lost before deleting a worktree that has them', async () => {
     badge();
-    fireEvent.click(await screen.findByTestId('worktree-badge'));
+    fireEvent.click(await chip());
     await screen.findByTestId('worktree-popup');
     fireEvent.click(within(row('cart')).getByRole('button', { name: 'Delete' }));
     const confirm = await screen.findByTestId('worktree-delete-confirm');

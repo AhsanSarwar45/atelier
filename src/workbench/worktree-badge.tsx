@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { FolderGit2 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -16,8 +15,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { request } from '@/lib/api';
-import { cn } from '@/lib/utils';
-import { PHONE_HIDDEN } from '@/workbench/status-chips';
 
 /** One checkout of the project, as `worktrees.list` answers. */
 interface Worktree {
@@ -50,8 +47,8 @@ const chatTitle = (chat: Worktree['chats'][number]) => chat.title || 'Untitled c
 /**
  * The chat's folder chip, opening the project's worktrees with their size,
  * branch and chats: the open chat can move to any of them, and any but the
- * project's own folder can be deleted. `children` is the chip; without it a
- * plain chip names the folder.
+ * project's own folder can be deleted. `children` is the chip, a button that
+ * opens the list.
  */
 export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }: {
   sessionId: string;
@@ -59,7 +56,7 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }
   cwd: string;
   /** Called after this chat moved, so the header reads its folder again. */
   onMoved?: () => void;
-  children?: ReactNode;
+  children: ReactNode;
 }) {
   const [trees, setTrees] = useState<Worktree[] | null>(null);
   const [deleting, setDeleting] = useState<Worktree | null>(null);
@@ -76,7 +73,7 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }
   const own = trees?.find(tree => tree.path === cwd)
     ?? trees?.filter(tree => cwd.startsWith(`${tree.path}/`)).sort((a, b) => b.path.length - a.path.length)[0];
   // Not a git checkout, or not listed yet: the chip alone, with nothing to open.
-  if (!trees || !own) return <>{children ?? null}</>;
+  if (!trees || !own) return <>{children}</>;
 
   const act = (command: Record<string, unknown>, after?: () => void) => {
     setBusy(true);
@@ -95,15 +92,9 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }
   return <>
     <Popover onOpenChange={open => { if (open) { setError(null); read(); } }}>
       <PopoverTrigger asChild>
-        <button type="button" data-testid="worktree-badge" aria-label={`Worktrees (this chat: ${own.name})`}
-          className={cn(PHONE_HIDDEN, 'shrink-0 cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring')}>
-          {children ?? <Badge appearance="outline" size="sm" shape="circle" className="gap-1">
-            <FolderGit2 className="size-3" aria-hidden="true" />
-            <span>{own.name}</span>
-          </Badge>}
-        </button>
+        {children}
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[26rem] p-0" data-testid="worktree-popup">
+      <PopoverContent align="start" className="w-[26rem] max-w-[calc(100vw-2rem)] p-0" data-testid="worktree-popup">
         <div className="border-b px-3 py-2"><p className="text-sm font-medium">Worktrees</p></div>
         <div className="max-h-[28rem] overflow-y-auto p-1.5 text-sm">
           {trees.map(tree => {
@@ -115,6 +106,7 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }
                 <div className="flex items-center gap-1.5">
                   <span className="truncate font-medium" title={tree.path}>{tree.name}</span>
                   {here && <span className="shrink-0 text-xs text-muted-foreground">This chat</span>}
+                  <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{diskWords(tree.bytes)}</span>
                 </div>
                 <div className="truncate text-xs text-muted-foreground">
                   {[tree.branch ?? 'Detached', tree.dirty ? 'Uncommitted changes' : null].filter(Boolean).join(' · ')}
@@ -122,12 +114,11 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }
                 {tree.chats.length > 0 && <div className="truncate text-xs text-muted-foreground">
                   {tree.chats.map(chatTitle).join(', ')}
                 </div>}
-              </div>
-              <span className="shrink-0 pt-0.5 tabular-nums text-muted-foreground">{diskWords(tree.bytes)}</span>
-              <div className="flex shrink-0 gap-1">
-                {!here && <Button variant="outline" size="xs" disabled={busy} onClick={() => move(tree)}>Move here</Button>}
-                {!tree.isMain && <Button variant="ghost" size="xs" disabled={busy} className="text-destructive"
-                  onClick={() => { setError(null); setDeleting(tree); }}>Delete</Button>}
+                {(!here || !tree.isMain) && <div className="mt-1 flex gap-1">
+                  {!here && <Button variant="outline" size="xs" disabled={busy} onClick={() => move(tree)}>Move here</Button>}
+                  {!tree.isMain && <Button variant="ghost" size="xs" disabled={busy} className="text-destructive"
+                    onClick={() => { setError(null); setDeleting(tree); }}>Delete</Button>}
+                </div>}
               </div>
             </div>;
           })}

@@ -2754,13 +2754,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           <WorktreeBadge sessionId={sessionId ?? ''} projectPath={projectPath ?? ''} cwd={facts.cwd ?? ''} onMoved={() => setMovedCount((count) => count + 1)}>
             <Tooltip label={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}>
               <Badge
+                asChild
                 hue={hueFor(facts.folder)}
                 appearance="light"
                 size="sm"
                 shape="circle"
-                data-testid="chat-folder-chip"
-                data-folder={facts.folder}
-                data-branch={facts.branch ?? ''}
                 // The whole path and the branch in the tooltip: the chip has room
                 // for the one word that tells two copies of a project apart.
                 // Never squeezed by the line, and never wider than a name: a chip
@@ -2768,15 +2766,24 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 // (bw-7ks.22.15).
                 className="hidden max-w-40 shrink-0 gap-1 truncate group-data-[expanded=true]/chips:inline-flex md:inline-flex"
               >
-                {/* A folder that is a checkout says so: the branch is already in
-                    this chip's tooltip, and the mark is what says there is one to
-                    hover for (bw-ja9l.12). */}
-                {facts.branch ? (
-                  <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-                ) : (
-                  <Folder className="size-3 shrink-0" aria-hidden="true" />
-                )}
-                <span className="min-w-0 truncate">{facts.folder}</span>
+                <Button
+                  variant="ghost"
+                  size="none"
+                  data-testid="chat-folder-chip"
+                  data-folder={facts.folder}
+                  data-branch={facts.branch ?? ''}
+                  aria-label={`Worktrees (this chat: ${facts.folder})`}
+                >
+                  {/* A folder that is a checkout says so: the branch is already in
+                      this chip's tooltip, and the mark is what says there is one to
+                      hover for (bw-ja9l.12). */}
+                  {facts.branch ? (
+                    <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <Folder className="size-3 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="min-w-0 truncate">{facts.folder}</span>
+                </Button>
               </Badge>
             </Tooltip>
           </WorktreeBadge>
