@@ -15,6 +15,8 @@ pub mod types;
 pub mod visual;
 #[cfg(test)]
 mod lock_scope_tests;
+#[cfg(test)]
+mod unlocked_tests;
 
 use super::store::Store;
 use rusqlite::{params, Connection, OptionalExtension, Row};

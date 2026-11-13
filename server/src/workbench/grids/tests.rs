@@ -6,20 +6,20 @@ use super::*;
 use crate::workbench::store::Store;
 use crate::workbench::tasks;
 
-fn store() -> (tempfile::TempDir, Store) {
+pub(super) fn store() -> (tempfile::TempDir, Store) {
     let directory = tempfile::tempdir().unwrap();
     let store = Store::open(&directory.path().join("workbench.db")).unwrap();
     (directory, store)
 }
 
-fn owner_says(store: &Store, session: &str, text: &str) {
+pub(super) fn owner_says(store: &Store, session: &str, text: &str) {
     let count: i64 = store.connection().query_row("SELECT COUNT(*) FROM message", [], |row| row.get(0)).unwrap();
     let id = format!("m{count}");
     store.open_message(session, &id, "user", &format!("2026-01-01T00:{:02}:{:02}Z", count / 60, count % 60)).unwrap();
     store.grow_message(session, &id, text).unwrap();
 }
 
-fn request(action: &str, actor: &str, session: Option<&str>, slug: &str) -> Request {
+pub(super) fn request(action: &str, actor: &str, session: Option<&str>, slug: &str) -> Request {
     Request {
         action: action.into(),
         actor: actor.into(),
@@ -31,7 +31,7 @@ fn request(action: &str, actor: &str, session: Option<&str>, slug: &str) -> Requ
     }
 }
 
-fn on(mut request: Request, row: &str, col: &str) -> Request {
+pub(super) fn on(mut request: Request, row: &str, col: &str) -> Request {
     request.row = Some(row.into());
     request.col = Some(col.into());
     request
@@ -45,7 +45,7 @@ fn refused(result: Result<Outcome, TaskError>) -> String {
     }
 }
 
-fn found(id: &str, paths: &[&str]) -> search::Found {
+pub(super) fn found(id: &str, paths: &[&str]) -> search::Found {
     search::Found {
         id: id.into(),
         name: id.to_uppercase(),
@@ -55,11 +55,11 @@ fn found(id: &str, paths: &[&str]) -> search::Found {
     }
 }
 
-fn ran(rows: Vec<search::Found>) -> Option<Result<search::Run, String>> {
+pub(super) fn ran(rows: Vec<search::Found>) -> Option<Result<search::Run, String>> {
     Some(Ok(search::Run { rows, head: Some("h1".into()) }))
 }
 
-fn draft_payload(slug: &str) -> Value {
+pub(super) fn draft_payload(slug: &str) -> Value {
     json!({
         "slug": slug, "title": format!("Grid {slug}"), "area": "An area.",
         "row_search": {"command": "scripts/rows.sh", "watch": [format!("{slug}/")]},
@@ -72,7 +72,7 @@ fn draft_payload(slug: &str) -> Value {
     })
 }
 
-fn draft(store: &Store, session: &str, payload: Value, rows: Vec<search::Found>) -> Result<Outcome, TaskError> {
+pub(super) fn draft(store: &Store, session: &str, payload: Value, rows: Vec<search::Found>) -> Result<Outcome, TaskError> {
     let mut asked = request("draft", "agent", Some(session), "");
     asked.slug = None;
     asked.payload = payload;
@@ -91,16 +91,16 @@ fn camera(store: &Store) {
     approved(store, "s1", "camera", vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]);
 }
 
-fn state(store: &Store, slug: &str, row: &str, col: &str) -> Cell {
+pub(super) fn state(store: &Store, slug: &str, row: &str, col: &str) -> Cell {
     get_cell(store.connection(), "p", slug, row, col).unwrap().unwrap()
 }
 
-fn passing() -> Vec<proof::CheckResult> {
+pub(super) fn passing() -> Vec<proof::CheckResult> {
     vec![proof::CheckResult { name: "unit".into(), exit: 0, ms: 5, tail: String::new() }]
 }
 
 /// A prove payload for a cell with approved checks: the server runs those.
-fn proof_payload() -> Value {
+pub(super) fn proof_payload() -> Value {
     json!({"summary": "glare matches the reference"})
 }
 
@@ -978,7 +978,7 @@ fn prove_runs_the_cells_approved_checks_and_refuses_the_agents_own() {
 }
 
 #[test]
-fn approval_locks_the_check_files_and_a_changed_one_refuses_prove() {
+fn approval_records_the_check_files_and_a_changed_one_is_named_on_the_proof() {
     let (_d, store) = store();
     owner_says(&store, "s1", "@matrix the camera area");
     let mut payload = draft_payload("camera");
@@ -997,12 +997,14 @@ fn approval_locks_the_check_files_and_a_changed_one_refuses_prove() {
     asked.checks = passing();
     asked.fingerprint = Some("f1".into());
     asked.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a2"}}));
-    let refusal = refused(apply(store.connection(), &asked));
-    assert!(refusal.starts_with("camera.glare.gpu: approved check file changed: tests/glare_gpu.rs"), "{refusal}");
-    // Another row's file is not this cell's business; put back, it proves.
+    apply(store.connection(), &asked).unwrap();
+    let cell = state(&store, "camera", "glare", "gpu");
+    assert_eq!(cell.state, "proved", "a changed check file is not locked");
+    assert_eq!(cell.proof.unwrap()["changedCheckFiles"], json!(["tests/glare_gpu.rs"]));
+    // Another row's file is not this cell's business.
     asked.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a1", "tests/sunstar_gpu.rs": "changed"}}));
     apply(store.connection(), &asked).unwrap();
-    assert_eq!(state(&store, "camera", "glare", "gpu").state, "proved");
+    assert!(state(&store, "camera", "glare", "gpu").proof.unwrap().get("changedCheckFiles").is_none());
 }
 
 #[test]

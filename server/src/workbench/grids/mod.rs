@@ -1945,8 +1945,6 @@ pub fn pending_check_files(pending: &Value) -> Vec<String> {
     files.into_iter().collect()
 }
 
-/// The approved check files of a cell whose hash in `current` differs from
-/// the one approval locked.
 /// Every file a check on the grid names, filled in for its row.
 fn owned_check_files(loaded: &Loaded) -> Vec<String> {
     let mut owned = Vec::new();
@@ -1964,6 +1962,8 @@ fn owned_check_files(loaded: &Loaded) -> Vec<String> {
     owned
 }
 
+/// The approved check files of a cell, and the helpers beside them, whose
+/// hash in `current` differs from the one stored at approval.
 fn changed_check_files(approved: &[Value], owned: &[String], locked: Option<&Value>, current: Option<&Value>) -> Vec<String> {
     let (Some(locked), Some(current)) = (locked, current) else { return Vec::new() };
     use crate::workbench::tasks::checks::test_folder;
@@ -1997,13 +1997,9 @@ fn prove(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
     let folder = request.cwd.as_deref().unwrap_or("this chat's folder");
     let approved = loaded.cell_checks(&cell.row, &cell.col);
     let owned = owned_check_files(&loaded);
+    // Nothing is locked: a changed check file is recorded on the proof for
+    // the owner to review.
     let changed = changed_check_files(&approved, &owned, loaded.grid.hashes.as_ref(), request.hashes.as_ref());
-    if !changed.is_empty() {
-        return refuse(format!(
-            "{at}: approved check file changed: {}. Put it back as approved; to change a check, draft the grid again for the owner to approve",
-            changed.join(", ")
-        ));
-    }
     if !request.dirty.is_empty() {
         return refuse(format!(
             "commit the covered code first: {} uncommitted in {folder}. A proof describes committed code",
@@ -2028,7 +2024,11 @@ fn prove(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
         .ok_or_else(|| TaskError::Refused(format!("git could not fingerprint the covered code in {folder}; is it a repository with a commit?")))?;
     let now = request.now;
     cell.state = "proved".into();
-    cell.proof = Some(checked.value.clone());
+    let mut value = checked.value.clone();
+    if !changed.is_empty() {
+        value["changedCheckFiles"] = json!(changed);
+    }
+    cell.proof = Some(value);
     cell.fingerprint = Some(fingerprint);
     cell.proved_by = Some(session.to_string());
     cell.proved_at = Some(now);
@@ -3544,5 +3544,7 @@ pub fn describe(id: &str, loaded: Option<&Loaded>, prints: &Prints, with_task: b
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unlocked_tests;
 #[cfg(test)]
 mod note_tests;
