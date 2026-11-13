@@ -22,6 +22,7 @@ mod gaps;
 mod grid_column_checks;
 mod grid_next_exit;
 mod grid_next_needs_check;
+mod grid_next_one_cell;
 mod mutation_score;
 mod proof_dependencies;
 mod carried_folders_reach_the_build;
