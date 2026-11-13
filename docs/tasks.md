@@ -281,6 +281,17 @@ sha256 of each file in `files` and of every harness file
 (`approved_hashes`). The check files must therefore exist when the task is
 proposed or created; an agent writes them first.
 
+A check file inside a test folder (the topmost ancestor named `tests`,
+`test`, `__tests__`, `spec` or `e2e`) locks that whole test folder: every
+tracked file under it, so shared helpers, fixtures, tolerances and
+baselines cannot be loosened to make a check pass. A check file outside a
+test folder locks only itself.
+
+A check also cannot pass by running fewer tests. At start the server
+records how many tests each check's output reports (cargo, vitest and
+pytest summaries). A later run that reports fewer fails with, for example,
+"ran 1 test, 3 at start", even when every locked file is unchanged.
+
 From then on, before any run, the hashes are compared. A changed file fails
 the item with `approved check file changed: tests/x.rs` (flag
 `hash-changed`) until the owner approves an amend that re-hashes it.
@@ -334,6 +345,18 @@ than its item list. Then:
    ignore markers (`skip-added`), `exit(` calls inside test files
    (`exit-in-test`) and deleted test files or test functions
    (`test-deleted`).
+
+4. **Deliberate breaks (optional).** With `"mutants": true` in the plan,
+   the server breaks the task's changed lines in small ways in a scratch
+   copy. It flips a comparison, swaps an operator, `&&`/`||` or
+   `true`/`false`, changes a number, or deletes a statement. It then runs
+   each item's checks against every break. Each item gets a `mutants` flag
+   that says how many breaks its checks catch ("the checks catch 7 of 9
+   deliberate breaks"). An item whose checks catch fewer than a quarter is
+   also flagged `weak-checks`. Break-it shows that a check depends on the
+   change; this shows that it catches a wrong answer. It costs one run of
+   the item's checks per break, so ask for it where the checks matter
+   most.
 
 Flags are stored as `checkFlags: [{item?, check?, kind, text}]` and shown on
 the review card.

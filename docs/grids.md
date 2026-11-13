@@ -145,7 +145,19 @@ These are worked out each time a grid is read:
 ## Covered code and staleness
 
 A row covers its `paths`. A combination row covers its own paths plus the
-paths of every row in its `of`.
+paths of every row in its `of`. A row also covers what its cells' checks
+depend on: each check's `files`, and the extra paths it lists in `watch`
+(with `{row}` filled in). Use `watch` for anything the proof relies on
+that the row search does not list, such as a shared shader or a baseline
+image.
+
+The fingerprint follows what covered files pull in, so a row does not have
+to list every file by hand. In Rust, a macro call with a file name, like
+`include_str!("x.wgsl")`, `include_bytes!(…)`, `include!(…)` or a
+project macro such as `wgsl!("iris.wgsl")`, adds that file. In WGSL and
+GLSL, an `#include "x"` or `#import "x"` line does the same. Names resolve
+against the including file's folder, then the repository root. The walk
+is recursive and bounded, and only committed files count.
 
 - **Checkout.** Every git question about a grid is asked in the project's
   folder (`local_path`, else `path`, as for tasks), at that folder's `HEAD`.
@@ -241,6 +253,17 @@ by the row id, so one template covers every row:
   otherwise the claim is refused, naming the cell and check.
 - Grids approved before column checks, and cells proved before them, keep
   the old rules: `prove` takes its own `checks` in the payload.
+- To add checks to an approved grid without drafting it again, run
+  `atelier grid checks SLUG --input FILE` with
+  `{"columns": [{"id": "docs", "checks": [ … ]}]}`. Only column checks are
+  allowed in this payload. The grid stays approved while the checks wait. The owner
+  approves or discards just those checks on the grid card. Rows, columns,
+  cells, proofs and history are kept, and the new check files join the
+  grid's lock.
+- `atelier grid next` never calls a grid finished while cells need a check.
+  It says how many need one and names `atelier grid checks`. Its JSON has
+  `finished: false`, and the command exits non-zero when it hands out
+  nothing and the grid is not finished.
 
 ## Proof
 

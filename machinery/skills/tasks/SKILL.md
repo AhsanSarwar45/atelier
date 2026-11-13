@@ -103,6 +103,13 @@ on; they are locked when the owner approves.
 - Each check fails for one stated reason, the one in `red`. Make the
   command print that reason.
 - Keep each under about two minutes.
+- Everything in a check's test folder is locked with it (helpers,
+  fixtures, baselines), and a check that runs fewer tests than at start
+  fails.
+- Add `"mutants": true` to the plan for the deeper test at done: the server
+  breaks the changed lines on purpose and reports how many breaks each
+  item's checks catch; items that catch almost none are flagged
+  `weak-checks`.
 - Write the check files before you propose or create: their contents are
   what the owner approves and the server locks.
 
@@ -198,7 +205,13 @@ atelier grid next SLUG [--row ROW | --col COL]
 atelier grid prove SLUG ROW COL  <<< '{"summary":…,"commits":[…]}'
 atelier grid verify SLUG [ROW COL]
 atelier grid na SLUG ROW COL --reason TEXT
+atelier grid checks SLUG       <<< '{"columns":[{"id":…,"checks":[…]}]}'
 ```
+
+A grid approved before checks shows every cell as "Needs a check". Add
+column check templates with `atelier grid checks SLUG`; the owner approves
+just those, and the grid's rows, cells and history stay. A check may list
+extra paths in `watch`, so its cell's proof goes stale when they change.
 
 To work through an approved grid: run `atelier grid next SLUG`, create the
 task it prints (no `@task` needed), start it (each cell's checks must go
