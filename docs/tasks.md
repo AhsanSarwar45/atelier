@@ -375,9 +375,13 @@ checks, since they pass before and after.
 
 When a check is wrong or cannot be met, the agent runs `atelier task amend
 N` with the whole new plan and a `reason` (what it ran, what it printed).
-It must not work around it. The owner approves or rejects on the card, and
-the waiting-on-you bar shows it. Approval re-hashes the changed checks and
-re-runs them: a changed check must go red again (characterisation: pass).
+It must not work around it. Filing it runs the changed checks against the
+starting code: a changed check must go red again (characterisation: pass),
+or the amend is refused there and then. The owner approves or rejects on the
+card, and the waiting-on-you bar shows it. Approval runs nothing, so it
+answers at once: it confirms the changed checks' files are as they were when
+the amend was filed (refused, naming the file, if not), keeps the runs from
+filing and locks those files anew.
 
 ### Agent rules for checks
 

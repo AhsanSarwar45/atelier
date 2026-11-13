@@ -148,7 +148,9 @@ on; they are locked when the owner approves.
 - When a check is wrong or impossible to meet, run `atelier task amend N`
   with the corrected checks and a `reason` that says what you ran and what
   it printed. Wait for the owner; don't work around it. An amended check
-  must go red again.
+  must go red again: filing the amend runs it against the starting code
+  and refuses it if it doesn't. Don't touch its files until the owner
+  answers, or the approval is refused and you must file again.
 
 ## Rules
 
