@@ -14,6 +14,7 @@
 //! its own.
 
 mod a_push_reaches_a_real_device;
+mod amend_applies;
 mod a_session_event_reaches_the_file_on_disk;
 mod a_start_leaves_the_readers_own_settings_alone;
 mod build_hygiene;
