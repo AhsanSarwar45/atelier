@@ -37,8 +37,8 @@ fn stored(task: &TaskRow) -> Value {
 
 /// `Err` naming the approved files of this item (or the harness) that
 /// changed since the owner approved them.
-fn locked(stored: &Value, item: &str, checks: &[Check], found: &Gate) -> Result<(), String> {
-    let changed = checks::changed_for(&stored["hashes"], checks, &found.hashes);
+fn locked(stored: &Value, item: &str, checks: &[Check], owned: &[String], found: &Gate) -> Result<(), String> {
+    let changed = checks::changed_for(&stored["hashes"], checks, owned, &found.hashes);
     if changed.is_empty() {
         return Ok(());
     }
@@ -57,6 +57,12 @@ fn baseline(stored: &Value, item: &str, check: &Check) -> Option<f64> {
     stored["baseline"][item][&check.name]["p50"].as_f64()
 }
 
+/// Green, and running no fewer tests than at start.
+fn green(stored: &Value, item: &str, check: &Check, run: &Run) -> Result<(), String> {
+    checks::judge_green(check, run, baseline(stored, item, check))?;
+    checks::judge_count(run, stored["baseline"][item][&check.name]["tests"].as_u64())
+}
+
 fn recorded(run: &Run, passed: bool, reason: Option<&str>, phase: &str) -> Value {
     let mut value = run.to_json(passed, reason);
     value["phase"] = json!(phase);
@@ -69,13 +75,14 @@ fn recorded(run: &Run, passed: bool, reason: Option<&str>, phase: &str) -> Value
 pub fn start(task: &mut TaskRow, gate: Option<&Gate>) -> Result<Value, TaskError> {
     let found = measured(gate, "start")?;
     let mut stored = stored(task);
+    let owned = checks::check_files(&task.kind, &task.plan);
     let mut problems = Vec::new();
     let mut runs = json!({});
     let mut baselines = json!({});
     let mut count = 0;
     let mut kept = 0;
     for (item, checks) in checks::item_checks(&task.kind, &task.plan) {
-        if let Err(why) = locked(&stored, &item, &checks, found) {
+        if let Err(why) = locked(&stored, &item, &checks, &owned, found) {
             problems.push(why);
             continue;
         }
@@ -91,7 +98,11 @@ pub fn start(task: &mut TaskRow, gate: Option<&Gate>) -> Result<Value, TaskError
             match checks::judge_red(check, run) {
                 Ok(p50) => {
                     if let Some(p50) = p50 {
-                        baselines[&item][&check.name] = json!({"p50": p50, "samples": run.samples});
+                        baselines[&item][&check.name]["p50"] = json!(p50);
+                        baselines[&item][&check.name]["samples"] = json!(run.samples);
+                    }
+                    if let Some(tests) = checks::tests_ran(&run.output) {
+                        baselines[&item][&check.name]["tests"] = json!(tests);
                     }
                     if check.is_characterisation() {
                         kept += 1;
@@ -133,8 +144,9 @@ pub fn check(task: &mut TaskRow, item: &str, gate: Option<&Gate>) -> Result<Chec
         .ok_or_else(|| TaskError::Refused(format!("\"{item}\" is not an item in the plan (items with checks: {})", ids.join(", "))))?;
     let found = measured(gate, "check")?;
     let mut stored = stored(task);
+    let owned = checks::check_files(&task.kind, &task.plan);
     let mut problems = Vec::new();
-    if let Err(why) = locked(&stored, item, &checks, found) {
+    if let Err(why) = locked(&stored, item, &checks, &owned, found) {
         problems.push(why);
     }
     let mut passed = 0;
@@ -143,8 +155,8 @@ pub fn check(task: &mut TaskRow, item: &str, gate: Option<&Gate>) -> Result<Chec
         let run = run_of(found, item, check).map_err(TaskError::Refused)?;
         // A check whose own approved files changed does not count as passing,
         // whatever it printed: what ran is no longer the check the owner approved.
-        let tampered = !checks::changed_for(&stored["hashes"], std::slice::from_ref(check), &found.hashes).is_empty();
-        let judged = if tampered { Err("ran with an approved file changed".to_string()) } else { checks::judge_green(check, run, baseline(&stored, item, check)) };
+        let tampered = !checks::changed_for(&stored["hashes"], std::slice::from_ref(check), &owned, &found.hashes).is_empty();
+        let judged = if tampered { Err("ran with an approved file changed".to_string()) } else { green(&stored, item, check, run) };
         match judged {
             Ok(()) => {
                 passed += 1;
@@ -192,15 +204,16 @@ pub fn ticked(task: &TaskRow) -> (usize, usize) {
 pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<(), TaskError> {
     let found = measured(gate, "done")?;
     let mut stored = stored(task);
+    let owned = checks::check_files(&task.kind, &task.plan);
     let mut problems = Vec::new();
     for (item, checks) in checks::item_checks(&task.kind, &task.plan) {
-        if let Err(why) = locked(&stored, &item, &checks, found) {
+        if let Err(why) = locked(&stored, &item, &checks, &owned, found) {
             problems.push(why);
         }
         let mut met = true;
         for check in &checks {
             let run = run_of(found, &item, check).map_err(TaskError::Refused)?;
-            match checks::judge_green(check, run, baseline(&stored, &item, check)) {
+            match green(&stored, &item, check, run) {
                 Ok(()) => stored["runs"][&item][&check.name] = recorded(run, true, None, "done"),
                 Err(why) => {
                     met = false;
@@ -272,7 +285,11 @@ pub fn approve_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> R
                 Ok(p50) => {
                     stored["runs"][item][&check.name] = recorded(run, check.is_characterisation(), None, "amend");
                     if let Some(p50) = p50 {
-                        stored["baseline"][item][&check.name] = json!({"p50": p50, "samples": run.samples});
+                        stored["baseline"][item][&check.name]["p50"] = json!(p50);
+                        stored["baseline"][item][&check.name]["samples"] = json!(run.samples);
+                    }
+                    if let Some(tests) = checks::tests_ran(&run.output) {
+                        stored["baseline"][item][&check.name]["tests"] = json!(tests);
                     }
                 }
                 Err(why) => problems.push(format!("{item}: \"{}\" {why} (an amended check must fail against the starting code, as at start)", check.name)),
@@ -285,10 +302,17 @@ pub fn approve_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> R
     let harness: Vec<String> =
         stored["hashes"]["harness"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
     let mut files = serde_json::Map::new();
-    for path in checks::locked_paths(&task.kind, plan, &harness) {
+    // The changed checks' test folders are locked again as they are now.
+    let roots: Vec<String> = fresh.iter().filter_map(|path| checks::test_folder(path)).collect();
+    let owned = checks::check_files(&task.kind, plan);
+    let mut paths = checks::locked_paths(&task.kind, plan, &harness);
+    paths.extend(found.hashes.keys().filter(|path| !paths.contains(path)).cloned().collect::<Vec<_>>());
+    for path in paths {
         let before = stored["hashes"]["files"].get(&path).cloned();
         let now = found.hashes.get(&path).map(|sha| json!(sha));
-        let kept = if fresh.contains(&path) { now.or(before) } else { before.or(now) };
+        // An unchanged check's own file keeps its approval.
+        let renewed = fresh.contains(&path) || (!owned.contains(&path) && roots.iter().any(|root| path.starts_with(&format!("{root}/"))));
+        let kept = if renewed { now.or(before) } else { before.or(now) };
         if let Some(sha) = kept {
             files.insert(path, sha);
         }

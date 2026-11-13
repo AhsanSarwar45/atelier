@@ -558,8 +558,21 @@ pub fn check_why(why: &str, at: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Check a plan for its type.
+/// Check a plan for its type. Any plan may ask for deliberate breaks at
+/// done with `mutants: true` (docs/tasks.md, "Deliberate breaks").
 pub fn check_plan(kind: &str, plan: &Value) -> Result<(), String> {
+    if let Some(mutants) = plan.get("mutants") {
+        if !mutants.is_boolean() {
+            return Err("plan.mutants must be true or false".into());
+        }
+        let mut rest = plan.clone();
+        rest.as_object_mut().map(|row| row.remove("mutants"));
+        return check_plan_fields(kind, &rest);
+    }
+    check_plan_fields(kind, plan)
+}
+
+fn check_plan_fields(kind: &str, plan: &Value) -> Result<(), String> {
     let at = "plan";
     let row = object(plan, at)?;
     match kind {

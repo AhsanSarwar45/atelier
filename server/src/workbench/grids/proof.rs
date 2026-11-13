@@ -399,8 +399,10 @@ pub async fn fingerprint(folder: &Path, head: &str, paths: &[String]) -> Option<
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         git(folder, &args).await?
     };
-    let mut lines: Vec<&str> = listing.lines().filter(|line| !line.is_empty()).collect();
+    let mut lines: Vec<String> = listing.lines().filter(|line| !line.is_empty()).map(str::to_string).collect();
+    lines.extend(dependencies(folder, head, &lines).await);
     lines.sort();
+    lines.dedup();
     let digest = Sha256::digest(lines.join("\n").as_bytes());
     let print = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
     let mut known = known().lock().unwrap_or_else(|e| e.into_inner());
@@ -409,6 +411,150 @@ pub async fn fingerprint(folder: &Path, head: &str, paths: &[String]) -> Option<
     }
     known.insert(key, print.clone());
     Some(print)
+}
+
+/// Files whose text may pull in other files.
+const SOURCE_EXTENSIONS: &[&str] = &[
+    "rs", "wgsl", "glsl", "hlsl", "vert", "frag", "comp", "metal", "c", "h", "cc", "cpp", "hpp", "ts", "tsx", "js", "jsx", "mjs",
+];
+/// How deep, and how many files, the walk of what covered files pull in goes.
+const DEPENDENCY_ROUNDS: usize = 6;
+const MAX_DEPENDENCIES: usize = 2000;
+
+/// The paths a file's text pulls in, as written: the first string of a
+/// macro call (`include_str!("x")`, `include_bytes!`, `include!`, and any
+/// `name!("x.wgsl")` such as a shader macro) and `#include "x"` /
+/// `#import "x"` lines (WGSL, GLSL, C).
+pub fn pulled_in(text: &str) -> Vec<String> {
+    static MACRO: OnceLock<regex::Regex> = OnceLock::new();
+    static INCLUDE: OnceLock<regex::Regex> = OnceLock::new();
+    let call = MACRO.get_or_init(|| regex::Regex::new(r#"[A-Za-z_][A-Za-z0-9_]*!\s*\(\s*"([^"\\]+)""#).unwrap());
+    let include = INCLUDE.get_or_init(|| regex::Regex::new(r#"(?m)^\s*#\s*(?:include|import)\s+["<]([^">]+)[">]"#).unwrap());
+    call.captures_iter(text)
+        .chain(include.captures_iter(text))
+        .map(|caps| caps[1].trim().to_string())
+        .filter(|path| path.contains('.') && !path.starts_with('/') && !path.contains("://"))
+        .collect()
+}
+
+/// `dir/target` with `.` and `..` resolved; None when it climbs out.
+fn joined(dir: &str, target: &str) -> Option<String> {
+    let mut parts: Vec<&str> = dir.split('/').filter(|part| !part.is_empty()).collect();
+    for part in target.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            other => parts.push(other),
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+/// The text of these blobs, by id, from one `git cat-file --batch`.
+async fn blobs(folder: &Path, ids: &[String]) -> HashMap<String, String> {
+    use tokio::io::AsyncWriteExt;
+    let mut found = HashMap::new();
+    if ids.is_empty() {
+        return found;
+    }
+    let Ok(mut child) = tokio::process::Command::new("git")
+        .args(["cat-file", "--batch"])
+        .current_dir(folder)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+    else {
+        return found;
+    };
+    let mut stdin = child.stdin.take();
+    let request = ids.join("\n") + "\n";
+    let writer = async move {
+        if let Some(stdin) = stdin.as_mut() {
+            let _ = stdin.write_all(request.as_bytes()).await;
+        }
+        drop(stdin);
+    };
+    let (_, output) = tokio::join!(writer, child.wait_with_output());
+    let Ok(output) = output else { return found };
+    let bytes = output.stdout;
+    let mut at = 0;
+    while at < bytes.len() {
+        let Some(end) = bytes[at..].iter().position(|b| *b == b'\n') else { break };
+        let header = String::from_utf8_lossy(&bytes[at..at + end]).to_string();
+        at += end + 1;
+        let fields: Vec<&str> = header.split(' ').collect();
+        if fields.len() != 3 {
+            continue; // "<id> missing"
+        }
+        let size: usize = fields[2].parse().unwrap_or(0);
+        let body = &bytes[at.min(bytes.len())..(at + size).min(bytes.len())];
+        at += size + 1;
+        if size <= 1024 * 1024 {
+            found.insert(fields[0].to_string(), String::from_utf8_lossy(body).to_string());
+        }
+    }
+    found
+}
+
+/// The `ls-tree` lines of the files the listed files pull in, followed
+/// recursively: a shader a covered Rust file includes is covered too.
+/// Targets resolve from the including file's folder, then the top.
+async fn dependencies(folder: &Path, head: &str, listed: &[String]) -> Vec<String> {
+    let entry = |line: &str| -> Option<(String, String)> {
+        let (meta, path) = line.split_once('\t')?;
+        let id = meta.split(' ').nth(2)?.to_string();
+        Some((id, path.to_string()))
+    };
+    let mut seen: std::collections::HashSet<String> = listed.iter().filter_map(|line| entry(line).map(|(_, path)| path)).collect();
+    let mut frontier: Vec<String> = listed.to_vec();
+    let mut out = Vec::new();
+    for _ in 0..DEPENDENCY_ROUNDS {
+        let sources: Vec<(String, String)> = frontier
+            .iter()
+            .filter_map(|line| entry(line))
+            .filter(|(_, path)| path.rsplit_once('.').is_some_and(|(_, ext)| SOURCE_EXTENSIONS.contains(&ext)))
+            .collect();
+        if sources.is_empty() {
+            break;
+        }
+        let ids: Vec<String> = sources.iter().map(|(id, _)| id.clone()).collect();
+        let texts = blobs(folder, &ids).await;
+        let mut wanted: Vec<String> = Vec::new();
+        for (id, path) in &sources {
+            let Some(text) = texts.get(id) else { continue };
+            let dir = path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+            for target in pulled_in(text) {
+                for candidate in [joined(dir, &target), joined("", &target)].into_iter().flatten() {
+                    if !seen.contains(&candidate) && !wanted.contains(&candidate) {
+                        wanted.push(candidate);
+                    }
+                }
+            }
+        }
+        if wanted.is_empty() || seen.len() >= MAX_DEPENDENCIES {
+            break;
+        }
+        wanted.truncate(MAX_DEPENDENCIES.saturating_sub(seen.len()));
+        let mut args = vec!["ls-tree".to_string(), "--full-tree".into(), head.to_string(), "--".into()];
+        args.extend(wanted.iter().cloned());
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let Some(listing) = git(folder, &args).await else { break };
+        frontier = listing
+            .lines()
+            .filter(|line| line.contains(" blob "))
+            .map(str::to_string)
+            .filter(|line| entry(line).is_some_and(|(_, path)| seen.insert(path)))
+            .collect();
+        out.extend(frontier.iter().cloned());
+        if frontier.is_empty() {
+            break;
+        }
+    }
+    out
 }
 
 /// The covered paths that have uncommitted changes (or untracked files) in

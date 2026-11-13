@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const KINDS: &[&str] = &["test", "benchmark", "structure", "characterisation"];
-pub const FIELDS: &[&str] = &["name", "command", "kind", "given", "when", "then", "red", "timeout_s", "files", "bench"];
+pub const FIELDS: &[&str] = &["name", "command", "kind", "given", "when", "then", "red", "timeout_s", "files", "watch", "bench"];
 pub const DEFAULT_TIMEOUT_S: u64 = proof::CHECK_TIMEOUT_S;
 pub const MAX_TIMEOUT_S: u64 = proof::CHECK_TIMEOUT_MAX_S;
 /// A benchmark is timed at least this many times after its warmup.
@@ -61,6 +61,9 @@ pub struct Check {
     pub red: Option<String>,
     pub timeout_s: u64,
     pub files: Vec<String>,
+    /// Paths a grid cell's proof also depends on: a change to any of them
+    /// makes the proof stale. Not locked.
+    pub watch: Vec<String>,
     pub bench: Option<Bench>,
 }
 
@@ -165,7 +168,7 @@ fn parse_bench(value: &Value, at: &str) -> Result<Bench, String> {
 pub fn parse_check(value: &Value, at: &str) -> Result<Check, String> {
     let row = value
         .as_object()
-        .ok_or_else(|| format!("{at} must be an object: {{name, command, kind, given, when, then, red?, timeout_s?, files?, bench?}}"))?;
+        .ok_or_else(|| format!("{at} must be an object: {{name, command, kind, given, when, then, red?, timeout_s?, files?, watch?, bench?}}"))?;
     if let Some(unknown) = row.keys().find(|key| !FIELDS.contains(&key.as_str())) {
         return Err(format!("{at}.{unknown} is not a check field (allowed: {})", FIELDS.join(", ")));
     }
@@ -195,30 +198,37 @@ pub fn parse_check(value: &Value, at: &str) -> Result<Check, String> {
     };
     let timeout_s = count(row, "timeout_s", &at, DEFAULT_TIMEOUT_S, 1, MAX_TIMEOUT_S)
         .map_err(|_| format!("{at}.timeout_s must be a whole number of seconds from 1 to {MAX_TIMEOUT_S}"))?;
-    let files = match row.get("files") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(items)) => {
-            let mut files = Vec::new();
-            for (index, item) in items.iter().enumerate() {
-                let path = item.as_str().ok_or_else(|| format!("{at}.files[{index}] must be a path (text)"))?.trim().to_string();
-                if !valid_path(&path) {
-                    return Err(format!("{at}.files[{index}] \"{path}\" must be a path inside the task's folder, relative to it"));
-                }
-                if !files.contains(&path) {
-                    files.push(path);
-                }
-            }
-            files
-        }
-        Some(other) => return Err(format!("{at}.files must be a list of paths, got {}", kind_of(other))),
-    };
+    let files = paths(row, "files", &at)?;
+    let watch = paths(row, "watch", &at)?;
     let bench = match (kind.as_str(), row.get("bench")) {
         ("benchmark", Some(value)) if !value.is_null() => Some(parse_bench(value, &format!("{at}.bench"))?),
         ("benchmark", _) => return Err(format!("{at}.bench is required for a benchmark: {{value, runs, warmup, budget}}")),
         (_, None | Some(Value::Null)) => None,
         (_, Some(_)) => return Err(format!("{at}.bench is only for kind benchmark")),
     };
-    Ok(Check { name, command, kind, given, when, then, red, timeout_s, files, bench })
+    Ok(Check { name, command, kind, given, when, then, red, timeout_s, files, watch, bench })
+}
+
+/// A check's list of paths (`files`, `watch`): relative, inside the folder,
+/// without repeats.
+fn paths(row: &Map<String, Value>, key: &str, at: &str) -> Result<Vec<String>, String> {
+    match row.get(key) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(items)) => {
+            let mut paths = Vec::new();
+            for (index, item) in items.iter().enumerate() {
+                let path = item.as_str().ok_or_else(|| format!("{at}.{key}[{index}] must be a path (text)"))?.trim().to_string();
+                if !valid_path(&path) {
+                    return Err(format!("{at}.{key}[{index}] \"{path}\" must be a path inside the task's folder, relative to it"));
+                }
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+            Ok(paths)
+        }
+        Some(other) => Err(format!("{at}.{key} must be a list of paths, got {}", kind_of(other))),
+    }
 }
 
 /// A `checks` list: one or more, names unique.
@@ -584,6 +594,40 @@ pub fn judge_red(check: &Check, run: &Run) -> Result<Option<f64>, String> {
     Ok(None)
 }
 
+/// How many tests a run reports it ran (passed and failed, not skipped):
+/// cargo's `test result:` lines (summed over every binary), vitest's
+/// `Tests` line, or pytest's summary. None when it reports none of these.
+pub fn tests_ran(output: &str) -> Option<u64> {
+    static CARGO: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    static COUNT: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let cargo = CARGO.get_or_init(|| Regex::new(r"test result: \w+\. (\d+) passed; (\d+) failed").unwrap());
+    let count = COUNT.get_or_init(|| Regex::new(r"(\d+) (passed|failed)").unwrap());
+    let mut found = None;
+    for caps in cargo.captures_iter(output) {
+        let ran: u64 = caps[1].parse::<u64>().unwrap_or(0) + caps[2].parse::<u64>().unwrap_or(0);
+        found = Some(found.unwrap_or(0) + ran);
+    }
+    if found.is_some() {
+        return found;
+    }
+    let summary = output.lines().rev().find(|line| {
+        let line = line.trim_start();
+        (line.starts_with("Tests ") || line.starts_with('=')) && count.is_match(line)
+    })?;
+    Some(count.captures_iter(summary).map(|caps| caps[1].parse::<u64>().unwrap_or(0)).sum())
+}
+
+/// `Err` when a run that passes ran fewer tests than the check did at
+/// start: tests were dropped, filtered or skipped to get it green.
+pub fn judge_count(run: &Run, at_start: Option<u64>) -> Result<(), String> {
+    let Some(then) = at_start else { return Ok(()) };
+    let now = tests_ran(&run.output).unwrap_or(0);
+    if now >= then {
+        return Ok(());
+    }
+    Err(format!("ran {now} test{}, {then} at start", if now == 1 { "" } else { "s" }))
+}
+
 /// Green: `Err` with why the check does not pass.
 pub fn judge_green(check: &Check, run: &Run, baseline: Option<f64>) -> Result<(), String> {
     if run.exit != 0 {
@@ -639,15 +683,79 @@ pub fn locked_paths(kind: &str, plan: &Value, harness: &[String]) -> Vec<String>
     paths
 }
 
+/// Folders that hold tests. A check file inside one locks the whole folder:
+/// the helpers, fixtures, tolerances and baselines beside it are part of
+/// the check too.
+pub const TEST_FOLDERS: &[&str] = &["tests", "test", "__tests__", "spec", "e2e"];
+/// At most this many files are locked for one plan.
+pub const MAX_LOCKED: usize = 5000;
+
+/// The test folder a check file lives in: its topmost ancestor folder named
+/// like one (`tests/suite/a.sh` → `tests`). None for a file outside one,
+/// such as a test module beside the code it tests.
+pub fn test_folder(path: &str) -> Option<String> {
+    let parts: Vec<&str> = path.split('/').collect();
+    let folders = &parts[..parts.len().saturating_sub(1)];
+    folders.iter().position(|part| TEST_FOLDERS.contains(part)).map(|at| folders[..=at].join("/"))
+}
+
+/// The committed files under `dir`, relative to `folder`.
+fn tracked_under(folder: &Path, dir: &str) -> Vec<String> {
+    let output = std::process::Command::new("git").args(["ls-files", "-z", "--", dir]).current_dir(folder).output();
+    match output {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .split('\0')
+            .filter(|path| !path.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `paths` and, for each in a test folder, every committed file in that
+/// folder: what approval locks.
+pub fn widened(folder: &Path, paths: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = paths.to_vec();
+    let mut seen: BTreeSet<String> = out.iter().cloned().collect();
+    let mut roots = BTreeSet::new();
+    for path in paths {
+        let Some(root) = test_folder(path) else { continue };
+        if !roots.insert(root.clone()) {
+            continue;
+        }
+        for file in tracked_under(folder, &root) {
+            if out.len() >= MAX_LOCKED {
+                return out;
+            }
+            if seen.insert(file.clone()) {
+                out.push(file);
+            }
+        }
+    }
+    out
+}
+
 /// What approval stores: `{files: {path: sha}, harness: [path]}`.
 pub fn approved_hashes(hashes: &BTreeMap<String, String>, harness: &[String]) -> Value {
     json!({"files": hashes, "harness": harness})
 }
 
 /// The approved files one item depends on that have changed since approval:
-/// its checks' files and the harness.
-pub fn changed_for(approved: &Value, checks: &[Check], current: &BTreeMap<String, String>) -> Vec<String> {
+/// its checks' files, the rest of the test folders they live in, and the
+/// harness.
+/// `owned` is every check file of the plan: another check's own file counts
+/// against that check's item, not against everything in its test folder.
+pub fn changed_for(approved: &Value, checks: &[Check], owned: &[String], current: &BTreeMap<String, String>) -> Vec<String> {
     let mut paths: Vec<String> = checks.iter().flat_map(|check| check.files.iter().cloned()).collect();
+    // Everything else approved in the test folders those files live in.
+    let roots: BTreeSet<String> = paths.iter().filter_map(|path| test_folder(path)).collect();
+    if let Some(files) = approved["files"].as_object() {
+        for path in files.keys() {
+            if !owned.contains(path) && roots.iter().any(|root| path.starts_with(&format!("{root}/"))) {
+                paths.push(path.clone());
+            }
+        }
+    }
     paths.extend(approved["harness"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string));
     let mut changed = Vec::new();
     for path in paths {
@@ -734,19 +842,19 @@ pub async fn measure(folder: &Path, kind: &str, plan: &Value, stored: &Value, me
     let start = stored["startCommit"].as_str().map(str::to_string);
     match measure {
         Measure::Start => {
-            gate.hashes = hash_files(folder, &locked_paths(kind, plan, &harness));
+            gate.hashes = hash_files(folder, &widened(folder, &locked_paths(kind, plan, &harness)));
             for (item, checks) in item_checks(kind, plan) {
                 gate.runs.insert(item, run_all(folder, &checks, head.as_deref(), at).await);
             }
         }
         Measure::Item(item) => {
-            gate.hashes = hash_files(folder, &locked_paths(kind, plan, &harness));
+            gate.hashes = hash_files(folder, &widened(folder, &locked_paths(kind, plan, &harness)));
             if let Some(checks) = checks_of(kind, plan, &item) {
                 gate.runs.insert(item, run_all(folder, &checks, head.as_deref(), at).await);
             }
         }
         Measure::Done { test_command } => {
-            gate.hashes = hash_files(folder, &locked_paths(kind, plan, &harness));
+            gate.hashes = hash_files(folder, &widened(folder, &locked_paths(kind, plan, &harness)));
             let items = item_checks(kind, plan);
             let mut green = true;
             for (item, checks) in &items {
@@ -770,10 +878,13 @@ pub async fn measure(folder: &Path, kind: &str, plan: &Value, stored: &Value, me
             if let (true, Some(start)) = (green, start.as_deref()) {
                 gate.flags.extend(break_it(folder, start, &items, &stored["baseline"], at).await);
                 gate.flags.extend(diff_flags(folder, start).await);
+                if plan["mutants"] == true {
+                    gate.flags.extend(mutation_flags(folder, start, &items, at).await);
+                }
             }
         }
         Measure::Amend { plan: new } => {
-            gate.hashes = hash_files(folder, &locked_paths(kind, &new, &harness));
+            gate.hashes = hash_files(folder, &widened(folder, &locked_paths(kind, &new, &harness)));
             let changed = changed_checks(kind, plan, &new);
             let keep = check_files(kind, &new);
             for (item, checks) in changed {
@@ -808,7 +919,7 @@ pub fn draft_gate(folder: &Path, kind: &str, plan: &Value, harness: &[String]) -
     if !is_checked(plan) {
         return Gate::default();
     }
-    let paths = locked_paths(kind, plan, harness);
+    let paths = widened(folder, &locked_paths(kind, plan, harness));
     let hashes = hash_files(folder, &paths);
     let own = check_files(kind, plan);
     let missing = own.iter().filter(|path| hashes.get(*path).map(String::as_str) == Some(MISSING)).cloned().collect();
@@ -932,6 +1043,232 @@ pub async fn break_it(
         }
     }
     scratch.remove().await;
+    flags
+}
+
+/* ------------------------------------------------------ deliberate breaks */
+
+/// At most this many deliberate breaks (mutants) per task.
+pub const MAX_MUTANTS: usize = 30;
+
+/// One deliberate break: `line` (1-based) of `file` (relative to the task's
+/// folder) replaced by `text`, or deleted when `text` is None.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Mutant {
+    pub file: String,
+    pub line: usize,
+    pub change: String,
+    pub text: Option<String>,
+}
+
+fn word_swaps() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("-ge", "-lt"), ("-gt", "-le"), ("-le", "-gt"), ("-lt", "-ge"), ("-eq", "-ne"), ("-ne", "-eq"),
+        ("true", "false"), ("false", "true"),
+    ]
+}
+
+fn symbol_swaps() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("==", "!="), ("!=", "=="), ("<=", ">"), (">=", "<"), (" < ", " >= "), (" > ", " <= "),
+        (" + ", " - "), (" - ", " + "), (" * ", " / "), (" / ", " * "), ("&&", "||"), ("||", "&&"),
+    ]
+}
+
+fn is_comment(line: &str) -> bool {
+    let line = line.trim_start();
+    line.starts_with("//") || line.starts_with('#') || line.starts_with("/*") || line.starts_with('*') || line.starts_with("--")
+}
+
+/// Whether deleting this line is a meaningful break: a statement, not a
+/// brace, a block's opening line or punctuation.
+fn deletable(line: &str) -> bool {
+    let line = line.trim();
+    !line.is_empty() && !line.ends_with('{') && line.chars().any(|c| c.is_alphanumeric())
+}
+
+/// The deliberate breaks of one changed line: each operator, comparison,
+/// boolean and integer literal changed once, and the line deleted.
+pub fn mutate_line(file: &str, number: usize, line: &str) -> Vec<Mutant> {
+    if is_comment(line) || line.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut push = |text: String, change: String| {
+        if text != line {
+            out.push(Mutant { file: file.into(), line: number, change, text: Some(text) });
+        }
+    };
+    let bytes = line.as_bytes();
+    let boundary = |at: usize| at >= bytes.len() || !(bytes[at].is_ascii_alphanumeric() || bytes[at] == b'_');
+    for (from, to) in word_swaps() {
+        for (at, _) in line.match_indices(from) {
+            let before_ok = at == 0 || boundary(at - 1);
+            if before_ok && boundary(at + from.len()) {
+                push(format!("{}{}{}", &line[..at], to, &line[at + from.len()..]), format!("{from} → {to}"));
+            }
+        }
+    }
+    for (from, to) in symbol_swaps() {
+        for (at, _) in line.match_indices(from) {
+            push(format!("{}{}{}", &line[..at], to, &line[at + from.len()..]), format!("{} → {}", from.trim(), to.trim()));
+        }
+    }
+    static NUMBER: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let number_pattern = NUMBER.get_or_init(|| Regex::new(r"\d+").unwrap());
+    for found in number_pattern.find_iter(line) {
+        let (start, end) = (found.start(), found.end());
+        let before = if start == 0 { None } else { line[..start].chars().last() };
+        let after = line[end..].chars().next();
+        // Not part of a name, a decimal, a shell positional ($1) or a hex literal.
+        if before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.')
+            || after.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        {
+            continue;
+        }
+        let Ok(value) = found.as_str().parse::<u64>() else { continue };
+        push(format!("{}{}{}", &line[..start], value + 1, &line[end..]), format!("{value} → {}", value + 1));
+    }
+    if deletable(line) {
+        out.push(Mutant { file: file.into(), line: number, change: "line deleted".into(), text: None });
+    }
+    out
+}
+
+/// The lines the task added or changed since `start`, by file (relative to
+/// the folder), leaving out tests and the files in `skip`.
+async fn changed_lines(folder: &Path, start: &str, skip: &BTreeSet<String>) -> Result<Vec<(String, Vec<usize>)>, String> {
+    let diff = git(folder, &["diff", "--no-renames", "--relative", "-U0", start, "HEAD"]).await?;
+    let mut files: Vec<(String, Vec<usize>)> = Vec::new();
+    let mut current: Option<String> = None;
+    for line in diff.lines() {
+        if let Some(path) = line.strip_prefix("+++ ") {
+            current = path.strip_prefix("b/").map(str::to_string).filter(|path| !skip.contains(path) && !is_test_path(path));
+            if let Some(path) = &current {
+                files.push((path.clone(), Vec::new()));
+            }
+        } else if let (Some(hunk), Some(_)) = (line.strip_prefix("@@ "), &current) {
+            // @@ -a,b +c,d @@
+            let added = hunk.split(' ').find(|part| part.starts_with('+')).unwrap_or("+0,0");
+            let mut parts = added[1..].splitn(2, ',');
+            let first: usize = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+            let count: usize = parts.next().map_or(Some(1), |n| n.parse().ok()).unwrap_or(0);
+            if let Some((_, lines)) = files.last_mut() {
+                lines.extend(first..first + count);
+            }
+        }
+    }
+    files.retain(|(_, lines)| !lines.is_empty());
+    Ok(files)
+}
+
+/// The deliberate breaks for a task: changed lines since `start`, outside
+/// the checks' files and test folders, at most `MAX_MUTANTS`, spread over
+/// the changed lines.
+pub async fn mutants(folder: &Path, start: &str, items: &[(String, Vec<Check>)]) -> Result<Vec<Mutant>, String> {
+    let named: Vec<String> = items.iter().flat_map(|(_, checks)| checks.iter().flat_map(|c| c.files.iter().cloned())).collect();
+    let skip: BTreeSet<String> = widened(folder, &named).into_iter().collect();
+    let mut all = Vec::new();
+    for (file, lines) in changed_lines(folder, start, &skip).await? {
+        let Ok(text) = std::fs::read_to_string(folder.join(&file)) else { continue };
+        let source: Vec<&str> = text.lines().collect();
+        for number in lines {
+            if let Some(line) = source.get(number.wrapping_sub(1)) {
+                all.extend(mutate_line(&file, number, line));
+            }
+        }
+    }
+    if all.len() <= MAX_MUTANTS {
+        return Ok(all);
+    }
+    // An even spread, so one long line does not take every break.
+    let step = all.len() as f64 / MAX_MUTANTS as f64;
+    Ok((0..MAX_MUTANTS).map(|index| all[(index as f64 * step) as usize].clone()).collect())
+}
+
+fn applied(original: &str, mutant: &Mutant) -> String {
+    let mut lines: Vec<&str> = original.split('\n').collect();
+    let index = mutant.line - 1;
+    if index < lines.len() {
+        match &mutant.text {
+            Some(text) => lines[index] = text,
+            None => {
+                lines.remove(index);
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+/// The optional deeper test at done (plan `mutants: true`): each deliberate
+/// break is made in a scratch copy at HEAD and every item's checks run
+/// against it; a break is caught by an item when one of its checks fails.
+/// One `mutants` flag per item with its score and breaks, and `weak-checks`
+/// for an item whose checks catch fewer than a quarter of them.
+pub async fn mutation_flags(folder: &Path, start: &str, items: &[(String, Vec<Check>)], at: i64) -> Vec<Value> {
+    let breaks = match mutants(folder, start, items).await {
+        Ok(breaks) => breaks,
+        Err(error) => return vec![flag(None, None, "mutants", format!("the deliberate breaks could not be made: {error}"))],
+    };
+    if breaks.is_empty() {
+        return Vec::new();
+    }
+    let Some((top, inside)) = prefix(folder).await else {
+        return vec![flag(None, None, "mutants", "the deliberate breaks could not be made: the folder is not in a git repository")];
+    };
+    let scratch = match Scratch::add(&top, "HEAD").await {
+        Ok(scratch) => scratch,
+        Err(error) => return vec![flag(None, None, "mutants", format!("the deliberate breaks could not be made: {error}"))],
+    };
+    let tree = scratch.path.join(&inside);
+    let mut caught: BTreeMap<String, Vec<bool>> = BTreeMap::new();
+    for mutant in &breaks {
+        let path = tree.join(&mutant.file);
+        let Ok(original) = std::fs::read_to_string(&path) else { continue };
+        if std::fs::write(&path, applied(&original, mutant)).is_err() {
+            continue;
+        }
+        for (item, checks) in items {
+            let mut fails = false;
+            for check in checks.iter().filter(|check| !check.is_characterisation()) {
+                let run = run_check(&tree, check, Some(start), at).await;
+                if run.exit != 0 {
+                    fails = true;
+                    break;
+                }
+            }
+            caught.entry(item.clone()).or_default().push(fails);
+        }
+        let _ = std::fs::write(&path, original);
+    }
+    scratch.remove().await;
+    let mut flags = Vec::new();
+    for (item, checks) in items {
+        if checks.iter().all(Check::is_characterisation) {
+            continue;
+        }
+        let results = caught.get(item).cloned().unwrap_or_default();
+        let total = results.len();
+        let hits = results.iter().filter(|hit| **hit).count();
+        let listed: Vec<Value> = breaks
+            .iter()
+            .zip(results.iter())
+            .map(|(mutant, hit)| json!({"file": mutant.file, "line": mutant.line, "change": mutant.change, "caught": hit}))
+            .collect();
+        let mut score = flag(Some(item), None, "mutants", format!("the checks catch {hits} of {total} deliberate breaks"));
+        score["caught"] = json!(hits);
+        score["total"] = json!(total);
+        score["breaks"] = json!(listed);
+        flags.push(score);
+        if total > 0 && hits * 4 < total {
+            flags.push(flag(
+                Some(item),
+                None,
+                "weak-checks",
+                format!("the checks catch only {hits} of {total} deliberate breaks of the changed code, so they barely test it"),
+            ));
+        }
+    }
     flags
 }
 
@@ -1235,11 +1572,11 @@ pub(crate) mod tests {
         assert_eq!(paths, vec!["tests/export.rs".to_string(), "Cargo.toml".to_string()]);
         let approved = approved_hashes(&hash_files(folder.path(), &paths), &harness);
         let checks = checks_of("feature", &plan, "a").unwrap();
-        assert!(changed_for(&approved, &checks, &hash_files(folder.path(), &paths)).is_empty());
+        assert!(changed_for(&approved, &checks, &[], &hash_files(folder.path(), &paths)).is_empty());
         std::fs::write(folder.path().join("tests/export.rs"), "b").unwrap();
-        assert_eq!(changed_for(&approved, &checks, &hash_files(folder.path(), &paths)), vec!["tests/export.rs".to_string()]);
+        assert_eq!(changed_for(&approved, &checks, &[], &hash_files(folder.path(), &paths)), vec!["tests/export.rs".to_string()]);
         std::fs::remove_file(folder.path().join("Cargo.toml")).unwrap();
-        assert_eq!(changed_for(&approved, &checks, &hash_files(folder.path(), &paths)).len(), 2);
+        assert_eq!(changed_for(&approved, &checks, &[], &hash_files(folder.path(), &paths)).len(), 2);
     }
 
     #[test]
