@@ -6,9 +6,9 @@
  * out is drawn as missing rather than taken as a broken task.
  */
 
+import type { Note } from '@/workbench/notes';
 import type { SessionState } from '@/workbench/protocol';
 import type { CheckFlag } from '@/workbench/tasks/checks';
-import type { Note } from '@/workbench/notes';
 
 export const TASK_STATUSES = ['todo', 'in_progress', 'blocked', 'review', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
