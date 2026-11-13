@@ -13,6 +13,8 @@ pub mod gate;
 pub mod git;
 pub mod types;
 pub mod visual;
+#[cfg(test)]
+mod lock_scope_tests;
 
 use super::store::Store;
 use rusqlite::{params, Connection, OptionalExtension, Row};

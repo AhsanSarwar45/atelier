@@ -683,9 +683,9 @@ pub fn locked_paths(kind: &str, plan: &Value, harness: &[String]) -> Vec<String>
     paths
 }
 
-/// Folders that hold tests. A check file inside one locks the whole folder:
-/// the helpers, fixtures, tolerances and baselines beside it are part of
-/// the check too.
+/// Folders that hold tests. A check file inside one locks the folder: the
+/// helpers, fixtures, tolerances and baselines beside it are part of the
+/// check too. The other test files there are not (`is_test_file`).
 pub const TEST_FOLDERS: &[&str] = &["tests", "test", "__tests__", "spec", "e2e"];
 /// At most this many files are locked for one plan.
 pub const MAX_LOCKED: usize = 5000;
@@ -697,6 +697,16 @@ pub fn test_folder(path: &str) -> Option<String> {
     let parts: Vec<&str> = path.split('/').collect();
     let folders = &parts[..parts.len().saturating_sub(1)];
     folders.iter().position(|part| TEST_FOLDERS.contains(part)).map(|at| folders[..=at].join("/"))
+}
+
+/// Whether `path` is a test file by its name (`a.test.tsx`, `a.spec.ts`,
+/// `test_a.py`, `a_test.go`, `a_spec.rb`): another test, not a helper, so
+/// a check beside it does not lock it.
+pub fn is_test_file(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let stem = name.split('.').next().unwrap_or(name);
+    name.contains(".test.") || name.contains(".spec.") || (stem.starts_with("test_") && name.ends_with(".py"))
+        || ((stem.ends_with("_test") || stem.ends_with("_spec")) && stem != name)
 }
 
 /// The committed files under `dir`, relative to `folder`.
@@ -713,7 +723,7 @@ fn tracked_under(folder: &Path, dir: &str) -> Vec<String> {
 }
 
 /// `paths` and, for each in a test folder, every committed file in that
-/// folder: what approval locks.
+/// folder but the other test files: what approval locks.
 pub fn widened(folder: &Path, paths: &[String]) -> Vec<String> {
     let mut out: Vec<String> = paths.to_vec();
     let mut seen: BTreeSet<String> = out.iter().cloned().collect();
@@ -726,6 +736,9 @@ pub fn widened(folder: &Path, paths: &[String]) -> Vec<String> {
         for file in tracked_under(folder, &root) {
             if out.len() >= MAX_LOCKED {
                 return out;
+            }
+            if is_test_file(&file) {
+                continue;
             }
             if seen.insert(file.clone()) {
                 out.push(file);
@@ -741,17 +754,18 @@ pub fn approved_hashes(hashes: &BTreeMap<String, String>, harness: &[String]) ->
 }
 
 /// The approved files one item depends on that have changed since approval:
-/// its checks' files, the rest of the test folders they live in, and the
-/// harness.
+/// its checks' files, the rest of the test folders they live in but other
+/// test files, and the harness.
 /// `owned` is every check file of the plan: another check's own file counts
 /// against that check's item, not against everything in its test folder.
 pub fn changed_for(approved: &Value, checks: &[Check], owned: &[String], current: &BTreeMap<String, String>) -> Vec<String> {
     let mut paths: Vec<String> = checks.iter().flat_map(|check| check.files.iter().cloned()).collect();
-    // Everything else approved in the test folders those files live in.
+    // Everything else approved in the test folders those files live in, but
+    // other test files, which a lock made before they were left out may hold.
     let roots: BTreeSet<String> = paths.iter().filter_map(|path| test_folder(path)).collect();
     if let Some(files) = approved["files"].as_object() {
         for path in files.keys() {
-            if !owned.contains(path) && roots.iter().any(|root| path.starts_with(&format!("{root}/"))) {
+            if !owned.contains(path) && !is_test_file(path) && roots.iter().any(|root| path.starts_with(&format!("{root}/"))) {
                 paths.push(path.clone());
             }
         }
