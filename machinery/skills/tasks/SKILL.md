@@ -109,9 +109,10 @@ on; they are locked when the owner approves.
 - Each check fails for one stated reason, the one in `red`. Make the
   command print that reason.
 - Keep each under about two minutes.
-- Everything in a check's test folder is locked with it (helpers,
-  fixtures, baselines), and a check that runs fewer tests than at start
-  fails.
+- The helpers, fixtures and baselines in a check's test folder are
+  locked with it; other test files there are not, so you may update
+  tests your change makes out of date. A check that runs fewer tests
+  than at start fails.
 - Add `"mutants": true` to the plan for the deeper test at done: the server
   breaks the changed lines on purpose and reports how many breaks each
   item's checks catch; items that catch almost none are flagged

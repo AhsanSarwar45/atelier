@@ -280,10 +280,14 @@ sha256 of each file in `files` and of every harness file
 proposed or created; an agent writes them first.
 
 A check file inside a test folder (the topmost ancestor named `tests`,
-`test`, `__tests__`, `spec` or `e2e`) locks that whole test folder: every
+`test`, `__tests__`, `spec` or `e2e`) locks that test folder: every
 tracked file under it, so shared helpers, fixtures, tolerances and
-baselines cannot be loosened to make a check pass. A check file outside a
-test folder locks only itself.
+baselines cannot be loosened to make a check pass. The other test files
+there (`*.test.*`, `*.spec.*`, `test_*.py`, `*_test.*`, `*_spec.*`) are
+not locked: they are other tests, which a task's change may make out of
+date. A lock made before this rule may hold them; a change to one is not
+counted against the check. A check file outside a test folder locks only
+itself.
 
 A check also cannot pass by running fewer tests. At start the server
 records how many tests each check's output reports (cargo, vitest and
