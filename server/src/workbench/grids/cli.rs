@@ -20,6 +20,8 @@ usage: atelier grid <command>
   template set NAME               {columns:[{id,name,proof_rule,checks?}]} on stdin or --input FILE
   draft                           {slug,title,area,template?,row_search,columns,rows,cells?}; the owner approves or discards it
                                   columns[].checks: check templates ({row} = the row id); cells: [{row,col,checks,override?}]
+  checks SLUG                     {columns:[{id,checks}]}: check templates for columns of an approved grid; the owner
+                                  approves only those, and rows, cells and proofs stay as they are
   discover SLUG                   rerun the grid's row search now
   prove SLUG ROW COL              {summary,commits?,evidence?}: runs the cell's approved checks
                                   (a cell with none, proved before checks: {summary,checks,tests?,commits?,benchmarks?,evidence?})
@@ -339,6 +341,17 @@ fn print_cell(slug: &str, value: &Value) {
     }
 }
 
+/// `grid next`'s exit code: 0 when it hands out cells or the grid is
+/// finished; 3 when nothing can be handed out yet (cells need a check, are
+/// claimed, or wait on the owner).
+pub fn next_exit(value: &Value) -> i32 {
+    if !value["create"].is_null() || value["finished"] == true {
+        0
+    } else {
+        3
+    }
+}
+
 /// `grid next` as text: the scope, its free cells with their proof rules,
 /// the cells other tasks hold, what is left, and the exact command to run.
 pub fn next_text(value: &Value) -> String {
@@ -351,21 +364,29 @@ pub fn next_text(value: &Value) -> String {
     if scope.is_null() {
         let held = value["takenInGrid"].as_u64().unwrap_or(0);
         let pending = value["naPending"].as_u64().unwrap_or(0);
-        if held > 0 {
+        let needing = value["needsCheckInGrid"].as_u64().unwrap_or(0);
+        if value["finished"] == true {
+            out.push_str(&format!("No gaps left in {slug}. Every cell is proved or N/A.\n"));
+        } else if held > 0 && needing == 0 && pending == 0 {
             out.push_str(&format!(
                 "No free cells left in {slug}: {held} {} claimed by open tasks, and every other cell is proved or N/A.\n",
                 if held == 1 { "is" } else { "are" }
             ));
         } else {
-            out.push_str(&format!("No gaps left in {slug}. Every cell is proved or N/A.\n"));
+            out.push_str(&format!("Nothing to hand out in {slug} yet; the grid is not finished.\n"));
+            if held > 0 {
+                out.push_str(&format!("{held} {} claimed by open tasks.\n", if held == 1 { "cell is" } else { "cells are" }));
+            }
         }
         if pending > 0 {
             out.push_str(&format!("{pending} N/A request(s) wait for the owner's answer.\n"));
         }
-        let needing = value["needsCheckInGrid"].as_u64().unwrap_or(0);
         if needing > 0 {
             out.push_str(&format!(
-                "{needing} cell(s) need a check before they can be claimed: add one to the column or cell (`atelier grid draft` again) and get it approved.\n"
+                "{needing} {} a check before {} can be claimed. Add check templates to their columns with \
+                 `atelier grid checks {slug} --input FILE` ({{\"columns\": [{{\"id\": COLUMN, \"checks\": [ … ]}}]}}); the owner approves them.\n",
+                if needing == 1 { "cell needs" } else { "cells need" },
+                if needing == 1 { "it" } else { "they" }
             ));
         }
         return out;
@@ -510,7 +531,7 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             }
             let value = get(&format!("/api/workbench/grids/{}/{}/next", encode(project), encode(found[0])), &query).await?;
             print!("{}", next_text(&value));
-            Ok(0)
+            Ok(next_exit(&value))
         }
         "template" => match rest.first().map(String::as_str) {
             Some("list") => {
@@ -547,6 +568,12 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             let session = session()?;
             let payload = payload(rest, "{slug, title, area, template?, row_search, columns, rows}")?;
             post(json!({"action": "draft", "actor": "agent", "session": session, "payload": payload})).await
+        }
+        "checks" => {
+            let found = exactly(rest, &["--input"], &["SLUG"], "checks")?;
+            let session = session()?;
+            let payload = payload(rest, "{columns: [{id, checks}]}")?;
+            post(json!({"action": "checks", "actor": "agent", "session": session, "slug": found[0], "payload": payload})).await
         }
         "discover" => {
             let found = exactly(rest, &[], &["SLUG"], "discover")?;

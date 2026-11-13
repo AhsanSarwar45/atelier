@@ -145,7 +145,7 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-pub const AGENT_ACTIONS: &[&str] = &["draft", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set"];
+pub const AGENT_ACTIONS: &[&str] = &["draft", "checks", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set"];
 pub const OWNER_ACTIONS: &[&str] = &[
     "approve", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template",
 ];
@@ -460,6 +460,15 @@ impl Loaded {
             for other in &row.of {
                 if let Some(other) = self.row(other) {
                     paths.extend(other.paths.iter().cloned());
+                }
+            }
+        }
+        // What the row's cells' checks rely on: their files and the paths
+        // they watch, so changing a check or a watched file makes the proof stale.
+        for column in self.columns.iter().filter(|column| column.retired_at.is_none()) {
+            for check in self.cell_checks(id, &column.id) {
+                for key in ["files", "watch"] {
+                    paths.extend(check[key].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string));
                 }
             }
         }
@@ -938,6 +947,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
     }
     match action {
         "draft" => draft(connection, request),
+        "checks" => add_checks(connection, request),
         "approve" => approve(connection, request),
         "discard" => discard(connection, request),
         "discover" => discover(connection, request),
@@ -1367,6 +1377,9 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
     let project = request.project.as_str();
     let mut grid = get_existing(connection, project, slug)?;
     let pending = grid.pending.clone().ok_or_else(|| TaskError::Refused(format!("grid \"{slug}\" has no draft waiting")))?;
+    if pending["checksOnly"] == true {
+        return approve_checks(connection, request, grid, &pending);
+    }
     let edit = grid.status == "approved";
     let now = request.now;
     let rows_wanted: Vec<Value> = pending["rows"].as_array().cloned().unwrap_or_default();
@@ -1480,6 +1493,130 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
     );
     let tell = pending["draftedBy"].as_str().map(|session| (session.to_string(), summary.clone())).into_iter().collect();
     Ok(Outcome { slug: Some(slug.into()), summary, tell, grids: vec![slug.into()], ..Default::default() })
+}
+
+/// `grid checks`: check templates for the columns of an approved grid, and
+/// nothing else. Stored as an edit draft holding the grid as it stands with
+/// only those columns' checks changed, so the owner approves just the checks.
+fn add_checks(connection: &Connection, request: &Request) -> Result<Outcome, TaskError> {
+    let slug = need(&request.slug, "slug", "checks")?;
+    let project = request.project.as_str();
+    let session = request.session.as_deref().unwrap_or_default();
+    let mut grid = get_existing(connection, project, slug)?;
+    if grid.status != "approved" {
+        return refuse(format!("grid \"{slug}\" is not approved yet; put the checks in its draft (`atelier grid draft`)"));
+    }
+    if grid.pending.is_some() {
+        return refuse(format!("grid \"{slug}\" already has a change waiting for the owner; wait for their answer"));
+    }
+    let object = request
+        .payload
+        .as_object()
+        .ok_or_else(|| TaskError::Refused("the payload must be an object: {columns: [{id, checks}]}".into()))?;
+    if let Some(other) = object.keys().find(|key| key.as_str() != "columns") {
+        return refuse(format!("{other} is not allowed: `grid checks` takes only columns[].checks; draft the grid again to change anything else"));
+    }
+    let given = object.get("columns").and_then(Value::as_array).filter(|items| !items.is_empty())
+        .ok_or_else(|| TaskError::Refused("columns is required: [{id, checks}], one or more".into()))?;
+    let loaded = load(connection, project, slug)?.expect("the grid was just read");
+    let mut changed: Vec<(String, Vec<Value>)> = Vec::new();
+    for (index, item) in given.iter().enumerate() {
+        let here = format!("columns[{index}]");
+        let column = item.as_object().ok_or_else(|| TaskError::Refused(format!("{here} must be an object: {{id, checks}}")))?;
+        if let Some(other) = column.keys().find(|key| !["id", "checks"].contains(&key.as_str())) {
+            return refuse(format!("{here}.{other} is not allowed: `grid checks` takes only id and checks for each column"));
+        }
+        let id = column.get("id").and_then(Value::as_str).unwrap_or("");
+        if !loaded.columns.iter().any(|known| known.id == id && known.retired_at.is_none()) {
+            return refuse(format!("{here}: \"{id}\" is not a column of grid \"{slug}\""));
+        }
+        if changed.iter().any(|(known, _)| known == id) {
+            return refuse(format!("{here}: column \"{id}\" is given twice"));
+        }
+        let checks = match column.get("checks") {
+            Some(Value::Array(items)) if !items.is_empty() => check_templates(&Value::Array(items.clone()), &format!("{here}.checks"))?,
+            _ => return refuse(format!("{here}: column \"{id}\" needs one or more checks")),
+        };
+        changed.push((id.to_string(), checks));
+    }
+    let columns: Vec<Value> = loaded
+        .columns
+        .iter()
+        .filter(|column| column.retired_at.is_none())
+        .map(|column| {
+            let checks = changed.iter().find(|(id, _)| *id == column.id).map(|(_, checks)| checks.clone()).unwrap_or_else(|| column.checks.clone());
+            json!({"id": column.id, "name": column.name, "proofRule": column.proof_rule, "fromTemplate": column.from_template, "checks": checks})
+        })
+        .collect();
+    let rows: Vec<Value> = loaded
+        .rows
+        .iter()
+        .filter(|row| row.removed_at.is_none())
+        .map(|row| json!({"id": row.id, "name": row.name, "kind": row.kind, "paths": row.paths, "of": row.of,
+            "ref": row.reference.clone().unwrap_or(Value::Null), "source": row.source}))
+        .collect();
+    let now = request.now;
+    let ids: Vec<&str> = changed.iter().map(|(id, _)| id.as_str()).collect();
+    grid.pending = Some(json!({
+        "checksOnly": true, "changed": ids, "hashes": request.hashes.clone().unwrap_or(Value::Null),
+        "title": grid.title, "area": grid.area, "template": grid.template, "rowSearch": grid.row_search,
+        "columns": columns, "rows": rows, "draftedBy": session, "draftedAt": now, "edit": true, "diff": Value::Null,
+    }));
+    grid.drafted_by = Some(session.to_string());
+    grid.updated_at = now;
+    save_grid(connection, &grid)?;
+    append_event(connection, project, slug, now, "checks_drafted", None, Some(session), "agent", &json!({"columns": ids}))?;
+    Ok(Outcome {
+        slug: Some(slug.into()),
+        summary: format!(
+            "Asked the owner to approve checks for {} column(s) of grid \"{slug}\" ({}); rows, cells and proofs stay as they are. \
+             Stop here and end your turn; the owner's answer arrives as your next message.",
+            ids.len(),
+            ids.join(", ")
+        ),
+        widget: Some("draft"),
+        grids: vec![slug.into()],
+        ..Default::default()
+    })
+}
+
+/// The owner approves column checks from `grid checks`: only those columns'
+/// checks change, and their files join the grid's locked hashes.
+fn approve_checks(connection: &Connection, request: &Request, mut grid: Grid, pending: &Value) -> Result<Outcome, TaskError> {
+    let project = request.project.as_str();
+    let slug = grid.slug.clone();
+    let now = request.now;
+    let changed: Vec<String> = pending["changed"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+    for column in pending["columns"].as_array().into_iter().flatten() {
+        let id = column["id"].as_str().unwrap_or("");
+        if !changed.iter().any(|known| known == id) {
+            continue;
+        }
+        connection.execute(
+            "UPDATE grid_column SET checks = ?4 WHERE project_id = ?1 AND slug = ?2 AND id = ?3",
+            params![project, slug, id, column["checks"].to_string()],
+        )?;
+    }
+    let mut hashes = grid.hashes.clone().unwrap_or_else(|| json!({"files": {}}));
+    if !hashes["files"].is_object() {
+        hashes["files"] = json!({});
+    }
+    for source in [&pending["hashes"], request.hashes.as_ref().unwrap_or(&Value::Null)] {
+        for (path, hash) in source["files"].as_object().into_iter().flatten() {
+            hashes["files"][path] = hash.clone();
+        }
+    }
+    grid.hashes = Some(hashes);
+    grid.pending = None;
+    grid.updated_at = now;
+    save_grid(connection, &grid)?;
+    append_event(connection, project, &slug, now, "checks_approved", None, None, "owner", &json!({"columns": changed}))?;
+    let summary = format!(
+        "Owner approved the checks for column(s) {} of grid \"{slug}\". Run `atelier grid next {slug}` to pick the next gaps.",
+        changed.join(", ")
+    );
+    let tell = pending["draftedBy"].as_str().map(|session| (session.to_string(), summary.clone())).into_iter().collect();
+    Ok(Outcome { slug: Some(slug.clone()), summary, tell, grids: vec![slug], ..Default::default() })
 }
 
 /// Give every pair of a live feature or combination row and a live column an
@@ -2789,6 +2926,9 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
         "claimable": claimable, "taken": taken, "left": left, "takenInGrid": taken_in_grid, "naPending": na_pending,
         "needsCheck": needs_check, "needsCheckInGrid": needs_check_in_grid,
         "create": create,
+        // Finished only when every cell is proved or N/A: none free, claimed,
+        // waiting on a check or on the owner's N/A answer.
+        "finished": left == 0 && taken_in_grid == 0 && needs_check_in_grid == 0 && na_pending == 0,
     }))
 }
 
