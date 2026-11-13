@@ -328,6 +328,14 @@ pub fn check_files(kind: &str, plan: &Value) -> Vec<String> {
 
 /* ------------------------------------------------------------------ lint */
 
+/// A flag for the owner: an approved check file, a helper beside it or the
+/// harness changed during the task. Not a refusal; the owner reviews it.
+pub fn changed_file_flag(path: &str) -> Value {
+    let mut value = flag(None, None, "check-file-changed", format!("{path} changed since the owner approved the checks"));
+    value["path"] = json!(path);
+    value
+}
+
 fn flag(item: Option<&str>, check: Option<&str>, kind: &str, text: impl Into<String>) -> Value {
     let mut value = json!({"kind": kind, "text": text.into()});
     if let Some(item) = item {

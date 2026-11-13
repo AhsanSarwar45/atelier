@@ -52,10 +52,10 @@ export interface CheckRun {
   name?: string;
 }
 
-export type CheckFlagKind = 'weak' | 'proves-nothing' | 'skip-added' | 'exit-in-test' | 'test-deleted' | 'hash-changed' | string;
+export type CheckFlagKind = 'weak' | 'proves-nothing' | 'skip-added' | 'exit-in-test' | 'test-deleted' | 'hash-changed' | 'check-file-changed' | string;
 
 /** Something about a check worth the owner's eye. It informs and never refuses. */
-export interface CheckFlag { kind: CheckFlagKind; text: string; item?: string; check?: string }
+export interface CheckFlag { kind: CheckFlagKind; text: string; item?: string; check?: string; path?: string }
 
 export type CheckRuns = Record<string, Record<string, CheckRun>>;
 export type CheckBaseline = Record<string, Record<string, { p50: number; samples?: number[] }>>;
@@ -218,12 +218,13 @@ const FLAG_LABEL: Record<string, string> = {
   'exit-in-test': 'Exit call in a test',
   'test-deleted': 'Test deleted',
   'hash-changed': 'Approved check file changed',
+  'check-file-changed': 'Check file changed',
 };
 
 /** A flag's short name: "Proves nothing: export/b", "Skip added". */
 export function flagTitle(flag: CheckFlag): string {
   const label = FLAG_LABEL[flag.kind] ?? (flag.kind || 'Flag');
-  const where = flag.item && flag.check ? `${flag.item}/${flag.check}` : flag.check || '';
+  const where = flag.item && flag.check ? `${flag.item}/${flag.check}` : flag.check || flag.path || '';
   return where ? `${label}: ${where}` : label;
 }
 

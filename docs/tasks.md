@@ -19,7 +19,7 @@ the task and what it must prove when it finishes.
   server rejects a result that does not cover the plan.
 - Tasks are test-first. Every plan item carries one or more checks, written
   before the work and approved by the owner with the plan in one step. The
-  server locks the files they rely on, requires them to fail at start and
+  server records the files they rely on, requires them to fail at start and
   pass at done, and ticks items itself. Agents cannot tick an item by
   saying so (see Checks).
 - "Done" means the result is accepted, and for code-changing types that the
@@ -234,7 +234,7 @@ from editing a test until it passes.
 | `given`, `when`, `then` | the behaviour in words; shown on the card |
 | `red` | regex the failing output must match at start; not used for `characterisation` |
 | `timeout_s` | default 600, at most 3600 |
-| `files` | the files the check relies on: its test file, a script, a baseline image. Locked at approval |
+| `files` | the files the check relies on: its test file, a script, a baseline image. Recorded at approval |
 | `bench` | only for `benchmark`: `value` is a regex with one group read from each run's output; `runs` (at least 10) and `warmup`; `budget` is `{max, unit}` (absolute) or `{improve_pct, unit}` (p50 at least that much under the start-of-task baseline) |
 
 Each plan item, under whatever key its type uses (`criteria`, `done_when`,
@@ -264,13 +264,13 @@ harness = ["vitest.config.ts", "package.json", "server/Cargo.toml"]
 test_command = "npm test && cargo test"
 ```
 
-- `harness`: test configuration the checks depend on. It is locked with
-  every check, so a task cannot loosen the runner (exclude a file, change a
-  timeout, swap the test script) to get green.
+- `harness`: test configuration the checks depend on. It is recorded with
+  every check, so the owner sees at done when a task changed the runner
+  (excluded a file, changed a timeout, swapped the test script).
 - `test_command`: the project's whole suite, run at `done` on top of the
   task's checks. Optional.
 
-### Approval and the lock
+### Approval and review
 
 The owner approves every check in one step: **Create task** on a proposal,
 an agent's create after the owner's `@task`, approving a grid, or approving
@@ -280,98 +280,31 @@ sha256 of each file in `files` and of every harness file
 proposed or created; an agent writes them first.
 
 A check file inside a test folder (the topmost ancestor named `tests`,
-`test`, `__tests__`, `spec` or `e2e`) locks that test folder: every
-tracked file under it, so shared helpers, fixtures, tolerances and
-baselines cannot be loosened to make a check pass. The other test files
-there (`*.test.*`, `*.spec.*`, `test_*.py`, `*_test.*`, `*_spec.*`) are
-not locked: they are other tests, which a task's change may make out of
-date. A lock made before this rule may hold them; a change to one is not
-counted against the check. A check file outside a test folder locks only
-itself.
+`test`, `__tests__`, `spec` or `e2e`) also records the other tracked files
+in that folder: shared helpers, fixtures, tolerances and baselines. The
+other test files there (`*.test.*`, `*.spec.*`, `test_*.py`, `*_test.*`,
+`*_spec.*`) are left out: they are other tests, which a task's change may
+make out of date.
 
-A check also cannot pass by running fewer tests. At start the server
-records how many tests each check's output reports (cargo, vitest and
-pytest summaries). A later run that reports fewer fails with, for example,
-"ran 1 test, 3 at start", even when every locked file is unchanged.
+Nothing is locked. An agent may edit any file while it works, including a
+check's own file: a Rust test often lives in the same file as the code it
+tests. Checks always run as the files are now. The protection is review,
+as in SWE-bench and Anthropic's agent guidance, not a lock:
 
-From then on, before any run, the hashes are compared. A changed file fails
-the item with `approved check file changed: tests/x.rs` (flag
-`hash-changed`) until it is put back, or an amend re-hashes it.
+- At done, every recorded file that changed since approval gets a
+  `check-file-changed` flag on the review card, naming the file, so the
+  owner sees each edit to a check, a helper or the harness.
+- Break-it (see Done) still reverts the agent's other changes and requires
+  each check to go red again. A check weakened until it passes on the old
+  code is flagged `proves-nothing`.
+- A check cannot pass by running fewer tests. At start the server records
+  how many tests each check's output reports (cargo, vitest and pytest
+  summaries). A later run that reports fewer fails with, for example,
+  "ran 1 test, 3 at start".
 
-Before the card reaches the owner, a lint reads each proposed check and
-flags weak ones on the proposal card (flag `weak`), for example "only
-checks the file exists", "asserts a mock call", "no `red` pattern names a
-behaviour". The owner sees the checks folded under each item and only sees
-a single check again when an agent asks to change it.
+Tasks approved under the old lock keep their recorded hashes; those are
+now only used for the flags.
 
-### Red at start
-
-`atelier task start N` (and claiming a grid cell) runs every check at the
-current HEAD before the task moves to `in_progress`:
-
-- `test` and `structure` must fail, and their output must match `red`.
-- `benchmark` must miss its budget; the timed samples are kept as the
-  baseline for a relative budget, measured on the same machine.
-- `characterisation` must pass.
-
-Otherwise start is refused, naming the item and check: `export: "repro"
-already passes, so it proves nothing`, or `export: "repro" failed for
-another reason: <output tail>`. A check that passes before the work proves
-nothing; one that fails for the wrong reason (a typo, a missing fixture)
-would go green for the wrong reason too. The fix is an amend.
-
-### Ticking items
-
-`atelier task check N ITEM` takes no payload. The server verifies the
-hashes, runs every check of the item and records for each
-`{exit, passed, outputTail (last 40 lines), commit, at, samples?, value?}`
-in `checkRuns`. It ticks the item only when all pass; otherwise the card
-shows `2 of 3 checks pass`. Agent-written evidence is not accepted for a
-task with checks.
-
-### Done
-
-`done` takes the summary, commits, follow-ups and the type's fields other
-than its item list. Then:
-
-1. **Green.** The hashes are verified and every check is run again, plus
-   `test_command` if set. `done` is refused while any fails or any approved
-   file has changed. An item that cannot be met is amended, not finished
-   around.
-2. **Break-it.** In a scratch worktree at HEAD the server reverts the
-   task's changes since its start commit, except the checks' `files`, and
-   runs each check. A check that still passes is flagged `proves-nothing`:
-   it passes without the work. Characterisation checks are skipped. This is
-   a flag for the owner, not a refusal.
-3. **Diff scan.** The task's diff is scanned for added skip, only, xfail and
-   ignore markers (`skip-added`), `exit(` calls inside test files
-   (`exit-in-test`) and deleted test files or test functions
-   (`test-deleted`).
-
-4. **Deliberate breaks (optional).** With `"mutants": true` in the plan,
-   the server breaks the task's changed lines in small ways in a scratch
-   copy. It flips a comparison, swaps an operator, `&&`/`||` or
-   `true`/`false`, changes a number, or deletes a statement. It then runs
-   each item's checks against every break. Each item gets a `mutants` flag
-   that says how many breaks its checks catch ("the checks catch 7 of 9
-   deliberate breaks"). An item whose checks catch fewer than a quarter is
-   also flagged `weak-checks`. Break-it shows that a check depends on the
-   change; this shows that it catches a wrong answer. It costs one run of
-   the item's checks per break, so ask for it where the checks matter
-   most.
-
-Flags are stored as `checkFlags: [{item?, check?, kind, text}]` and shown on
-the review card.
-
-### Benchmarks
-
-A benchmark check's command does one measured run and prints its value.
-The server runs it `warmup` times unrecorded, then `runs` times (at least
-10), reads `bench.value` from each run's output, stores the raw samples and
-compares the p50 with the budget. The start-of-task samples are the
-baseline for `improve_pct`, so both sides come from the same machine.
-Correctness tests for the optimised code go in as `characterisation`
-checks, since they pass before and after.
 
 ### Amend
 
@@ -380,7 +313,7 @@ N` with the whole new plan and a `reason` (what it ran, what it printed).
 It applies at once; the owner does not approve it. Filing it runs the
 changed checks against the starting code: a changed check must go red again
 (characterisation: pass), or the amend is refused there and then. Once it
-applies, the runs from filing are kept, the changed checks' files are locked
+applies, the runs from filing are kept, the changed checks' files are recorded
 anew and the changed items are unmet.
 
 A change that may weaken what the owner approved still applies, since the
@@ -488,7 +421,7 @@ JSON is camelCase. A task:
 `{ITEM: {CHECK: {exit, passed, outputTail, commit, at, samples?, value?}}}`;
 `checkFlags` is `[{item?, check?, kind, text}]` with `kind` one of `weak`,
 `proves-nothing`, `skip-added`, `test-deleted`, `exit-in-test`,
-`hash-changed`. Plan items carry their `checks`.
+`check-file-changed` (with `path`). Plan items carry their `checks`.
 
 `merged` is only in list and detail responses: `true` when every commit of a
 done task is in the base branch, `false` when one is not, `null` when there

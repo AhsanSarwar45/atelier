@@ -35,18 +35,20 @@ fn stored(task: &TaskRow) -> Value {
     stored
 }
 
-/// `Err` naming the approved files of this item (or the harness) that
-/// changed since the owner approved them.
-fn locked(stored: &Value, item: &str, checks: &[Check], owned: &[String], found: &Gate) -> Result<(), String> {
-    let changed = checks::changed_for(&stored["hashes"], checks, owned, &found.hashes);
-    if changed.is_empty() {
-        return Ok(());
+/// The approved files that changed since the owner approved them: each
+/// item's check files, the helpers beside them and the harness. Nothing is
+/// locked; done flags these for the owner to review.
+fn changed_files(stored: &Value, kind: &str, plan: &Value, found: &Gate) -> Vec<String> {
+    let owned = checks::check_files(kind, plan);
+    let mut changed: Vec<String> = Vec::new();
+    for (_, checks) in checks::item_checks(kind, plan) {
+        for path in checks::changed_for(&stored["hashes"], &checks, &owned, &found.hashes) {
+            if !changed.contains(&path) {
+                changed.push(path);
+            }
+        }
     }
-    Err(format!(
-        "{item}: approved check file changed: {}. Put it back as approved; if the check is wrong, run `atelier task amend` \
-         with a reason",
-        changed.join(", ")
-    ))
+    changed
 }
 
 fn run_of<'a>(found: &'a Gate, item: &str, check: &Check) -> Result<&'a Run, String> {
@@ -69,23 +71,17 @@ fn recorded(run: &Run, passed: bool, reason: Option<&str>, phase: &str) -> Value
     value
 }
 
-/// `task start`: no approved file changed, and every check red for its
-/// stated reason (a characterisation check green). Stores the starting
+/// `task start`: every check red for its stated reason (a characterisation check green). Stores the starting
 /// commit, the runs and each benchmark's baseline.
 pub fn start(task: &mut TaskRow, gate: Option<&Gate>) -> Result<Value, TaskError> {
     let found = measured(gate, "start")?;
     let mut stored = stored(task);
-    let owned = checks::check_files(&task.kind, &task.plan);
     let mut problems = Vec::new();
     let mut runs = json!({});
     let mut baselines = json!({});
     let mut count = 0;
     let mut kept = 0;
     for (item, checks) in checks::item_checks(&task.kind, &task.plan) {
-        if let Err(why) = locked(&stored, &item, &checks, &owned, found) {
-            problems.push(why);
-            continue;
-        }
         for check in &checks {
             let run = match run_of(found, &item, check) {
                 Ok(run) => run,
@@ -136,28 +132,20 @@ pub struct Checked {
     pub problems: Vec<String>,
 }
 
-/// `task check N ITEM`: run the item's checks; tick it when every one
-/// passes and none of its approved files changed, untick it otherwise.
+/// `task check N ITEM`: run the item's checks as they are; tick it when
+/// every one passes, untick it otherwise.
 pub fn check(task: &mut TaskRow, item: &str, gate: Option<&Gate>) -> Result<Checked, TaskError> {
     let ids: Vec<String> = checks::plan_items(&task.kind, &task.plan).into_iter().map(|(id, _)| id).collect();
     let checks = checks::checks_of(&task.kind, &task.plan, item)
         .ok_or_else(|| TaskError::Refused(format!("\"{item}\" is not an item in the plan (items with checks: {})", ids.join(", "))))?;
     let found = measured(gate, "check")?;
     let mut stored = stored(task);
-    let owned = checks::check_files(&task.kind, &task.plan);
     let mut problems = Vec::new();
-    if let Err(why) = locked(&stored, item, &checks, &owned, found) {
-        problems.push(why);
-    }
     let mut passed = 0;
     let mut passing = Vec::new();
     for check in &checks {
         let run = run_of(found, item, check).map_err(TaskError::Refused)?;
-        // A check whose own approved files changed does not count as passing,
-        // whatever it printed: what ran is no longer the check the owner approved.
-        let tampered = !checks::changed_for(&stored["hashes"], std::slice::from_ref(check), &owned, &found.hashes).is_empty();
-        let judged = if tampered { Err("ran with an approved file changed".to_string()) } else { green(&stored, item, check, run) };
-        match judged {
+        match green(&stored, item, check, run) {
             Ok(()) => {
                 passed += 1;
                 passing.push(check.name.clone());
@@ -198,18 +186,15 @@ pub fn ticked(task: &TaskRow) -> (usize, usize) {
     (items.iter().filter(|(id, _)| met[id] == true).count(), items.len())
 }
 
-/// `task done`: every check passes, no approved file changed and the
-/// project's test command passes. Stores the runs, and break-it's and the
-/// diff scan's flags beside the lint's, for the owner's review card.
+/// `task done`: every check passes and the project's test command passes.
+/// Stores the runs, and break-it's and the diff scan's flags beside the
+/// lint's, with one `check-file-changed` flag per approved file that
+/// changed, for the owner's review card.
 pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<(), TaskError> {
     let found = measured(gate, "done")?;
     let mut stored = stored(task);
-    let owned = checks::check_files(&task.kind, &task.plan);
     let mut problems = Vec::new();
     for (item, checks) in checks::item_checks(&task.kind, &task.plan) {
-        if let Err(why) = locked(&stored, &item, &checks, &owned, found) {
-            problems.push(why);
-        }
         let mut met = true;
         for check in &checks {
             let run = run_of(found, &item, check).map_err(TaskError::Refused)?;
@@ -245,6 +230,9 @@ pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<(), TaskError> {
         .cloned()
         .collect();
     flags.extend(found.flags.iter().cloned());
+    for path in changed_files(&stored, &task.kind, &task.plan, found) {
+        flags.push(checks::changed_file_flag(&path));
+    }
     stored["flags"] = json!(flags);
     stored["doneCommit"] = json!(found.head);
     task.gate = Some(stored);
@@ -496,32 +484,24 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_changed_approved_file_fails_start_check_and_done() {
+    fn a_changed_approved_file_refuses_nothing_and_done_flags_it() {
         let (_d, store) = store();
         let payload = json!({"type": "feature", "title": "T", "why": "W", "plan": plan()});
         let one = ask(&store, "create", None, payload, Some(measured(&[], &[]))).unwrap().task.number;
         let mut gate = red();
-        gate.hashes = hashes(&["tests/b.rs"]);
-        let message = refused(ask(&store, "start", Some(one), json!({}), Some(gate)));
-        assert!(message.contains("export: approved check file changed: tests/b.rs"), "{message}");
-        assert!(!message.contains("images:"), "only the item whose file changed: {message}");
-        let mut gate = red();
-        gate.hashes = hashes(&["Cargo.toml"]);
-        let message = refused(ask(&store, "start", Some(one), json!({}), Some(gate)));
-        assert!(message.contains("images: approved check file changed: Cargo.toml"), "the harness is every item's: {message}");
-        ask(&store, "start", Some(one), json!({}), Some(red())).unwrap();
-        // At check the item is not met while its file is changed, even with every check green.
+        gate.hashes = hashes(&["tests/b.rs", "Cargo.toml"]);
+        ask(&store, "start", Some(one), json!({}), Some(gate)).unwrap();
         let mut gate = green(&[]);
         gate.hashes = hashes(&["tests/a.rs"]);
         let outcome = ask(&store, "check", Some(one), json!({"item": "export"}), Some(gate)).unwrap();
-        assert_eq!(outcome.detail["met"], false);
-        assert!(outcome.summary.contains("approved check file changed: tests/a.rs"), "{}", outcome.summary);
-        // The check whose file changed is not counted as passing.
-        assert_eq!(outcome.detail["passed"].as_u64().unwrap() + 1, outcome.detail["total"].as_u64().unwrap(), "{}", outcome.detail);
+        assert_eq!(outcome.detail["met"], true, "{}", outcome.summary);
         let mut gate = green(&[]);
         gate.hashes = hashes(&["tests/i.rs"]);
-        let message = refused(ask(&store, "done", Some(one), json!({"summary": "s", "commits": ["abcdef1"], "result": {}}), Some(gate)));
-        assert!(message.contains("images: approved check file changed: tests/i.rs"), "{message}");
+        ask(&store, "done", Some(one), json!({"summary": "s", "commits": ["abcdef1"], "result": {}}), Some(gate)).unwrap();
+        let task = get(store.connection(), "p", one).unwrap().unwrap();
+        let flagged: Vec<&str> = task.gate.as_ref().unwrap()["flags"].as_array().unwrap().iter()
+            .filter(|flag| flag["kind"] == "check-file-changed").filter_map(|flag| flag["path"].as_str()).collect();
+        assert_eq!(flagged, ["tests/i.rs"], "only what differs at done");
     }
 
     fn started(store: &Store, plan: Value, gate: Gate) -> i64 {
@@ -650,13 +630,8 @@ pub(crate) mod tests {
         let task = stored(&store);
         let gate = checks::measure(dir, &task.kind, &task.plan, task.gate.as_ref().unwrap(), checks::Measure::Item("export".into()), 2).await;
         assert_eq!(ask(&store, "check", Some(one), json!({"item": "export"}), Some(gate)).unwrap().detail["met"], true);
-        // Tampering with the approved check is caught at done.
-        std::fs::write(dir.join("tests/value.sh"), "true\n").unwrap();
         let task = stored(&store);
         let done = checks::Measure::Done { test_command: Some("test -f src/value.txt".into()) };
-        let gate = checks::measure(dir, &task.kind, &task.plan, task.gate.as_ref().unwrap(), done.clone(), 3).await;
-        assert!(refused(ask(&store, "done", Some(one), done_payload(), Some(gate))).contains("approved check file changed: tests/value.sh"));
-        std::fs::write(dir.join("tests/value.sh"), "grep -qx 2 src/value.txt || { echo 'value FAILED'; exit 1; }\n").unwrap();
         let gate = checks::measure(dir, &task.kind, &task.plan, task.gate.as_ref().unwrap(), done, 4).await;
         assert!(gate.flags.is_empty(), "{:?}", gate.flags);
         let outcome = ask(&store, "done", Some(one), done_payload(), Some(gate)).unwrap();

@@ -1,7 +1,8 @@
-//! The lock covers what a check depends on, not only the files it names:
+//! Approval records what a check depends on, not only the files it names:
 //! the whole test folder its files live in (shared helpers, fixtures,
-//! tolerances). And a check that runs fewer tests than it did at start
-//! fails, even when every locked file is unchanged.
+//! tolerances). Nothing is locked, but done flags each of those that
+//! changed for the owner. And a check that runs fewer tests than it did at
+//! start fails.
 
 
 use atelier::workbench::tasks::{checks, get};
@@ -31,7 +32,7 @@ async fn check_item(store: &Db, dir: &std::path::Path, number: i64) -> atelier::
 }
 
 #[test]
-fn approval_locks_the_whole_test_folder_a_check_file_lives_in() {
+fn approval_records_the_whole_test_folder_a_check_file_lives_in() {
     let root = repository();
     let dir = root.path();
     commit(dir, "src/value.txt", "1\n");
@@ -42,13 +43,13 @@ fn approval_locks_the_whole_test_folder_a_check_file_lives_in() {
         "checks": [shell_check("camera", "sh tests/suite/camera.sh", "value FAILED", &["tests/suite/camera.sh"])]}]});
     let gate = checks::draft_gate(dir, "feature", &plan, &[]);
     for path in ["tests/suite/camera.sh", "tests/common/tolerance.sh", "tests/fixtures/reference.txt"] {
-        assert!(gate.hashes.contains_key(path), "{path} is not locked: {:?}", gate.hashes.keys().collect::<Vec<_>>());
+        assert!(gate.hashes.contains_key(path), "{path} is not recorded: {:?}", gate.hashes.keys().collect::<Vec<_>>());
     }
-    assert!(!gate.hashes.contains_key("src/value.txt"), "the code under work is not locked");
+    assert!(!gate.hashes.contains_key("src/value.txt"), "the code under work is not recorded");
 }
 
 #[tokio::test]
-async fn weakening_a_shared_helper_fails_the_check_with_its_named_file_unchanged() {
+async fn a_loosened_shared_helper_is_flagged_for_the_owner_at_done() {
     let root = repository();
     let dir = root.path();
     commit(dir, "src/value.txt", "1\n");
@@ -59,15 +60,21 @@ async fn weakening_a_shared_helper_fails_the_check_with_its_named_file_unchanged
     // The helper is loosened so anything passes; camera.sh itself is untouched.
     commit(dir, "tests/common/tolerance.sh", "within() { true; }\n");
     let outcome = check_item(&store, dir, number).await;
-    assert_eq!(outcome.detail["met"], false, "{}", outcome.summary);
-    assert!(outcome.summary.contains("approved check file changed: tests/common/tolerance.sh"), "{}", outcome.summary);
+    assert_eq!(outcome.detail["met"], true, "the check runs as it is: {}", outcome.summary);
+    let task = get(store.connection(), "p", number).unwrap().unwrap();
+    let done = checks::Measure::Done { test_command: None };
+    let gate = checks::measure(dir, &task.kind, &task.plan, task.gate.as_ref().unwrap(), done, 3).await;
+    ask(&store, "done", Some(number), json!({"summary": "s", "commits": ["abcdef1"], "result": {}}), Some(gate)).unwrap();
+    let flags = get(store.connection(), "p", number).unwrap().unwrap().gate.unwrap()["flags"].clone();
+    let flagged = flags.as_array().unwrap().iter().any(|flag| flag["kind"] == "check-file-changed" && flag["path"] == "tests/common/tolerance.sh");
+    assert!(flagged, "the loosened helper is flagged: {flags}");
 }
 
 #[tokio::test]
 async fn a_check_that_runs_fewer_tests_than_at_start_fails() {
     let root = repository();
     let dir = root.path();
-    // The suite runs one test per line of src/cases.txt, a file outside the lock.
+    // The suite runs one test per line of src/cases.txt, not a check file.
     commit(dir, "src/cases.txt", "a\nb\nc\n");
     commit(dir, "src/value.txt", "1\n");
     commit(dir, "tests/suite/cases.sh", "n=$(wc -l < src/cases.txt); if grep -qx 2 src/value.txt; then echo \"test result: ok. $n passed; 0 failed\"; \

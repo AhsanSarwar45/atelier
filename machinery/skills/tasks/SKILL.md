@@ -11,8 +11,7 @@ a task.
 
 Tasks are test-first. Every plan item carries the checks that prove it,
 written before the work. The owner approves them with the plan, the server
-locks them, runs them red at start, and ticks each item only when its checks
-pass.
+runs them red at start, and ticks each item only when its checks pass.
 
 ## When a task is needed
 
@@ -101,7 +100,7 @@ item to be met. A type without an item list puts them in the plan's own
 `bench: {value, runs, warmup, budget}`) or `characterisation` (behaviour
 that must stay the same, so it passes at start). `red` is a pattern the
 failing output must match at start. `files` are the files the check relies
-on; they are locked when the owner approves.
+on; the server records them when the owner approves.
 
 - One observable behaviour per check, and as many checks as the item needs.
 - Assert outcomes: return values, DOM, files, HTTP responses, exit codes.
@@ -109,16 +108,16 @@ on; they are locked when the owner approves.
 - Each check fails for one stated reason, the one in `red`. Make the
   command print that reason.
 - Keep each under about two minutes.
-- The helpers, fixtures and baselines in a check's test folder are
-  locked with it; other test files there are not, so you may update
-  tests your change makes out of date. A check that runs fewer tests
-  than at start fails.
+- Nothing is locked. Checks run as the files are now, and at done the
+  owner sees every changed check file, helper and harness file. You may
+  update tests your change makes out of date. A check that runs fewer
+  tests than at start fails.
 - Add `"mutants": true` to the plan for the deeper test at done: the server
   breaks the changed lines on purpose and reports how many breaks each
   item's checks catch; items that catch almost none are flagged
   `weak-checks`.
 - Write the check files before you propose or create: their contents are
-  what the owner approves and the server locks.
+  what the owner approves.
 
 ## Working a task
 
@@ -145,9 +144,11 @@ on; they are locked when the owner approves.
 
 ## Never
 
-- Never edit, delete, skip, rename or weaken an approved check file, the
-  project's test harness config or a baseline. The server rejects the item
-  ("approved check file changed").
+- Never weaken, delete, skip or rename an approved check, the project's
+  test harness config or a baseline to get green. You may edit a check's
+  file for other reasons (a Rust test shares its file with the code), but
+  each change is flagged to the owner at done, and break-it flags a check
+  that no longer catches the old code.
 - Never branch on test inputs, special-case the values a check uses,
   override equality or comparison, or add `exit` calls to tests.
 - Never tick an item yourself or claim a check passed that you did not see

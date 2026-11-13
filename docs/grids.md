@@ -248,8 +248,10 @@ by the row id, so one template covers every row:
   shows **Needs a check** until an edit adds them, and cannot be claimed.
   The draft card names those columns.
 - Approving the grid (or an edit, or a template change) approves every
-  check on it and stores its hashes, as a task's approval does. The lock,
-  the hash-changed failure and the harness files work as for tasks.
+  check on it and stores its hashes, as a task's approval does.
+  Nothing is locked: `prove` runs the checks as they are, and a proof made
+  while a recorded check file or a helper beside it differs from approval
+  lists them in `changedCheckFiles` for the owner.
 - Claiming a cell (task create with `cells`, or the owner's Create task)
   runs its resolved checks at HEAD, and they must go red as at task start;
   otherwise the claim is refused, naming the cell and check.
@@ -260,8 +262,8 @@ by the row id, so one template covers every row:
   `{"columns": [{"id": "docs", "checks": [ … ]}]}`. Only column checks are
   allowed in this payload. The grid stays approved while the checks wait. The owner
   approves or discards just those checks on the grid card. Rows, columns,
-  cells, proofs and history are kept, and the new check files join the
-  grid's lock.
+  cells, proofs and history are kept, and the new check files' hashes are
+  recorded with the grid's.
 - `atelier grid next` never calls a grid finished while cells need a check.
   It says how many need one and names `atelier grid checks`. Its JSON has
   `finished: false`, and the command exits non-zero when it hands out
