@@ -238,7 +238,7 @@ export function MemoryBadge() {
   const GroupIcon = { chat: MessageSquare, app: AppWindow, other: Box } as const;
   return <Popover onOpenChange={open => open && read()}>
     <PopoverTrigger asChild>
-      <Badge asChild appearance="outline" size="sm" shape="circle" className="hidden shrink-0 md:inline-flex">
+      <Badge asChild appearance="outline" size="sm" shape="circle" className="hidden shrink-0 group-data-[expanded=true]/chips:inline-flex md:inline-flex">
         <Button variant="ghost" size="none" data-testid="memory-badge" aria-label={`Atelier RAM usage: ${memoryWords(shownBytes)}`}>
           <MemoryStick className="size-3" aria-hidden="true" />
           <span>{memoryWords(shownBytes)}</span>

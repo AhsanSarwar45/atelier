@@ -2289,11 +2289,15 @@ already did, and did not.
 
 #### Worktrees
 
-The chat header's worktree badge, beside the RAM badge, shows how much disk the
-chat's checkout takes: its files without the repository's shared `.git`, links
-not followed. It opens the project's worktrees (`worktrees.list`), each with its
-size, branch, uncommitted changes and the chats working in it; the chat's own
-row says "This chat".
+The chat's folder chip is the worktree badge: pressed, it opens the project's
+worktrees (`worktrees.list`), each with its size on disk (its files without the
+repository's shared `.git`, links not followed), branch, uncommitted changes
+and the chats working in it; the chat's own row says "This chat". A folder
+that is not a git checkout keeps a plain chip.
+
+On a phone the status line hides its less urgent chips (profile, memory,
+guidance, folder, branch). A button at the end of the row, "Show all chips",
+shows them; "Show fewer chips" hides them again.
 
 **Move here** moves the open chat to that worktree (`session.move`). Only an
 idle chat moves, and only to a checkout `git worktree list` gives for its

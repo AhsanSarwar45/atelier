@@ -235,7 +235,7 @@ describe('what the chat is running, on its own line', () => {
     // And the line it sits in reads that same value rather than writing its
     // own: two numbers is how they drifted apart in the first place.
     const header = readFileSync(resolve(__dirname, '../chat-tab.tsx'), 'utf8');
-    const line = header.slice(header.indexOf('data-testid="chat-status-line"'));
+    const line = header.slice(header.indexOf('<ChipRow'));
     const opening = line.slice(0, line.indexOf('>'));
     expect(opening, 'the line spaces its chips by the shared value').toContain('CHIP_GAP');
     expect(opening, 'and never by a number of its own').not.toMatch(/\bgap-[\d.]+/);

@@ -122,6 +122,7 @@ import { ModelIcon } from '@/workbench/model-icon';
 import { useSteadyCallback } from '@/hooks/use-steady-callback';
 import { MemoryBadge } from '@/workbench/memory-badge';
 import { WorktreeBadge } from '@/workbench/worktree-badge';
+import { ChipRow } from '@/workbench/status-chips';
 import { DEFAULT_PANEL_WIDTH, ResizeDivider, rememberedPanelWidth } from '@/workbench/resize-divider';
 import * as api from '@/lib/api';
 import type { MentionPlace } from '@/lib/api';
@@ -2731,8 +2732,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   const statusLine = useMemo(() => (
     <>
-      <div
-        data-testid="chat-status-line"
+      <ChipRow
         // One distance between every two chips on this line, read from the one
         // place it is written. The model/mode group inside it held its own pair
         // half a step closer, so the four chips drew as two pairs instead of a
@@ -2746,40 +2746,40 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           CHIP_GAP,
         )}
       >
-        {sessionProfileName && <ProfileBadge name={sessionProfileName} brand={sessionBrand} className="hidden md:inline-flex" />}
+        {sessionProfileName && <ProfileBadge name={sessionProfileName} brand={sessionBrand} className="hidden group-data-[expanded=true]/chips:inline-flex md:inline-flex" />}
         <MemoryBadge />
-        {sessionId && projectPath && facts?.cwd && (
-          <WorktreeBadge sessionId={sessionId} projectPath={projectPath} cwd={facts.cwd} onMoved={() => setMovedCount((count) => count + 1)} />
-        )}
         {view.menu.sharedLibrary && <ActiveGuidance snapshot={view.menu.sharedLibrary} />}
+        {/* The folder chip opens the project's worktrees, with their sizes. */}
         {facts?.folder && (
-          <Tooltip label={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}>
-            <Badge
-              hue={hueFor(facts.folder)}
-              appearance="light"
-              size="sm"
-              shape="circle"
-              data-testid="chat-folder-chip"
-              data-folder={facts.folder}
-              data-branch={facts.branch ?? ''}
-              // The whole path and the branch in the tooltip: the chip has room
-              // for the one word that tells two copies of a project apart.
-              // Never squeezed by the line, and never wider than a name: a chip
-              // that shrinks under its own text spills it over its neighbour
-              // (bw-7ks.22.15).
-              className="hidden max-w-40 shrink-0 gap-1 truncate md:inline-flex"
-            >
-              {/* A folder that is a checkout says so: the branch is already in
-                  this chip's tooltip, and the mark is what says there is one to
-                  hover for (bw-ja9l.12). */}
-              {facts.branch ? (
-                <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
-              ) : (
-                <Folder className="size-3 shrink-0" aria-hidden="true" />
-              )}
-              <span className="min-w-0 truncate">{facts.folder}</span>
-            </Badge>
-          </Tooltip>
+          <WorktreeBadge sessionId={sessionId ?? ''} projectPath={projectPath ?? ''} cwd={facts.cwd ?? ''} onMoved={() => setMovedCount((count) => count + 1)}>
+            <Tooltip label={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}>
+              <Badge
+                hue={hueFor(facts.folder)}
+                appearance="light"
+                size="sm"
+                shape="circle"
+                data-testid="chat-folder-chip"
+                data-folder={facts.folder}
+                data-branch={facts.branch ?? ''}
+                // The whole path and the branch in the tooltip: the chip has room
+                // for the one word that tells two copies of a project apart.
+                // Never squeezed by the line, and never wider than a name: a chip
+                // that shrinks under its own text spills it over its neighbour
+                // (bw-7ks.22.15).
+                className="hidden max-w-40 shrink-0 gap-1 truncate group-data-[expanded=true]/chips:inline-flex md:inline-flex"
+              >
+                {/* A folder that is a checkout says so: the branch is already in
+                    this chip's tooltip, and the mark is what says there is one to
+                    hover for (bw-ja9l.12). */}
+                {facts.branch ? (
+                  <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+                ) : (
+                  <Folder className="size-3 shrink-0" aria-hidden="true" />
+                )}
+                <span className="min-w-0 truncate">{facts.folder}</span>
+              </Badge>
+            </Tooltip>
+          </WorktreeBadge>
         )}
         {/* The branch beside the worktree, not folded into its tooltip: the
             two together are what says which piece of work this chat is in,
@@ -2798,7 +2798,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               shape="circle"
               data-testid="chat-branch-chip"
               data-branch={facts.branch}
-              className="hidden max-w-40 shrink-0 gap-1 truncate md:inline-flex"
+              className="hidden max-w-40 shrink-0 gap-1 truncate group-data-[expanded=true]/chips:inline-flex md:inline-flex"
             >
               <GitBranch className="size-3 shrink-0" aria-hidden="true" />
               <span className="min-w-0 truncate">{facts.branch}</span>
@@ -2819,7 +2819,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           )}
           <PlanChip usage={plan} onOpen={() => setShowing('usage')} />
         </div>
-      </div>
+      </ChipRow>
 
       {checklist.length > 0 && (
         <div className="border-b border-border/60 px-4 py-2" aria-live="polite">

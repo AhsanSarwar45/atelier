@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
-import { FolderGit2, HardDrive } from 'lucide-react';
+import { FolderGit2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { request } from '@/lib/api';
+import { cn } from '@/lib/utils';
+import { PHONE_HIDDEN } from '@/workbench/status-chips';
 
 /** One checkout of the project, as `worktrees.list` answers. */
 interface Worktree {
@@ -46,22 +48,25 @@ async function send(command: Record<string, unknown>): Promise<unknown> {
 const chatTitle = (chat: Worktree['chats'][number]) => chat.title || 'Untitled chat';
 
 /**
- * How much disk the chat's worktree takes. It opens the project's worktrees
- * with their size, branch and chats: the open chat can move to any of them,
- * and any but the project's own folder can be deleted.
+ * The chat's folder chip, opening the project's worktrees with their size,
+ * branch and chats: the open chat can move to any of them, and any but the
+ * project's own folder can be deleted. `children` is the chip; without it a
+ * plain chip names the folder.
  */
-export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved }: {
+export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }: {
   sessionId: string;
   projectPath: string;
   cwd: string;
   /** Called after this chat moved, so the header reads its folder again. */
   onMoved?: () => void;
+  children?: ReactNode;
 }) {
   const [trees, setTrees] = useState<Worktree[] | null>(null);
   const [deleting, setDeleting] = useState<Worktree | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const read = useCallback(() => {
+    if (!projectPath) return;
     void send({ type: 'worktrees.list', projectPath })
       .then(value => { const listed = (value as { trees?: Worktree[] } | null)?.trees; if (Array.isArray(listed)) setTrees(listed); })
       .catch(() => {});
@@ -70,7 +75,8 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved }: {
 
   const own = trees?.find(tree => tree.path === cwd)
     ?? trees?.filter(tree => cwd.startsWith(`${tree.path}/`)).sort((a, b) => b.path.length - a.path.length)[0];
-  if (!trees || !own) return null;
+  // Not a git checkout, or not listed yet: the chip alone, with nothing to open.
+  if (!trees || !own) return <>{children ?? null}</>;
 
   const act = (command: Record<string, unknown>, after?: () => void) => {
     setBusy(true);
@@ -89,12 +95,13 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved }: {
   return <>
     <Popover onOpenChange={open => { if (open) { setError(null); read(); } }}>
       <PopoverTrigger asChild>
-        <Badge asChild appearance="outline" size="sm" shape="circle" className="hidden shrink-0 md:inline-flex">
-          <Button variant="ghost" size="none" data-testid="worktree-badge" aria-label={`Worktree size: ${diskWords(own.bytes)}`}>
-            <HardDrive className="size-3" aria-hidden="true" />
-            <span>{diskWords(own.bytes)}</span>
-          </Button>
-        </Badge>
+        <button type="button" data-testid="worktree-badge" aria-label={`Worktrees (this chat: ${own.name})`}
+          className={cn(PHONE_HIDDEN, 'shrink-0 cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring')}>
+          {children ?? <Badge appearance="outline" size="sm" shape="circle" className="gap-1">
+            <FolderGit2 className="size-3" aria-hidden="true" />
+            <span>{own.name}</span>
+          </Badge>}
+        </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[26rem] p-0" data-testid="worktree-popup">
         <div className="border-b px-3 py-2"><p className="text-sm font-medium">Worktrees</p></div>

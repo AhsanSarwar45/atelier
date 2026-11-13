@@ -107,9 +107,27 @@ test('the worktree badge lists, moves and deletes worktrees', async ({ page, req
     await expect(page.getByTestId('memory-badge')).toBeVisible();
     const before = (await badge.innerText()).trim();
     console.log('badge before:', before);
-    expect(before).toMatch(/^\d+(\.\d)? (KB|MB|GB)$/);
-    const header = badge.locator('xpath=ancestor::*[.//*[@data-testid="memory-badge"]][1]');
-    await header.screenshot({ path: join(SHOTS, 'header.png') });
+    // The folder chip is the badge: it names the folder, and the sizes are in its list.
+    expect(before).toBe('main');
+    await expect(badge.getByTestId('chat-folder-chip')).toBeVisible();
+    const line = page.getByTestId('chat-status-line');
+    await line.screenshot({ path: join(SHOTS, 'header.png') });
+
+    // On a phone the folder chip waits behind the row's toggle.
+    await page.setViewportSize({ width: 390, height: 844 });
+    // The side panel opened on the wide screen covers a phone; close it as a phone user would.
+    const rail = page.getByTestId('chat-right-rail');
+    if (await rail.getAttribute('data-open') === 'true') await page.getByTestId('chat-right-rail-toggle').click({ force: true });
+    await expect(rail).not.toHaveAttribute('data-open', 'true');
+    await expect(badge).toBeHidden();
+    await line.screenshot({ path: join(SHOTS, 'phone-collapsed.png') });
+    await line.getByRole('button', { name: 'Show all chips' }).click();
+    await expect(badge).toBeVisible();
+    await expect(page.getByTestId('memory-badge')).toBeVisible();
+    await line.screenshot({ path: join(SHOTS, 'phone.png') });
+    await line.getByRole('button', { name: 'Show fewer chips' }).click();
+    await expect(badge).toBeHidden();
+    await page.setViewportSize({ width: 1280, height: 800 });
 
     // Step 2: the popup.
     await badge.click();
@@ -134,7 +152,7 @@ test('the worktree badge lists, moves and deletes worktrees', async ({ page, req
     await expect.poll(() => factsCwd(request, sessionId), { timeout: WAIT }).toBe(tree);
     await expect(rowOf('tree')).toContainText('This chat', { timeout: WAIT });
     await expect(rowOf('main')).not.toContainText('This chat');
-    await expect(badge).toHaveText('5 MB', { timeout: WAIT });
+    await expect(badge).toHaveText('tree', { timeout: WAIT });
 
     // Step 4: delete the dirty worktree.
     await rowOf('dirty').getByRole('button', { name: 'Delete' }).click();
