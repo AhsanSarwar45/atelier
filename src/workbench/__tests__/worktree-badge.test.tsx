@@ -1,7 +1,7 @@
 /**
- * Each chat shows how much disk its worktree takes, beside the memory badge.
- * The badge opens the project's worktrees: their size, branch and chats, with
- * Move here for the open chat and Delete for any worktree but the project's own.
+ * The chat's folder chip opens the project's worktrees: their size, branch and
+ * chats, with Move here for the open chat and Delete for any worktree but the
+ * project's own.
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -49,9 +49,15 @@ const row = (name: string) =>
   screen.getAllByTestId('worktree-row').find((one) => one.getAttribute('data-name') === name)!;
 
 describe('worktree badge', () => {
-  it('shows the size of the chat\'s own worktree', async () => {
+  it('opens the worktree list from the folder chip, with the size of the chat\'s own worktree inside', async () => {
     badge();
-    expect(await screen.findByTestId('worktree-badge')).toHaveTextContent('1.5 GB');
+    const chip = await screen.findByTestId('worktree-badge');
+    // The chip names the folder; the sizes live in the list it opens.
+    expect(chip).toHaveTextContent('search');
+    expect(chip).not.toHaveTextContent('GB');
+    fireEvent.click(chip);
+    await screen.findByTestId('worktree-popup');
+    expect(row('search')).toHaveTextContent('1.5 GB');
     expect(sentOf('worktrees.list')[0]).toMatchObject({ projectPath: '/work/shop' });
   });
 
