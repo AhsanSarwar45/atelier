@@ -8,6 +8,7 @@
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
 
 export interface Note {
@@ -56,14 +57,16 @@ export function NotesView({ notes, onAdd, testId }: {
       {notes.length > 0 && (
         <ul className="space-y-1.5">
           {notes.map((note, at) => (
-            <li key={at} data-testid="note" className="rounded-md border border-border/60 px-2.5 py-1.5 text-sm">
-              <div className="text-[11px] text-muted-foreground">
-                {note.scope && SCOPE_LABEL[note.scope] ? `${SCOPE_LABEL[note.scope]} · ` : ''}
-                {note.actor === 'owner' ? 'You' : 'Agent'}
-                {note.at ? ` · ${new Date(note.at).toLocaleString()}` : ''}
-              </div>
-              <div className="whitespace-pre-wrap break-words">{note.text}</div>
-            </li>
+            <Panel asChild key={at} data-testid="note" className="text-sm">
+              <li>
+                <div className="text-[11px] text-muted-foreground">
+                  {note.scope && SCOPE_LABEL[note.scope] ? `${SCOPE_LABEL[note.scope]} · ` : ''}
+                  {note.actor === 'owner' ? 'You' : 'Agent'}
+                  {note.at ? ` · ${new Date(note.at).toLocaleString()}` : ''}
+                </div>
+                <div className="whitespace-pre-wrap break-words">{note.text}</div>
+              </li>
+            </Panel>
           ))}
         </ul>
       )}
