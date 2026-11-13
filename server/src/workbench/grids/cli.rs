@@ -29,7 +29,10 @@ usage: atelier grid <command>
   na SLUG ROW COL --reason TEXT   ask the owner to mark a cell N/A
   audit SLUG [--done]             proved cells to audit; --done prints the audit summary
   pass SLUG ROW COL [--note TEXT]
-  reopen SLUG ROW COL --reason TEXT";
+  reopen SLUG ROW COL --reason TEXT
+  note SLUG [--row ROW] [--col COL] --text TEXT
+                                  leave a note on the grid, a row, a column or one cell (both --row and --col);
+                                  whoever works on a cell later sees it in `next` and `show`";
 
 const PRESENTED: &str = "The card is shown in the chat. Do not paste this block into your reply.";
 
@@ -326,6 +329,13 @@ fn print_cell(slug: &str, value: &Value) {
     if let Some(at) = cell["auditedAt"].as_i64() {
         println!("Audited at {at} by {}", cell["auditedBy"].as_str().unwrap_or("?"));
     }
+    let notes = value["notes"].as_array().cloned().unwrap_or_default();
+    if !notes.is_empty() {
+        println!("Notes:");
+        for note in &notes {
+            println!("{}", note_line(note));
+        }
+    }
     println!("History:");
     for event in value["events"].as_array().into_iter().flatten() {
         println!(
@@ -339,6 +349,17 @@ fn print_cell(slug: &str, value: &Value) {
             }
         );
     }
+}
+
+/// One note as an indented line, labelled by where it was left.
+fn note_line(note: &Value) -> String {
+    let scope = match note["scope"].as_str().unwrap_or("cell") {
+        "row" => "Row",
+        "column" => "Column",
+        "grid" => "Grid",
+        _ => "Cell",
+    };
+    format!("    {scope} note ({}): {}", note["actor"].as_str().unwrap_or("?"), note["text"].as_str().unwrap_or(""))
 }
 
 /// `grid next`'s exit code: 0 when it hands out cells or the grid is
@@ -408,6 +429,10 @@ pub fn next_text(value: &Value) -> String {
             cell["colName"].as_str().unwrap_or(""),
             cell["proofRule"].as_str().unwrap_or("")
         ));
+        for note in cell["notes"].as_array().into_iter().flatten() {
+            out.push_str(&note_line(note));
+            out.push('\n');
+        }
     }
     let needing = value["needsCheck"].as_array().cloned().unwrap_or_default();
     if !needing.is_empty() {
@@ -610,6 +635,14 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             let note = flag(rest, "--note")?.unwrap_or_default();
             let session = session()?;
             post(cell_body(&session, "pass", found[0], found[1], found[2], json!({"note": note}))).await
+        }
+        "note" => {
+            let found = exactly(rest, &["--row", "--col", "--text"], &["SLUG"], "note")?;
+            let text = flag(rest, "--text")?.ok_or("--text TEXT is required: what the note says")?;
+            let session = session()?;
+            post(json!({"action": "note", "actor": "agent", "session": session, "slug": found[0],
+                "row": flag(rest, "--row")?, "col": flag(rest, "--col")?, "payload": {"text": text}}))
+            .await
         }
         "reopen" => {
             let found = exactly(rest, &["--reason"], &["SLUG", "ROW", "COL"], "reopen")?;

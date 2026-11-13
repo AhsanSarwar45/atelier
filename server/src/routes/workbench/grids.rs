@@ -205,9 +205,13 @@ async fn cell_detail(state: &WorkbenchState, project: &str, slug: &str, row: &st
         .ok_or_else(|| ApiError::not_found(format!("there is no cell {slug}.{row}.{col}")))?;
     let (prints, _) = prints_of(folder_path(state, project).as_deref(), &loaded).await;
     let (asked, slug_owned, row_owned, col_owned) = (project.to_string(), slug.to_string(), row.to_string(), col.to_string());
-    let events = state
+    let (events, notes) = state
         .database()
-        .read_tasks(move |store| grids::events(store.connection(), &asked, &slug_owned, Some((&row_owned, &col_owned))))
+        .read_tasks(move |store| {
+            let events = grids::events(store.connection(), &asked, &slug_owned, Some((&row_owned, &col_owned)))?;
+            let notes = grids::notes(store.connection(), &asked, &slug_owned)?;
+            Ok((events, grids::notes_for(&notes, &row_owned, &col_owned)))
+        })
         .await
         .map_err(failed)?;
     // Whether the proof's commits are in the base branch, as a task's Merged badge reads.
@@ -242,6 +246,7 @@ async fn cell_detail(state: &WorkbenchState, project: &str, slug: &str, row: &st
         "row": grid.row(row).map(grids::row_json),
         "column": grid.column(col).map(grids::column_json),
         "events": events,
+        "notes": notes,
     }))
 }
 

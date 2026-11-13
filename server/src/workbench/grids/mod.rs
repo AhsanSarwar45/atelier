@@ -145,9 +145,9 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-pub const AGENT_ACTIONS: &[&str] = &["draft", "checks", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set"];
+pub const AGENT_ACTIONS: &[&str] = &["draft", "checks", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set", "note"];
 pub const OWNER_ACTIONS: &[&str] = &[
-    "approve", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template",
+    "approve", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template", "note",
 ];
 /// What a `grid` widget's `event` may be.
 pub const WIDGET_EVENTS: &[&str] = &["draft", "template", "prove", "na", "audit", "reopen", "pass", "discover"];
@@ -960,6 +960,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         "audit_done" => audit_done(connection, request),
         "template_set" => template_set(connection, request),
         "approve_template" | "reject_template" => answer_template(connection, request),
+        "note" => note(connection, request),
         _ => refuse(format!("{action} is not a grid action")),
     }
 }
@@ -2245,6 +2246,98 @@ fn pass(connection: &Connection, request: &Request) -> Result<Outcome, TaskError
     })
 }
 
+/// A note on the grid, a row, a column or a cell, from the owner or any
+/// agent, at any time. Whoever works on a cell later sees the notes that
+/// cover it.
+fn note(connection: &Connection, request: &Request) -> Result<Outcome, TaskError> {
+    let slug = need(&request.slug, "slug", "note")?;
+    let text = match request.payload.get("text") {
+        Some(Value::String(text)) if !text.trim().is_empty() => text.trim().to_string(),
+        Some(Value::String(_)) | Some(Value::Null) | None => return refuse("text is required: what the note says"),
+        Some(_) => return refuse("text must be text: what the note says"),
+    };
+    let count = text.chars().count();
+    if count > NOTE_MAX {
+        return refuse(format!("text is {count} characters; at most {NOTE_MAX}"));
+    }
+    let loaded = load(connection, &request.project, slug)?
+        .filter(|loaded| loaded.grid.status != "discarded")
+        .ok_or_else(|| TaskError::Refused(format!("there is no grid \"{slug}\" in this project; run `atelier grid list`")))?;
+    if let Some(row) = request.row.as_deref() {
+        if loaded.row(row).is_none() {
+            return refuse(format!("grid \"{slug}\" has no row \"{row}\"; run `atelier grid show {slug}`"));
+        }
+    }
+    if let Some(col) = request.col.as_deref() {
+        if loaded.column(col).is_none() {
+            return refuse(format!("grid \"{slug}\" has no column \"{col}\"; run `atelier grid show {slug}`"));
+        }
+    }
+    let (row, col) = (request.row.as_deref(), request.col.as_deref());
+    connection.execute(
+        "INSERT INTO grid_event (project_id, slug, seq, at, kind, row, col, session_id, actor, payload)
+         VALUES (?1, ?2, (SELECT COALESCE(MAX(seq), 0) + 1 FROM grid_event WHERE project_id = ?1 AND slug = ?2),
+                 ?3, 'note', ?4, ?5, ?6, ?7, ?8)",
+        params![request.project, slug, request.now, row, col, request.session, request.actor, json!({"text": text}).to_string()],
+    )?;
+    let place = match (row, col) {
+        (Some(row), Some(col)) => format!("{slug}.{row}.{col}"),
+        (Some(row), None) => format!("row {row} of {slug}"),
+        (None, Some(col)) => format!("column {col} of {slug}"),
+        (None, None) => format!("grid {slug}"),
+    };
+    Ok(Outcome {
+        slug: Some(slug.to_string()),
+        cell: row.zip(col).map(|(row, col)| (row.to_string(), col.to_string())),
+        summary: format!("Note added to {place}."),
+        grids: vec![slug.to_string()],
+        ..Default::default()
+    })
+}
+
+pub const NOTE_MAX: usize = 4000;
+
+/// Every note on a grid, oldest first: `{row, col, actor, sessionId, at, text}`.
+pub fn notes(connection: &Connection, project: &str, slug: &str) -> rusqlite::Result<Vec<Value>> {
+    let mut statement = connection.prepare(
+        "SELECT at, row, col, session_id, actor, payload FROM grid_event
+          WHERE project_id = ?1 AND slug = ?2 AND kind = 'note' ORDER BY seq",
+    )?;
+    let rows = statement
+        .query_map(params![project, slug], |row| {
+            let payload = json_column(row, 5)?.unwrap_or(Value::Null);
+            Ok(json!({
+                "at": row.get::<_, i64>(0)?,
+                "row": row.get::<_, Option<String>>(1)?,
+                "col": row.get::<_, Option<String>>(2)?,
+                "sessionId": row.get::<_, Option<String>>(3)?,
+                "actor": row.get::<_, String>(4)?,
+                "text": payload["text"],
+            }))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// The notes that cover one cell, each labelled by where it was left:
+/// `cell`, `row`, `column` or `grid`.
+pub fn notes_for(all: &[Value], row: &str, col: &str) -> Vec<Value> {
+    all.iter()
+        .filter_map(|note| {
+            let scope = match (note["row"].as_str(), note["col"].as_str()) {
+                (Some(r), Some(c)) if r == row && c == col => "cell",
+                (Some(r), None) if r == row => "row",
+                (None, Some(c)) if c == col => "column",
+                (None, None) => "grid",
+                _ => return None,
+            };
+            let mut note = note.clone();
+            note["scope"] = json!(scope);
+            Some(note)
+        })
+        .collect()
+}
+
 fn audit_done(connection: &Connection, request: &Request) -> Result<Outcome, TaskError> {
     let session = request.session.as_deref().unwrap_or_default();
     let slug = need(&request.slug, "slug", "audit_done")?;
@@ -2916,6 +3009,7 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
             .map(|((row, _, _), _)| ("row", row.id.clone(), row.name.clone())),
     };
     let (mut claimable, mut taken, mut picked, mut needs_check) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let all_notes = notes(connection, project, slug)?;
     if let Some((kind, id, _)) = &chosen {
         for ((row, col, cell), standing) in pairs.iter().zip(&standings) {
             let inside = if *kind == "row" { row.id == *id } else { col.id == *id };
@@ -2927,6 +3021,7 @@ pub fn next_cells(connection: &Connection, project: &str, slug: &str, prints: &P
                     claimable.push(json!({
                         "row": row.id, "col": col.id, "rowName": row.name, "colName": col.name,
                         "state": cell.state, "stale": is_stale(slug, cell, prints), "proofRule": col.proof_rule,
+                        "notes": notes_for(&all_notes, &row.id, &col.id),
                     }));
                     picked.push((row.id.clone(), col.id.clone()));
                 }

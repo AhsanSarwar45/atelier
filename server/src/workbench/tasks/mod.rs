@@ -74,8 +74,8 @@ CREATE TABLE IF NOT EXISTS task_proposal (
 CREATE INDEX IF NOT EXISTS task_proposal_by_session ON task_proposal(session_id, status);
 "#;
 
-pub const AGENT_ACTIONS: &[&str] = &["create", "propose", "start", "check", "block", "unblock", "amend", "done", "cancel", "take"];
-pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend", "cancel", "release", "answer_proposal", "create"];
+pub const AGENT_ACTIONS: &[&str] = &["create", "propose", "start", "check", "block", "unblock", "amend", "done", "cancel", "take", "note"];
+pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend", "cancel", "release", "answer_proposal", "create", "note"];
 /// The owner's three answers to a proposal (`propose`).
 pub const PROPOSAL_CHOICES: &[&str] = &["create", "just_do_it", "cancel"];
 pub const STATUSES: &[&str] = &["todo", "in_progress", "blocked", "review", "done", "cancelled"];
@@ -307,6 +307,28 @@ fn save(connection: &Connection, task: &TaskRow) -> rusqlite::Result<()> {
     Ok(())
 }
 
+pub const NOTE_MAX: usize = 4000;
+
+/// A task's notes, oldest first: `{actor, sessionId, at, text}`.
+pub fn notes(connection: &Connection, project: &str, number: i64) -> rusqlite::Result<Vec<Value>> {
+    let mut statement = connection.prepare(
+        "SELECT at, session_id, actor, payload FROM task_event
+          WHERE project_id = ?1 AND number = ?2 AND kind = 'note' ORDER BY seq",
+    )?;
+    let rows = statement
+        .query_map(params![project, number], |row| {
+            let payload = json_column(row, 3)?.unwrap_or(Value::Null);
+            Ok(json!({
+                "at": row.get::<_, i64>(0)?,
+                "sessionId": row.get::<_, Option<String>>(1)?,
+                "actor": row.get::<_, String>(2)?,
+                "text": payload["text"],
+            }))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
 /// The HTTP shape of a task (camelCase), with the holding session's name.
 pub fn to_json(store: &Store, task: &TaskRow) -> Value {
     let session_title = task.session_id.as_ref().and_then(|id| {
@@ -335,6 +357,7 @@ pub fn to_json(store: &Store, task: &TaskRow) -> Value {
         "amendReason": task.gate.as_ref().map(|gate| gate["amendReason"].clone()).unwrap_or(Value::Null),
         "cells": super::grids::task_cells(store.connection(), &task.project_id, task.number).unwrap_or_default(),
         "claimShape": super::grids::claim_shape(store.connection(), &task.project_id, task.number).unwrap_or(Value::Null),
+        "notes": notes(store.connection(), &task.project_id, task.number).unwrap_or_default(),
     })
 }
 
@@ -1147,6 +1170,21 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         .ok_or_else(|| TaskError::Refused(format!("number is required for {action}")))?;
     let mut task = get(connection, &request.project, number)?
         .ok_or_else(|| TaskError::Refused(format!("there is no task #{number} in this project")))?;
+    if action == "note" {
+        // Anyone may leave a note on any task, in any state; it changes nothing else.
+        let text = match request.payload.get("text") {
+            Some(Value::String(text)) if !text.trim().is_empty() => text.trim().to_string(),
+            Some(Value::String(_)) | Some(Value::Null) | None => return refuse("text is required: what the note says"),
+            Some(_) => return refuse("text must be text: what the note says"),
+        };
+        let count = text.chars().count();
+        if count > NOTE_MAX {
+            return refuse(format!("text is {count} characters; at most {NOTE_MAX}"));
+        }
+        let payload = json!({"text": text});
+        append_event(connection, &task.project_id, number, now, "note", caller, actor, &payload)?;
+        return Ok(Outcome { task, summary: format!("Note added to #{number}."), grids: Vec::new(), detail: payload });
+    }
     let before_session = task.session_id.clone();
     let mut grids = Vec::new();
     let event_session = |task: &TaskRow| caller.map(str::to_string).or_else(|| task.session_id.clone());

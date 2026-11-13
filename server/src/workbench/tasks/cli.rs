@@ -28,6 +28,7 @@ usage: atelier task <command>
                                re-runs every check and the project's test command first
   cancel N --reason TEXT
   take N
+  note N --text TEXT           leave a note on any task in the project, in any state; whoever works on it sees it
   list [--all]                 this session's tasks (or the project's)
   show N";
 
@@ -279,6 +280,14 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             post(json!({"action": "cancel", "actor": "agent", "session": session, "number": number,
                 "payload": {"reason": reason}})).await
         }
+        "note" => {
+            let number = number(rest.first(), "note N --text TEXT")?;
+            only_flags(&rest[1..], &["--text"])?;
+            let session = session()?;
+            let text = flag(rest, "--text")?.ok_or("--text TEXT is required: what the note says")?;
+            post(json!({"action": "note", "actor": "agent", "session": session, "number": number,
+                "payload": {"text": text}})).await
+        }
         "amend" => {
             let number = number(rest.first(), "amend N")?;
             only_flags(&rest[1..], &["--input"])?;
@@ -339,6 +348,13 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             let value = get(&format!("/api/workbench/tasks/{}/{number}", urlencoding(project)), &[]).await?;
             println!("{}", line(&value["task"]));
             println!("{}", serde_json::to_string_pretty(&value["task"]).map_err(|e| e.to_string())?);
+            let notes = value["task"]["notes"].as_array().cloned().unwrap_or_default();
+            if !notes.is_empty() {
+                println!("Notes:");
+                for note in notes {
+                    println!("  ({}) {}", note["actor"].as_str().unwrap_or(""), note["text"].as_str().unwrap_or(""));
+                }
+            }
             println!("History:");
             for event in value["events"].as_array().into_iter().flatten() {
                 println!(
