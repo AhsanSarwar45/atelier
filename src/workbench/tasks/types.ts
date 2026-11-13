@@ -8,6 +8,7 @@
 
 import type { SessionState } from '@/workbench/protocol';
 import type { CheckFlag } from '@/workbench/tasks/checks';
+import type { Note } from '@/workbench/notes';
 
 export const TASK_STATUSES = ['todo', 'in_progress', 'blocked', 'review', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -143,6 +144,8 @@ export interface Task {
    * grid (`Glare row · 5 cells`). Null or absent when they are not.
    */
   claimShape?: ClaimShape | null;
+  /** Notes the owner or any agent left on the task, oldest first. */
+  notes?: Note[];
   /** Whether the plan carries checks the server runs (docs/tasks.md, "Checks"). */
   checked?: boolean;
   /** What the server ran of each item's checks: `{ITEM: {CHECK: run}}`. */
@@ -232,7 +235,7 @@ export interface TaskTypeInfo { name: string; code: boolean; review: boolean; pl
  */
 export type TaskEventDetail = Record<string, unknown>;
 
-export type OwnerAction = 'approve' | 'reopen' | 'approve_amend' | 'reject_amend' | 'cancel' | 'release';
+export type OwnerAction = 'approve' | 'reopen' | 'approve_amend' | 'reject_amend' | 'cancel' | 'release' | 'note';
 
 /**
  * The `task` chat widget: the card printed by every `atelier task` change, or

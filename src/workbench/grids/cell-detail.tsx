@@ -25,6 +25,7 @@ import { readCheck } from '@/workbench/tasks/checks';
 import { cellLook, LOOK_LABEL, NEEDS_CHECK_LABEL, needsACheck, type Benchmark, type CellDetail, type CellFull, type GridEvent, type GridOwnerAction } from '@/workbench/grids/types';
 import { gridsChangedFor } from '@/workbench/grids/use-grids';
 import { onWorkbench } from '@/workbench/live-wire';
+import { NotesView } from '@/workbench/notes';
 import { shotUrl } from '@/workbench/tasks/task-card';
 import { ZoomableImage } from '@/workbench/zoomable-image';
 
@@ -427,6 +428,17 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
               <Label>Proof</Label>
               <ProofView cell={cell} />
               {cell.provedAt ? <p className={cn('text-xs text-muted-foreground')}>{`Proved ${when(cell.provedAt)}`}</p> : null}
+            </section>
+            <section className="space-y-2">
+              <Label>Notes</Label>
+              <NotesView
+                testId="cell-notes"
+                notes={detail.notes ?? []}
+                onAdd={async (text) => {
+                  await gridsApi.act('note', { projectId, slug, row, col }, { text });
+                  setRound((n) => n + 1);
+                }}
+              />
             </section>
             <section className="space-y-2">
               <Label>History</Label>

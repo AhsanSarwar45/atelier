@@ -101,6 +101,7 @@ export function eventText(event: string, task: Task, detail: TaskEventDetail = {
     case 'unblock': return 'Unblocked';
     case 'take': return 'Taken by this chat';
     case 'release': return 'Released';
+    case 'note': return str(detail.text) ? `Note: ${str(detail.text)}` : 'Note added';
     case 'approve': return 'Approved';
     case 'approve_amend': return 'Plan change approved';
     case 'reject_amend': return 'Plan change rejected';

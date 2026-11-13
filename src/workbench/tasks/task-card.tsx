@@ -19,6 +19,7 @@ import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip } from '@/components/ui/tooltip';
 import { tasks as tasksApi } from '@/lib/api';
+import { NotesView } from '@/workbench/notes';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
 import { mediaUrl, presentationAssetUrl } from '@/workbench/attachment-store';
@@ -951,7 +952,7 @@ export function TaskOwnerActions({ task, only, onChanged, className }: {
 const EVENT_LABEL: Record<string, string> = {
   create: 'Created', start: 'Started', block: 'Blocked', unblock: 'Unblocked', amend: 'Change proposed',
   check: 'Checked', done: 'Finished', cancel: 'Cancelled', take: 'Taken', approve: 'Approved', reopen: 'Reopened',
-  approve_amend: 'Change approved', reject_amend: 'Change rejected', release: 'Released',
+  approve_amend: 'Change approved', reject_amend: 'Change rejected', release: 'Released', note: 'Note added',
 };
 
 function Section({ label, children }: { label: string; children: ReactNode }) {
@@ -1282,6 +1283,17 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
       )}
 
       <TaskCells task={task} />
+
+      <Section label="Notes">
+        <NotesView
+          testId="task-notes"
+          notes={task.notes ?? []}
+          onAdd={async (text) => {
+            const { task: next } = await tasksApi.act(task.projectId, task.number, 'note', { text });
+            setActed(next);
+          }}
+        />
+      </Section>
 
       {reviewing && !result && (
         <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve' || a === 'reopen')} onChanged={setActed} />

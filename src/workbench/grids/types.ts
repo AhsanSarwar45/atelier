@@ -7,6 +7,8 @@
  * either spelling, `row_search` or `rowSearch`.
  */
 
+import type { Note } from '@/workbench/notes';
+
 export const CELL_STATES = ['unchecked', 'gap', 'in_progress', 'proved', 'na_pending', 'na'] as const;
 export type CellState = (typeof CELL_STATES)[number];
 
@@ -164,6 +166,8 @@ export interface CellDetail {
   row: GridRow;
   column: GridColumn;
   events: GridEvent[];
+  /** The cell's notes and its row's, column's and grid's, oldest first. */
+  notes?: Note[];
 }
 
 export interface GridsList {
@@ -174,7 +178,7 @@ export interface GridsList {
 
 export type GridOwnerAction =
   | 'approve' | 'discard' | 'approve_na' | 'reject_na' | 'reopen' | 'verify' | 'discover'
-  | 'approve_template' | 'reject_template';
+  | 'approve_template' | 'reject_template' | 'note';
 
 export type GridWidgetEvent = 'draft' | 'template' | 'prove' | 'na' | 'audit' | 'reopen' | 'pass' | 'discover';
 
