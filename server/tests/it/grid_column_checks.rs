@@ -2,10 +2,9 @@
 //! without a full re-draft: the agent sends only `columns[].checks`, the owner
 //! approves just those, and rows, columns, cells and their history stay.
 
-mod gaps;
 
 use atelier::workbench::grids::{self, get_cell, load, Prints, Scope};
-use gaps::*;
+use crate::gaps::*;
 use serde_json::{json, Value};
 
 fn add_checks(store: &Db, slug: &str, payload: Value) -> Result<grids::Outcome, atelier::workbench::tasks::TaskError> {

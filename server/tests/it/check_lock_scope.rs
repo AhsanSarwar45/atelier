@@ -3,10 +3,9 @@
 //! tolerances). And a check that runs fewer tests than it did at start
 //! fails, even when every locked file is unchanged.
 
-mod gaps;
 
 use atelier::workbench::tasks::{checks, get};
-use gaps::*;
+use crate::gaps::*;
 use serde_json::json;
 
 const CAMERA: &str = ". tests/common/tolerance.sh\ngot=$(cat src/value.txt)\n\

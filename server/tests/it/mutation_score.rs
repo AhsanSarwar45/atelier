@@ -4,10 +4,9 @@
 //! break, reports how many each item catches, and flags an item whose checks
 //! catch almost none as weak.
 
-mod gaps;
 
 use atelier::workbench::tasks::checks;
-use gaps::*;
+use crate::gaps::*;
 use serde_json::{json, Value};
 
 fn flags_of<'a>(flags: &'a [Value], kind: &str) -> Vec<&'a Value> {

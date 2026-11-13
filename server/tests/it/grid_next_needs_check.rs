@@ -2,10 +2,9 @@
 //! it says how many need one and how to add it, and its JSON says the grid
 //! is not finished.
 
-mod gaps;
 
 use atelier::workbench::grids::{cli::next_text, next_cells, Prints, Scope};
-use gaps::*;
+use crate::gaps::*;
 
 #[test]
 fn next_on_a_grid_whose_open_cells_all_need_a_check_does_not_say_it_is_finished() {

@@ -3,10 +3,9 @@
 //! and macros like `wgsl!("x.wgsl")`, WGSL `#include "x.wgsl"`), the cell's
 //! check files, and extra paths a check names in `watch`.
 
-mod gaps;
 
 use atelier::workbench::grids::{load, proof::fingerprint};
-use gaps::*;
+use crate::gaps::*;
 use serde_json::json;
 
 async fn print(dir: &std::path::Path, paths: &[&str]) -> String {
