@@ -70,3 +70,6 @@ pub mod waiting;
 pub mod wire;
 
 pub mod status;
+
+#[cfg(test)]
+mod worktree_tests;
