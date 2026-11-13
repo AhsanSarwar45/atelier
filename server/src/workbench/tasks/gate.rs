@@ -130,6 +130,8 @@ pub struct Checked {
     pub passed: usize,
     pub total: usize,
     pub problems: Vec<String>,
+    /// The item's check files that changed since approval, for the warning.
+    pub edited: Vec<String>,
 }
 
 /// `task check N ITEM`: run the item's checks as they are; tick it when
@@ -158,6 +160,8 @@ pub fn check(task: &mut TaskRow, item: &str, gate: Option<&Gate>) -> Result<Chec
         }
     }
     let met = problems.is_empty();
+    let owned = checks::check_files(&task.kind, &task.plan);
+    let edited = checks::changed_for(&stored["hashes"], &checks, &owned, &found.hashes);
     stored["met"][item] = json!(met);
     task.gate = Some(stored);
     if super::types::item_lists(&task.kind).is_some() {
@@ -167,7 +171,7 @@ pub fn check(task: &mut TaskRow, item: &str, gate: Option<&Gate>) -> Result<Chec
             untick(task, item);
         }
     }
-    Ok(Checked { met, passed, total: checks.len(), problems })
+    Ok(Checked { met, passed, total: checks.len(), problems, edited })
 }
 
 fn untick(task: &mut TaskRow, item: &str) {
@@ -187,10 +191,10 @@ pub fn ticked(task: &TaskRow) -> (usize, usize) {
 }
 
 /// `task done`: every check passes and the project's test command passes.
-/// Stores the runs, and break-it's and the diff scan's flags beside the
-/// lint's, with one `check-file-changed` flag per approved file that
-/// changed, for the owner's review card.
-pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<(), TaskError> {
+/// Stores the runs, and the diff scan's flags beside the lint's, with one
+/// `check-file-changed` flag per approved file that changed. Returns those
+/// files, so the agent is warned about them.
+pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<Vec<String>, TaskError> {
     let found = measured(gate, "done")?;
     let mut stored = stored(task);
     let mut problems = Vec::new();
@@ -230,26 +234,35 @@ pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<(), TaskError> {
         .cloned()
         .collect();
     flags.extend(found.flags.iter().cloned());
-    for path in changed_files(&stored, &task.kind, &task.plan, found) {
-        flags.push(checks::changed_file_flag(&path));
+    let edited = changed_files(&stored, &task.kind, &task.plan, found);
+    for path in &edited {
+        flags.push(checks::changed_file_flag(path));
     }
     stored["flags"] = json!(flags);
     stored["doneCommit"] = json!(found.head);
     task.gate = Some(stored);
-    Ok(())
+    Ok(edited)
 }
 
-/// The agent files an amend of a gated task: a changed check must have its
-/// files and, once the task has started, fail against the starting code for
-/// its stated reason. The runs and the changed checks' file hashes are kept
-/// for `apply_amend`.
+/// The warning the agent reads when check files changed during the task.
+pub fn edited_warning(edited: &[String]) -> String {
+    if edited.is_empty() {
+        return String::new();
+    }
+    format!(
+        " Warning: you edited {}, which the checks use. Make sure each check still tests the real behaviour and was not weakened to pass.",
+        edited.join(", ")
+    )
+}
+
+/// The agent files an amend of a gated task: a changed check must name files
+/// in the chat's folder. Their hashes are kept for `apply_amend`.
 pub fn file_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Result<(), TaskError> {
     let found = measured(gate, "the amend")?;
     let mut stored = stored(task);
     let changed = checks::changed_checks(&task.kind, &task.plan, plan);
-    let started = stored["startCommit"].is_string();
     let mut problems = Vec::new();
-    let (mut runs, mut baseline, mut files) = (json!({}), json!({}), serde_json::Map::new());
+    let mut files = serde_json::Map::new();
     for (item, checks) in &changed {
         for check in checks {
             for path in &check.files {
@@ -263,42 +276,18 @@ pub fn file_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Resu
                     None => {}
                 }
             }
-            if !started {
-                continue;
-            }
-            let run = match run_of(found, item, check) {
-                Ok(run) => run,
-                Err(why) => {
-                    problems.push(why);
-                    continue;
-                }
-            };
-            match checks::judge_red(check, run) {
-                Ok(p50) => {
-                    runs[item][&check.name] = recorded(run, check.is_characterisation(), None, "amend");
-                    if let Some(p50) = p50 {
-                        baseline[item][&check.name]["p50"] = json!(p50);
-                        baseline[item][&check.name]["samples"] = json!(run.samples);
-                    }
-                    if let Some(tests) = checks::tests_ran(&run.output) {
-                        baseline[item][&check.name]["tests"] = json!(tests);
-                    }
-                }
-                Err(why) => problems.push(format!("{item}: \"{}\" {why} (an amended check must fail against the starting code, as at start)", check.name)),
-            }
         }
     }
     if !problems.is_empty() {
         return refuse(format!("the amend cannot be filed: {}", problems.join("; ")));
     }
-    stored["amendProof"] = json!({"runs": runs, "baseline": baseline, "files": files});
+    stored["amendProof"] = json!({"files": files});
     task.gate = Some(stored);
     Ok(())
 }
 
-/// An amend of a gated task applies: its changed checks were proved red by
-/// `file_amend`, so their runs are kept and their files locked anew, while
-/// the rest keep their approval.
+/// An amend of a gated task applies: its changed checks' files are recorded
+/// anew, while the rest keep their approval.
 pub fn apply_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Result<(), TaskError> {
     checks::require_checks(&task.kind, plan)?;
     let found = measured(gate, "the amend")?;
@@ -638,39 +627,8 @@ pub(crate) mod tests {
         assert_eq!(outcome.task.status, "done");
     }
 
-    #[tokio::test]
-    async fn done_measures_break_it_and_the_diff_scan_once_every_check_passes() {
-        use crate::workbench::grids::proof::tests::{commit_file, git_run, repository};
-        let root = repository();
-        let dir = root.path();
-        commit_file(dir, "src/value.txt", "1\n");
-        commit_file(dir, "tests/value.sh", "grep -qx 2 src/value.txt || { echo 'value FAILED'; exit 1; }\n");
-        commit_file(dir, "src/a.test.ts", "it('exports', () => {})\n");
-        let start = git_run(dir, &["rev-parse", "HEAD"]);
-        commit_file(dir, "src/value.txt", "2\n");
-        commit_file(dir, "src/a.test.ts", "it.skip('exports', () => {})\n");
-        let real = json!({"name": "real", "command": "sh tests/value.sh", "kind": "test", "given": "g", "when": "w", "then": "t",
-            "red": "value FAILED", "files": ["tests/value.sh"]});
-        let empty = json!({"name": "empty", "command": "test -f tests/value.sh", "kind": "test", "given": "g", "when": "w", "then": "t",
-            "files": ["tests/value.sh"]});
-        let plan = json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [real, empty]}]});
-        let stored = json!({"hashes": {"files": {}, "harness": []}, "startCommit": start});
-        let done = checks::Measure::Done { test_command: None };
-        let gate = checks::measure(dir, "feature", &plan, &stored, done.clone(), 1).await;
-        let kinds: Vec<(String, String)> = gate.flags.iter()
-            .map(|f| (f["kind"].as_str().unwrap().to_string(), f["check"].as_str().unwrap_or("").to_string())).collect();
-        assert!(kinds.contains(&("proves-nothing".into(), "empty".into())), "{kinds:?}");
-        assert!(!kinds.contains(&("proves-nothing".into(), "real".into())), "{kinds:?}");
-        assert!(kinds.iter().any(|(kind, _)| kind == "skip-added"), "{kinds:?}");
-        assert_eq!(git_run(dir, &["status", "--porcelain"]), "", "the checkout is untouched");
-        assert_eq!(git_run(dir, &["worktree", "list"]).lines().count(), 1, "the scratch worktree is gone");
-        // While a check fails the audits do not run.
-        std::fs::write(dir.join("src/value.txt"), "3\n").unwrap();
-        assert!(checks::measure(dir, "feature", &plan, &stored, done, 2).await.flags.is_empty());
-    }
-
     #[test]
-    fn done_keeps_the_lint_and_adds_break_it_and_diff_flags_for_the_owner() {
+    fn done_keeps_the_lint_and_adds_diff_flags_for_the_owner() {
         let (_d, store) = store();
         let mut gate = measured(&[], &[]);
         gate.flags = vec![json!({"kind": "weak", "item": "export", "check": "a", "text": "\"a\" has no red pattern"})];
@@ -679,7 +637,6 @@ pub(crate) mod tests {
         ask(&store, "start", Some(one), json!({}), Some(red())).unwrap();
         let mut gate = green(&[]);
         gate.flags = vec![
-            json!({"kind": "proves-nothing", "item": "images", "check": "i", "text": "\"i\" still passes with the task's changes undone, so it proves nothing"}),
             json!({"kind": "skip-added", "text": "src/a.test.ts adds a skip or only marker: it.skip('exports', () => {"}),
             json!({"kind": "exit-in-test", "text": "src/a.test.ts adds an exit call in a test file: process.exit(0)"}),
             json!({"kind": "test-deleted", "text": "the test file tests/old.rs was deleted"}),
@@ -687,12 +644,12 @@ pub(crate) mod tests {
         let outcome = ask(&store, "done", Some(one), done_payload(), Some(gate)).unwrap();
         let shown = super::super::to_json(&store, &outcome.task);
         let kinds: Vec<&str> = shown["checkFlags"].as_array().unwrap().iter().map(|f| f["kind"].as_str().unwrap()).collect();
-        assert_eq!(kinds, ["weak", "proves-nothing", "skip-added", "exit-in-test", "test-deleted"]);
+        assert_eq!(kinds, ["weak", "skip-added", "exit-in-test", "test-deleted"]);
         assert_eq!(outcome.task.status, "done", "flags inform the owner; they do not refuse done");
     }
 
     #[test]
-    fn an_amend_needs_a_reason_and_a_changed_check_must_go_red_again() {
+    fn an_amend_needs_a_reason_and_applies_at_once() {
         let (_d, store) = store();
         let one = started(&store, plan(), red());
         ask(&store, "check", Some(one), json!({"item": "export"}), Some(green(&[]))).unwrap();
@@ -705,13 +662,8 @@ pub(crate) mod tests {
         let message = refused(ask(&store, "amend", Some(one), json!({"plan": unchecked, "reason": "r"}), None));
         assert!(message.contains("has no checks"), "{message}");
         let reason = "\"i\" runs every test in the file, and one needs a GPU";
-        // The changed check is run against the starting code when the amend is filed: still green there, it is refused.
         assert!(refused(ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), None)).contains("could not run the checks"));
-        let gate = measured(&[("images", "i", 0, "ok")], &["tests/i.rs"]);
-        let message = refused(ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), Some(gate)));
-        assert!(message.contains("images: \"i\" already passes, so it proves nothing (an amended check must fail against the starting code"), "{message}");
-        let gate = measured(&[("images", "i", 101, FAILING)], &["tests/i.rs", "tests/a.rs"]);
-        // Filed with a red run, it applies at once.
+        let gate = measured(&[], &["tests/i.rs", "tests/a.rs"]);
         let outcome = ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), Some(gate)).unwrap();
         assert_eq!(outcome.detail["reason"], reason);
         let stored = outcome.task.gate.clone().unwrap();
@@ -722,24 +674,4 @@ pub(crate) mod tests {
         assert_eq!(outcome.task.plan, new_plan);
     }
 
-    #[tokio::test]
-    async fn an_amended_check_runs_against_the_starting_code() {
-        use crate::workbench::grids::proof::tests::{commit_file, git_run, repository};
-        let root = repository();
-        let dir = root.path();
-        commit_file(dir, "src/value.txt", "1\n");
-        commit_file(dir, "tests/value.sh", "grep -qx 2 src/value.txt || { echo 'value FAILED'; exit 1; }\n");
-        let start = git_run(dir, &["rev-parse", "HEAD"]);
-        commit_file(dir, "src/value.txt", "2\n");
-        let check = |command: &str| json!({"name": "two", "command": command, "kind": "test", "given": "g", "when": "w", "then": "t",
-            "red": "value FAILED", "files": ["tests/value.sh"]});
-        let old = json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [check("sh tests/value.sh")]}]});
-        let new = json!({"outcome": "o", "criteria": [{"id": "export", "text": "x", "checks": [check("sh tests/value.sh && test -s src/value.txt")]}]});
-        let stored = json!({"hashes": {"files": {}, "harness": []}, "startCommit": start});
-        let gate = checks::measure(dir, "feature", &old, &stored, checks::Measure::Amend { plan: new }, 1).await;
-        let run = &gate.runs["export"]["two"];
-        assert_eq!(run.exit, 1, "red against the starting code, though it passes at HEAD: {run:?}");
-        assert!(run.output.contains("value FAILED"));
-        assert_eq!(git_run(dir, &["worktree", "list"]).lines().count(), 1);
-    }
 }

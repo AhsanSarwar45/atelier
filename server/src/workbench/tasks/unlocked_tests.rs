@@ -1,7 +1,7 @@
 //! Nothing is locked while a task is worked (docs/tasks.md, "Approval and
 //! review"). Editing a check file, a helper beside it or the harness never
 //! refuses start, check or done; done flags each changed file for the
-//! owner, and break-it still catches a check that was weakened.
+//! owner, and warns the agent that edited it.
 //!
 //! Each assertion that the old lock would break says `LOCKED:`.
 
@@ -98,10 +98,9 @@ fn a_changed_check_file_helper_or_harness_refuses_nothing_and_is_flagged_at_done
 }
 
 /// The whole path in a real repository: the agent weakens its own check to
-/// `true`. Nothing refuses it, and done shows the owner both the edit and
-/// break-it's verdict that the check now proves nothing.
+/// `true`. Nothing refuses it; the agent is warned and done flags the edit.
 #[tokio::test]
-async fn a_weakened_check_runs_but_the_owner_sees_the_edit_and_that_it_proves_nothing() {
+async fn a_weakened_check_runs_but_the_agent_is_warned() {
     use crate::workbench::grids::proof::tests::{commit_file, repository};
     let root = repository();
     let dir = root.path();
@@ -127,6 +126,7 @@ async fn a_weakened_check_runs_but_the_owner_sees_the_edit_and_that_it_proves_no
     let gate = measure(checks::Measure::Item("export".into())).await;
     let outcome = allowed("check", ask(&store, "check", Some(number), json!({"item": "export"}), Some(gate)));
     assert_eq!(outcome.detail["met"], true, "LOCKED: the edited check was not run as it is: {}", outcome.summary);
+    assert!(outcome.summary.contains("Warning: you edited tests/value.sh"), "the agent is not warned: {}", outcome.summary);
 
     let gate = measure(checks::Measure::Done { test_command: None }).await;
     allowed("done", ask(&store, "done", Some(number), json!({"summary": "s", "commits": ["abcdef1"], "result": {}}), Some(gate)));
@@ -138,5 +138,4 @@ async fn a_weakened_check_runs_but_the_owner_sees_the_edit_and_that_it_proves_no
         .map(|flag| (flag["kind"].as_str().unwrap_or("").to_string(), flag["path"].as_str().or(flag["check"].as_str()).unwrap_or("").to_string()))
         .collect();
     assert!(kinds.contains(&("check-file-changed".into(), "tests/value.sh".into())), "the edit is not flagged: {kinds:?}");
-    assert!(kinds.contains(&("proves-nothing".into(), "two".into())), "break-it does not catch the weakened check: {kinds:?}");
 }

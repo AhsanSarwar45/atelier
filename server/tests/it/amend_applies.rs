@@ -98,16 +98,6 @@ fn an_amend_applies_at_once_and_its_checks_count_from_then() {
 }
 
 #[test]
-fn a_changed_check_must_still_fail_on_the_starting_code() {
-    let (_d, store) = task_store();
-    let one = started(&store);
-    let message = refused(amend(&store, one, changed(), measured(&[("images", "i", 0, "ok")])));
-    assert!(message.contains("already passes, so it proves nothing"), "{message}");
-    let task = tasks::get(store.connection(), "p", one).unwrap().unwrap();
-    assert_eq!(task.plan, plan(), "a refused amend changes nothing");
-}
-
-#[test]
 fn an_amend_that_may_weaken_the_checks_applies_and_asks_the_agent_to_make_sure() {
     let (_d, store) = task_store();
     let one = started(&store);

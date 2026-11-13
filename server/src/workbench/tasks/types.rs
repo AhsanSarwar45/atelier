@@ -558,8 +558,8 @@ pub fn check_why(why: &str, at: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Check a plan for its type. Any plan may ask for deliberate breaks at
-/// done with `mutants: true` (docs/tasks.md, "Deliberate breaks").
+/// Check a plan for its type. A `mutants` key from older plans is accepted
+/// and ignored.
 pub fn check_plan(kind: &str, plan: &Value) -> Result<(), String> {
     if let Some(mutants) = plan.get("mutants") {
         if !mutants.is_boolean() {

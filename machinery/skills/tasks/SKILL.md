@@ -108,14 +108,10 @@ on; the server records them when the owner approves.
 - Each check fails for one stated reason, the one in `red`. Make the
   command print that reason.
 - Keep each under about two minutes.
-- Nothing is locked. Checks run as the files are now, and at done the
-  owner sees every changed check file, helper and harness file. You may
-  update tests your change makes out of date. A check that runs fewer
-  tests than at start fails.
-- Add `"mutants": true` to the plan for the deeper test at done: the server
-  breaks the changed lines on purpose and reports how many breaks each
-  item's checks catch; items that catch almost none are flagged
-  `weak-checks`.
+- Nothing is locked. Checks run as the files are now. You may update
+  tests your change makes out of date; when you edit a check's files,
+  `task check` and `done` warn you to make sure the check was not
+  weakened. A check that runs fewer tests than at start fails.
 - Write the check files before you propose or create: their contents are
   what the owner approves.
 
@@ -138,26 +134,21 @@ on; the server records them when the owner approves.
    commit SHAs for types that change code (they must exist) and the type's
    other fields; the items' results are the checks' runs. The server re-runs
    every check and the project's test command, refuses while any fails,
-   reverts your non-check changes in a scratch checkout to confirm each
-   check goes red again ("proves nothing" otherwise), and flags added skips
-   and deleted tests to the owner.
+   and flags added skips and deleted tests to the owner.
 
 ## Never
 
 - Never weaken, delete, skip or rename an approved check, the project's
   test harness config or a baseline to get green. You may edit a check's
-  file for other reasons (a Rust test shares its file with the code), but
-  each change is flagged to the owner at done, and break-it flags a check
-  that no longer catches the old code.
+  file for other reasons (a Rust test shares its file with the code); the
+  server then warns you, and the check must still test the real behaviour.
 - Never branch on test inputs, special-case the values a check uses,
   override equality or comparison, or add `exit` calls to tests.
 - Never tick an item yourself or claim a check passed that you did not see
   pass.
 - When a check is wrong or impossible to meet, run `atelier task amend N`
   with the corrected checks and a `reason` that says what you ran and what
-  it printed. It applies at once; the owner can undo it. An amended check
-  must go red again: filing the amend runs it against the starting code
-  and refuses it if it doesn't. When the reply says the change may weaken
+  it printed. It applies at once; the owner can undo it. When the reply says the change may weaken
   what the owner approved (an item or check removed, an approved check
   changed), make sure it doesn't: the approved checks are the proof the
   work is done. If it does, amend it back.

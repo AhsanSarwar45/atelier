@@ -1247,7 +1247,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                     } else {
                         format!(" {ticked} of {items} items ticked.")
                     };
-                    format!("#{number}: \"{item}\" is met: {} of {} checks pass.{rest}", found.passed, found.total)
+                    format!("#{number}: \"{item}\" is met: {} of {} checks pass.{rest}{}", found.passed, found.total, gate::edited_warning(&found.edited))
                 } else {
                     let why = found.problems.join("; ");
                     payload["reason"] = json!(why);
@@ -1352,9 +1352,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             held_by(&task, caller.unwrap())?;
             status_is(&task, &["in_progress"], "done")?;
             let (mut result, unmet) = check_done(&task, request)?;
-            if gate::gated(&task) {
-                gate::done(&mut task, request.gate.as_ref())?;
-            }
+            let edited = if gate::gated(&task) { gate::done(&mut task, request.gate.as_ref())? } else { Vec::new() };
             let cells = super::grids::parse_cells(request.payload.get("cells"), true)?;
             super::grids::check_done_cells(connection, &request.project, number, &cells)?;
             grids = super::grids::finish(connection, &request.project, number, &cells, caller, actor, now)?;
@@ -1372,14 +1370,14 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             }
             if review {
                 task.status = "review".into();
-                ("submitted", payload, format!("#{number} is submitted for review; the owner approves it or reopens it with a note, and their answer arrives as your next message."))
+                ("submitted", payload, format!("#{number} is submitted for review; the owner approves it or reopens it with a note, and their answer arrives as your next message.{}", gate::edited_warning(&edited)))
             } else {
                 task.status = "done".into();
                 task.finished_at = Some(now);
                 let summary = if unmet.is_empty() {
-                    format!("#{number} is done.")
+                    format!("#{number} is done.{}", gate::edited_warning(&edited))
                 } else {
-                    format!("#{number} is done with shortfalls: {}", unmet.join("; "))
+                    format!("#{number} is done with shortfalls: {}{}", unmet.join("; "), gate::edited_warning(&edited))
                 };
                 ("done", payload, summary)
             }

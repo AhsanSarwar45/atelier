@@ -1,5 +1,5 @@
 //! Shared set-up for the check-gap tests (grid column checks, grid next,
-//! lock scope, mutants, proof dependencies): a store in a temporary folder,
+//! lock scope, proof dependencies): a store in a temporary folder,
 //! a real git repository, and requests applied directly.
 #![allow(dead_code)]
 

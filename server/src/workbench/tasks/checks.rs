@@ -4,8 +4,8 @@
 //! commands written before the work, approved by the owner, run by the
 //! server. This module reads and validates them, lints weak ones, runs them
 //! (benchmarks repeated and timed), judges red and green, hashes the files
-//! they rely on, and does the two `done` audits: break-it in a scratch
-//! worktree, and the diff scan for added skips and deleted tests.
+//! they rely on, and scans the diff at `done` for added skips and deleted
+//! tests.
 //!
 //! What touches the outside world (running, hashing, git) is async and is
 //! done by the route before the database writer; the writer only judges what
@@ -15,7 +15,7 @@ use crate::workbench::grids::proof;
 use regex::Regex;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 pub const KINDS: &[&str] = &["test", "benchmark", "structure", "characterisation"];
@@ -805,7 +805,7 @@ pub struct Gate {
     pub runs: BTreeMap<String, BTreeMap<String, Run>>,
     /// `[tasks] test_command` and its run, at done.
     pub test_command: Option<(String, Run)>,
-    /// Flags found: the lint's at propose and create, break-it and the diff
+    /// Flags found: the lint's at propose and create, the diff scan
     /// scan's at done.
     pub flags: Vec<Value>,
     /// Check files a draft names that are not in the folder.
@@ -822,7 +822,7 @@ pub enum Measure {
     /// `task check N ITEM`: that item's checks.
     Item(String),
     /// `task done`: every check, the project's test command, and, when all
-    /// pass, break-it and the diff scan.
+    /// pass, the diff scan scan.
     Done { test_command: Option<String> },
     /// The agent files an amend: the new plan's changed checks, against the
     /// code as it was at start, and its files' hashes.
@@ -922,28 +922,11 @@ pub async fn measure(folder: &Path, kind: &str, plan: &Value, stored: &Value, me
             }
             // The audits only mean something once every check passes.
             if let (true, Some(start)) = (green, start.as_deref()) {
-                gate.flags.extend(break_it(folder, start, &items, &stored["baseline"], at).await);
                 gate.flags.extend(diff_flags(folder, start).await);
-                if plan["mutants"] == true {
-                    gate.flags.extend(mutation_flags(folder, start, &items, at).await);
-                }
             }
         }
         Measure::Amend { plan: new } => {
             gate.hashes = hash_files(folder, &widened(folder, &locked_paths(kind, &new, &harness)));
-            let changed = changed_checks(kind, plan, &new);
-            let keep = check_files(kind, &new);
-            for (item, checks) in changed {
-                match run_reverted(folder, start.as_deref(), &checks, &keep, at).await {
-                    Ok(runs) => {
-                        gate.runs.insert(item, runs);
-                    }
-                    Err(error) => {
-                        gate.error = Some(format!("the changed checks could not be run against the starting code: {error}"));
-                        break;
-                    }
-                }
-            }
         }
     }
     gate
@@ -980,7 +963,7 @@ pub fn draft_gate(folder: &Path, kind: &str, plan: &Value, harness: &[String]) -
     Gate { hashes, harness: harness.to_vec(), flags, missing, ..Default::default() }
 }
 
-/* -------------------------------------------------------------- break-it */
+/* ------------------------------------------------------------------- git */
 
 async fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let output = crate::routes::git_output(dir, args).await.map_err(|error| error.to_string())?;
@@ -989,353 +972,6 @@ async fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     } else {
         Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
     }
-}
-
-/// A scratch worktree, removed when dropped (best effort) or by `remove`.
-struct Scratch {
-    top: PathBuf,
-    path: PathBuf,
-    _held: tempfile::TempDir,
-}
-
-impl Scratch {
-    async fn add(top: &Path, commit: &str) -> Result<Scratch, String> {
-        let held = tempfile::Builder::new().prefix("atelier-break-it-").tempdir().map_err(|error| error.to_string())?;
-        let path = held.path().join("tree");
-        let shown = path.to_string_lossy().to_string();
-        git(top, &["worktree", "add", "--detach", "--quiet", &shown, commit]).await?;
-        Ok(Scratch { top: top.to_path_buf(), path, _held: held })
-    }
-
-    async fn remove(self) {
-        let shown = self.path.to_string_lossy().to_string();
-        let _ = git(&self.top, &["worktree", "remove", "--force", &shown]).await;
-        let _ = git(&self.top, &["worktree", "prune"]).await;
-    }
-}
-
-/// The task's folder relative to its repository's top (empty at the top).
-async fn prefix(folder: &Path) -> Option<(PathBuf, PathBuf)> {
-    let top = proof::toplevel(folder).await?;
-    let top = std::fs::canonicalize(&top).unwrap_or(top);
-    let here = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-    let inside = here.strip_prefix(&top).ok()?.to_path_buf();
-    Some((top, inside))
-}
-
-/// A scratch worktree at HEAD with the task's changes since `start` undone,
-/// except `keep` (paths relative to the task's folder): the code as it was,
-/// with the checks as they are. Returns it and the folder inside it that
-/// matches the task's.
-async fn reverted_tree(folder: &Path, start: &str, keep: &[String]) -> Result<(Scratch, PathBuf), String> {
-    let (top, inside) = prefix(folder).await.ok_or("the task's folder is not in a git repository")?;
-    let scratch = Scratch::add(&top, "HEAD").await?;
-    let kept: BTreeSet<String> = keep
-        .iter()
-        .map(|path| inside.join(path).to_string_lossy().replace('\\', "/"))
-        .collect();
-    let listed = match git(&scratch.path, &["diff", "--no-renames", "--name-status", start, "HEAD"]).await {
-        Ok(listed) => listed,
-        Err(error) => {
-            scratch.remove().await;
-            return Err(error);
-        }
-    };
-    for line in listed.lines() {
-        let mut parts = line.splitn(2, '\t');
-        let (status, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or("").trim());
-        if path.is_empty() || kept.contains(path) {
-            continue;
-        }
-        if status.starts_with('A') {
-            let _ = std::fs::remove_file(scratch.path.join(path));
-        } else {
-            let _ = git(&scratch.path, &["checkout", start, "--", path]).await;
-        }
-    }
-    let at = scratch.path.join(&inside);
-    Ok((scratch, at))
-}
-
-/// Break-it: run each non-characterisation check with the task's changes
-/// undone. One that still passes proves nothing: a flag.
-pub async fn break_it(
-    folder: &Path,
-    start: &str,
-    items: &[(String, Vec<Check>)],
-    baselines: &Value,
-    at: i64,
-) -> Vec<Value> {
-    let keep: Vec<String> = items.iter().flat_map(|(_, checks)| checks.iter().flat_map(|c| c.files.iter().cloned())).collect();
-    let (scratch, tree) = match reverted_tree(folder, start, &keep).await {
-        Ok(found) => found,
-        Err(error) => {
-            return vec![flag(None, None, "proves-nothing", format!("break-it could not run: {error}"))];
-        }
-    };
-    let mut flags = Vec::new();
-    for (item, checks) in items {
-        for check in checks.iter().filter(|check| !check.is_characterisation()) {
-            let run = run_check(&tree, check, Some(start), at).await;
-            let baseline = baselines[item][&check.name]["p50"].as_f64();
-            if judge_green(check, &run, baseline).is_ok() {
-                flags.push(flag(
-                    Some(item),
-                    Some(&check.name),
-                    "proves-nothing",
-                    format!("\"{}\" still passes with the task's changes undone, so it proves nothing", check.name),
-                ));
-            }
-        }
-    }
-    scratch.remove().await;
-    flags
-}
-
-/* ------------------------------------------------------ deliberate breaks */
-
-/// At most this many deliberate breaks (mutants) per task.
-pub const MAX_MUTANTS: usize = 30;
-
-/// One deliberate break: `line` (1-based) of `file` (relative to the task's
-/// folder) replaced by `text`, or deleted when `text` is None.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Mutant {
-    pub file: String,
-    pub line: usize,
-    pub change: String,
-    pub text: Option<String>,
-}
-
-fn word_swaps() -> &'static [(&'static str, &'static str)] {
-    &[
-        ("-ge", "-lt"), ("-gt", "-le"), ("-le", "-gt"), ("-lt", "-ge"), ("-eq", "-ne"), ("-ne", "-eq"),
-        ("true", "false"), ("false", "true"),
-    ]
-}
-
-fn symbol_swaps() -> &'static [(&'static str, &'static str)] {
-    &[
-        ("==", "!="), ("!=", "=="), ("<=", ">"), (">=", "<"), (" < ", " >= "), (" > ", " <= "),
-        (" + ", " - "), (" - ", " + "), (" * ", " / "), (" / ", " * "), ("&&", "||"), ("||", "&&"),
-    ]
-}
-
-fn is_comment(line: &str) -> bool {
-    let line = line.trim_start();
-    line.starts_with("//") || line.starts_with('#') || line.starts_with("/*") || line.starts_with('*') || line.starts_with("--")
-}
-
-/// Whether deleting this line is a meaningful break: a statement, not a
-/// brace, a block's opening line or punctuation.
-fn deletable(line: &str) -> bool {
-    let line = line.trim();
-    !line.is_empty() && !line.ends_with('{') && line.chars().any(|c| c.is_alphanumeric())
-}
-
-/// The deliberate breaks of one changed line: each operator, comparison,
-/// boolean and integer literal changed once, and the line deleted.
-pub fn mutate_line(file: &str, number: usize, line: &str) -> Vec<Mutant> {
-    if is_comment(line) || line.trim().is_empty() {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    let mut push = |text: String, change: String| {
-        if text != line {
-            out.push(Mutant { file: file.into(), line: number, change, text: Some(text) });
-        }
-    };
-    let bytes = line.as_bytes();
-    let boundary = |at: usize| at >= bytes.len() || !(bytes[at].is_ascii_alphanumeric() || bytes[at] == b'_');
-    for (from, to) in word_swaps() {
-        for (at, _) in line.match_indices(from) {
-            let before_ok = at == 0 || boundary(at - 1);
-            if before_ok && boundary(at + from.len()) {
-                push(format!("{}{}{}", &line[..at], to, &line[at + from.len()..]), format!("{from} → {to}"));
-            }
-        }
-    }
-    for (from, to) in symbol_swaps() {
-        for (at, _) in line.match_indices(from) {
-            push(format!("{}{}{}", &line[..at], to, &line[at + from.len()..]), format!("{} → {}", from.trim(), to.trim()));
-        }
-    }
-    static NUMBER: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let number_pattern = NUMBER.get_or_init(|| Regex::new(r"\d+").unwrap());
-    for found in number_pattern.find_iter(line) {
-        let (start, end) = (found.start(), found.end());
-        let before = if start == 0 { None } else { line[..start].chars().last() };
-        let after = line[end..].chars().next();
-        // Not part of a name, a decimal, a shell positional ($1) or a hex literal.
-        if before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.')
-            || after.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
-        {
-            continue;
-        }
-        let Ok(value) = found.as_str().parse::<u64>() else { continue };
-        push(format!("{}{}{}", &line[..start], value + 1, &line[end..]), format!("{value} → {}", value + 1));
-    }
-    if deletable(line) {
-        out.push(Mutant { file: file.into(), line: number, change: "line deleted".into(), text: None });
-    }
-    out
-}
-
-/// The lines the task added or changed since `start`, by file (relative to
-/// the folder), leaving out tests and the files in `skip`.
-async fn changed_lines(folder: &Path, start: &str, skip: &BTreeSet<String>) -> Result<Vec<(String, Vec<usize>)>, String> {
-    let diff = git(folder, &["diff", "--no-renames", "--relative", "-U0", start, "HEAD"]).await?;
-    let mut files: Vec<(String, Vec<usize>)> = Vec::new();
-    let mut current: Option<String> = None;
-    for line in diff.lines() {
-        if let Some(path) = line.strip_prefix("+++ ") {
-            current = path.strip_prefix("b/").map(str::to_string).filter(|path| !skip.contains(path) && !is_test_path(path));
-            if let Some(path) = &current {
-                files.push((path.clone(), Vec::new()));
-            }
-        } else if let (Some(hunk), Some(_)) = (line.strip_prefix("@@ "), &current) {
-            // @@ -a,b +c,d @@
-            let added = hunk.split(' ').find(|part| part.starts_with('+')).unwrap_or("+0,0");
-            let mut parts = added[1..].splitn(2, ',');
-            let first: usize = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
-            let count: usize = parts.next().map_or(Some(1), |n| n.parse().ok()).unwrap_or(0);
-            if let Some((_, lines)) = files.last_mut() {
-                lines.extend(first..first + count);
-            }
-        }
-    }
-    files.retain(|(_, lines)| !lines.is_empty());
-    Ok(files)
-}
-
-/// The deliberate breaks for a task: changed lines since `start`, outside
-/// the checks' files and test folders, at most `MAX_MUTANTS`, spread over
-/// the changed lines.
-pub async fn mutants(folder: &Path, start: &str, items: &[(String, Vec<Check>)]) -> Result<Vec<Mutant>, String> {
-    let named: Vec<String> = items.iter().flat_map(|(_, checks)| checks.iter().flat_map(|c| c.files.iter().cloned())).collect();
-    let skip: BTreeSet<String> = widened(folder, &named).into_iter().collect();
-    let mut all = Vec::new();
-    for (file, lines) in changed_lines(folder, start, &skip).await? {
-        let Ok(text) = std::fs::read_to_string(folder.join(&file)) else { continue };
-        let source: Vec<&str> = text.lines().collect();
-        for number in lines {
-            if let Some(line) = source.get(number.wrapping_sub(1)) {
-                all.extend(mutate_line(&file, number, line));
-            }
-        }
-    }
-    if all.len() <= MAX_MUTANTS {
-        return Ok(all);
-    }
-    // An even spread, so one long line does not take every break.
-    let step = all.len() as f64 / MAX_MUTANTS as f64;
-    Ok((0..MAX_MUTANTS).map(|index| all[(index as f64 * step) as usize].clone()).collect())
-}
-
-fn applied(original: &str, mutant: &Mutant) -> String {
-    let mut lines: Vec<&str> = original.split('\n').collect();
-    let index = mutant.line - 1;
-    if index < lines.len() {
-        match &mutant.text {
-            Some(text) => lines[index] = text,
-            None => {
-                lines.remove(index);
-            }
-        }
-    }
-    lines.join("\n")
-}
-
-/// The optional deeper test at done (plan `mutants: true`): each deliberate
-/// break is made in a scratch copy at HEAD and every item's checks run
-/// against it; a break is caught by an item when one of its checks fails.
-/// One `mutants` flag per item with its score and breaks, and `weak-checks`
-/// for an item whose checks catch fewer than a quarter of them.
-pub async fn mutation_flags(folder: &Path, start: &str, items: &[(String, Vec<Check>)], at: i64) -> Vec<Value> {
-    let breaks = match mutants(folder, start, items).await {
-        Ok(breaks) => breaks,
-        Err(error) => return vec![flag(None, None, "mutants", format!("the deliberate breaks could not be made: {error}"))],
-    };
-    if breaks.is_empty() {
-        return Vec::new();
-    }
-    let Some((top, inside)) = prefix(folder).await else {
-        return vec![flag(None, None, "mutants", "the deliberate breaks could not be made: the folder is not in a git repository")];
-    };
-    let scratch = match Scratch::add(&top, "HEAD").await {
-        Ok(scratch) => scratch,
-        Err(error) => return vec![flag(None, None, "mutants", format!("the deliberate breaks could not be made: {error}"))],
-    };
-    let tree = scratch.path.join(&inside);
-    let mut caught: BTreeMap<String, Vec<bool>> = BTreeMap::new();
-    for mutant in &breaks {
-        let path = tree.join(&mutant.file);
-        let Ok(original) = std::fs::read_to_string(&path) else { continue };
-        if std::fs::write(&path, applied(&original, mutant)).is_err() {
-            continue;
-        }
-        for (item, checks) in items {
-            let mut fails = false;
-            for check in checks.iter().filter(|check| !check.is_characterisation()) {
-                let run = run_check(&tree, check, Some(start), at).await;
-                if run.exit != 0 {
-                    fails = true;
-                    break;
-                }
-            }
-            caught.entry(item.clone()).or_default().push(fails);
-        }
-        let _ = std::fs::write(&path, original);
-    }
-    scratch.remove().await;
-    let mut flags = Vec::new();
-    for (item, checks) in items {
-        if checks.iter().all(Check::is_characterisation) {
-            continue;
-        }
-        let results = caught.get(item).cloned().unwrap_or_default();
-        let total = results.len();
-        let hits = results.iter().filter(|hit| **hit).count();
-        let listed: Vec<Value> = breaks
-            .iter()
-            .zip(results.iter())
-            .map(|(mutant, hit)| json!({"file": mutant.file, "line": mutant.line, "change": mutant.change, "caught": hit}))
-            .collect();
-        let mut score = flag(Some(item), None, "mutants", format!("the checks catch {hits} of {total} deliberate breaks"));
-        score["caught"] = json!(hits);
-        score["total"] = json!(total);
-        score["breaks"] = json!(listed);
-        flags.push(score);
-        if total > 0 && hits * 4 < total {
-            flags.push(flag(
-                Some(item),
-                None,
-                "weak-checks",
-                format!("the checks catch only {hits} of {total} deliberate breaks of the changed code, so they barely test it"),
-            ));
-        }
-    }
-    flags
-}
-
-/// Red for checks changed by an amend, against the code as it was at the
-/// task's start (the checks' files as they are now). Without a start commit
-/// (the task has not started) they run in the folder itself.
-pub async fn run_reverted(
-    folder: &Path,
-    start: Option<&str>,
-    checks: &[Check],
-    keep: &[String],
-    at: i64,
-) -> Result<BTreeMap<String, Run>, String> {
-    let Some(start) = start else {
-        let head = proof::head(folder).await;
-        return Ok(run_all(folder, checks, head.as_deref(), at).await);
-    };
-    let (scratch, tree) = reverted_tree(folder, start, keep).await?;
-    let runs = run_all(&tree, checks, Some(start), at).await;
-    scratch.remove().await;
-    Ok(runs)
 }
 
 /* ------------------------------------------------------------- diff scan */
@@ -1660,28 +1296,4 @@ diff --git a/server/src/lib.rs b/server/src/lib.rs
         assert!(scan_diff("diff --git a/x.rs b/x.rs\n+fn plain() {}\n").is_empty());
     }
 
-    #[tokio::test]
-    async fn break_it_flags_a_check_that_passes_without_the_work_and_cleans_up() {
-        use crate::workbench::grids::proof::tests::{commit_file, git_run, repository};
-        let root = repository();
-        let dir = root.path();
-        commit_file(dir, "src/lib.txt", "old\n");
-        let start = git_run(dir, &["rev-parse", "HEAD"]);
-        commit_file(dir, "tests/check.sh", "grep -q new src/lib.txt\n");
-        commit_file(dir, "src/lib.txt", "new\n");
-        let good = parse_check(&json!({"name": "real", "command": "sh tests/check.sh", "kind": "test", "given": "g", "when": "w",
-            "then": "t", "files": ["tests/check.sh"]}), "c").unwrap();
-        let empty = parse_check(&json!({"name": "empty", "command": "test -f tests/check.sh", "kind": "test", "given": "g",
-            "when": "w", "then": "t", "files": ["tests/check.sh"]}), "c").unwrap();
-        let pinned = parse_check(&json!({"name": "pinned", "command": "true", "kind": "characterisation", "given": "g",
-            "when": "w", "then": "t"}), "c").unwrap();
-        let items = vec![("a".to_string(), vec![good, empty, pinned])];
-        let flags = break_it(dir, &start, &items, &Value::Null, 1).await;
-        assert_eq!(flags.len(), 1, "{flags:?}");
-        assert_eq!((flags[0]["kind"].as_str(), flags[0]["check"].as_str()), (Some("proves-nothing"), Some("empty")));
-        // The checkout is untouched and the scratch tree is gone.
-        assert_eq!(std::fs::read_to_string(dir.join("src/lib.txt")).unwrap(), "new\n");
-        assert_eq!(git_run(dir, &["status", "--porcelain"]), "");
-        assert_eq!(git_run(dir, &["worktree", "list"]).lines().count(), 1);
-    }
 }

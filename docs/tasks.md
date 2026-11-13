@@ -52,7 +52,7 @@ Stored in `workbench.db`.
 | `checks` | json, null | plan items checked while in progress: `{<result list>: [entry, …]}` in plan order (see Checking items) |
 | `approved_hashes` | json, null | per item, per check: sha256 of each of its `files` and of the harness files, taken at approval (see Checks) |
 | `check_runs` | json, null | the last run of each check: `{ITEM: {CHECK: run}}` |
-| `check_flags` | json, null | flags for the owner: weak checks, proves nothing, added skips, deleted tests |
+| `check_flags` | json, null | flags for the owner: weak checks, changed check files, added skips, deleted tests |
 | `created_at`, `updated_at`, `started_at`, `finished_at` | integer ms | |
 
 `task_proposal`: a task an agent asked to make, kept apart from tasks so it
@@ -294,9 +294,10 @@ as in SWE-bench and Anthropic's agent guidance, not a lock:
 - At done, every recorded file that changed since approval gets a
   `check-file-changed` flag on the review card, naming the file, so the
   owner sees each edit to a check, a helper or the harness.
-- Break-it (see Done) still reverts the agent's other changes and requires
-  each check to go red again. A check weakened until it passes on the old
-  code is flagged `proves-nothing`.
+- When an item's check files changed, `task check` and `done` end with a
+  warning to the agent: "Warning: you edited tests/x.rs, which the checks
+  use. Make sure each check still tests the real behaviour and was not
+  weakened to pass."
 - A check cannot pass by running fewer tests. At start the server records
   how many tests each check's output reports (cargo, vitest and pytest
   summaries). A later run that reports fewer fails with, for example,
@@ -310,11 +311,8 @@ now only used for the flags.
 
 When a check is wrong or cannot be met, the agent runs `atelier task amend
 N` with the whole new plan and a `reason` (what it ran, what it printed).
-It applies at once; the owner does not approve it. Filing it runs the
-changed checks against the starting code: a changed check must go red again
-(characterisation: pass), or the amend is refused there and then. Once it
-applies, the runs from filing are kept, the changed checks' files are recorded
-anew and the changed items are unmet.
+It applies at once; the owner does not approve it. Once it applies, the
+changed checks' files are recorded anew and the changed items are unmet.
 
 A change that may weaken what the owner approved still applies, since the
 test can be wrong. The server compares the plans: an item removed, a check
