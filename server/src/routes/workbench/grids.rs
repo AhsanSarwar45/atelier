@@ -391,7 +391,7 @@ pub(super) async fn act(
                 .map_err(failed)?;
             if let (Some(pending), Some(folder)) = (pending, folder_path(&state, &project)) {
                 let files = grids::pending_check_files(&pending);
-                request.hashes = Some(json!({"files": checks::hash_files(&folder, &files)}));
+                request.hashes = Some(json!({"files": checks::hash_files(&folder, &checks::widened(&folder, &files))}));
             }
         }
         _ => {}
@@ -532,14 +532,15 @@ async fn run_approved(folder: &std::path::Path, approved: &[Value]) -> Vec<proof
     results
 }
 
-/// The sha256 of each file the approved checks name, in `folder`.
+/// The sha256 of each file the approved checks name, and of every file in
+/// the test folders they live in, in `folder`.
 fn approved_hashes(folder: &std::path::Path, approved: &[Value]) -> Value {
     let paths: Vec<String> = approved
         .iter()
         .flat_map(|check| check["files"].as_array().cloned().unwrap_or_default())
         .filter_map(|path| path.as_str().map(str::to_string))
         .collect();
-    json!({"files": checks::hash_files(folder, &paths)})
+    json!({"files": checks::hash_files(folder, &checks::widened(folder, &paths))})
 }
 
 /// `prove`: check the shape and the claim, then the covered code (committed,

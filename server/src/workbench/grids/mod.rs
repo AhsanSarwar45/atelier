@@ -1938,11 +1938,37 @@ pub fn pending_check_files(pending: &Value) -> Vec<String> {
 
 /// The approved check files of a cell whose hash in `current` differs from
 /// the one approval locked.
-fn changed_check_files(approved: &[Value], locked: Option<&Value>, current: Option<&Value>) -> Vec<String> {
+/// Every file a check on the grid names, filled in for its row.
+fn owned_check_files(loaded: &Loaded) -> Vec<String> {
+    let mut owned = Vec::new();
+    for row in &loaded.rows {
+        for column in &loaded.columns {
+            for check in loaded.cell_checks(&row.id, &column.id) {
+                for path in check["files"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                    if !owned.iter().any(|known| known == path) {
+                        owned.push(path.to_string());
+                    }
+                }
+            }
+        }
+    }
+    owned
+}
+
+fn changed_check_files(approved: &[Value], owned: &[String], locked: Option<&Value>, current: Option<&Value>) -> Vec<String> {
     let (Some(locked), Some(current)) = (locked, current) else { return Vec::new() };
+    use crate::workbench::tasks::checks::test_folder;
+    let named: Vec<&str> = approved.iter().flat_map(|check| check["files"].as_array().into_iter().flatten().filter_map(Value::as_str)).collect();
+    // A check file in a test folder locks that whole folder: helpers,
+    // fixtures and baselines beside it count as its own.
+    let roots: Vec<String> = named.iter().filter_map(|path| test_folder(path)).collect();
+    let beside = locked["files"].as_object().into_iter().flatten().map(|(path, _)| path.as_str())
+        .filter(|path| roots.iter().any(|root| path.starts_with(&format!("{root}/"))))
+        // Another check's own file is that check's business.
+        .filter(|path| !owned.iter().any(|own| own == path));
     let mut changed = Vec::new();
-    for check in approved {
-        for path in check["files"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+    {
+        for path in named.iter().copied().chain(beside) {
             let Some(then) = locked["files"][path].as_str() else { continue };
             let now = current["files"][path].as_str().unwrap_or(crate::workbench::tasks::checks::MISSING);
             if now != then && !changed.iter().any(|known| known == path) {
@@ -1961,7 +1987,8 @@ fn prove(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
     let at = format!("{slug}.{}.{}", cell.row, cell.col);
     let folder = request.cwd.as_deref().unwrap_or("this chat's folder");
     let approved = loaded.cell_checks(&cell.row, &cell.col);
-    let changed = changed_check_files(&approved, loaded.grid.hashes.as_ref(), request.hashes.as_ref());
+    let owned = owned_check_files(&loaded);
+    let changed = changed_check_files(&approved, &owned, loaded.grid.hashes.as_ref(), request.hashes.as_ref());
     if !changed.is_empty() {
         return refuse(format!(
             "{at}: approved check file changed: {}. Put it back as approved; to change a check, draft the grid again for the owner to approve",
