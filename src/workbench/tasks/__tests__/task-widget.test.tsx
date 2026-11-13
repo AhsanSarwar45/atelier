@@ -239,28 +239,16 @@ describe('task card rendering', () => {
     expect(screen.getByTestId('task-blocked')).toHaveTextContent('CI back up');
   });
 
-  it('lets the owner approve a proposed plan change, and the buttons go once it is answered', async () => {
+  it('shows a plan change on one line, and counts it beside the diff once open', () => {
     const amend = { outcome: 'Chats export', criteria: [{ id: 'md', text: 'Exports markdown' }, { id: 'img', text: 'Exports images' }, { id: 'pdf', text: 'Exports PDF' }] };
-    act.mockResolvedValue({ task: makeTask({ ...feature.task, status: 'in_progress', result: null, plan: amend, pendingAmend: null, updatedAt: 5 }), widget: null });
-    render(<ChatWidgetView widget={card({ status: 'in_progress', plan: feature.task!.plan, pendingAmend: amend }, 'amend')} />);
-    expect(screen.getByTestId('task-event-text')).toHaveTextContent('Plan change: +1 criterion “Exports PDF”');
-    expect(screen.getByTestId('task-event')).toHaveAttribute('data-waiting', 'yes');
-    // Folded, the buttons sit on the line.
+    render(<ChatWidgetView widget={{ ...card({ status: 'in_progress', plan: amend }, 'amend'), detail: { previous: feature.task!.plan } }} />);
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent('Plan changed: +1 criterion “Exports PDF”');
+    expect(screen.getByTestId('task-event')).toHaveAttribute('data-waiting', 'no');
     expect(screen.queryByTestId('task-event-more')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Approve change' })).toBeVisible();
     fireEvent.click(screen.getByTestId('task-event-toggle'));
-    // Open, the line counts the change rather than repeating it, and the buttons follow the diff.
-    expect(screen.getByTestId('task-event-text')).toHaveTextContent(/^Plan change: \+1$/);
+    expect(screen.getByTestId('task-event-text')).toHaveTextContent(/^Plan changed: \+1$/);
     const changes = screen.getAllByTestId('task-amend-change');
     expect(changes.map((row) => [row.getAttribute('data-change'), row.textContent])).toEqual([['added', 'Added: Exports PDF']]);
-    const more = screen.getByTestId('task-event-more');
-    const approve = within(more).getByRole('button', { name: 'Approve change' });
-    expect(screen.getAllByRole('button', { name: 'Approve change' })).toHaveLength(1);
-    expect(within(more).getByTestId('task-amend-diff').compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(approve);
-    await waitFor(() => expect(act).toHaveBeenCalledWith('p1', 1, 'approve_amend', undefined));
-    await waitFor(() => expect(screen.getByTestId('task-event-answer')).toHaveTextContent('Approved'));
-    expect(screen.queryByRole('button', { name: 'Approve change' })).toBeNull();
   });
 
   it('asks for a note before reopening a task in review', async () => {

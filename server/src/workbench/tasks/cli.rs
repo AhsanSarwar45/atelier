@@ -23,7 +23,8 @@ usage: atelier task <command>
   block N --cause TEXT --needs TEXT
   unblock N
   amend N                      {plan, reason} on stdin or --input FILE: the whole new plan, and why a check is
-                               wrong or impossible as approved; the owner approves it
+                               wrong or impossible as approved; it applies at once (the owner can undo it), and
+                               the reply says what it may weaken of the approved checks
   done N                       {summary, commits?, followups?, result?, cells?} on stdin or --input FILE; the server
                                re-runs every check and the project's test command first
   cancel N --reason TEXT

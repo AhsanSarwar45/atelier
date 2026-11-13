@@ -5,10 +5,11 @@
  * (docs/tasks.md, "Front end"): an icon, the task's number and what happened,
  * e.g. `Checked “Button works” — met`. Only the create card shows the plan.
  *
- * While the change still waits on the owner (a plan change not yet answered,
- * a finished task in review) its buttons sit on the line, and once the line
- * is unfolded, after what they decide on. A plan change and a finished task
- * unfold to what they changed and came to, a visual check to its images.
+ * While a finished task waits for the owner's review, its buttons sit on the
+ * line, and once the line is unfolded, after what they decide on. A plan
+ * change applies at once: it unfolds to its diff and what it may weaken, with
+ * Undo change while it is still the latest. A finished task unfolds to what
+ * it came to, a visual check to its images.
  * Clicking the line opens the task's detail in the Tasks tab; Back returns
  * to the chat.
  */
@@ -21,6 +22,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
+import { tasks as tasksApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useLiveSessions } from '@/workbench/live';
 import { openTaskDetail } from '@/workbench/tasks/open-task';
@@ -38,21 +40,28 @@ const str = (value: unknown): string => (typeof value === 'string' ? value : typ
 
 /**
  * Whether the change this row tells of still waits on the owner, read from
- * the task now: the same plan change still pending, or the same result still
- * in review. Once answered, here or anywhere, the buttons go.
+ * the task now: the same result still in review. Once answered, here or
+ * anywhere, the buttons go.
  */
 export function waitsOnOwner(event: string, printed: Task, now: Task): boolean {
-  if (event === 'amend') return printed.pendingAmend != null && same(now.pendingAmend, printed.pendingAmend);
   if (event === 'done') return printed.status === 'review' && now.status === 'review' && same(now.result, printed.result);
   return false;
 }
 
-/** How a change that waited on the owner was answered, once it was. */
-export function answer(event: string, printed: Task, now: Task): string {
+/**
+ * Whether the owner can still undo the plan change this row tells of: the
+ * task's plan is still the one it made, and the task is not finished.
+ */
+export function undoable(event: string, printed: Task, now: Task, detail: TaskEventDetail): boolean {
+  return event === 'amend' && detail.previous !== undefined && same(now.plan, printed.plan)
+    && !['done', 'cancelled', 'review'].includes(now.status);
+}
+
+/** How a change was answered by the owner, once it was. */
+export function answer(event: string, printed: Task, now: Task, detail: TaskEventDetail = {}): string {
   if (waitsOnOwner(event, printed, now)) return '';
-  if (event === 'amend' && printed.pendingAmend) {
-    if (same(now.plan, printed.pendingAmend)) return 'Approved';
-    if (now.pendingAmend == null) return 'Rejected';
+  if (event === 'amend' && detail.previous !== undefined && !same(now.plan, printed.plan) && same(now.plan, detail.previous)) {
+    return 'Undone';
   }
   if (event === 'done' && printed.status === 'review') {
     // A later done replaced this result, so this one was sent back, whatever the task says now.
@@ -65,7 +74,7 @@ export function answer(event: string, printed: Task, now: Task): string {
 
 const ICON: Record<string, LucideIcon> = {
   start: Play, unblock: Play, check: Check, block: AlertTriangle, amend: PencilLine, done: CircleCheckBig,
-  cancel: Ban, take: Hand, approve: CircleCheckBig, reopen: RotateCcw, approve_amend: Check, reject_amend: Ban, release: LogOut,
+  cancel: Ban, take: Hand, approve: CircleCheckBig, reopen: RotateCcw, undo_amend: RotateCcw, release: LogOut,
 };
 
 /** The checked item's name and outcome, from what the change recorded or else from the task. */
@@ -103,8 +112,7 @@ export function eventText(event: string, task: Task, detail: TaskEventDetail = {
     case 'release': return 'Released';
     case 'note': return str(detail.text) ? `Note: ${str(detail.text)}` : 'Note added';
     case 'approve': return 'Approved';
-    case 'approve_amend': return 'Plan change approved';
-    case 'reject_amend': return 'Plan change rejected';
+    case 'undo_amend': return 'Plan change undone';
     case 'check': {
       const item = checked(task, detail);
       if (!item) return 'Checked a plan item';
@@ -124,9 +132,9 @@ export function eventText(event: string, task: Task, detail: TaskEventDetail = {
       return cause ? `Blocked: ${cause}` : 'Blocked';
     }
     case 'amend': {
-      if (!task.pendingAmend) return 'Plan change';
-      const diff = planDiff(task.type, task.plan, task.pendingAmend);
-      return `Plan change: ${unfolded ? diffCounts(diff) : diffLine(diff)}`;
+      if (detail.previous === undefined) return 'Plan changed';
+      const diff = planDiff(task.type, detail.previous, task.plan);
+      return `Plan changed: ${unfolded ? diffCounts(diff) : diffLine(diff)}`;
     }
     case 'done': {
       const counts = countsLine(itemProgress(task));
@@ -159,15 +167,25 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
   const sessions = useLiveSessions();
   const cwd = (printed.sessionId ? sessions.find((s) => s.id === printed.sessionId)?.cwd : null) ?? null;
   const text = useMemo(() => eventText(event, printed, detail, open), [event, printed, detail, open]);
-  const answered = answer(event, printed, now);
+  const answered = answer(event, printed, now, detail);
   const item = event === 'check' ? checked(printed, detail) : null;
   const Icon = item?.met === false ? AlertTriangle : ICON[event] ?? Check;
   const warn = event === 'block' || (event === 'check' && item?.met === false) || (event === 'done' && printed.shortfalls);
 
   // What the line unfolds to, if anything.
   let more: ReactNode = null;
-  if (event === 'amend' && printed.pendingAmend) {
-    more = <AmendDiff type={printed.type} plan={printed.plan} amend={printed.pendingAmend} reason={printed.amendReason} />;
+  if (event === 'amend' && detail.previous !== undefined) {
+    const weakens = Array.isArray(detail.weakens) ? detail.weakens.map(str).filter(Boolean) : [];
+    more = (
+      <div className="space-y-2">
+        <AmendDiff type={printed.type} plan={detail.previous} amend={printed.plan} reason={str(detail.reason) || null} />
+        {weakens.length > 0 && (
+          <div data-testid="task-amend-weakens" className="text-sm">
+            <span className="text-muted-foreground">May weaken the approved checks: </span>{weakens.join('; ')}
+          </div>
+        )}
+      </div>
+    );
   } else if (event === 'done' && printed.result) {
     // The result as printed, with the merge state as it is now.
     more = <DoneSummary task={same(now.result, printed.result) ? { ...printed, merged: now.merged } : printed} cwd={cwd} counted />;
@@ -180,11 +198,11 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
 
   // A bare label (Started, Approved) sits on the task's own line rather than on a line of its own.
   const short = !more && !waiting && text.length <= 28;
-  const only: OwnerAction[] = event === 'amend' ? ['approve_amend', 'reject_amend'] : event === 'done' ? ['approve', 'reopen'] : [];
+  const only: OwnerAction[] = event === 'done' ? ['approve', 'reopen'] : [];
   // The owner's buttons: after what they decide on when it is open, on the line when it is folded.
   const buttons = waiting && only.length > 0
     ? <TaskOwnerActions task={now} only={only} onChanged={setActed} className="flex justify-end" />
-    : null;
+    : undoable(event, printed, now, detail) ? <UndoChange task={now} onChanged={setActed} /> : null;
   const unfolded = open && !!more;
   // A click anywhere on the line opens the task, except on its buttons.
   const openFromLine = (e: MouseEvent<HTMLDivElement>) => {
@@ -234,5 +252,29 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
         </div>
       )}
     </Panel>
+  );
+}
+
+/** Undo change: puts the plan back as it was before the agent's last change. */
+function UndoChange({ task, onChanged }: { task: Task; onChanged: (task: Task) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const undo = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { task: next } = await tasksApi.act(task.projectId, task.number, 'undo_amend', undefined);
+      onChanged(next);
+    } catch (e) {
+      setError((e instanceof Error ? e.message : String(e)).replace(/^API error: \d+\s*/, ''));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {error && <span role="alert" className="text-xs text-destructive">{`Couldn't undo the change. ${error}`}</span>}
+      <Button type="button" size="sm" variant="outline" onClick={() => void undo()} loading={busy}>Undo change</Button>
+    </div>
   );
 }

@@ -44,7 +44,7 @@ fn locked(stored: &Value, item: &str, checks: &[Check], owned: &[String], found:
     }
     Err(format!(
         "{item}: approved check file changed: {}. Put it back as approved; if the check is wrong, run `atelier task amend` \
-         with a reason for the owner to approve",
+         with a reason",
         changed.join(", ")
     ))
 }
@@ -254,7 +254,7 @@ pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<(), TaskError> {
 /// The agent files an amend of a gated task: a changed check must have its
 /// files and, once the task has started, fail against the starting code for
 /// its stated reason. The runs and the changed checks' file hashes are kept
-/// with the amend, so the owner's approval needs no runs.
+/// for `apply_amend`.
 pub fn file_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Result<(), TaskError> {
     let found = measured(gate, "the amend")?;
     let mut stored = stored(task);
@@ -308,38 +308,15 @@ pub fn file_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Resu
     Ok(())
 }
 
-/// The owner approves an amend of a gated task. Its changed checks were
-/// proved when it was filed; approval only confirms their files are as they
-/// were then, keeps those runs, and locks the changed checks' files anew
-/// while the rest keep their approval.
-pub fn approve_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Result<(), TaskError> {
+/// An amend of a gated task applies: its changed checks were proved red by
+/// `file_amend`, so their runs are kept and their files locked anew, while
+/// the rest keep their approval.
+pub fn apply_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> Result<(), TaskError> {
     checks::require_checks(&task.kind, plan)?;
     let found = measured(gate, "the amend")?;
     let mut stored = stored(task);
     let changed = checks::changed_checks(&task.kind, &task.plan, plan);
     let proof = stored.as_object_mut().and_then(|stored| stored.remove("amendProof")).unwrap_or(Value::Null);
-    // An amend filed before filing ran its checks has no runs to keep. It
-    // is approved, and the owner is told its changed checks were not proved
-    // red; they still have to pass for their items to be ticked.
-    if !changed.is_empty() && proof.is_null() {
-        let items: Vec<&str> = changed.iter().map(|(item, _)| item.as_str()).collect();
-        let flag = json!({"kind": "unproved-amend", "items": items,
-            "text": format!("the plan change to {} was filed by an older Atelier, so its changed checks were not proved to fail first", items.join(", "))});
-        if !stored["flags"].is_array() {
-            stored["flags"] = json!([]);
-        }
-        stored["flags"].as_array_mut().unwrap().push(flag);
-    }
-    let moved: Vec<String> = proof["files"]
-        .as_object()
-        .into_iter()
-        .flatten()
-        .filter(|(path, sha)| found.hashes.get(path.as_str()).map(|now| json!(now)) != Some((*sha).clone()))
-        .map(|(path, _)| format!("{path} changed since the amend was filed"))
-        .collect();
-    if !moved.is_empty() {
-        return refuse(format!("the amend cannot be approved: {}; the agent must file it again", moved.join("; ")));
-    }
     for key in ["runs", "baseline"] {
         for (item, checks) in proof[key].as_object().into_iter().flatten() {
             for (name, value) in checks.as_object().into_iter().flatten() {
@@ -391,7 +368,7 @@ pub(crate) mod tests {
     }
 
     fn ask(store: &Store, action: &str, number: Option<i64>, payload: Value, gate: Option<Gate>) -> Result<Outcome, TaskError> {
-        let owner = matches!(action, "approve_amend" | "reject_amend");
+        let owner = matches!(action, "undo_amend");
         apply(store, &Request {
             action: action.into(),
             actor: if owner { "owner" } else { "agent" }.into(),
@@ -759,15 +736,14 @@ pub(crate) mod tests {
         let message = refused(ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), Some(gate)));
         assert!(message.contains("images: \"i\" already passes, so it proves nothing (an amended check must fail against the starting code"), "{message}");
         let gate = measured(&[("images", "i", 101, FAILING)], &["tests/i.rs", "tests/a.rs"]);
-        let outcome = ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), Some(gate.clone())).unwrap();
+        // Filed with a red run, it applies at once.
+        let outcome = ask(&store, "amend", Some(one), json!({"plan": new_plan, "reason": reason}), Some(gate)).unwrap();
         assert_eq!(outcome.detail["reason"], reason);
-        assert_eq!(super::super::to_json(&store, &outcome.task)["amendReason"], reason);
-        let outcome = ask(&store, "approve_amend", Some(one), json!({}), Some(gate)).unwrap();
         let stored = outcome.task.gate.clone().unwrap();
         assert_eq!(stored["hashes"]["files"]["tests/i.rs"], "changed", "the changed check's file is locked anew");
         assert_eq!(stored["hashes"]["files"]["tests/a.rs"], "approved", "an unchanged check keeps its approval");
         assert_eq!(stored["met"], json!({"export": true, "images": false}));
-        assert!(stored.get("amendReason").is_none());
+        assert!(stored.get("amendProof").is_none(), "nothing is left waiting");
         assert_eq!(outcome.task.plan, new_plan);
     }
 

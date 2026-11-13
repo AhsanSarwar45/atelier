@@ -13,8 +13,6 @@ pub mod gate;
 pub mod git;
 pub mod types;
 pub mod visual;
-#[cfg(test)]
-mod amend_tests;
 
 use super::store::Store;
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -75,7 +73,7 @@ CREATE INDEX IF NOT EXISTS task_proposal_by_session ON task_proposal(session_id,
 "#;
 
 pub const AGENT_ACTIONS: &[&str] = &["create", "propose", "start", "check", "block", "unblock", "amend", "done", "cancel", "take", "note"];
-pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend", "cancel", "release", "answer_proposal", "create", "note"];
+pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "undo_amend", "cancel", "release", "answer_proposal", "create", "note"];
 /// The owner's three answers to a proposal (`propose`).
 pub const PROPOSAL_CHOICES: &[&str] = &["create", "just_do_it", "cancel"];
 pub const STATUSES: &[&str] = &["todo", "in_progress", "blocked", "review", "done", "cancelled"];
@@ -354,7 +352,6 @@ pub fn to_json(store: &Store, task: &TaskRow) -> Value {
         "checkBaseline": task.gate.as_ref().map(|gate| gate["baseline"].clone()).unwrap_or(Value::Null),
         "startCommit": task.gate.as_ref().map(|gate| gate["startCommit"].clone()).unwrap_or(Value::Null),
         "testCommandRun": task.gate.as_ref().map(|gate| gate["testCommand"].clone()).unwrap_or(Value::Null),
-        "amendReason": task.gate.as_ref().map(|gate| gate["amendReason"].clone()).unwrap_or(Value::Null),
         "cells": super::grids::task_cells(store.connection(), &task.project_id, task.number).unwrap_or_default(),
         "claimShape": super::grids::claim_shape(store.connection(), &task.project_id, task.number).unwrap_or(Value::Null),
         "notes": notes(store.connection(), &task.project_id, task.number).unwrap_or_default(),
@@ -1011,7 +1008,7 @@ pub fn create_from_pick(
 }
 
 /// The owner actions the holding chat's agent is told of (`owner_prompt`).
-pub const TOLD_ACTIONS: &[&str] = &["approve", "reopen", "approve_amend", "reject_amend"];
+pub const TOLD_ACTIONS: &[&str] = &["approve", "reopen", "undo_amend"];
 
 /// The chat to tell of an action that succeeded: the holding chat, when the
 /// owner approved or reopened the task or answered its plan change.
@@ -1057,11 +1054,7 @@ pub fn owner_prompt(action: &str, task: &TaskRow, note: &str, merge: &git::Merge
                 format!("{said} Continue the work and run done again.")
             }
         }
-        "approve_amend" => format!("Owner approved the plan change for {named}: continue with the new plan."),
-        "reject_amend" if note.is_empty() => {
-            format!("Owner rejected the plan change for {named}: continue with the old plan.")
-        }
-        "reject_amend" => format!("Owner rejected the plan change for {named}: {} Continue with the old plan.", sentence(note)),
+        "undo_amend" => format!("Owner undid the plan change for {named}: continue with the plan as it was before."),
         _ => return None,
     })
 }
@@ -1322,26 +1315,34 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                 return refuse(format!("the proposed plan is the same as #{number}'s current plan"));
             }
             let reason = request.payload.get("reason").and_then(Value::as_str).map(str::trim).filter(|r| !r.is_empty());
-            let mut payload = json!({"plan": plan});
+            // What the change replaces, so the owner can undo it.
+            let previous = json!({"plan": task.plan, "gate": task.gate, "checks": task.checks});
+            let weakens = checks::may_weaken(&task.kind, &task.plan, plan);
             if gate::gated(&task) {
                 // A check is changed only for a reason the owner reads.
-                let reason = reason.ok_or_else(|| {
-                    TaskError::Refused(
-                        "reason is required: amend takes {plan, reason}, with why a check is wrong or impossible as approved".into(),
-                    )
-                })?;
+                if reason.is_none() {
+                    return refuse("reason is required: amend takes {plan, reason}, with why a check is wrong or impossible as approved");
+                }
                 checks::require_checks(&task.kind, plan)?;
                 gate::file_amend(&mut task, plan, request.gate.as_ref())?;
-                if let Some(stored) = task.gate.as_mut() {
-                    stored["amendReason"] = json!(reason);
-                }
+                gate::apply_amend(&mut task, plan, request.gate.as_ref())?;
             }
+            task.plan = plan.clone();
+            task.pending_amend = None;
+            prune_checks(&mut task);
+            let mut payload = json!({"plan": plan, "previous": previous});
             if let Some(reason) = reason {
                 payload["reason"] = json!(reason);
             }
-            task.pending_amend = Some(plan.clone());
-            ("amend_proposed", payload,
-                format!("#{number}: plan amendment proposed; the owner approves or rejects it, and their answer arrives as a message. `done` is checked against the approved plan."))
+            let mut summary = format!("#{number}: the plan is changed.");
+            if !weakens.is_empty() {
+                payload["weakens"] = json!(weakens);
+                summary.push_str(&format!(
+                    " It may weaken what the owner approved: {}. Make sure it doesn't: the approved checks are the proof the work is done. If it does, amend it back.",
+                    weakens.join("; ")
+                ));
+            }
+            ("amended", payload, summary)
         }
         (false, "done") => {
             held_by(&task, caller.unwrap())?;
@@ -1430,30 +1431,20 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             task.finished_at = None;
             ("reopened", json!({"note": note}), format!("#{number} is reopened ({}): {note}", task.status))
         }
-        (true, "approve_amend") => {
-            let plan = task.pending_amend.take().ok_or_else(|| {
-                TaskError::Refused(format!("#{number} has no plan amendment waiting"))
-            })?;
-            if gate::gated(&task) {
-                gate::approve_amend(&mut task, &plan, request.gate.as_ref())?;
-                if let Some(stored) = task.gate.as_mut().and_then(Value::as_object_mut) {
-                    stored.remove("amendReason");
-                }
-            }
-            task.plan = plan.clone();
-            prune_checks(&mut task);
-            ("amend_approved", json!({"plan": plan}), format!("#{number}: the amended plan is approved."))
-        }
-        (true, "reject_amend") => {
-            let plan = task.pending_amend.take().ok_or_else(|| {
-                TaskError::Refused(format!("#{number} has no plan amendment waiting"))
-            })?;
-            let note = request.payload.get("note").and_then(Value::as_str).unwrap_or("");
-            if let Some(stored) = task.gate.as_mut().and_then(Value::as_object_mut) {
-                stored.remove("amendReason");
-                stored.remove("amendProof");
-            }
-            ("amend_rejected", json!({"plan": plan, "note": note}), format!("#{number}: the plan amendment is rejected."))
+        (true, "undo_amend") => {
+            status_is(&task, &["todo", "in_progress", "blocked"], "undo_amend")?;
+            let last = events(connection, &task.project_id, number)?
+                .into_iter()
+                .filter(|event| matches!(event["kind"].as_str(), Some("amended" | "amend_undone")))
+                .last();
+            let previous = match last {
+                Some(event) if event["kind"] == "amended" && event["payload"]["plan"] == task.plan => event["payload"]["previous"].clone(),
+                _ => return refuse(format!("#{number} has no plan change to undo")),
+            };
+            task.plan = previous["plan"].clone();
+            task.gate = previous.get("gate").filter(|gate| !gate.is_null()).cloned();
+            task.checks = previous.get("checks").filter(|checks| !checks.is_null()).cloned();
+            ("amend_undone", json!({}), format!("#{number}: the plan change is undone; the plan is as it was before."))
         }
         (true, "release") => {
             status_is(&task, &["todo", "in_progress", "blocked", "review"], "release")?;
@@ -1489,6 +1480,11 @@ pub fn widget_detail(payload: &Value) -> Value {
     if let Some(row) = detail.as_object_mut() {
         for heavy in ["plan", "droppedAmend", "entry"] {
             row.remove(heavy);
+        }
+        // A plan change keeps the plan it replaced, for its diff; the stored
+        // gate and checks stay with the event.
+        if let Some(previous) = row.get("previous").map(|previous| previous["plan"].clone()) {
+            row.insert("previous".into(), previous);
         }
     }
     detail
@@ -1787,22 +1783,11 @@ mod tests {
         let mut changed = plan.clone();
         changed["scope"] = json!("Server only");
         agent(&store, "s1", "amend", Some(one), json!({"plan": changed})).unwrap();
-        let rejected = owner(&store, "reject_amend", one, json!({"note": "keep the scope"})).unwrap();
-        assert_eq!(told_chat("owner", "reject_amend", &rejected.task), Some("s1"));
+        let undone = owner(&store, "undo_amend", one, json!({})).unwrap();
+        assert_eq!(told_chat("owner", "undo_amend", &undone.task), Some("s1"));
         assert_eq!(
-            owner_prompt("reject_amend", &rejected.task, "keep the scope", &MergeState::Unknown).unwrap(),
-            "Owner rejected the plan change for task #1 \"T\": keep the scope. Continue with the old plan."
-        );
-        assert_eq!(
-            owner_prompt("reject_amend", &rejected.task, "", &MergeState::Unknown).unwrap(),
-            "Owner rejected the plan change for task #1 \"T\": continue with the old plan."
-        );
-        agent(&store, "s1", "amend", Some(one), json!({"plan": changed})).unwrap();
-        let approved = owner(&store, "approve_amend", one, json!({})).unwrap();
-        assert_eq!(told_chat("owner", "approve_amend", &approved.task), Some("s1"));
-        assert_eq!(
-            owner_prompt("approve_amend", &approved.task, "", &MergeState::Unknown).unwrap(),
-            "Owner approved the plan change for task #1 \"T\": continue with the new plan."
+            owner_prompt("undo_amend", &undone.task, "", &MergeState::Unknown).unwrap(),
+            "Owner undid the plan change for task #1 \"T\": continue with the plan as it was before."
         );
 
         agent(&store, "s1", "done", Some(one), done_payload("plan")).unwrap();
@@ -1828,17 +1813,15 @@ mod tests {
     }
 
     #[test]
-    fn amend_waits_for_the_owner_and_done_uses_the_approved_plan() {
+    fn an_amend_applies_at_once_and_done_uses_the_new_plan() {
         let (_d, store) = store();
         let one = create(&store, "s1", "general");
         agent(&store, "s1", "start", Some(one), json!({})).unwrap();
         let plan = json!({"outcome": "o", "done_when": [{"id": "posted", "text": "t"}, {"id": "shared", "text": "u"}]});
-        agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
-        assert!(refused(owner(&store, "approve_amend", 99, json!({}))).contains("no task #99"));
-        owner(&store, "reject_amend", one, json!({"note": "no"})).unwrap();
-        assert!(refused(owner(&store, "approve_amend", one, json!({}))).contains("no plan amendment waiting"));
-        agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
-        owner(&store, "approve_amend", one, json!({})).unwrap();
+        assert!(refused(owner(&store, "undo_amend", one, json!({}))).contains("no plan change to undo"));
+        assert!(refused(owner(&store, "undo_amend", 99, json!({}))).contains("no task #99"));
+        let amended = agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
+        assert_eq!((amended.task.plan.clone(), amended.task.pending_amend.clone()), (plan.clone(), None));
         let message = refused(agent(&store, "s1", "done", Some(one), done_payload("general")));
         assert!(message.starts_with("result.done_when does not cover plan id \"shared\": every plan id needs exactly one entry"), "{message}");
         assert!(message.ends_with("Still open: \"shared\""), "{message}");
@@ -2208,7 +2191,6 @@ mod tests {
         agent(&store, "s1", "start", Some(one), json!({})).unwrap();
         let plan = json!({"outcome": "o", "done_when": [{"id": "posted", "text": "t"}, {"id": "shared", "text": "u"}, {"id": "linked", "text": "v"}]});
         agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
-        owner(&store, "approve_amend", one, json!({})).unwrap();
         check(&store, "s1", one, "shared", json!({"met": true, "evidence": "e"})).unwrap();
         let message = refused(agent(&store, "s1", "done", Some(one), json!({"summary": "s"})));
         assert!(message.contains("does not cover plan ids \"posted\", \"linked\""), "{message}");
@@ -2225,29 +2207,24 @@ mod tests {
     }
 
     #[test]
-    fn an_approved_amend_drops_checks_for_removed_items_and_keeps_the_rest() {
+    fn an_amend_drops_checks_for_removed_items_and_an_undo_brings_them_back() {
         let (_d, store) = store();
         let one = create(&store, "s1", "general");
         agent(&store, "s1", "start", Some(one), json!({})).unwrap();
         check(&store, "s1", one, "posted", json!({"met": true, "evidence": "e"})).unwrap();
-        // Proposed but not approved: nothing is dropped yet.
-        let plan = json!({"outcome": "o", "done_when": [{"id": "shared", "text": "u"}]});
-        agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
-        owner(&store, "reject_amend", one, json!({})).unwrap();
-        assert!(checks_of(&store, one).is_some());
         let plan = json!({"outcome": "o", "done_when": [{"id": "posted", "text": "t"}, {"id": "shared", "text": "u"}]});
         agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
-        owner(&store, "approve_amend", one, json!({})).unwrap();
         assert_eq!(checks_of(&store, one).unwrap()["done_when"][0]["id"], "posted", "kept");
         let plan = json!({"outcome": "o", "done_when": [{"id": "shared", "text": "u"}]});
         agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
-        owner(&store, "approve_amend", one, json!({})).unwrap();
         assert!(checks_of(&store, one).is_none(), "posted is no longer in the plan");
+        owner(&store, "undo_amend", one, json!({})).unwrap();
+        assert_eq!(checks_of(&store, one).unwrap()["done_when"][0]["id"], "posted", "the undo brings the check back");
+        assert!(refused(owner(&store, "undo_amend", one, json!({}))).contains("no plan change to undo"), "only the last change is undone");
+        agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
         check(&store, "s1", one, "shared", json!({"met": true, "evidence": "e"})).unwrap();
-        assert!(refused(owner(&store, "approve_amend", one, json!({}))).contains("no plan amendment waiting"));
         let plan = json!({"outcome": "o", "done_when": [{"id": "shared", "text": "u"}, {"id": "new", "text": "w"}]});
         agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
-        owner(&store, "approve_amend", one, json!({})).unwrap();
         assert_eq!(checks_of(&store, one).unwrap()["done_when"], json!([{"id": "shared", "met": true, "evidence": "e"}]));
     }
 
@@ -2283,9 +2260,10 @@ mod tests {
         let blocked = agent(&store, "s1", "block", Some(one), json!({"cause": "No key", "needed_to_resume": "A key"})).unwrap();
         assert_eq!(blocked.detail, json!({"cause": "No key", "needed_to_resume": "A key"}));
         agent(&store, "s1", "unblock", Some(one), json!({})).unwrap();
+        let before = get(store.connection(), "p", one).unwrap().unwrap().plan;
         let plan = json!({"outcome": "o", "done_when": [{"id": "posted", "text": "t"}]});
         let amended = agent(&store, "s1", "amend", Some(one), json!({"plan": plan})).unwrap();
-        assert_eq!(amended.detail, json!({}), "the amend's plan is the task's pendingAmend");
+        assert_eq!(amended.detail, json!({"previous": before}), "the new plan is the task's; the old one is kept for the diff");
         let checked = agent(&store, "s1", "check", Some(one), json!({"item": "posted", "entry": {"met": false, "evidence": "e", "reason": "r"}})).unwrap();
         assert_eq!(checked.detail, json!({"item": "posted", "met": false, "reason": "r"}));
         let done = agent(&store, "s1", "done", Some(one), json!({"summary": "s"})).unwrap();

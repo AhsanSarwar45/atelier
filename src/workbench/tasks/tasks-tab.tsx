@@ -33,7 +33,6 @@ import { claimShapeLabel } from '@/workbench/grids/task-cells';
 import { useLiveSessions, type LiveSession } from '@/workbench/live';
 import { ComposerPrefillContext, prefillChat } from '@/workbench/tasks/composer-prefill';
 import { lineForNewChat, NEW_TASK_LINE, startTaskIn } from '@/workbench/tasks/new-task';
-import { same } from '@/workbench/tasks/plan-diff';
 import { isStale, STALE_REASON } from '@/workbench/tasks/stale';
 import { MergeBadge, ProposalActions, TaskCard, TaskStatusChip, ownerActions, shownStatus, type ShownStatus } from '@/workbench/tasks/task-card';
 import { eventText } from '@/workbench/tasks/task-event-row';
@@ -77,12 +76,16 @@ function sessionName(task: Task, sessions: ReadonlyMap<string, LiveSession>): st
 
 /** A stored event's kind, as the chat's task rows name the same change. */
 const CHAT_EVENT: Record<string, string> = {
-  started: 'start', checked: 'check', blocked: 'block', unblocked: 'unblock', amend_proposed: 'amend',
-  amend_approved: 'approve_amend', amend_rejected: 'reject_amend', done: 'done', submitted: 'done',
+  started: 'start', checked: 'check', blocked: 'block', unblocked: 'unblock', amended: 'amend',
+  amend_proposed: 'amend', amend_undone: 'undo_amend', done: 'done', submitted: 'done',
   approved: 'approve', reopened: 'reopen', cancelled: 'cancel', released: 'release',
 };
 /** The changes a chat row has no words for, or words that only fit inside the chat. */
-const OWN_LABEL: Record<string, string> = { created: 'Created', taken: 'Moved to another chat' };
+const OWN_LABEL: Record<string, string> = {
+  created: 'Created', taken: 'Moved to another chat',
+  // Plan changes once waited for the owner; older histories still hold these.
+  amend_approved: 'Plan change approved', amend_rejected: 'Plan change rejected',
+};
 
 const rec = (value: unknown): Record<string, unknown> =>
   (typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {});
@@ -97,9 +100,11 @@ export function historyText(event: Pick<TaskEvent, 'kind' | 'payload'>, task: Ta
   if (!kind) return event.kind;
   const payload = rec(event.payload);
   if (kind === 'amend') {
-    // The proposal against the plan now; once approved the two are the same and there is nothing to show.
+    // The change against the plan it replaced; an older proposal kept only the new plan.
     const plan = rec(payload.plan);
-    return Object.keys(plan).length && !same(task.plan, plan) ? eventText(kind, { ...task, pendingAmend: plan }) : 'Plan change proposed';
+    const previous = rec(rec(payload.previous).plan);
+    if (Object.keys(plan).length && Object.keys(previous).length) return eventText(kind, { ...task, plan }, { previous });
+    return event.kind === 'amend_proposed' ? 'Plan change proposed' : 'Plan changed';
   }
   if (kind === 'done') return eventText(kind, { ...task, status: event.kind === 'submitted' ? 'review' : 'done' });
   return eventText(kind, task, payload);

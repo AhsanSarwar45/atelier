@@ -159,8 +159,6 @@ export interface Task {
   startCommit?: string | null;
   /** The project's test command as it ran at done. */
   testCommandRun?: Record<string, unknown> | null;
-  /** Why the agent asked to change the plan, for a pending amend. */
-  amendReason?: string | null;
 }
 
 /** A task's claimed cells as one row, one column or one whole grid. */
@@ -213,7 +211,7 @@ export interface TaskProposal {
 }
 
 export type TaskEventKind =
-  | 'created' | 'started' | 'checked' | 'blocked' | 'unblocked' | 'amend_proposed' | 'amend_approved'
+  | 'created' | 'started' | 'checked' | 'blocked' | 'unblocked' | 'amended' | 'amend_undone' | 'amend_proposed' | 'amend_approved'
   | 'amend_rejected' | 'done' | 'submitted' | 'approved' | 'reopened' | 'cancelled' | 'taken' | 'released';
 
 export interface TaskEvent {
@@ -235,7 +233,7 @@ export interface TaskTypeInfo { name: string; code: boolean; review: boolean; pl
  */
 export type TaskEventDetail = Record<string, unknown>;
 
-export type OwnerAction = 'approve' | 'reopen' | 'approve_amend' | 'reject_amend' | 'cancel' | 'release' | 'note';
+export type OwnerAction = 'approve' | 'reopen' | 'undo_amend' | 'cancel' | 'release' | 'note';
 
 /**
  * The `task` chat widget: the card printed by every `atelier task` change, or

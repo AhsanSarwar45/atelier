@@ -124,13 +124,12 @@ describe('the bar above the composer', () => {
     await waitFor(() => expect(answerProposal).toHaveBeenCalledWith('p1', 4, 'just_do_it'));
   });
 
-  it('answers a plan change with Approve change and Reject change', async () => {
+  it('offers no approval for a plan change, since one applies at once', async () => {
     await aBar([AMEND]);
     const amend = line('amend');
     expect(amend).toHaveTextContent('Plan change for #12');
-    expect(within(amend).getByRole('button', { name: 'Reject change' })).toBeInTheDocument();
-    fireEvent.click(within(amend).getByRole('button', { name: 'Approve change' }));
-    await waitFor(() => expect(taskAct).toHaveBeenCalledWith('p1', 12, 'approve_amend', undefined));
+    expect(within(amend).queryByRole('button', { name: 'Approve change' })).toBeNull();
+    expect(within(amend).queryByRole('button', { name: 'Reject change' })).toBeNull();
   });
 
   it('approves a grid draft, leaving Discard to the card, and opens the grid', async () => {

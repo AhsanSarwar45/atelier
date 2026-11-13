@@ -859,9 +859,8 @@ export function ResultView({ type, plan, result, cwd, summarised = false }: {
 /* ------------------------------------------------------------------ actions */
 
 /** What the owner can do to a task, by where it stands. */
-export function ownerActions(task: Pick<Task, 'status' | 'pendingAmend' | 'sessionId'>): OwnerAction[] {
+export function ownerActions(task: Pick<Task, 'status' | 'sessionId'>): OwnerAction[] {
   const actions: OwnerAction[] = [];
-  if (task.pendingAmend) actions.push('approve_amend', 'reject_amend');
   if (task.status === 'review') actions.push('approve', 'reopen');
   if (task.status !== 'done' && task.status !== 'cancelled') actions.push('cancel');
   if (task.sessionId && task.status !== 'done' && task.status !== 'cancelled') actions.push('release');
@@ -875,7 +874,7 @@ function failure(e: unknown): string {
 
 /**
  * The owner's buttons for one task. `only` limits them to a set — the chat
- * card shows the review and amend ones; the Tasks tab shows them all.
+ * card shows the review ones; the Tasks tab shows them all.
  */
 export function TaskOwnerActions({ task, only, onChanged, className }: {
   task: Task;
@@ -936,8 +935,6 @@ export function TaskOwnerActions({ task, only, onChanged, className }: {
         <div className="flex flex-wrap gap-2">
           {has('approve') && <Button type="button" size="sm" onClick={() => void act('approve')} loading={busy === 'approve'}>Approve</Button>}
           {has('reopen') && <Button type="button" size="sm" variant="outline" onClick={() => setAsking('reopen')}>Reopen</Button>}
-          {has('approve_amend') && <Button type="button" size="sm" onClick={() => void act('approve_amend')} loading={busy === 'approve_amend'}>Approve change</Button>}
-          {has('reject_amend') && <Button type="button" size="sm" variant="outline" onClick={() => void act('reject_amend')} loading={busy === 'reject_amend'}>Reject change</Button>}
           {has('release') && <Button type="button" size="sm" variant="outline" onClick={() => void act('release')} loading={busy === 'release'}>Release</Button>}
           {has('cancel') && <Button type="button" size="sm" variant="ghost" onClick={() => setAsking('cancel')}>Cancel task</Button>}
         </div>
@@ -950,9 +947,9 @@ export function TaskOwnerActions({ task, only, onChanged, className }: {
 /* ------------------------------------------------------------------ card */
 
 const EVENT_LABEL: Record<string, string> = {
-  create: 'Created', start: 'Started', block: 'Blocked', unblock: 'Unblocked', amend: 'Change proposed',
+  create: 'Created', start: 'Started', block: 'Blocked', unblock: 'Unblocked', amend: 'Plan changed',
   check: 'Checked', done: 'Finished', cancel: 'Cancelled', take: 'Taken', approve: 'Approved', reopen: 'Reopened',
-  approve_amend: 'Change approved', reject_amend: 'Change rejected', release: 'Released', note: 'Note added',
+  undo_amend: 'Change undone', release: 'Released', note: 'Note added',
 };
 
 function Section({ label, children }: { label: string; children: ReactNode }) {
@@ -1179,7 +1176,7 @@ export function CompactPlan({ task }: { task: Task }) {
  * later change prints a one-line row instead (task-event-row.tsx). Without
  * `event` it is the Tasks tab's detail: the whole task.
  */
-export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen', 'approve_amend', 'reject_amend'] }: {
+export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'] }: {
   task: Task;
   /** The action that printed this card, for a chat card. */
   event?: string;
@@ -1253,14 +1250,6 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
 
       {task.status === 'cancelled' && task.cancelReason && (
         <Panel tone="default" inset="sm"><Field label="Cancelled">{task.cancelReason}</Field></Panel>
-      )}
-
-      {task.pendingAmend && (
-        <Panel tone="info" inset="sm" data-testid="task-amend" className="space-y-2">
-          <Label>Proposed plan change</Label>
-          <AmendDiff type={task.type} plan={task.plan} amend={task.pendingAmend} reason={task.amendReason} />
-          <TaskOwnerActions task={task} only={actions.filter((a) => a === 'approve_amend' || a === 'reject_amend')} onChanged={setActed} />
-        </Panel>
       )}
 
       {result ? (

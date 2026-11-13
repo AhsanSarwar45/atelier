@@ -805,9 +805,30 @@ pub enum Measure {
     /// The agent files an amend: the new plan's changed checks, against the
     /// code as it was at start, and its files' hashes.
     Amend { plan: Value },
-    /// The owner approves an amend: only the new plan's files' hashes, to
-    /// confirm they are as they were when it was filed.
-    Approve { plan: Value },
+}
+
+/// What a plan change may weaken of the checks the owner approved, in
+/// words: an item or check removed, or an approved check changed. Added
+/// items and checks weaken nothing. A hint for the agent, not a verdict.
+pub fn may_weaken(kind: &str, old: &Value, new: &Value) -> Vec<String> {
+    let after: BTreeMap<String, Value> = plan_items(kind, new).into_iter().collect();
+    let name = |check: &Value| check["name"].as_str().unwrap_or("").to_string();
+    let mut said = Vec::new();
+    for (item, listed) in plan_items(kind, old) {
+        let Some(now) = after.get(&item) else {
+            said.push(format!("removes item \"{item}\""));
+            continue;
+        };
+        let now: Vec<&Value> = now.as_array().into_iter().flatten().collect();
+        for check in listed.as_array().into_iter().flatten() {
+            match now.iter().find(|other| name(other) == name(check)) {
+                None => said.push(format!("removes check \"{}\" of {item}", name(check))),
+                Some(other) if *other != check => said.push(format!("changes check \"{}\" of {item}", name(check))),
+                Some(_) => {}
+            }
+        }
+    }
+    said
 }
 
 /// The checks of `new` that are not, as they are, in `old`: what an amend
@@ -885,9 +906,6 @@ pub async fn measure(folder: &Path, kind: &str, plan: &Value, stored: &Value, me
                     gate.flags.extend(mutation_flags(folder, start, &items, at).await);
                 }
             }
-        }
-        Measure::Approve { plan: new } => {
-            gate.hashes = hash_files(folder, &widened(folder, &locked_paths(kind, &new, &harness)));
         }
         Measure::Amend { plan: new } => {
             gate.hashes = hash_files(folder, &widened(folder, &locked_paths(kind, &new, &harness)));

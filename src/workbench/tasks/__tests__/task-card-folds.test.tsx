@@ -96,8 +96,7 @@ describe('a later change is one line', () => {
     ['take', {}, {}, 'Taken by this chat'],
     ['reopen', {}, { note: 'Clipped' }, 'Reopened: Clipped'],
     ['approve', {}, {}, 'Approved'],
-    ['approve_amend', {}, {}, 'Plan change approved'],
-    ['reject_amend', {}, {}, 'Plan change rejected'],
+    ['undo_amend', {}, {}, 'Plan change undone'],
     ['release', {}, {}, 'Released'],
   ] as const)('%s', (event, over, detail, words) => {
     show(event, feature(over), detail);
@@ -186,14 +185,12 @@ describe('a later change is one line', () => {
 
 describe('whether a line still waits on the owner', () => {
   const amend = { outcome: 'o', criteria: criteria.slice(0, 2) };
-  const printed = feature({ status: 'in_progress', pendingAmend: amend });
+  const printed = feature({ status: 'in_progress', plan: amend });
 
-  it('a plan change waits while the same change is pending, then says how it was answered', () => {
-    expect(waitsOnOwner('amend', printed, printed)).toBe(true);
-    expect(answer('amend', printed, printed)).toBe('');
-    expect(waitsOnOwner('amend', printed, { ...printed, pendingAmend: null, plan: amend })).toBe(false);
-    expect(answer('amend', printed, { ...printed, pendingAmend: null, plan: amend })).toBe('Approved');
-    expect(answer('amend', printed, { ...printed, pendingAmend: null })).toBe('Rejected');
+  it('a plan change never waits, and says Undone once the owner undid it', () => {
+    expect(waitsOnOwner('amend', printed, printed)).toBe(false);
+    expect(answer('amend', printed, printed, { previous: plan })).toBe('');
+    expect(answer('amend', printed, { ...printed, plan }, { previous: plan })).toBe('Undone');
   });
 
   it('a finished task waits while the same result is in review', () => {
@@ -205,8 +202,8 @@ describe('whether a line still waits on the owner', () => {
   });
 
   it('names a plan change by what it adds', () => {
-    expect(eventText('amend', feature({ pendingAmend: { ...plan, criteria: [...criteria, { id: 'search', text: 'Search box' }] } }))).toBe('Plan change: +1 criterion “Search box”');
-    expect(eventText('amend', feature({ pendingAmend: { ...plan, criteria: [...criteria.slice(1, 6), { id: 'search', text: 'Search box' }] } }), {}, true)).toBe('Plan change: +1 / −2');
+    expect(eventText('amend', feature({ plan: { ...plan, criteria: [...criteria, { id: 'search', text: 'Search box' }] } }), { previous: plan })).toBe('Plan changed: +1 criterion “Search box”');
+    expect(eventText('amend', feature({ plan: { ...plan, criteria: [...criteria.slice(1, 6), { id: 'search', text: 'Search box' }] } }), { previous: plan }, true)).toBe('Plan changed: +1 / −2');
   });
 });
 
@@ -217,16 +214,6 @@ describe('the Tasks tab detail', () => {
     expect(screen.getByTestId('task-card')).not.toHaveAttribute('data-compact');
   });
 
-  it('shows a pending plan change as what it changes, not both plans', () => {
-    const amend = { outcome: 'One settings menu', criteria: [...criteria.slice(0, 5).map((c) => (c.id === 'c2' ? { ...c, text: 'Theme switch works without a reload' } : c)), { id: 'search', text: 'Search box' }] };
-    render(<TaskCard task={feature({ status: 'in_progress', pendingAmend: amend })} />);
-    const panel = screen.getByTestId('task-amend');
-    const changes = within(panel).getAllByTestId('task-amend-change').map((row) => row.getAttribute('data-change'));
-    expect(changes).toEqual(['added', 'removed', 'removed', 'changed']);
-    expect(panel).toHaveTextContent('Theme switch works without a reload');
-    expect(panel).not.toHaveTextContent('Arrow keys move through the menu');
-    expect(within(panel).getByRole('button', { name: 'Approve change' })).toBeVisible();
-  });
 });
 
 describe('the visual types, finished', () => {

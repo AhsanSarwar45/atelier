@@ -93,7 +93,6 @@ function WaitingLine({ item, task, onOpenTask }: { item: Waiting; task: Task | u
     case 'amend':
       actions = (
         <div className="flex flex-wrap items-start gap-2">
-          {task && <TaskOwnerActions task={task} only={['approve_amend', 'reject_amend']} onChanged={refreshWaiting} />}
           {openTask}
         </div>
       );

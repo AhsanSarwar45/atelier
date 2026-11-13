@@ -204,7 +204,7 @@ async fn task_gate(
     cwd: Option<&str>,
     payload: &Value,
 ) -> Option<checks::Gate> {
-    if !matches!((actor, action), ("agent", "start" | "check" | "done" | "amend") | ("owner", "approve_amend")) {
+    if !matches!((actor, action), ("agent", "start" | "check" | "done" | "amend")) {
         return None;
     }
     let (asked, number) = (project.to_string(), number?);
@@ -231,7 +231,7 @@ async fn task_gate(
         "check" => checks::Measure::Item(payload["item"].as_str().unwrap_or_default().trim().to_string()),
         "done" => checks::Measure::Done { test_command: task_settings(state, project, Some(&folder)).test_command },
         "amend" => checks::Measure::Amend { plan: payload.get("plan").filter(|plan| !plan.is_null())?.clone() },
-        _ => checks::Measure::Approve { plan: task.pending_amend.clone()? },
+        _ => return None,
     };
     let stored = task.gate.clone().unwrap_or(Value::Null);
     let at = chrono::Utc::now().timestamp_millis();
