@@ -241,7 +241,7 @@ pub fn done(task: &mut TaskRow, gate: Option<&Gate>) -> Result<(), TaskError> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|flag| flag["kind"] == "weak")
+        .filter(|flag| flag["kind"] == "weak" || flag["kind"] == "unproved-amend")
         .cloned()
         .collect();
     flags.extend(found.flags.iter().cloned());
@@ -318,8 +318,17 @@ pub fn approve_amend(task: &mut TaskRow, plan: &Value, gate: Option<&Gate>) -> R
     let mut stored = stored(task);
     let changed = checks::changed_checks(&task.kind, &task.plan, plan);
     let proof = stored.as_object_mut().and_then(|stored| stored.remove("amendProof")).unwrap_or(Value::Null);
+    // An amend filed before filing ran its checks has no runs to keep. It
+    // is approved, and the owner is told its changed checks were not proved
+    // red; they still have to pass for their items to be ticked.
     if !changed.is_empty() && proof.is_null() {
-        return refuse("the amend cannot be approved: it was filed before amends were checked when filed; the agent must file it again".to_string());
+        let items: Vec<&str> = changed.iter().map(|(item, _)| item.as_str()).collect();
+        let flag = json!({"kind": "unproved-amend", "items": items,
+            "text": format!("the plan change to {} was filed by an older Atelier, so its changed checks were not proved to fail first", items.join(", "))});
+        if !stored["flags"].is_array() {
+            stored["flags"] = json!([]);
+        }
+        stored["flags"].as_array_mut().unwrap().push(flag);
     }
     let moved: Vec<String> = proof["files"]
         .as_object()
