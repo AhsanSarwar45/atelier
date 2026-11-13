@@ -3301,3 +3301,5 @@ pub fn describe(id: &str, loaded: Option<&Loaded>, prints: &Prints, with_task: b
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod note_tests;
