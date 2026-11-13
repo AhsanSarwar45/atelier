@@ -68,6 +68,7 @@ pub mod tasks;
 pub mod usage;
 pub mod waiting;
 pub mod wire;
+pub mod worktrees;
 
 pub mod status;
 

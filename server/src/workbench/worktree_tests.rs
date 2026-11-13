@@ -149,7 +149,7 @@ async fn an_idle_chat_moves_to_another_worktree_of_its_project() {
         !registry.has_driver("chat-1").await,
         "the agent still runs in the old folder; the next message must start it in the new one"
     );
-    let said = serde_json::to_string(&database.view_events("chat-1".into()).await.unwrap()).unwrap();
+    let said = serde_json::to_string(&database.events_since("chat-1".into(), 0).await.unwrap()).unwrap();
     assert!(said.contains("Moved to tree"), "the chat was not told where it moved: {said}");
 }
 

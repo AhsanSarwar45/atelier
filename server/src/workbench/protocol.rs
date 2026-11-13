@@ -105,6 +105,9 @@ wire_kinds!(CommandKind {
     SessionConfigOption => "session.config-option",
     SessionOpen => "session.open",
     SessionResume => "session.resume",
+    SessionMove => "session.move",
+    WorktreesList => "worktrees.list",
+    WorktreeDelete => "worktree.delete",
 });
 
 wire_kinds!(EventKind {

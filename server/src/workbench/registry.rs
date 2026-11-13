@@ -1851,6 +1851,125 @@ impl WorkbenchRegistry {
         Ok(json!({"ok":true,"profile":chosen,"moved":moving}))
     }
 
+    /// Move an idle chat to another checkout of its project. The agent is
+    /// retired so the next message starts it in the new folder, and Claude's
+    /// record of the conversation is copied to where Claude looks for it there.
+    async fn move_chat(&self, session: &crate::workbench::store::Session, target: &Path) -> Result<(), String> {
+        let session_id = session.id.as_str();
+        if Self::working(&session.state) {
+            return Err("Wait for the current response to finish before moving this chat.".into());
+        }
+        if super::worktrees::canonical(Path::new(&session.cwd)) == target {
+            return Ok(());
+        }
+        let retiring = self.drivers.write().await.remove(session_id);
+        if let Some(driver) = retiring {
+            let (reply, receive) = oneshot::channel();
+            driver
+                .send(DriverRequest::Retire(reply))
+                .map_err(|_| format!("provider for {session_id} stopped"))?;
+            receive
+                .await
+                .map_err(|_| format!("provider for {session_id} stopped before moving"))??;
+        }
+        if let (true, Some(external)) = (session.brand == "claude", session.external_id.as_deref()) {
+            let config = self.account_dir("claude", session.profile.as_deref());
+            let file = format!("{external}.jsonl");
+            let from = super::worktrees::claude_folder(&config, Path::new(&session.cwd)).join(&file);
+            if from.is_file() {
+                let into = super::worktrees::claude_folder(&config, target);
+                std::fs::create_dir_all(&into).map_err(|error| format!("could not copy the conversation: {error}"))?;
+                std::fs::copy(&from, into.join(&file)).map_err(|error| format!("could not copy the conversation: {error}"))?;
+            }
+        }
+        self.database.move_session(session_id.to_string(), target.display().to_string()).await?;
+        let name = target.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_else(|| target.display().to_string());
+        super::provider::append_notice(&self.database, session_id, &format!("Moved to {name}")).await?;
+        if !matches!(session.state.as_str(), "dormant") {
+            self.database
+                .append(serde_json::from_value(json!({
+                    "type":"session.state", "sessionId":session_id, "seq":0,
+                    "at":chrono::Utc::now().to_rfc3339(), "state":"dormant", "label":"Asleep"
+                })).map_err(|error| error.to_string())?)
+                .await?;
+        }
+        Ok(())
+    }
+
+    fn working(state: &str) -> bool {
+        matches!(state, "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission")
+    }
+
+    /// The chats whose folder is in `tree` and not in a deeper checkout.
+    fn chats_in<'a>(
+        sessions: &'a [crate::workbench::store::Session],
+        tree: &Path,
+        trees: &[PathBuf],
+    ) -> Vec<&'a crate::workbench::store::Session> {
+        sessions
+            .iter()
+            .filter(|session| {
+                let cwd = super::worktrees::canonical(Path::new(&session.cwd));
+                cwd.starts_with(tree) && !trees.iter().any(|other| other != tree && other.starts_with(tree) && cwd.starts_with(other))
+            })
+            .collect()
+    }
+
+    /// The project's checkouts with their branch, size, uncommitted changes
+    /// and chats.
+    async fn list_worktrees(&self, project: &Path) -> Result<Value, String> {
+        let trees = super::worktrees::list(project).await?;
+        let roots: Vec<PathBuf> = trees.iter().map(|tree| super::worktrees::canonical(&tree.path)).collect();
+        let sessions = self.database.list_sessions(None).await?;
+        let mut listed = Vec::new();
+        for (tree, root) in trees.iter().zip(&roots) {
+            let (bytes, dirty) = tokio::join!(super::worktrees::size(root), super::worktrees::dirty(root));
+            let chats: Vec<Value> = Self::chats_in(&sessions, root, &roots)
+                .into_iter()
+                .map(|session| json!({"sessionId":session.id,"title":session.title,"state":session.state}))
+                .collect();
+            listed.push(json!({
+                "path": root.display().to_string(),
+                "name": root.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default(),
+                "branch": tree.branch,
+                "isMain": tree.is_main,
+                "bytes": bytes,
+                "dirty": dirty,
+                "chats": chats,
+            }));
+        }
+        Ok(json!({"trees": listed}))
+    }
+
+    /// Remove a checkout that is not the project's own folder. Its branch is
+    /// kept, and its chats move to the project's folder.
+    async fn delete_worktree(&self, project: &Path, path: &Path, force: bool) -> Result<Value, String> {
+        let trees = super::worktrees::list(project).await?;
+        let target = super::worktrees::canonical(path);
+        let tree = trees
+            .iter()
+            .find(|tree| super::worktrees::canonical(&tree.path) == target)
+            .ok_or_else(|| format!("{} is not a worktree of this project", path.display()))?;
+        if tree.is_main {
+            return Err("The project's own folder cannot be deleted.".into());
+        }
+        let home = trees.iter().find(|tree| tree.is_main).map(|tree| super::worktrees::canonical(&tree.path)).unwrap_or_else(|| super::worktrees::canonical(project));
+        let roots: Vec<PathBuf> = trees.iter().map(|tree| super::worktrees::canonical(&tree.path)).collect();
+        let sessions = self.database.list_sessions(None).await?;
+        let chats = Self::chats_in(&sessions, &target, &roots);
+        if chats.iter().any(|chat| Self::working(&chat.state)) {
+            return Err("A chat in this worktree is working. Wait for it to finish first.".into());
+        }
+        if !force && super::worktrees::dirty(&target).await {
+            return Err("This worktree has uncommitted changes.".into());
+        }
+        for chat in &chats {
+            self.move_chat(chat, &home).await?;
+        }
+        super::worktrees::remove(&home, &target, force).await?;
+        Ok(json!({"ok":true,"moved":chats.iter().map(|chat| chat.id.clone()).collect::<Vec<_>>()}))
+    }
+
     /// Execute one already-decoded WBP command and return the exact JSON body
     /// the former helper returned. Unknown discriminators have already been
     /// refused by `protocol::Command` before they can reach this registry.
@@ -1861,7 +1980,9 @@ impl WorkbenchRegistry {
 
     pub async fn execute(&self, command: &Command) -> Result<Value, String> {
         let id = command.fields.get("sessionId").and_then(Value::as_str);
-        if command.kind != CommandKind::SessionStop {
+        // A move judges the chat as the owner saw it: a turn the probe would
+        // settle is still not moved out from under its folder.
+        if !matches!(command.kind, CommandKind::SessionStop | CommandKind::SessionMove) {
             if let Some(id) = id {
                 self.reconcile_status(id).await?;
             }
@@ -2333,6 +2454,25 @@ impl WorkbenchRegistry {
                 Ok(json!({"ok":true}))
             }
             CommandKind::SessionProfile => self.switch_profile(command).await,
+            CommandKind::SessionMove => {
+                let session_id = Self::field(command, "sessionId")?;
+                let cwd = Path::new(Self::field(command, "cwd")?);
+                let session = self.database.get_session(session_id.to_string()).await?.ok_or_else(|| format!("no session {session_id}"))?;
+                let trees = super::worktrees::list(Path::new(&session.project_path)).await?;
+                let target = super::worktrees::canonical(cwd);
+                if !trees.iter().any(|tree| super::worktrees::canonical(&tree.path) == target) {
+                    return Err(format!("{} is not a worktree of this chat's project", cwd.display()));
+                }
+                self.move_chat(&session, &target).await?;
+                Ok(json!({"ok":true,"cwd":target.display().to_string()}))
+            }
+            CommandKind::WorktreesList => self.list_worktrees(Path::new(Self::field(command, "projectPath")?)).await,
+            CommandKind::WorktreeDelete => {
+                let project = Path::new(Self::field(command, "projectPath")?);
+                let path = Path::new(Self::field(command, "path")?);
+                let force = command.fields.get("force").and_then(Value::as_bool).unwrap_or(false);
+                self.delete_worktree(project, path, force).await
+            }
             CommandKind::SessionRename => {
                 let session_id = Self::field(command, "sessionId")?;
                 let title = Self::field(command, "title")?.trim();

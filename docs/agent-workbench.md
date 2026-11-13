@@ -2287,6 +2287,28 @@ conversation (bw-dmxj.12, bw-96is.22). A drop clears both halves of what the
 stream said; the map of what each holder is doing carried a comment claiming it
 already did, and did not.
 
+#### Worktrees
+
+The chat header's worktree badge, beside the RAM badge, shows how much disk the
+chat's checkout takes: its files without the repository's shared `.git`, links
+not followed. It opens the project's worktrees (`worktrees.list`), each with its
+size, branch, uncommitted changes and the chats working in it; the chat's own
+row says "This chat".
+
+**Move here** moves the open chat to that worktree (`session.move`). Only an
+idle chat moves, and only to a checkout `git worktree list` gives for its
+project. The agent is retired, so the next message starts it in the new
+folder; Claude's record of the conversation is copied to the folder Claude
+keeps for the new path, so the conversation resumes there. The chat is
+remembered as moved, so reading the provider's records again does not put it
+back. A "Moved to" note marks the move in the chat.
+
+**Delete** removes a worktree after a confirm (`worktree.delete`), never the
+project's own folder. The branch is kept, and the worktree's chats move to the
+project's folder. A worktree with a working chat is not deleted. One with
+uncommitted changes asks again, says they will be lost, and its **Delete
+anyway** forces the removal; otherwise the button reads **Delete worktree**.
+
 ### 8.3 The Tasks tab
 
 Every project's tasks, grouped by the chat that holds them, with a detail

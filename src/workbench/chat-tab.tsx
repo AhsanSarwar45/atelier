@@ -121,6 +121,7 @@ import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailab
 import { ModelIcon } from '@/workbench/model-icon';
 import { useSteadyCallback } from '@/hooks/use-steady-callback';
 import { MemoryBadge } from '@/workbench/memory-badge';
+import { WorktreeBadge } from '@/workbench/worktree-badge';
 import { DEFAULT_PANEL_WIDTH, ResizeDivider, rememberedPanelWidth } from '@/workbench/resize-divider';
 import * as api from '@/lib/api';
 import type { MentionPlace } from '@/lib/api';
@@ -1275,7 +1276,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // as long as the launch took (bw-akk9.1, live-wire.ts `open`).
   const reading = starting ? null : sessionId;
   const view = useSession(reading, { shape: true });
-  const factsRead = useSessionFactsRead(reading);
+  const [movedCount, setMovedCount] = useState(0);
+  const factsRead = useSessionFactsRead(reading, movedCount);
   const facts = factsRead?.facts ?? null;
   // The chat's checklist is the tasks it holds; the project's whole list is
   // read so a task card in the transcript can show any task's status live.
@@ -2746,6 +2748,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       >
         {sessionProfileName && <ProfileBadge name={sessionProfileName} brand={sessionBrand} className="hidden md:inline-flex" />}
         <MemoryBadge />
+        {sessionId && projectPath && facts?.cwd && (
+          <WorktreeBadge sessionId={sessionId} projectPath={projectPath} cwd={facts.cwd} onMoved={() => setMovedCount((count) => count + 1)} />
+        )}
         {view.menu.sharedLibrary && <ActiveGuidance snapshot={view.menu.sharedLibrary} />}
         {facts?.folder && (
           <Tooltip label={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}>
@@ -2822,7 +2827,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </div>
       )}
     </>
-  ), [checklist, facts, plan, sessionBrand, sessionProfileName, view.context, view.menu.sharedLibrary]);
+  ), [checklist, facts, plan, projectPath, sessionBrand, sessionId, sessionProfileName, view.context, view.menu.sharedLibrary]);
 
   const heldList = useMemo(() => (
     <>

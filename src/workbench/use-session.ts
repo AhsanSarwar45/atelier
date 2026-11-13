@@ -157,7 +157,8 @@ export function useSessionFacts(sessionId: string | null): SessionFacts | null {
  * reader: the writing box, which weighs them against a running set the stream
  * may have taken before them (running.ts, streamStillAnswers).
  */
-export function useSessionFactsRead(sessionId: string | null): SessionFactsRead | null {
+/** `again` reads the facts afresh when it changes, as after the chat moved. */
+export function useSessionFactsRead(sessionId: string | null, again = 0): SessionFactsRead | null {
   const factsCache = sessionFactsCache;
   const [facts, setFacts] = useState<SessionFactsRead | null>(() => sessionId ? factsCache.get(sessionId) ?? null : null);
 
@@ -184,7 +185,7 @@ export function useSessionFactsRead(sessionId: string | null): SessionFactsRead 
     return () => {
       live = false;
     };
-  }, [sessionId]);
+  }, [sessionId, again]);
 
   return facts;
 }

@@ -920,12 +920,23 @@ impl Store {
         let mut moved = 0;
         {
             let mut statement = transaction.prepare(
-                "UPDATE session SET cwd = ?3 WHERE brand = ?1 AND external_id = ?2 AND cwd <> ?3",
+                "UPDATE session SET cwd = ?3 WHERE brand = ?1 AND external_id = ?2 AND cwd <> ?3
+                   AND id NOT IN (SELECT session_id FROM session_moved)",
             )?;
             for (brand, external_id, cwd) in found {
                 moved += statement.execute(params![brand, external_id, cwd])?;
             }
         }
+        transaction.commit()?;
+        Ok(moved)
+    }
+
+    /// Move a chat to `cwd` for good: the provider's record of where it began
+    /// no longer moves it back.
+    pub fn move_session(&mut self, id: &str, cwd: &str) -> rusqlite::Result<usize> {
+        let transaction = self.connection.transaction()?;
+        let moved = transaction.execute("UPDATE session SET cwd = ?2 WHERE id = ?1", params![id, cwd])?;
+        transaction.execute("INSERT OR IGNORE INTO session_moved (session_id) VALUES (?1)", [id])?;
         transaction.commit()?;
         Ok(moved)
     }
@@ -4010,6 +4021,13 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
       not the owner having read it, and a push that emptied the tray would take
       the row away before he ever looked.
     */
+    // Chats the owner moved to another folder of their project. The
+    // provider's record still names the folder a chat began in, and reading
+    // it back (`correct_folders`) must not undo the move.
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_moved (session_id TEXT PRIMARY KEY);",
+    )?;
+
     transaction.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_notice (
            session_id TEXT PRIMARY KEY,

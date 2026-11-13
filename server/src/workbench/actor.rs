@@ -89,6 +89,7 @@ enum Command {
     FollowedTo(String, Reply<Option<i64>>),
     ImportedBy(String, Reply<Option<i64>>),
     MarkImported(String, Reply<()>),
+    MoveSession(String, String, Reply<usize>),
     RememberFollowed(String, i64, Reply<()>),
     WasDrivenHere(String, Reply<bool>),
     BeginDriving(String, i64, Reply<()>),
@@ -522,6 +523,10 @@ impl ChatDb {
         self.request(|reply| Command::ImportedBy(session_id, reply))
             .await
     }
+    pub async fn move_session(&self, session_id: String, cwd: String) -> Result<usize, String> {
+        self.request(|reply| Command::MoveSession(session_id, cwd, reply)).await
+    }
+
     pub async fn mark_imported(&self, session_id: String) -> Result<(), String> {
         self.request(|reply| Command::MarkImported(session_id, reply))
             .await
@@ -1531,6 +1536,9 @@ fn run(
             }
             Command::ImportedBy(session_id, reply) => {
                 respond(reply, store.imported_by(&session_id))
+            }
+            Command::MoveSession(session_id, cwd, reply) => {
+                respond(reply, store.move_session(&session_id, &cwd))
             }
             Command::MarkImported(session_id, reply) => {
                 respond(reply, store.mark_imported(&session_id).map(|_| ()))
