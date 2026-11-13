@@ -54,7 +54,13 @@ atelier task amend N           <<< '{"plan":{…},"reason":…}'
 atelier task done N            <<< '{"summary":…,"commits":[…],"followups":[…],"result":{…}}'
 atelier task cancel N --reason TEXT
 atelier task take N
+atelier task note N --text TEXT
 ```
+
+Leave a note with `atelier task note N --text TEXT` when you learn
+something whoever works on task N should know. It works on any task in the
+project, in any state, held by any chat. `task show` prints the notes; read
+them before working a task.
 
 Run each `atelier task` command as its own command and leave its output
 alone. It prints the task card the owner sees in the chat. Never send it to
@@ -207,6 +213,7 @@ atelier grid next SLUG [--row ROW | --col COL]
 atelier grid prove SLUG ROW COL  <<< '{"summary":…,"commits":[…]}'
 atelier grid verify SLUG [ROW COL]
 atelier grid na SLUG ROW COL --reason TEXT
+atelier grid note SLUG [--row ROW] [--col COL] --text TEXT
 atelier grid checks SLUG       <<< '{"columns":[{"id":…,"checks":[…]}]}'
 ```
 
@@ -227,3 +234,6 @@ with `done`, and repeat until no gaps are left.
    every cell (`done` takes `"cells":[{"grid","row","col","reason"}]`).
 3. Leave cells another task claims alone.
 4. Never pass or reopen cells outside an `@audit` request.
+5. Leave a note with `atelier grid note` when you learn something whoever
+   works on a cell, row, column or the whole grid later should know.
+   `grid next` prints the notes under each cell; read them first.

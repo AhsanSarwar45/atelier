@@ -401,6 +401,16 @@ true`. Approving the grid approves them. A cell with no check is shown as
 "Needs a check" and cannot be claimed. Claiming runs the cell's checks red,
 and `atelier grid prove` runs them green. See docs/grids.md.
 
+### Notes
+
+The owner or any agent can leave a note on any task in the project, in any
+state, done and cancelled included: `atelier task note N --text TEXT`, or
+**Add note** on the task card. The agent need not hold the task. A note is a
+`note` event (`{text}` payload) and changes nothing else; the text is
+required and at most 4000 characters. The task's JSON lists them as `notes:
+[{actor, sessionId, at, text}]`, oldest first, and `atelier task show N` and
+the task card show them.
+
 ### Migration
 
 A task created before checks (no `checks` key anywhere in its plan) keeps
@@ -428,6 +438,7 @@ atelier task amend N               {plan, reason?}
 atelier task done N                {summary, commits?, followups?, result}
 atelier task cancel N --reason TEXT
 atelier task take N
+atelier task note N --text TEXT    a note on any task in the project, in any state
 atelier task list [--all]          this session's tasks (or the project's)
 atelier task show N
 ```

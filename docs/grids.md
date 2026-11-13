@@ -525,6 +525,21 @@ cell detail: **Approve N/A** (→ `na`, no longer counted) or **Reject** with a
 note (→ `gap`, or `in_progress` if still claimed). The asking chat is told the
 answer with `tell_chat`. Only the owner can move a cell to `na`.
 
+## Notes
+
+Anyone can leave a note on a grid, a row, a column or one cell, at any time
+and in any state: `atelier grid note SLUG [--row ROW] [--col COL] --text
+TEXT` from any agent, or **Add note** in the cell panel from the owner.
+Naming neither row nor column notes the whole grid; a row alone notes every
+cell in the row, a column alone every cell in the column. The text is
+required, at most 4000 characters, and the row or column must exist.
+
+A note is a `note` event (`{text}` payload) and changes nothing else. Each
+cell shows its own notes and those of its row, column and grid, oldest
+first, each labelled Cell, Row, Column or Grid. They are in the cell panel,
+in `atelier grid show SLUG ROW COL`, and under each cell in `atelier grid
+next`, so whoever takes the cell sees them before starting.
+
 ## Audit (`@audit SLUG`)
 
 `@audit` is a bare word reference, followed by a grid slug. Its entry tells
@@ -571,6 +586,7 @@ atelier grid discover SLUG
 atelier grid prove SLUG ROW COL              {summary,tests?,commits?,benchmarks?,evidence?}  runs the approved checks (old cells: checks in the payload)
 atelier grid verify SLUG [ROW COL]           re-run checks (whole grid: proved cells)
 atelier grid na SLUG ROW COL --reason TEXT
+atelier grid note SLUG [--row ROW] [--col COL] --text TEXT  a note on the grid, a row, a column or a cell
 atelier grid audit SLUG [--done]
 atelier grid pass SLUG ROW COL [--note TEXT]
 atelier grid reopen SLUG ROW COL --reason TEXT
