@@ -540,6 +540,23 @@ pub(super) async fn act(
     let actor = request.actor.clone();
     let note = payload["note"].as_str().unwrap_or_default().to_string();
     let prints = if request.action == "create" { prints_for(&state, &project, cell_grids(&payload)).await } else { Default::default() };
+    if request.action == "done" && request.actor == "agent" {
+        // Refuse a malformed payload before the checks run, which can take minutes.
+        let first = Request {
+            action: request.action.clone(),
+            actor: request.actor.clone(),
+            session: session.clone(),
+            project: project.clone(),
+            number: request.number,
+            payload: payload.clone(),
+            missing_commits: missing.clone(),
+            cwd: cwd.clone(),
+            visual_files: visual.clone(),
+            ..Default::default()
+        };
+        let outcome = state.database().write_tasks(move |store| tasks::precheck_done(store, &first)).await.map_err(failed)?;
+        refused_or(outcome)?;
+    }
     let gate = if request.action == "create" && request.actor == "agent" {
         draft_gate(&state, &project, cwd.as_deref(), &payload["type"], &payload["plan"]).await
     } else {
@@ -945,5 +962,172 @@ mod tests {
         assert_eq!(started[0].title.as_deref(), Some("camera: GLARE row"));
         // Pinned as the owner's name, so the provider's own title cannot replace it.
         assert!(started[0].named_by_owner);
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// A chat `worker` in a repository holding an in-progress task under the
+    /// check rules, whose one check leaves `ran` behind each time it runs.
+    /// Returns the repository, the task's number and the HEAD commit.
+    async fn started_with_a_check(state: &WorkbenchState, project: &str) -> (tempfile::TempDir, i64, String) {
+        let repo = tempfile::tempdir().unwrap();
+        let dir = repo.path().to_path_buf();
+        git(&dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join("value.txt"), "1\n").unwrap();
+        std::fs::write(
+            dir.join("check.sh"),
+            "touch ran\nif grep -qx 2 value.txt; then echo 'test result: ok. 1 passed; 0 failed'; \
+             else echo 'value FAILED'; echo 'test result: FAILED. 0 passed; 1 failed'; exit 1; fi\n",
+        )
+        .unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "start"]);
+        let session = Session {
+            id: "worker".into(),
+            brand: "claude".into(),
+            external_id: None,
+            project_id: project.to_string(),
+            project_path: dir.display().to_string(),
+            cwd: dir.display().to_string(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            profile: None,
+            title: None,
+            state: "idle".into(),
+            origin: "app".into(),
+            created_at: "2026-11-14T00:00:00.000Z".into(),
+            last_active_at: "2026-11-14T00:00:00.000Z".into(),
+            last_spoke_at: None,
+            begun_by: Some("person".into()),
+            named_by_owner: false,
+            auto_approve: false,
+            parent_session_id: None,
+            workers: None,
+        };
+        state.database().create_session(session).await.unwrap();
+        let plan = json!({"outcome": "o", "criteria": [{"id": "value", "text": "the value is 2", "checks": [{
+            "name": "value", "command": "sh check.sh", "kind": "test", "given": "g", "when": "w", "then": "t",
+            "red": "value FAILED", "files": ["check.sh"]}]}]});
+        let decisions: serde_json::Map<String, Value> =
+            tasks::types::TYPES.iter().map(|kind| (kind.name.to_string(), json!(format!("{} or not", kind.name)))).collect();
+        let gate = checks::draft_gate(&dir, "feature", &plan, &[]);
+        let asked = project.to_string();
+        let number = state
+            .database()
+            .write_tasks(move |store| {
+                store.open_message("worker", "m0", "user", "2026-11-14T00:00:00Z").unwrap();
+                store.grow_message("worker", "m0", "@task do it").unwrap();
+                let request = tasks::Request {
+                    action: "create".into(),
+                    actor: "agent".into(),
+                    session: Some("worker".into()),
+                    project: asked,
+                    payload: json!({"type": "feature", "title": "T", "why": "W", "plan": plan, "decisions": decisions}),
+                    gate: Some(gate),
+                    now: 1,
+                    ..Default::default()
+                };
+                tasks::apply(store, &request).map_err(|error| format!("{error:?}")).unwrap().task.number
+            })
+            .await
+            .unwrap();
+        let start = task_gate(state, project, Some(number), "start", "agent", Some(&dir.display().to_string()), &json!({})).await;
+        let asked = project.to_string();
+        state
+            .database()
+            .write_tasks(move |store| {
+                let request = tasks::Request {
+                    action: "start".into(),
+                    actor: "agent".into(),
+                    session: Some("worker".into()),
+                    project: asked,
+                    number: Some(number),
+                    gate: start,
+                    now: 2,
+                    ..Default::default()
+                };
+                tasks::apply(store, &request).map_err(|error| format!("{error:?}")).unwrap();
+            })
+            .await
+            .unwrap();
+        let head = git(&dir, &["rev-parse", "HEAD"]);
+        (repo, number, head)
+    }
+
+    async fn done(state: &WorkbenchState, number: i64, payload: Value) -> Result<Json<Value>, ApiError> {
+        let request = ActionRequest {
+            action: "done".into(),
+            actor: "agent".into(),
+            session: Some("worker".into()),
+            project: None,
+            number: Some(number),
+            payload,
+            files: Default::default(),
+            ephemeral: false,
+            grid: None,
+            chat: None,
+            brand: None,
+        };
+        act(State(state.clone()), Json(request)).await
+    }
+
+    /// A malformed done is refused before the checks and the project's test
+    /// command run, which can take many minutes: a typo costs seconds.
+    #[tokio::test]
+    async fn a_done_with_a_malformed_followup_is_refused_before_any_check_runs() {
+        let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
+        let (repo, number, head) = started_with_a_check(&state, &project).await;
+        let ran = repo.path().join("ran");
+        std::fs::remove_file(&ran).unwrap();
+        let payload = json!({"summary": "s", "commits": [head], "followups": ["look at the export later"], "result": {}});
+        let refused = match done(&state, number, payload).await {
+            Ok(_) => panic!("a followup written as text is refused"),
+            Err(error) => error.message,
+        };
+        assert!(refused.contains("followups[0]"), "the refusal names the bad field: {refused}");
+        assert!(!ran.exists(), "the check ran before the payload was looked at (refused with: {refused})");
+    }
+
+    /// The same for a result entry for an item its checks tick.
+    #[tokio::test]
+    async fn a_done_with_a_result_entry_for_a_checked_item_is_refused_before_any_check_runs() {
+        let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
+        let (repo, number, head) = started_with_a_check(&state, &project).await;
+        let ran = repo.path().join("ran");
+        std::fs::remove_file(&ran).unwrap();
+        let payload = json!({"summary": "s", "commits": [head], "result": {"criteria": [{"id": "value", "met": true, "evidence": "it is 2"}]}});
+        let refused = match done(&state, number, payload).await {
+            Ok(_) => panic!("an entry for a checked item is refused"),
+            Err(error) => error.message,
+        };
+        assert!(refused.contains("is not given for a task with checks"), "the refusal says why: {refused}");
+        assert!(!ran.exists(), "the check ran before the payload was looked at (refused with: {refused})");
+    }
+
+    /// A good done still runs the checks and finishes the task.
+    #[tokio::test]
+    async fn a_well_formed_done_still_runs_the_checks() {
+        let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
+        let (repo, number, _) = started_with_a_check(&state, &project).await;
+        std::fs::write(repo.path().join("value.txt"), "2\n").unwrap();
+        git(repo.path(), &["commit", "-qam", "fix"]);
+        let head = git(repo.path(), &["rev-parse", "HEAD"]);
+        let ran = repo.path().join("ran");
+        std::fs::remove_file(&ran).unwrap();
+        let payload = json!({"summary": "s", "commits": [head], "followups": [{"type": "tests", "title": "t", "why": "w"}], "result": {}});
+        let Json(finished) = done(&state, number, payload).await.map_err(|error| error.message).unwrap();
+        assert!(ran.exists(), "done ran the check");
+        assert_eq!(finished["task"]["status"], "done", "{finished}");
     }
 }

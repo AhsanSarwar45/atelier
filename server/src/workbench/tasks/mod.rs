@@ -1310,6 +1310,22 @@ pub fn open_section(connection: &Connection, session: &str) -> rusqlite::Result<
 }
 
 /// Apply one action. Runs inside a transaction; nothing is written on refusal.
+/// What `done` checks in its payload, without running anything: the route
+/// calls this before the checks run, so a malformed done is refused at once
+/// instead of after every check and the test command.
+pub fn precheck_done(store: &Store, request: &Request) -> Result<(), TaskError> {
+    let connection = store.connection();
+    let number = request.number.ok_or_else(|| TaskError::Refused("number is required for done".into()))?;
+    let task = get(connection, &request.project, number)?
+        .ok_or_else(|| TaskError::Refused(format!("there is no task #{number} in this project")))?;
+    let caller = request.session.as_deref().ok_or_else(|| TaskError::Refused("session is required for done".into()))?;
+    held_by(&task, caller)?;
+    status_is(&task, &["in_progress"], "done")?;
+    check_done(&task, request)?;
+    let cells = super::grids::parse_cells(request.payload.get("cells"), true)?;
+    super::grids::check_done_cells(connection, &request.project, number, &cells)
+}
+
 pub fn apply(store: &Store, request: &Request) -> Result<Outcome, TaskError> {
     let connection = store.connection();
     let transaction = connection.unchecked_transaction()?;
