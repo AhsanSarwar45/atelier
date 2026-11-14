@@ -1210,9 +1210,12 @@ export function CompactPlan({ task }: { task: Task }) {
             <li data-testid="task-plan-item" data-item={item.id} data-full={item.text} data-declined={item.declined} tabIndex={0}
               data-met={item.state === 'open' ? 'pending' : item.state === 'met' ? 'yes' : 'no'}
               className="flex min-w-0 items-center gap-2 rounded-sm text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <Icon aria-label={item.state === 'met' ? 'Met' : item.state === 'missed' ? 'Missed' : 'Open'} className={cn('size-3.5 shrink-0',
+              <Icon aria-label={item.declined !== undefined ? 'Declined' : item.state === 'met' ? 'Met' : item.state === 'missed' ? 'Missed' : 'Open'} className={cn('size-3.5 shrink-0',
                 item.state === 'open' ? 'text-muted-foreground' : item.state === 'met' ? 'text-[var(--color-success-accent)]' : 'text-[var(--color-warning-accent)]')} />
               <span className={cn('min-w-0 truncate', item.state === 'open' && 'text-muted-foreground')}>{item.text}</span>
+              {item.declined !== undefined && (
+                <span data-testid="task-plan-item-declined" className="min-w-0 shrink truncate text-xs text-muted-foreground">{`Declined: ${item.declined}`}</span>
+              )}
               {item.checks?.ran && item.state !== 'met' && (
                 <span data-testid="task-plan-item-tally" className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{tallyLine(item.checks)}</span>
               )}

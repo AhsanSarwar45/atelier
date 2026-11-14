@@ -50,3 +50,31 @@ fn a_types_change_prints_a_card_the_chat_draws() {
     assert_eq!(specs[0]["change"], "c1");
     assert_eq!(specs[0]["summary"], "Turned type \"qa\" off for the project.");
 }
+
+#[test]
+fn an_undone_change_is_remembered_so_its_card_still_says_undone() {
+    let (_root, global, project) = folders();
+    disable(&global, &project, "qa");
+    let id = catalog::history(&global, Some(&project), "project").unwrap()[0]["id"].as_str().unwrap().to_string();
+    catalog::undo_change(&global, Some(&project), "project", Some(&id)).unwrap();
+    assert_eq!(catalog::undone(&global, Some(&project), "project").unwrap(), vec![id.clone()]);
+    let again = catalog::undo_change(&global, Some(&project), "project", Some(&id)).unwrap_err();
+    assert!(again.contains("already undone"), "{again}");
+    disable(&global, &project, "render_change");
+    let next = catalog::history(&global, Some(&project), "project").unwrap()[0]["id"].as_str().unwrap().to_string();
+    assert_ne!(next, id, "a new change never reuses an undone change's id");
+    assert_eq!(catalog::undone(&global, Some(&project), "project").unwrap(), vec![id], "a later change keeps the undone list");
+}
+
+#[test]
+fn a_project_with_no_settings_file_keeps_its_types_in_its_own_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let (data, one, two) = (root.path().join("data"), root.path().join("one"), root.path().join("two"));
+    for dir in [&data, &one, &two] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    let first = catalog::project_dir(&data, &one).expect("a folder for a project with no settings file");
+    let second = catalog::project_dir(&data, &two).unwrap();
+    assert_ne!(first, second, "each project has its own");
+    assert!(first.starts_with(&data), "{first:?} is in the data folder");
+}

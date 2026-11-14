@@ -384,24 +384,23 @@ fn toggle(list: &mut Value, name: &str, on: bool) {
 /// Keep the file as it was before a change, for undo. Returns the change's id.
 fn remember(dir: &Path, before: &Value, summary: &str) -> Result<String, String> {
     let path = dir.join(HISTORY);
-    let mut history = match read(&path)? {
-        Value::Object(row) => row.get("changes").and_then(Value::as_array).cloned().unwrap_or_default(),
-        _ => Vec::new(),
-    };
-    let id = new_id(&history);
+    let mut file = read(&path)?;
+    let mut history = file["changes"].as_array().cloned().unwrap_or_default();
+    let id = new_id(&history, &file["undone"]);
     history.push(json!({"id": id, "summary": summary, "before": before}));
     if history.len() > HISTORY_MAX {
         history.drain(..history.len() - HISTORY_MAX);
     }
-    write(&path, &json!({"changes": history}))?;
+    file["changes"] = json!(history);
+    write(&path, &file)?;
     Ok(id)
 }
 
 /// An id no change in the history has: the time in milliseconds, made
 /// unique against the history.
-fn new_id(history: &[Value]) -> String {
+fn new_id(history: &[Value], undone: &Value) -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_millis());
-    let taken = |id: &str| history.iter().any(|change| change["id"] == id);
+    let taken = |id: &str| history.iter().any(|change| change["id"] == id) || listed(undone, id);
     let mut id = format!("{now:x}");
     let mut more = 1;
     while taken(&id) {
@@ -417,6 +416,12 @@ pub fn history(global: &Path, project: Option<&Path>, scope: &str) -> Result<Vec
     Ok(read(&dir.join(HISTORY))?["changes"].as_array().cloned().unwrap_or_default())
 }
 
+/// The ids of the scope's changes that were undone, newest last.
+pub fn undone(global: &Path, project: Option<&Path>, scope: &str) -> Result<Vec<String>, String> {
+    let dir = folder(global, project, scope)?;
+    Ok(read(&dir.join(HISTORY))?["undone"].as_array().into_iter().flatten().filter_map(|id| id.as_str().map(str::to_string)).collect())
+}
+
 /// The owner's undo: put the scope's file back as it was before its last
 /// change. Returns what was undone.
 pub fn undo(global: &Path, project: Option<&Path>, scope: &str) -> Result<String, String> {
@@ -428,7 +433,8 @@ pub fn undo(global: &Path, project: Option<&Path>, scope: &str) -> Result<String
 pub fn undo_change(global: &Path, project: Option<&Path>, scope: &str, id: Option<&str>) -> Result<String, String> {
     let dir = folder(global, project, scope)?;
     let path = dir.join(HISTORY);
-    let mut changes = read(&path)?["changes"].as_array().cloned().unwrap_or_default();
+    let mut kept = read(&path)?;
+    let mut changes = kept["changes"].as_array().cloned().unwrap_or_default();
     if let Some(id) = id {
         if !changes.iter().any(|change| change["id"] == id) {
             return Err(format!("that change to the {scope}'s task types was already undone"));
@@ -449,7 +455,17 @@ pub fn undo_change(global: &Path, project: Option<&Path>, scope: &str, id: Optio
     } else {
         write(&file, &before)?;
     }
-    write(&path, &json!({"changes": changes}))?;
+    // The ids undone, so a change's card still says so after a reload.
+    let mut undone = kept["undone"].as_array().cloned().unwrap_or_default();
+    if let Some(id) = last["id"].as_str() {
+        undone.push(json!(id));
+    }
+    if undone.len() > HISTORY_MAX {
+        undone.drain(..undone.len() - HISTORY_MAX);
+    }
+    kept["changes"] = json!(changes);
+    kept["undone"] = json!(undone);
+    write(&path, &kept)?;
     Ok(format!("Undid: {}", last["summary"].as_str().unwrap_or("the last change")))
 }
 
@@ -460,10 +476,13 @@ pub fn widget(project: &str, scope: &str, summary: &str, id: &str) -> Result<Str
     }))
 }
 
-/// The folder a project's file lives in: its manifest's, `None` for a
-/// folder that is not a registered project.
+/// The folder a project's file lives in: its manifest's, or for a project
+/// with no settings file yet, the project's own folder in the data folder,
+/// where its personal manifest would go.
 pub fn project_dir(data: &Path, root: &Path) -> Option<PathBuf> {
-    crate::project_manifest::locate(root, data).and_then(|manifest| manifest.path.parent().map(Path::to_path_buf))
+    crate::project_manifest::locate(root, data)
+        .and_then(|manifest| manifest.path.parent().map(Path::to_path_buf))
+        .or_else(|| crate::project_manifest::personal_path(root, data).parent().map(Path::to_path_buf))
 }
 
 /// The types for the project in `root` (or the install's alone).

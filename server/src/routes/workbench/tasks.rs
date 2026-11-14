@@ -183,7 +183,16 @@ pub(super) async fn kinds(State(state): State<WorkbenchState>, Query(query): Que
     let project = kinds_project(&state, query.session.as_deref(), query.project.as_deref()).await?;
     let folder = project.as_deref().and_then(|project| project_folder(&state, project));
     let catalog = tasks::catalog::for_folder(folder.as_deref().map(std::path::Path::new))?;
-    Ok(Json(catalog.listing()))
+    let mut listing = catalog.listing();
+    // The changes undone in each scope, so a change's card says Undone after a reload.
+    let data = crate::workbench::library::data_dir()?;
+    let dir = folder.as_deref().and_then(|folder| tasks::catalog::project_dir(&data, std::path::Path::new(folder)));
+    let mut undone = json!({"install": tasks::catalog::undone(&data, None, "install")?});
+    if dir.is_some() {
+        undone["project"] = json!(tasks::catalog::undone(&data, dir.as_deref(), "project")?);
+    }
+    listing["undone"] = undone;
+    Ok(Json(listing))
 }
 
 #[derive(Deserialize)]

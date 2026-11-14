@@ -267,6 +267,8 @@ export interface TaskTypesListing {
   off?: string[];
   /** Of those, the ones the install turned off, which a project cannot turn on. */
   offInstall?: string[];
+  /** The ids of the changes undone, by scope, so a change's card can say so. */
+  undone?: Partial<Record<'install' | 'project', string[]>>;
 }
 
 /** A change to a scope's task types (catalog.rs `change`), or the owner's undo. */
