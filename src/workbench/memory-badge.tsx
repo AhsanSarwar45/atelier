@@ -1,13 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { AppWindow, Box, ChevronRight, MemoryStick, MessageSquare, Square } from 'lucide-react';
+import { AppWindow, Box, ChevronRight, MemoryStick, MessageSquare, Square, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Overlay, overlayPanel } from '@/components/ui/overlay';
 import { request } from '@/lib/api';
+import { cn } from '@/lib/utils';
 
 interface MemoryReport {
   totalBytes: number;
@@ -127,6 +128,8 @@ export function memoryWords(bytes: number): string {
 }
 export function MemoryBadge() {
   const [report, setReport] = useState<MemoryReport | null>(null);
+  const [shown, setShown] = useState(false);
+  const chip = useRef<HTMLButtonElement>(null);
   const [confirming, setConfirming] = useState<number | null>(null);
   const [stopping, setStopping] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -236,18 +239,25 @@ export function MemoryBadge() {
     return words.join(' · ');
   };
   const GroupIcon = { chat: MessageSquare, app: AppWindow, other: Box } as const;
-  return <Popover onOpenChange={open => open && read()}>
-    <PopoverTrigger asChild>
-      <Badge asChild appearance="outline" size="sm" shape="circle" className="hidden shrink-0 group-data-[expanded=true]/chips:inline-flex md:inline-flex">
-        <Button variant="ghost" size="none" data-testid="memory-badge" aria-label={`Atelier RAM usage: ${memoryWords(shownBytes)}`}>
-          <MemoryStick className="size-3" aria-hidden="true" />
-          <span>{memoryWords(shownBytes)}</span>
+  const close = () => setShown(false);
+  return <>
+    <Badge asChild appearance="outline" size="sm" shape="circle" className="hidden shrink-0 group-data-[expanded=true]/chips:inline-flex md:inline-flex">
+      <Button ref={chip} variant="ghost" size="none" data-testid="memory-badge" aria-label={`Atelier RAM usage: ${memoryWords(shownBytes)}`}
+        aria-haspopup="dialog" aria-expanded={shown} onClick={() => { read(); setShown(true); }}>
+        <MemoryStick className="size-3" aria-hidden="true" />
+        <span>{memoryWords(shownBytes)}</span>
+      </Button>
+    </Badge>
+    {/* The panel the usage and token chips open: the whole screen on a phone. */}
+    {shown && <Overlay testId="memory-popup" label="RAM usage" onClose={close} returnFocus={chip}>
+    <div className={cn(overlayPanel, 'max-w-xl')}>
+      <div className="flex items-center gap-2 border-b border-border/60 p-4">
+        <h2 className="text-base font-semibold text-foreground">RAM usage</h2>
+        <Button size="xs" mode="icon" variant="ghost" className="ml-auto" aria-label="Close" onClick={close}>
+          <X aria-hidden="true" />
         </Button>
-      </Badge>
-    </PopoverTrigger>
-    <PopoverContent align="start" className="w-[26rem] p-0" data-testid="memory-popup">
-      <div className="border-b px-3 py-2"><p className="text-sm font-medium">RAM usage</p></div>
-      <div className="max-h-[28rem] overflow-y-auto p-1.5 text-sm">
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2 text-sm">
         {groups.map(group => {
           const open = opened.has(group.key);
           const Icon = GroupIcon[group.kind];
@@ -297,6 +307,7 @@ export function MemoryBadge() {
           </div>
         </div>}
       </div>
-    </PopoverContent>
-  </Popover>;
+    </div>
+    </Overlay>}
+  </>;
 }

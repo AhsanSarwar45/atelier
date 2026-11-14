@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode } from 'react';
+import { type ReactNode, type RefObject } from 'react';
 
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
@@ -32,6 +32,7 @@ export function Overlay({
   className,
   onClose,
   onOpenAutoFocus,
+  returnFocus,
   children,
   ...rest
 }: {
@@ -54,6 +55,11 @@ export function Overlay({
    * tooltip before anyone has touched it.
    */
   onOpenAutoFocus?: (event: Event) => void;
+  /**
+   * The control the panel was opened from. Focus goes back to it on close, as
+   * it does from a popup; left alone it falls to the page.
+   */
+  returnFocus?: RefObject<HTMLElement | null>;
   children: ReactNode;
 } & Record<`data-${string}`, string | number | undefined>) {
   return (
@@ -71,6 +77,7 @@ export function Overlay({
         overlayClassName="bg-black/50"
         aria-describedby={undefined}
         onOpenAutoFocus={onOpenAutoFocus}
+        onCloseAutoFocus={returnFocus ? (event) => { event.preventDefault(); returnFocus.current?.focus(); } : undefined}
         data-testid={testId}
         className={cn('flex items-start justify-center p-0 sm:p-8', className)}
         onClick={

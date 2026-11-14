@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { Slot } from '@radix-ui/react-slot';
 import { FolderGit2, X } from 'lucide-react';
@@ -62,6 +62,7 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }
 }) {
   const [trees, setTrees] = useState<Worktree[] | null>(null);
   const [open, setOpen] = useState(false);
+  const chip = useRef<HTMLElement>(null);
   const [deleting, setDeleting] = useState<Worktree | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,14 +93,15 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }
     () => { setDeleting(null); if (tree === own) onMoved?.(); },
   );
 
+  const close = () => setOpen(false);
   return <>
-    <Slot aria-haspopup="dialog" aria-expanded={open} onClick={() => { setError(null); read(); setOpen(true); }}>{children}</Slot>
+    <Slot ref={chip} aria-haspopup="dialog" aria-expanded={open} onClick={() => { setError(null); read(); setOpen(true); }}>{children}</Slot>
     {/* The panel the usage and token chips open: the whole screen on a phone. */}
-    {open && <Overlay testId="worktree-popup" label="Worktrees" onClose={() => setOpen(false)}>
+    {open && <Overlay testId="worktree-popup" label="Worktrees" onClose={close} returnFocus={chip}>
       <div className={cn(overlayPanel, 'max-w-xl')}>
         <div className="flex items-center gap-2 border-b border-border/60 p-4">
           <h2 className="text-base font-semibold text-foreground">Worktrees</h2>
-          <Button size="xs" mode="icon" variant="ghost" className="ml-auto" aria-label="Close" onClick={() => setOpen(false)}>
+          <Button size="xs" mode="icon" variant="ghost" className="ml-auto" aria-label="Close" onClick={close}>
             <X aria-hidden="true" />
           </Button>
         </div>
