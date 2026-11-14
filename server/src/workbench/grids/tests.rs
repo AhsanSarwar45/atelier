@@ -634,27 +634,45 @@ fn an_audit_verdict_from_the_proving_chat_is_refused() {
 }
 
 #[test]
-fn audit_verdicts_need_the_owners_audit() {
+fn audit_passes_need_the_owners_audit() {
     let (_d, store) = store();
     camera(&store);
     prove(&store, "s1", "camera", "glare", "gpu", "f1").unwrap();
     prove(&store, "s1", "camera", "sunstar", "gpu", "f1").unwrap();
     owner_says(&store, "s9", "please look at the camera grid");
+    let pass = on(request("pass", "agent", Some("s9"), "camera"), "sunstar", "gpu");
+    assert!(refused(apply(store.connection(), &pass)).contains("@audit camera"));
+    owner_says(&store, "s9", "@audit lens");
+    assert!(refused(apply(store.connection(), &pass)).contains("@audit camera"));
+    owner_says(&store, "s9", "@audit camera");
     let mut reopen = on(request("reopen", "agent", Some("s9"), "camera"), "glare", "gpu");
     reopen.payload = json!({"reason": "the check compares the kernel with itself"});
-    assert!(refused(apply(store.connection(), &reopen)).contains("@audit camera"));
-    owner_says(&store, "s9", "@audit lens");
-    assert!(refused(apply(store.connection(), &reopen)).contains("@audit camera"));
-    owner_says(&store, "s9", "@audit camera");
     let outcome = apply(store.connection(), &reopen).unwrap();
     assert_eq!(outcome.widget, Some("reopen"));
     let cell = state(&store, "camera", "glare", "gpu");
     assert_eq!((cell.state.as_str(), cell.proof.is_some()), ("gap", true));
-    apply(store.connection(), &on(request("pass", "agent", Some("s9"), "camera"), "sunstar", "gpu")).unwrap();
+    apply(store.connection(), &pass).unwrap();
     let done = apply(store.connection(), &request("audit_done", "agent", Some("s9"), "camera")).unwrap();
     let audit = done.audit.unwrap();
     assert_eq!((audit["passed"].as_i64(), audit["reopened"].as_i64()), (Some(1), Some(1)));
     assert_eq!(audit["cells"][0]["reason"], "the check compares the kernel with itself");
+}
+
+/// Any agent may reopen a proved or N/A cell, with no `@audit` and even
+/// one it proved itself: the bar for proof changes all the time.
+#[test]
+fn any_agent_reopens_a_proved_cell() {
+    let (_d, store) = store();
+    camera(&store);
+    prove(&store, "s1", "camera", "glare", "gpu", "f1").unwrap();
+    owner_says(&store, "s1", "the speed check never timed loading");
+    let mut reopen = on(request("reopen", "agent", Some("s1"), "camera"), "glare", "gpu");
+    reopen.payload = json!({"reason": "the speed check never timed loading"});
+    apply(store.connection(), &reopen).unwrap();
+    let cell = state(&store, "camera", "glare", "gpu");
+    assert_eq!((cell.state.as_str(), cell.reason.as_deref()), ("gap", Some("the speed check never timed loading")));
+    // A gap has nothing to reopen.
+    assert!(refused(apply(store.connection(), &reopen)).contains("only a proved or N/A cell"));
 }
 
 #[test]

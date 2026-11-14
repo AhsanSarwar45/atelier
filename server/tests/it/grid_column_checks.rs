@@ -54,6 +54,28 @@ fn checks_attach_to_the_columns_of_an_approved_grid_and_keep_its_history() {
     assert!(!next["create"].is_null(), "{next}");
 }
 
+/// New checks for a column raise the bar for proof: its cells proved under
+/// the old checks are gaps again; other columns keep theirs.
+#[test]
+fn new_column_checks_reopen_the_cells_proved_under_the_old_ones() {
+    let (_d, store) = store();
+    grid_without_checks(&store, "camera");
+    for col in ["gpu", "perf"] {
+        let mut prove = on(request("prove", "agent", Some("s1"), "camera"), "glare", col);
+        prove.payload = json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]});
+        prove.checks = vec![atelier::workbench::grids::proof::CheckResult { name: "unit".into(), exit: 0, ms: 5, tail: String::new() }];
+        prove.fingerprint = Some("f1".into());
+        apply(&store, &prove).unwrap();
+    }
+    add_checks(&store, "camera", gpu_checks()).unwrap();
+    let approved = apply(&store, &request("approve", "owner", None, "camera")).unwrap();
+    assert!(approved.summary.contains("1 cell proved under the old checks is a gap again"), "{}", approved.summary);
+    let gpu = get_cell(store.connection(), "p", "camera", "glare", "gpu").unwrap().unwrap();
+    assert_eq!(gpu.state, "gap", "the column's checks changed, so its proof no longer counts");
+    let perf = get_cell(store.connection(), "p", "camera", "glare", "perf").unwrap().unwrap();
+    assert_eq!(perf.state, "proved", "a column whose checks did not change keeps its proof");
+}
+
 #[test]
 fn adding_checks_refuses_anything_but_column_checks() {
     let (_d, store) = store();

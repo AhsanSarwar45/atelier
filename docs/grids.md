@@ -754,7 +754,7 @@ work-through loop (`grid next` → `task create`, no `@task` needed →
 `task start` → prove → `task check` → `task done` → repeat), "`grid prove`
 runs the approved checks; commit the covered code first", "a task with `cells` must end with
 proof, N/A or a reason for every cell", "leave cells another task claims
-alone", and "never pass or reopen cells outside an `@audit` request". The
+alone", and "never pass cells outside an `@audit` request; reopen any cell that no longer meets its requirement". The
 step-by-step instructions for drafting and auditing are in the `@matrix` and
 `@audit` reference entries, as `@merge` carries its own steps. That way
 sessions that never touch grids pay for six lines, not a page.

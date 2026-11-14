@@ -1398,9 +1398,14 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
     let loaded = load(connection, project, slug)?.expect("the grid was just read");
 
     // Columns.
+    let mut rechecked = Vec::new();
     for (position, column) in cols_wanted.iter().enumerate() {
         let id = column["id"].as_str().unwrap_or("");
         let added = !loaded.columns.iter().any(|known| known.id == id && known.retired_at.is_none());
+        let wanted_checks = column["checks"].as_array().cloned().unwrap_or_default();
+        if edit && loaded.columns.iter().any(|known| known.id == id && known.retired_at.is_none() && known.checks != wanted_checks) {
+            rechecked.push(id.to_string());
+        }
         connection.execute(
             "INSERT INTO grid_column (project_id, slug, id, name, proof_rule, position, from_template, retired_at, checks)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)
@@ -1414,6 +1419,7 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
             append_event(connection, project, slug, now, "column_added", None, None, "owner", &json!({"col": id}))?;
         }
     }
+    reopen_for_new_checks(connection, project, slug, &rechecked, now)?;
     for column in loaded.columns.iter().filter(|c| c.retired_at.is_none()) {
         if !cols_wanted.iter().any(|wanted| wanted["id"] == column.id.as_str()) {
             connection.execute(
@@ -1606,6 +1612,7 @@ fn approve_checks(connection: &Connection, request: &Request, mut grid: Grid, pe
             params![project, slug, id, column["checks"].to_string()],
         )?;
     }
+    let reopened = reopen_for_new_checks(connection, project, &slug, &changed, now)?;
     let mut hashes = grid.hashes.clone().unwrap_or_else(|| json!({"files": {}}));
     if !hashes["files"].is_object() {
         hashes["files"] = json!({});
@@ -1621,11 +1628,46 @@ fn approve_checks(connection: &Connection, request: &Request, mut grid: Grid, pe
     save_grid(connection, &grid)?;
     append_event(connection, project, &slug, now, "checks_approved", None, None, "owner", &json!({"columns": changed}))?;
     let summary = format!(
-        "Owner approved the checks for column(s) {} of grid \"{slug}\". Run `atelier grid next {slug}` to pick the next gaps.",
-        changed.join(", ")
+        "Owner approved the checks for column(s) {} of grid \"{slug}\".{} Run `atelier grid next {slug}` to pick the next gaps.",
+        changed.join(", "),
+        reopened_note(reopened)
     );
     let tell = pending["draftedBy"].as_str().map(|session| (session.to_string(), summary.clone())).into_iter().collect();
     Ok(Outcome { slug: Some(slug.clone()), summary, tell, grids: vec![slug], ..Default::default() })
+}
+
+/// A column's checks changed: its cells proved under the old checks are gaps
+/// again, so they are proved against the new ones. A cell whose own checks
+/// replace the column's keeps its proof. How many were reopened.
+fn reopen_for_new_checks(connection: &Connection, project: &str, slug: &str, columns: &[String], now: i64) -> Result<usize, TaskError> {
+    if columns.is_empty() {
+        return Ok(0);
+    }
+    let loaded = load(connection, project, slug)?.ok_or_else(|| TaskError::Refused(format!("there is no grid \"{slug}\"")))?;
+    let mut reopened = 0;
+    for cell in &loaded.cells {
+        let own_override = cell.own_checks.as_ref().is_some_and(|own| own["override"] == true);
+        if cell.state != "proved" || own_override || !columns.iter().any(|col| *col == cell.col) {
+            continue;
+        }
+        let mut cell = cell.clone();
+        let reason = "the column's checks changed; prove it against the new checks".to_string();
+        cell.state = "gap".into();
+        cell.reason = Some(reason.clone());
+        save_cell(connection, project, slug, &cell)?;
+        append_event(connection, project, slug, now, "reopened", Some((&cell.row, &cell.col)), None, "owner",
+            &json!({"reason": reason, "from": "proved", "checksChanged": true}))?;
+        reopened += 1;
+    }
+    Ok(reopened)
+}
+
+fn reopened_note(reopened: usize) -> String {
+    match reopened {
+        0 => String::new(),
+        1 => " 1 cell proved under the old checks is a gap again.".into(),
+        n => format!(" {n} cells proved under the old checks are gaps again."),
+    }
 }
 
 /// Give every pair of a live feature or combination row and a live column an
@@ -2181,7 +2223,7 @@ fn audit_gate(connection: &Connection, session: &str, slug: &str, cell: Option<&
     if !owner_asked_for_an_audit(connection, session, slug)? {
         return refuse(format!(
             "the owner has not asked this chat to audit \"{slug}\": their latest message has no @audit {slug}. \
-             Never pass or reopen cells outside an @audit request"
+             Never pass cells outside an @audit request"
         ));
     }
     if let Some(cell) = cell {
@@ -2199,13 +2241,8 @@ fn reopen(connection: &Connection, request: &Request) -> Result<Outcome, TaskErr
     let reason = payload_text(&request.payload, "reason", "why the cell is not met (--reason)", 600)?.to_string();
     let agent = request.actor == "agent";
     let session = request.session.as_deref();
-    if agent {
-        if cell.state != "proved" {
-            return refuse(format!("{at} is {}; an audit reopens a proved cell", cell.state.replace('_', " ")));
-        }
-        audit_gate(connection, session.unwrap_or_default(), &slug, Some(&cell), &at)?;
-    } else if !matches!(cell.state.as_str(), "proved" | "na") {
-        return refuse(format!("{at} is {}; the owner reopens a proved or N/A cell", cell.state.replace('_', " ")));
+    if !matches!(cell.state.as_str(), "proved" | "na") {
+        return refuse(format!("{at} is {}; only a proved or N/A cell can be reopened", cell.state.replace('_', " ")));
     }
     let was = cell.state.clone();
     cell.state = "gap".into();

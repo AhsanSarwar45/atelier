@@ -272,7 +272,11 @@ with `done`, and repeat until no gaps are left.
    payload. A task with `cells` must end with proof, N/A or a reason for
    every cell (`done` takes `"cells":[{"grid","row","col","reason"}]`).
 3. Leave cells another task claims alone.
-4. Never pass or reopen cells outside an `@audit` request.
+4. Never pass cells outside an `@audit` request. Reopen a proved or N/A
+   cell that no longer meets its requirement (say the bar for proof was
+   raised) with `atelier grid reopen SLUG ROW COL --reason TEXT`. When the
+   owner approves new checks for a column, its proved cells reopen by
+   themselves.
 5. Leave a note with `atelier grid note` when you learn something whoever
    works on a cell, row, column or the whole grid later should know.
    `grid next` prints the notes under each cell; read them first.
