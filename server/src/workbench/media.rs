@@ -848,8 +848,8 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
                     return Err("proposal.id is a whole number from 1 upwards".into());
                 }
                 let kind = required_string(proposal, "type", 40)?;
-                if crate::workbench::tasks::types::find(kind).is_none() {
-                    return Err(format!("proposal.type {kind} is not a task type"));
+                if !crate::workbench::tasks::catalog::valid_name(kind) {
+                    return Err(format!("proposal.type {kind} is not a task type name"));
                 }
                 required_string(proposal, "title", 480)?;
                 return Ok(format!(
@@ -869,8 +869,9 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
                 return Err("task.number is a whole number from 1 upwards".into());
             }
             let kind = required_string(task, "type", 40)?;
-            if crate::workbench::tasks::types::find(kind).is_none() {
-                return Err(format!("task.type {kind} is not a task type"));
+            // Built-in or one a project made (tasks/catalog.rs).
+            if !crate::workbench::tasks::catalog::valid_name(kind) {
+                return Err(format!("task.type {kind} is not a task type name"));
             }
             required_string(task, "title", 480)?;
             one_of(task, "status", crate::workbench::tasks::STATUSES, true)?;

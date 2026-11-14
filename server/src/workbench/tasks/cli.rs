@@ -298,7 +298,13 @@ async fn print_types(rest: &[String]) -> Result<i32, String> {
                             let mut answered = json!({"id": item["id"], "text": item["text"]});
                             match item.get("checks") {
                                 Some(checks) => answered["checks"] = checks.clone(),
-                                None => answered["checks"] = json!(["<checks that prove it, or drop checks and give declined: one line on why it does not apply>"]),
+                                None => {
+                                    answered["checks"] = json!([{
+                                        "name": item["id"], "kind": "test", "command": "<command that proves it>",
+                                        "given": "<given>", "when": "<when>", "then": "<then>",
+                                        "red": "<pattern the failing output matches>", "files": ["<the check's files>"],
+                                    }]);
+                                }
                             }
                             answered
                         })
@@ -307,7 +313,11 @@ async fn print_types(rest: &[String]) -> Result<i32, String> {
             }
             println!("{}", serde_json::to_string_pretty(&example).map_err(|e| e.to_string())?);
             if let Some(recipe) = recipe.as_ref().and_then(Value::as_str) {
-                println!("\nChecks for {name}:\n\n{recipe}");
+                if !items.is_empty() {
+                    println!("\nEach of plan.requirements takes checks that prove it, or instead declined: one line on why it does not apply.");
+                }
+                let shaped = if types::find(name).is_none() { " (planned like general)" } else { "" };
+                println!("\nChecks for {name}{shaped}:\n\n{recipe}");
             }
             Ok(0)
         }

@@ -176,7 +176,8 @@ fn folder(global: &Path, project: Option<&Path>, scope: &str) -> Result<PathBuf,
     }
 }
 
-fn valid_name(name: &str) -> bool {
+/// A type name: lowercase letters, digits and underscores, from a letter.
+pub fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 40
         && name.bytes().next().is_some_and(|b| b.is_ascii_lowercase())

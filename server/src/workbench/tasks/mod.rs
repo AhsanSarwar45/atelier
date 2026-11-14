@@ -391,7 +391,7 @@ pub fn to_json(store: &Store, task: &TaskRow) -> Value {
         "title": task.title, "why": task.why, "status": task.status,
         "sessionId": task.session_id, "sessionTitle": session_title, "createdBy": task.created_by,
         "plan": task.plan, "result": task.result, "shortfalls": task.shortfalls,
-        "decisions": task.decisions, "typeDef": task.type_def,
+        "decisions": task.decisions, "typeDef": task.type_def, "shape": types::shape(&task.kind),
         "blocked": task.blocked, "cancelReason": task.cancel_reason, "pendingAmend": task.pending_amend,
         "createdAt": task.created_at, "updatedAt": task.updated_at,
         "startedAt": task.started_at, "finishedAt": task.finished_at,
@@ -984,7 +984,7 @@ pub fn proposal_json(proposal: &ProposalRow) -> Value {
         "type": proposal.kind, "title": proposal.title, "why": proposal.why, "plan": proposal.plan,
         "status": proposal.status, "taskNumber": proposal.task_number,
         "createdAt": proposal.created_at, "decidedAt": proposal.decided_at,
-        "decisions": proposal.decisions, "typeDef": proposal.type_def,
+        "decisions": proposal.decisions, "typeDef": proposal.type_def, "shape": types::shape(&proposal.kind),
     })
 }
 
@@ -2418,6 +2418,13 @@ mod tests {
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0]["task"]["number"], 1);
         assert!(specs[0].get("detail").is_none(), "an empty detail is left out");
+
+        // A type a project made draws its card too.
+        let mut custom = task.clone();
+        custom["type"] = json!("api_change");
+        let specs = super::super::media::widget_specs(&widget("create", &custom, &json!({})).unwrap());
+        assert_eq!(specs.len(), 1, "a custom type's card is drawn");
+        assert!(widget("create", &json!({"projectId": "p", "number": 1, "type": "Not A Type", "title": "t", "status": "todo"}), &json!({})).is_err());
     }
 
     fn outcome_detail(payload: &Value) -> Value {
