@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Overlay, overlayPanel } from '@/components/ui/overlay';
+import { Tooltip } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -113,7 +114,7 @@ export function WorktreeBadge({ sessionId, projectPath, cwd, onMoved, children }
               <FolderGit2 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate font-medium" title={tree.path}>{tree.name}</span>
+                  <Tooltip label={tree.path}><span tabIndex={0} className="truncate font-medium">{tree.name}</span></Tooltip>
                   {here && <span className="shrink-0 text-xs text-muted-foreground">This chat</span>}
                   <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{diskWords(tree.bytes)}</span>
                 </div>
