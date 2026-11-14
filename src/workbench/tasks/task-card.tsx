@@ -1380,13 +1380,17 @@ const ANSWERED: Record<Exclude<TaskProposal['status'], 'pending'>, (proposal: Ta
   created: (p) => (p.taskNumber ? `Task #${p.taskNumber} created` : 'Task created'),
   just_do_it: () => 'Just doing it, without a task',
   cancelled: () => 'Cancelled',
+  changes_requested: (p) => (p.note ? `Changes requested: ${p.note}` : 'Changes requested'),
+  superseded: () => 'Replaced by a newer proposal',
 };
 
 /**
  * A task an agent asked to make (`atelier task propose`): the draft, and the
- * owner's three answers. Create task makes it a task in the chat that asked;
- * Just do it and Cancel drop it. Whichever is chosen, the chat's agent is
- * told as its next message (docs/tasks.md, "Proposals").
+ * owner's answers. Create task makes it a task in the chat that asked; Just
+ * do it and Cancel drop it; Request changes sends it back with a note.
+ * Whichever is chosen, the chat's agent is told as its next message. A
+ * proposal the chat replaced with a newer one folds to a line
+ * (docs/tasks.md, "Proposals").
  */
 export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal }) {
   const [proposal, setProposal] = useState<TaskProposal>(snapshot);
@@ -1409,6 +1413,15 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
     return () => { alive = false; off(); };
   }, [pending, projectId, id]);
 
+  if (proposal.status === 'superseded') {
+    return (
+      <div data-testid="task-proposal" data-proposal-id={id} data-proposal-status={proposal.status} className="flex flex-wrap items-baseline gap-x-2">
+        <span className="text-sm text-muted-foreground line-through">{proposal.title}</span>
+        <p data-testid="proposal-answer" className="text-xs text-muted-foreground">{ANSWERED.superseded(proposal)}</p>
+      </div>
+    );
+  }
+
   return (
     <div data-testid="task-proposal" data-proposal-id={id} data-proposal-status={proposal.status} className="space-y-3">
       <header className="space-y-1">
@@ -1428,13 +1441,13 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
       {pending ? (
         <ProposalActions projectId={projectId} id={id} onAnswered={setProposal} />
       ) : (
-        <p data-testid="proposal-answer" className="text-xs text-muted-foreground">{proposal.status === 'pending' ? '' : ANSWERED[proposal.status](proposal)}</p>
+        <p data-testid="proposal-answer" className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{proposal.status === 'pending' ? '' : ANSWERED[proposal.status](proposal)}</p>
       )}
     </div>
   );
 }
 
-/** The owner's three answers to a proposal, wherever it is answered from. */
+/** The owner's answers to a proposal, wherever it is answered from. */
 export function ProposalActions({ projectId, id, onAnswered, className }: {
   projectId: string;
   id: number;
@@ -1443,12 +1456,18 @@ export function ProposalActions({ projectId, id, onAnswered, className }: {
 }) {
   const [busy, setBusy] = useState<ProposalChoice | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [note, setNote] = useState('');
 
-  const answer = async (choice: ProposalChoice) => {
+  const answer = async (choice: ProposalChoice, words?: string) => {
     setBusy(choice);
     setError(null);
     try {
-      const answered = await tasksApi.answerProposal(projectId, id, choice);
+      const answered = words === undefined
+        ? await tasksApi.answerProposal(projectId, id, choice)
+        : await tasksApi.answerProposal(projectId, id, choice, words);
+      setAsking(false);
+      setNote('');
       onAnswered?.(answered.proposal);
     } catch (e) {
       setError(failure(e));
@@ -1459,11 +1478,36 @@ export function ProposalActions({ projectId, id, onAnswered, className }: {
 
   return (
     <div className={cn('space-y-2', className)}>
-      <div className="flex flex-wrap gap-2" data-testid="proposal-actions">
-        <Button type="button" size="sm" disabled={busy !== null} loading={busy === 'create'} onClick={() => void answer('create')}>Create task</Button>
-        <Button type="button" size="sm" variant="outline" disabled={busy !== null} loading={busy === 'just_do_it'} onClick={() => void answer('just_do_it')}>Just do it</Button>
-        <Button type="button" size="sm" variant="ghost" disabled={busy !== null} loading={busy === 'cancel'} onClick={() => void answer('cancel')}>Cancel</Button>
-      </div>
+      {asking ? (
+        <form
+          className="space-y-2"
+          data-testid="proposal-actions"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (note.trim()) void answer('changes', note.trim());
+          }}
+        >
+          <Textarea
+            autoFocus
+            rows={3}
+            aria-label="What should change?"
+            placeholder="What should change?"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={!note.trim() || busy !== null} loading={busy === 'changes'}>Send</Button>
+            <Button type="button" size="sm" variant="ghost" disabled={busy !== null} onClick={() => { setAsking(false); setNote(''); }}>Back</Button>
+          </div>
+        </form>
+      ) : (
+        <div className="flex flex-wrap gap-2" data-testid="proposal-actions">
+          <Button type="button" size="sm" disabled={busy !== null} loading={busy === 'create'} onClick={() => void answer('create')}>Create task</Button>
+          <Button type="button" size="sm" variant="outline" disabled={busy !== null} loading={busy === 'just_do_it'} onClick={() => void answer('just_do_it')}>Just do it</Button>
+          <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => setAsking(true)}>Request changes</Button>
+          <Button type="button" size="sm" variant="ghost" disabled={busy !== null} loading={busy === 'cancel'} onClick={() => void answer('cancel')}>Cancel</Button>
+        </div>
+      )}
       {error && <div role="alert" className="text-xs text-destructive">{`Couldn't answer. ${error}`}</div>}
     </div>
   );

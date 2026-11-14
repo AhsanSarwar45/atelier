@@ -23,8 +23,10 @@ runs them red at start, and ticks each item only when its checks pass.
   the check files, draft the task with its checks, run `atelier task
   propose` with it, and stop. Continue when the owner's choice arrives as a
   message: **Create task** (the task is made and its checks approved; start
-  it), **Just do it** (do the work without a task) or **Cancel** (don't do
-  it, and remove the check files you wrote).
+  it), **Just do it** (do the work without a task), **Cancel** (don't do
+  it, and remove the check files you wrote) or **Request changes** with a
+  note (revise the plan and its checks as the note says, and propose
+  again). A new proposal replaces the chat's proposal still waiting.
 - `@task TEXT` from the owner means: pick the type, draft the plan with its
   checks, and run `atelier task create`. Do not ask again. `create` is
   refused unless the owner's latest message has `@task`, or every cell it

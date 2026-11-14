@@ -193,10 +193,10 @@ export interface TaskCell {
 }
 
 /** Where a proposal stands: waiting, or the owner's answer. */
-export type ProposalStatus = 'pending' | 'created' | 'just_do_it' | 'cancelled';
+export type ProposalStatus = 'pending' | 'created' | 'just_do_it' | 'cancelled' | 'changes_requested' | 'superseded';
 
-/** The owner's three answers to a proposal. */
-export type ProposalChoice = 'create' | 'just_do_it' | 'cancel';
+/** The owner's answers to a proposal; `changes` carries a note. */
+export type ProposalChoice = 'create' | 'just_do_it' | 'cancel' | 'changes';
 
 /**
  * A task an agent asked the owner about (`atelier task propose`). Not a task:
@@ -222,6 +222,8 @@ export interface TaskProposal {
    */
   shape?: TaskType | string;
   status: ProposalStatus;
+  /** What the owner asked to change, once they said Request changes. */
+  note?: string | null;
   /** The task it became, once the owner said Create task. */
   taskNumber: number | null;
   createdAt: number;

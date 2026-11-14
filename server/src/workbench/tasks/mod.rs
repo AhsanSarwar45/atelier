@@ -98,7 +98,8 @@ CREATE INDEX IF NOT EXISTS task_proposal_by_session ON task_proposal(session_id,
 
 pub const AGENT_ACTIONS: &[&str] = &["create", "propose", "start", "check", "block", "unblock", "amend", "done", "cancel", "take", "note"];
 pub const OWNER_ACTIONS: &[&str] = &["approve", "reopen", "undo_amend", "cancel", "release", "answer_proposal", "create", "note"];
-/// The owner's three answers to a proposal (`propose`).
+/// The owner's answers to a proposal (`propose`); `changes` (Request
+/// changes, with a note) is answered by `request_changes`.
 pub const PROPOSAL_CHOICES: &[&str] = &["create", "just_do_it", "cancel"];
 pub const STATUSES: &[&str] = &["todo", "in_progress", "blocked", "review", "done", "cancelled"];
 
@@ -118,6 +119,8 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
     for (table, column) in [
         ("task", "gate"), ("task_proposal", "flags"),
         ("task", "decisions"), ("task", "type_def"), ("task_proposal", "decisions"), ("task_proposal", "type_def"),
+        // The owner's note when they ask for changes to a proposal.
+        ("task_proposal", "note"),
     ] {
         let has = connection
             .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'"))?
@@ -934,7 +937,9 @@ pub struct ProposalRow {
     pub title: String,
     pub why: String,
     pub plan: Value,
-    /// `pending`, then `created`, `just_do_it` or `cancelled`.
+    /// `pending`, then `created`, `just_do_it`, `cancelled`,
+    /// `changes_requested` (the owner sent it back with a note) or
+    /// `superseded` (the chat proposed again before the owner answered).
     pub status: String,
     pub task_number: Option<i64>,
     pub created_at: i64,
@@ -947,6 +952,8 @@ pub struct ProposalRow {
     pub decisions: Value,
     /// A custom type's definition (Task.type_def).
     pub type_def: Option<Value>,
+    /// What the owner asked to change (`changes_requested`).
+    pub note: Option<String>,
 }
 
 const PROPOSAL_COLUMNS: &str =
@@ -954,7 +961,7 @@ const PROPOSAL_COLUMNS: &str =
 /// The columns read: the stored ones plus the cells.
 const PROPOSAL_READ: &str =
     "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at, cells, flags,
-     decisions, type_def";
+     decisions, type_def, note";
 
 fn proposal_row(row: &Row) -> rusqlite::Result<ProposalRow> {
     Ok(ProposalRow {
@@ -973,6 +980,7 @@ fn proposal_row(row: &Row) -> rusqlite::Result<ProposalRow> {
         flags: json_column(row, 12)?.unwrap_or_else(|| json!([])),
         decisions: json_column(row, 13)?.unwrap_or(Value::Null),
         type_def: json_column(row, 14)?,
+        note: row.get(15)?,
     })
 }
 
@@ -1003,6 +1011,7 @@ pub fn proposal_json(proposal: &ProposalRow) -> Value {
         "status": proposal.status, "taskNumber": proposal.task_number,
         "createdAt": proposal.created_at, "decidedAt": proposal.decided_at,
         "decisions": proposal.decisions, "typeDef": proposal.type_def, "shape": types::shape(&proposal.kind),
+        "note": proposal.note,
     })
 }
 
@@ -1052,7 +1061,15 @@ pub fn propose(
         flags: json!(flags),
         decisions: draft.decisions,
         type_def: draft.type_def,
+        note: None,
     };
+    // A chat proposing again replaces its proposal still waiting: the newest
+    // plan is the one the owner answers.
+    connection.execute(
+        "UPDATE task_proposal SET status = 'superseded', decided_at = ?3
+         WHERE project_id = ?1 AND session_id = ?2 AND status = 'pending'",
+        params![project, session, now],
+    )?;
     connection.execute(
         &format!("INSERT INTO task_proposal ({PROPOSAL_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
         params![
@@ -1068,8 +1085,8 @@ pub fn propose(
             proposal.type_def.as_ref().map(Value::to_string),
         ],
     )?;
-    let summary = "Proposed a task; the owner answers on the card with Create task, Just do it or Cancel. \
-        Stop here and end your turn without starting the work. The owner's answer arrives as your next message."
+    let summary = "Proposed a task; it replaces any proposal of this chat still waiting. The owner answers on the card \
+        with Create task, Just do it, Cancel or Request changes. Stop here and end your turn without starting the work. The owner's answer arrives as your next message."
         .to_string();
     Ok((proposal, summary))
 }
@@ -1135,9 +1152,37 @@ pub fn answer_proposal(
     Ok((proposal, task, grids))
 }
 
+/// The owner's Request changes: the proposal closes with their note, and
+/// the chat's agent is told to propose again.
+pub fn request_changes(store: &Store, project: &str, id: i64, note: &str, now: i64) -> Result<ProposalRow, TaskError> {
+    let note = note.trim();
+    if note.is_empty() {
+        return refuse("a change request needs a note: say what should change");
+    }
+    let connection = store.connection();
+    let mut proposal = get_proposal(connection, project, id)?
+        .ok_or_else(|| TaskError::Refused(format!("there is no proposal {id} in this project")))?;
+    if proposal.status != "pending" {
+        return refuse(format!("this proposal is already answered ({})", proposal.status.replace('_', " ")));
+    }
+    proposal.status = "changes_requested".into();
+    proposal.decided_at = Some(now);
+    proposal.note = Some(note.to_string());
+    connection.execute(
+        "UPDATE task_proposal SET status = ?3, decided_at = ?4, note = ?5 WHERE project_id = ?1 AND id = ?2",
+        params![project, id, proposal.status, now, proposal.note],
+    )?;
+    Ok(proposal)
+}
+
 /// What the proposing chat's agent is told of the owner's answer.
 pub fn answer_prompt(proposal: &ProposalRow) -> String {
     match (proposal.status.as_str(), proposal.task_number) {
+        ("changes_requested", _) => format!(
+            "Owner asked for changes to proposal \"{}\": {}\nRevise the plan and its checks, then propose again with `atelier task propose`.",
+            proposal.title,
+            proposal.note.as_deref().unwrap_or("")
+        ),
         ("created", Some(number)) => format!(
             "Owner chose Create task for proposal \"{}\": task #{number} created. Start it with `atelier task start {number}` and do the work.",
             proposal.title
@@ -2190,7 +2235,7 @@ mod tests {
     fn just_do_it_and_cancel_discard_a_proposal() {
         let (_d, store) = store();
         propose(&store, "p", "s1", &decided(draft("chore")), &Default::default(), None, 1, &Default::default()).unwrap();
-        propose(&store, "p", "s1", &decided(draft("chore")), &Default::default(), None, 1, &Default::default()).unwrap();
+        propose(&store, "p", "s2", &decided(draft("chore")), &Default::default(), None, 1, &Default::default()).unwrap();
         assert!(refused_proposal(answer_proposal(&store, "p", 1, "maybe", &Default::default(), None, 2)).contains("choice must be one of"));
         let (one, task, _) = answer_proposal(&store, "p", 1, "just_do_it", &Default::default(), None, 2).unwrap();
         assert!(task.is_none());
@@ -2201,6 +2246,20 @@ mod tests {
         assert!(list(store.connection(), Some("p"), None).unwrap().is_empty());
         assert!(pending_proposals(store.connection(), "s1").unwrap().is_empty());
         assert!(refused_proposal(answer_proposal(&store, "p", 9, "create", &Default::default(), None, 2)).contains("no proposal 9"));
+    }
+
+    #[test]
+    fn a_new_proposal_replaces_the_chats_pending_one() {
+        let (_d, store) = store();
+        propose(&store, "p", "s1", &decided(draft("chore")), &Default::default(), None, 1, &Default::default()).unwrap();
+        propose(&store, "p", "s2", &decided(draft("chore")), &Default::default(), None, 1, &Default::default()).unwrap();
+        let (newer, _) = propose(&store, "p", "s1", &decided(draft("chore")), &Default::default(), None, 2, &Default::default()).unwrap();
+        let older = get_proposal(store.connection(), "p", 1).unwrap().unwrap();
+        assert_eq!((older.status.as_str(), older.decided_at), ("superseded", Some(2)), "the chat's earlier proposal was not replaced");
+        let waiting: Vec<i64> = pending_proposals(store.connection(), "s1").unwrap().iter().map(|p| p.id).collect();
+        assert_eq!(waiting, [newer.id], "only the newest proposal waits");
+        assert_eq!(get_proposal(store.connection(), "p", 2).unwrap().unwrap().status, "pending", "another chat's proposal is left alone");
+        assert!(refused_proposal(answer_proposal(&store, "p", 1, "create", &Default::default(), None, 3)).contains("already answered"));
     }
 
     #[test]

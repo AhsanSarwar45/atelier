@@ -31,6 +31,7 @@ const SHAPES: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
   [/^Owner chose Create task for proposal "([\s\S]*?)": task #(\d+) created\./, (m) => `You created task #${m[2]} from the proposal`],
   [/^Owner chose Just do it for proposal "([\s\S]*?)":/, (m) => `You chose Just do it for “${m[1]}”`],
   [/^Owner chose Cancel for proposal "([\s\S]*?)":/, (m) => `You cancelled the proposal “${m[1]}”`],
+  [/^Owner asked for changes to proposal "([\s\S]*?)":/, (m) => `You asked for changes to “${m[1]}”`],
   [/^Owner approved the edit to grid "([^"]+)"/, (m) => `You approved the edit to grid ${m[1]}`],
   [/^Owner approved grid "([^"]+)"/, (m) => `You approved grid ${m[1]}`],
   [/^Owner discarded the (draft of|edit to) grid "([^"]+)"/, (m) => `You discarded the ${m[1]} grid ${m[2]}`],

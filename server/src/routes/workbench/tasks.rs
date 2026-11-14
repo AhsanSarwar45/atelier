@@ -444,6 +444,24 @@ pub(super) async fn act(
             .ok_or_else(|| format!("choice is required: one of {}", tasks::PROPOSAL_CHOICES.join(", ")))?
             .to_string();
         let now = chrono::Utc::now().timestamp_millis();
+        if choice == "changes" {
+            let note = request.payload["note"].as_str().unwrap_or_default().to_string();
+            let answered = project.clone();
+            let outcome = state
+                .database()
+                .write_tasks(move |store| {
+                    tasks::request_changes(store, &answered, id, &note, now)
+                        .map(|proposal| (tasks::proposal_json(&proposal), tasks::answer_prompt(&proposal), proposal.session_id))
+                })
+                .await
+                .map_err(failed)?;
+            let (proposal, prompt, session) = refused_or(outcome)?;
+            announce(&state, &proposal["projectId"], &Value::Null);
+            let telling = state.clone();
+            let said = prompt.clone();
+            tokio::spawn(async move { tell_chat(&telling, &session, said).await });
+            return Ok(Json(json!({"proposal": proposal, "task": null, "summary": prompt})));
+        }
         let asked = project.clone();
         let found = state
             .database()

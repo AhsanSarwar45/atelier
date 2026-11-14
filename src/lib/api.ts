@@ -1675,10 +1675,11 @@ export const tasks = {
     return ProposalResponseSchema.parse(answer).proposal;
   },
   /** The owner's answer to a proposal; the chat that made it is told. */
-  answerProposal: async (projectId: string, id: number, choice: ProposalChoice) => {
+  answerProposal: async (projectId: string, id: number, choice: ProposalChoice, note?: string) => {
+    const payload = note === undefined ? { choice } : { choice, note };
     const answer = await fetchApi<{ proposal: TaskProposal; task: Task | null; summary?: string }>('/api/workbench/task', {
       method: 'POST',
-      body: JSON.stringify({ action: 'answer_proposal', actor: 'owner', project: projectId, number: id, payload: { choice } }),
+      body: JSON.stringify({ action: 'answer_proposal', actor: 'owner', project: projectId, number: id, payload }),
     });
     return ProposalAnswerSchema.parse(answer);
   },

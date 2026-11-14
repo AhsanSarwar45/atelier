@@ -63,7 +63,8 @@ takes no number and is in no list until the owner says yes.
 | `project_id`, `id` | text, integer | the key; `id` counts from 1 per project |
 | `session_id` | text | the chat that proposed it |
 | `type`, `title`, `why`, `plan` | | as for a task, checked the same way |
-| `status` | text | `pending`, `created`, `just_do_it`, `cancelled` |
+| `status` | text | `pending`, `created`, `just_do_it`, `cancelled`, `changes_requested`, `superseded` |
+| `note` | text, null | what the owner asked to change (`changes_requested`) |
 | `task_number` | integer, null | the task **Create task** made |
 | `created_at`, `decided_at` | integer ms | |
 
@@ -137,17 +138,24 @@ have none.
 ### Proposals
 
 ```
-propose ──▶ pending ──Create task──▶ created (a todo task in the proposing chat)
-               ├──────Just do it───▶ just_do_it
-               └──────Cancel───────▶ cancelled
+propose ──▶ pending ──Create task──────▶ created (a todo task in the proposing chat)
+               ├──────Just do it───────▶ just_do_it
+               ├──────Cancel───────────▶ cancelled
+               ├──────Request changes──▶ changes_requested (with the owner's note)
+               └──────the chat proposes again──▶ superseded
 ```
 
 - `atelier task propose` checks the draft like `create`, stores it, and prints
   a `task` widget with `event: "propose"`. The agent then stops.
-- The card offers the owner **Create task**, **Just do it** and **Cancel**.
-  Create task makes a `todo` task (actor `owner`, event payload
-  `{proposal: id}`) held by the proposing chat. The other two only record
-  the answer.
+- The card offers the owner **Create task**, **Just do it**, **Request
+  changes** and **Cancel**. Create task makes a `todo` task (actor `owner`,
+  event payload `{proposal: id}`) held by the proposing chat. Request
+  changes asks for a note and stores it; the agent is told `Owner asked for
+  changes to proposal "T": <note>` and to propose again. The others only
+  record the answer.
+- A chat that proposes while one of its proposals still waits replaces it:
+  the older one becomes `superseded`, leaves the waiting bar, and its card
+  folds to one line, "Replaced by a newer proposal".
 - Whichever is chosen, the chat's agent is told as a prompt, e.g. `Owner
   chose Create task for proposal "T": task #N created. Start it with …`. If
   the chat is mid-turn the prompt is held and sent when the turn ends; if it
@@ -520,12 +528,12 @@ are no commits or git could not tell (see Merging).
   Owner actions: `approve reopen undo_amend cancel release answer_proposal`.
   `widget` is the fenced `atelier-widget` text the CLI prints.
   `propose` answers `{proposal, widget, summary}`. `answer_proposal` takes
-  the proposal id as `number` and `{choice: create|just_do_it|cancel}` as
-  `payload`, and answers `{proposal, task, summary}` (`task` is null unless
+  the proposal id as `number` and `{choice: create|just_do_it|cancel}`, or
+  `{choice: changes, note}`, as `payload`, and answers `{proposal, task, summary}` (`task` is null unless
   the choice was `create`); answering one already answered is a 400.
 - `GET /api/workbench/task-proposals/:project/:id` → `{proposal}`, where a
   proposal is `{projectId, id, sessionId, type, title, why, plan, status,
-  taskNumber, createdAt, decidedAt}`.
+  taskNumber, createdAt, decidedAt, note}`.
 - Every change sends `{type: "tasks.changed", projectId, number}` on the live
   `workbench` feed (the frame also carries `kind: "tasks.changed"`, like the
   feed's other frames). Clients refetch.
@@ -763,8 +771,10 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
 - **`@task`** in the composer: a menu entry that inserts `@task `. `@task:N`
   references an existing task.
 - **Proposal card** (a `task` widget with `event: "propose"`): the draft and
-  its plan, each item's checks folded under it with any weak-check flags, with **Create task**, **Just do it** and **Cancel** while it
-  waits, and what became of it once answered. It rereads the proposal on
+  its plan, each item's checks folded under it with any weak-check flags, with **Create task**, **Just do it**, **Request changes**
+  (a note box and Send) and **Cancel** while it waits, and what became of
+  it once answered: a note sent back shows as "Changes requested: <note>",
+  and a proposal replaced by a newer one folds to one line. It rereads the proposal on
   `tasks.changed`, so an answer given elsewhere shows.
 - **Merged badge** on a done task's card, next to its commits.
 - **Why this type**: a fold under a task's or proposal's header with the
