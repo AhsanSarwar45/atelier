@@ -33,6 +33,7 @@ mod no_node_runtime;
 mod one_version_for_the_whole_product;
 mod skill_folders;
 mod skill_locations;
+mod task_type_skills;
 mod task_types;
 mod task_types_card;
 mod task_types_defaults;

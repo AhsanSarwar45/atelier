@@ -178,7 +178,7 @@ fn kinds_folders(state: &WorkbenchState, project: Option<&str>) -> Result<(std::
 }
 
 /// GET /api/workbench/task-types: the types a chat's (or a project's) tasks
-/// may use, with their default items.
+/// may use, with their default items and skills, and the library's skills.
 pub(super) async fn kinds(State(state): State<WorkbenchState>, Query(query): Query<KindsQuery>) -> Result<Json<Value>, ApiError> {
     let project = kinds_project(&state, query.session.as_deref(), query.project.as_deref()).await?;
     let folder = project.as_deref().and_then(|project| project_folder(&state, project));
@@ -192,6 +192,9 @@ pub(super) async fn kinds(State(state): State<WorkbenchState>, Query(query): Que
         undone["project"] = json!(tasks::catalog::undone(&data, dir.as_deref(), "project")?);
     }
     listing["undone"] = undone;
+    // The library's skills, which a type may name.
+    let library = crate::workbench::library::resolve(&data, folder.as_deref().map(std::path::Path::new));
+    listing["library"] = json!(library.map(|snapshot| snapshot.skills()).unwrap_or_default());
     Ok(Json(listing))
 }
 

@@ -455,6 +455,18 @@ pub struct Outcome {
     pub detail: Value,
 }
 
+/// The sentence telling the agent which skills the task's type names, read
+/// before the work; empty when it names none.
+fn skills_to_read(types: &catalog::Catalog, kind: &str) -> String {
+    let skills = types.find(kind).map(|entry| entry.skills.clone()).unwrap_or_default();
+    if skills.is_empty() {
+        return String::new();
+    }
+    let names = skills.iter().map(|id| format!("`{id}`")).collect::<Vec<_>>().join(", ");
+    format!(" Before the work, read the skill{} {kind} tasks use: {names} (use your skill tool, or `atelier tool skills read` as your instructions say).",
+        if skills.len() == 1 { "" } else { "s" })
+}
+
 fn payload_text<'a>(payload: &'a Value, key: &str, what: &str) -> Result<&'a str, TaskError> {
     match payload.get(key) {
         Some(Value::String(text)) if !text.trim().is_empty() => Ok(text),
@@ -1315,6 +1327,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             "Created #{number} ({}): {} — todo. Start it with `atelier task start {number}`.",
             task.kind, task.title
         );
+        summary.push_str(&skills_to_read(&request.types, &task.kind));
         if !draft.cells.is_empty() {
             summary.push_str(&format!(
                 " It claims {} grid cell{}; prove each with `atelier grid prove`, ask for N/A, or give a reason in `cells` when done.",
@@ -1397,6 +1410,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                 }
                 None => format!("#{number} is in progress."),
             };
+            let said = said + &skills_to_read(&request.types, &task.kind);
             ("started", payload, said)
         }
         (false, "check") => {

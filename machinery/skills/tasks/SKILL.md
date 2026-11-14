@@ -89,14 +89,17 @@ files. Each takes `--scope install|project` (project by default); the owner
 sees every change and can undo it:
 
 ```
-atelier task types create       <<< '{"name":…,"description":…,"code":true,"review":false,"items":[{"id":…,"text":…,"checks":[…]}]}'
+atelier task types create       <<< '{"name":…,"description":…,"code":true,"review":false,"items":[{"id":…,"text":…,"checks":[…]}],"skills":[…]}'
 atelier task types edit TYPE    <<< '{"items":[…]}'
+atelier task types edit TYPE    <<< '{"skills":["ui-copy"]}'
 atelier task types disable TYPE [--item ID]
 atelier task types enable TYPE [--item ID]
 atelier task types undo
 ```
 
-A type you create is planned like `general`. Built-in types keep their
+A type may name `"skills"`: library skills to read before working its
+tasks. The reply to `create` and `start` names them; read each before the
+work. A type you create is planned like `general`. Built-in types keep their
 shape; only their default items change. Add a type or an item only when the
 owner asks or the project clearly repeats the same work.
 

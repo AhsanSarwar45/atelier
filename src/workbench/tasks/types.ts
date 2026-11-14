@@ -256,6 +256,8 @@ export interface TaskTypeInfo {
   description?: string;
   /** The default items every task of the type answers. */
   items?: TaskTypeItem[];
+  /** The ids of the library skills an agent reads before working a task of the type. */
+  skills?: string[];
 }
 
 export interface TaskTypeItem { id: string; text: string; checks?: unknown[] }
@@ -269,11 +271,16 @@ export interface TaskTypesListing {
   offInstall?: string[];
   /** The ids of the changes undone, by scope, so a change's card can say so. */
   undone?: Partial<Record<'install' | 'project', string[]>>;
+  /** The library's skills, which a type may name. */
+  library?: LibrarySkill[];
 }
+
+export interface LibrarySkill { id: string; name: string; description: string }
 
 /** A change to a scope's task types (catalog.rs `change`), or the owner's undo. */
 export type TaskTypesChange =
   | { action: 'disable' | 'enable'; scope: 'install' | 'project'; name: string; item?: string }
+  | { action: 'edit'; scope: 'install' | 'project'; name: string; skills: string[] }
   | { action: 'undo'; scope: 'install' | 'project'; id?: string };
 
 /**

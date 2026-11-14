@@ -373,8 +373,19 @@ a type or an item off (`disabled`, `disabled_items`). The file:
 ```json
 {"types": [{"name": "api_change", "description": "…", "code": true, "review": false}],
  "items": {"ui_change": [{"id": "phone", "text": "Works on a phone screen", "checks": []}]},
+ "skills": {"ui_feature": ["ui-copy", "web-qa"]},
  "disabled": ["render_change"], "disabled_items": {"ui_change": ["long-text"]}}
 ```
+
+A type's `skills` are ids of library skills (as `atelier tool skills list`
+shows) that an agent reads before working a task of the type. A project's
+list for a type replaces the install's; an empty list names none. The
+built-in types name none: the install sets them, from settings (**Task
+types**: each type's skills, **Add a skill** and remove) or with
+`atelier task types edit TYPE <<< '{"skills": ["ui-copy"]}'`. The reply to
+`create` and to `start` names the type's skills to read.
+`GET /api/workbench/task-types` gives each type's `skills` and the
+library's skills as `library: [{id, name, description}]`.
 
 Agents change it with `atelier task types create|edit|disable|enable`; each
 change keeps the file as it was in `task-types.history.json` under an id,
@@ -427,8 +438,8 @@ one-line summary. Errors exit non-zero and say exactly which field is wrong.
 
 ```
 atelier task types [TYPE]          list the project's types and default items, or print one type's payloads and check recipe
-atelier task types create          {name, description, code, review, items?}   a new type (planned like general)
-atelier task types edit TYPE       {items?, description?, code?, review?}       items replace the scope's own
+atelier task types create          {name, description, code, review, items?, skills?}   a new type (planned like general)
+atelier task types edit TYPE       {items?, skills?, description?, code?, review?}   items and skills replace the scope's own
 atelier task types disable|enable TYPE [--item ID]
 atelier task types undo            put the scope's types back as they were before its last change
                                    (every types change takes --scope install|project; project is the default)

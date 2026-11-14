@@ -3,14 +3,18 @@
 /**
  * The task types a project's tasks may use (docs/tasks.md, "Task types"),
  * for the install (no project) or for one project: each type with its
- * description and default items, and a switch that turns it on or off in this
- * scope. Agents add and edit types with `atelier task types`; the owner sees
+ * description, default items and skills, and a switch that turns it on or off
+ * in this scope. The owner adds a skill from the library or removes one. Agents add and edit types with `atelier task types`; the owner sees
  * each change as a card in the chat and can undo it there.
  */
 import { useCallback, useEffect, useState } from 'react';
 
+import { X } from 'lucide-react';
+
 import { SettingsGroup } from '@/components/settings/section';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Picker } from '@/components/ui/picker';
 import { ReadFailed } from '@/components/ui/read-failed';
 import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
@@ -66,6 +70,19 @@ export function TaskTypesSettings({ projectId }: { projectId?: string | null }) 
     }
   };
 
+  const setSkills = async (name: string, skills: string[]) => {
+    setBusy(name);
+    setRefused(null);
+    try {
+      await tasksApi.changeTypes(projectId, { action: 'edit', scope, name, skills });
+      reread();
+    } catch (e) {
+      setRefused(`Couldn't change the skills of ${name}. ${failure(e)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (unread) return <ReadFailed what="The task types could not be read." why={unread} onRetry={reread} />;
   if (!listing) return <Spinner />;
   const offInstall = new Set(listing.offInstall ?? []);
@@ -85,6 +102,9 @@ export function TaskTypesSettings({ projectId }: { projectId?: string | null }) 
       {rows.map(({ type, name, on }) => {
         const locked = name === ALWAYS_ON || (scope === 'project' && offInstall.has(name));
         const items = type?.items ?? [];
+        const skills = type?.skills ?? [];
+        const addable = (listing.library ?? []).filter((skill) => !skills.includes(skill.id))
+          .map((skill) => ({ value: skill.id, label: skill.id, hint: skill.description }));
         return (
           <div key={name} data-testid="task-type-row" data-name={name} data-on={on ? 'yes' : 'no'} className="flex gap-3 px-3 py-3">
             <div className="min-w-0 flex-1 space-y-1">
@@ -98,6 +118,46 @@ export function TaskTypesSettings({ projectId }: { projectId?: string | null }) 
                 <ul className="list-disc space-y-0.5 pl-4 text-xs text-t-secondary" aria-label={`${name} default items`}>
                   {items.map((item) => <li key={item.id}>{item.text}</li>)}
                 </ul>
+              )}
+              {type && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-xs text-t-tertiary">Skills</span>
+                  {skills.length > 0 && (
+                    <ul className="flex flex-wrap gap-1.5" aria-label={`${name} skills`}>
+                      {skills.map((skill) => (
+                        <li key={skill}>
+                          <Badge variant="secondary" size="sm" className="gap-0.5 pr-0.5">
+                            <span className="font-mono">{skill}</span>
+                            <Button
+                              variant="ghost"
+                              mode="icon"
+                              size="2xs"
+                              data-reach="own"
+                              aria-label={`Remove ${skill} from ${name}`}
+                              disabled={busy !== null}
+                              onClick={() => void setSkills(name, skills.filter((kept) => kept !== skill))}
+                            >
+                              <X />
+                            </Button>
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {addable.length > 0 && (
+                    <Picker
+                      appearance="inline"
+                      className="w-auto text-t-secondary"
+                      label={`Add a skill to ${name}`}
+                      placeholder="Add a skill"
+                      searchPlaceholder="Search skills"
+                      value=""
+                      choices={addable}
+                      disabled={busy !== null}
+                      onChange={(skill) => void setSkills(name, [...skills, skill])}
+                    />
+                  )}
+                </div>
               )}
             </div>
             <div className="flex shrink-0 items-start gap-2 pt-0.5">

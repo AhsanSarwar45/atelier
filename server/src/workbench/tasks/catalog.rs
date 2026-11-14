@@ -6,7 +6,9 @@
 //!
 //! The file (both scopes):
 //! `{types: [{name, description, code, review}], items: {TYPE: [{id, text, checks?}]},
-//!   disabled: [TYPE], disabled_items: {TYPE: [ID]}}`.
+//!   skills: {TYPE: [SKILL]}, disabled: [TYPE], disabled_items: {TYPE: [ID]}}`.
+//! A type's skills are the library skills an agent reads before working one
+//! of its tasks; a project's list replaces the install's.
 //!
 //! Agents change types with `atelier task types create|edit|disable|enable`;
 //! each change keeps the file as it was, so the owner can undo it. A task
@@ -34,6 +36,8 @@ pub struct Entry {
     pub custom: bool,
     /// The default items every task of the type answers, `{id, text, checks?}`.
     pub items: Vec<Value>,
+    /// The ids of the library skills to read before working a task of the type.
+    pub skills: Vec<String>,
 }
 
 /// The types that are on, in order: built-ins, then the install's, then the
@@ -67,6 +71,7 @@ fn built_in(kind: &types::TaskType) -> Entry {
         review: kind.review,
         custom: false,
         items: kind.items.iter().map(|(id, text)| json!({"id": id, "text": text})).collect(),
+        skills: Vec::new(),
     }
 }
 
@@ -91,6 +96,7 @@ impl Catalog {
                     review: made["review"].as_bool().unwrap_or(false),
                     custom: true,
                     items: Vec::new(),
+                    skills: Vec::new(),
                 });
             }
         }
@@ -100,6 +106,11 @@ impl Catalog {
                     let id = item["id"].as_str().unwrap_or_default();
                     entry.items.retain(|kept| kept["id"].as_str() != Some(id));
                     entry.items.push(item.clone());
+                }
+            }
+            for layer in &layers {
+                if let Some(skills) = layer["skills"][&entry.name].as_array() {
+                    entry.skills = skills.iter().filter_map(|id| id.as_str().map(str::to_string)).collect();
                 }
             }
             for layer in &layers {
@@ -145,6 +156,7 @@ impl Catalog {
                 "plan": shape.map_or(types::find("general").unwrap().plan, |kind| kind.plan),
                 "result": shape.map_or(types::find("general").unwrap().result, |kind| kind.result),
                 "items": entry.items,
+                "skills": entry.skills,
             })
         }).collect::<Vec<_>>(), "off": self.off, "offInstall": self.off_install})
     }
@@ -229,13 +241,31 @@ fn check_items(items: &Value, at: &str) -> Result<Vec<Value>, String> {
     Ok(list.clone())
 }
 
+/// Skills as given: library skill ids, each once.
+fn check_skills(skills: &Value, at: &str) -> Result<Vec<String>, String> {
+    let list = skills.as_array().ok_or_else(|| format!("{at} must be a list of skill ids"))?;
+    let mut seen: Vec<String> = Vec::new();
+    for (index, skill) in list.iter().enumerate() {
+        let id = skill.as_str().map(str::trim).unwrap_or_default();
+        if !super::super::library::valid_id(id) {
+            return Err(format!("{at}[{index}]: \"{}\" is not a skill id (lowercase letters, digits and dashes, as `atelier tool skills list` shows)",
+                skill.as_str().unwrap_or(&skill.to_string())));
+        }
+        if seen.iter().any(|kept| kept == id) {
+            return Err(format!("{at}[{index}]: skill \"{id}\" is named twice"));
+        }
+        seen.push(id.to_string());
+    }
+    Ok(seen)
+}
+
 /// `atelier task types create|edit|disable|enable`: change one scope's file.
 /// Returns what changed, in a sentence.
 ///
-/// - `{action: create, scope, type: {name, description, code, review, items?}}`
-/// - `{action: edit, scope, name, items?, description?, code?, review?}`: items
-///   replace the scope's items for the type; the other fields change a type
-///   this scope made.
+/// - `{action: create, scope, type: {name, description, code, review, items?, skills?}}`
+/// - `{action: edit, scope, name, items?, skills?, description?, code?, review?}`:
+///   items and skills replace the scope's for the type; the other fields
+///   change a type this scope made.
 /// - `{action: disable|enable, scope, name, item?}`: turn a type, or one of
 ///   its items, off or back on in this scope.
 pub fn change(global: &Path, project: Option<&Path>, change: &Value) -> Result<String, String> {
@@ -261,13 +291,13 @@ pub fn change_with_id(global: &Path, project: Option<&Path>, change: &Value) -> 
     };
     let summary = match action {
         "create" => {
-            let made = change.get("type").filter(|value| value.is_object()).ok_or("type is required: {name, description, code, review, items?}")?;
-            if let Some(unknown) = made.as_object().unwrap().keys().find(|key| !["name", "description", "code", "review", "items"].contains(&key.as_str())) {
-                return Err(format!("type.{unknown} is not a type field (allowed: name, description, code, review, items)"));
+            let made = change.get("type").filter(|value| value.is_object()).ok_or("type is required: {name, description, code, review, items?, skills?}")?;
+            if let Some(unknown) = made.as_object().unwrap().keys().find(|key| !["name", "description", "code", "review", "items", "skills"].contains(&key.as_str())) {
+                return Err(format!("type.{unknown} is not a type field (allowed: name, description, code, review, items, skills)"));
             }
             let name = text(made, "name", "lowercase letters, digits and underscores")?;
             if types::find(name).is_some() {
-                return Err(format!("\"{name}\" is a built-in type; change its default items with `atelier task types edit {name}`"));
+                return Err(format!("\"{name}\" is a built-in type; change its default items or skills with `atelier task types edit {name}`"));
             }
             if !valid_name(name) {
                 return Err(format!("type name \"{name}\" must start with a letter and use lowercase letters, digits and underscores (up to 40)"));
@@ -284,9 +314,16 @@ pub fn change_with_id(global: &Path, project: Option<&Path>, change: &Value) -> 
                 None | Some(Value::Null) => Vec::new(),
                 Some(items) => check_items(items, "type.items")?,
             };
+            let skills = match made.get("skills") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(skills) => check_skills(skills, "type.skills")?,
+            };
             push(row, "types", json!({"name": name, "description": description, "code": code, "review": review}));
             if !items.is_empty() {
                 set_items(row, name, items);
+            }
+            if !skills.is_empty() {
+                set_skills(row, name, skills);
             }
             format!("Created type \"{name}\" for the {scope}.")
         }
@@ -299,10 +336,15 @@ pub fn change_with_id(global: &Path, project: Option<&Path>, change: &Value) -> 
                 said.push(format!("{} default item{}", items.len(), if items.len() == 1 { "" } else { "s" }));
                 set_items(row, name, items);
             }
+            if let Some(skills) = change.get("skills").filter(|value| !value.is_null()) {
+                let skills = check_skills(skills, "skills")?;
+                said.push(if skills.is_empty() { "no skills".into() } else { format!("skills {}", skills.join(", ")) });
+                set_skills(row, name, skills);
+            }
             for key in ["description", "code", "review"] {
                 let Some(value) = change.get(key).filter(|value| !value.is_null()) else { continue };
                 if types::find(name).is_some() {
-                    return Err(format!("{key} of the built-in type \"{name}\" cannot be changed; only its default items can"));
+                    return Err(format!("{key} of the built-in type \"{name}\" cannot be changed; only its default items and skills can"));
                 }
                 let own = row
                     .get_mut("types")
@@ -319,7 +361,7 @@ pub fn change_with_id(global: &Path, project: Option<&Path>, change: &Value) -> 
                 said.push(key.to_string());
             }
             if said.is_empty() {
-                return Err("nothing to change: give items, description, code or review".into());
+                return Err("nothing to change: give items, skills, description, code or review".into());
             }
             format!("Changed type \"{name}\" for the {scope}: {}.", said.join(", "))
         }
@@ -373,6 +415,15 @@ fn set_items(row: &mut Map<String, Value>, name: &str, items: Vec<Value>) {
         } else {
             map.insert(name.into(), json!(items));
         }
+    }
+}
+
+/// A scope's skills for a type. An empty list is kept, so a project can name
+/// none where the install names some.
+fn set_skills(row: &mut Map<String, Value>, name: &str, skills: Vec<String>) {
+    let map = row.entry("skills").or_insert_with(|| json!({}));
+    if let Some(map) = map.as_object_mut() {
+        map.insert(name.into(), json!(skills));
     }
 }
 

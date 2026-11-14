@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 pub const USAGE: &str = "\
 usage: atelier task <command>
   types [TYPE]                 list this project's types and their default items, or print one type's payloads
-  types create                 {name, description, code, review, items?} on stdin: a new type for the project
-  types edit TYPE              {items?, description?, code?, review?} on stdin: items replace the scope's own
+  types create                 {name, description, code, review, items?, skills?} on stdin: a new type for the project
+  types edit TYPE              {items?, skills?, description?, code?, review?} on stdin: items and skills replace the scope's own
   types disable|enable TYPE [--item ID]
                                turn a type, or one of its default items, off or back on
   types undo                   put back the types as they were before the last change
@@ -335,7 +335,7 @@ async fn change_types(rest: &[String]) -> Result<i32, String> {
             json!({"type": payload(rest, "{name, description, code, review, items?}")?})
         }
         "edit" => {
-            let name = rest.get(1).filter(|word| !word.starts_with("--")).ok_or("usage: atelier task types edit TYPE: {items?, description?, code?, review?} on stdin")?;
+            let name = rest.get(1).filter(|word| !word.starts_with("--")).ok_or("usage: atelier task types edit TYPE: {items?, skills?, description?, code?, review?} on stdin")?;
             only_flags(&rest[2..], &["--input", "--scope"])?;
             let mut change = payload(rest, "{items?, description?, code?, review?}")?;
             if !change.is_object() {
