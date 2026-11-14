@@ -1,7 +1,7 @@
-import { TASK_STATUSES, type TaskWidget } from '@/workbench/tasks/types';
-
-export type { TaskWidget } from '@/workbench/tasks/types';
 import type { GridWidget } from '@/workbench/grids/types';
+import { TASK_STATUSES, type TaskTypesWidget, type TaskWidget } from '@/workbench/tasks/types';
+
+export type { TaskTypesWidget, TaskWidget } from '@/workbench/tasks/types';
 export type { GridWidget } from '@/workbench/grids/types';
 
 const BLOCK = /```atelier-widget\s*\n([\s\S]*?)\n```/g;
@@ -47,7 +47,7 @@ export type ExplainerWidget = {
   steps: Array<{ label: string; detail?: string; active: string[] }>;
   evidence?: Array<{ label: string; path: string; line?: number }>;
 };
-export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ImageWidget | ImageCompareWidget | ArtifactWidget | ExplainerWidget | TaskWidget | GridWidget;
+export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ImageWidget | ImageCompareWidget | ArtifactWidget | ExplainerWidget | TaskWidget | GridWidget | TaskTypesWidget;
 
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -67,6 +67,7 @@ export function widget(value: unknown): ChatWidget | null {
   if (!object(value) || !text(value.type) || !title(value.title)) return null;
   if (value.type === 'task') return taskWidget(value);
   if (value.type === 'grid') return gridWidget(value);
+  if (value.type === 'taskTypes') return taskTypesWidget(value);
   const nodes = value.nodes;
   const edges = value.edges;
   const steps = value.steps;
@@ -158,6 +159,14 @@ const GRID_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
  * enough to know which grid, cell or template it is about; the card rereads
  * the rest live.
  */
+/** The card a task types change prints (server tasks/catalog.rs `widget`). */
+function taskTypesWidget(value: Record<string, unknown>): TaskTypesWidget | null {
+  const long = (field: unknown, max: number): field is string => typeof field === 'string' && field.trim().length > 0 && field.length <= max;
+  if (!long(value.projectId, 400) || !long(value.summary, 1000) || !long(value.change, 100)) return null;
+  if (value.scope !== 'install' && value.scope !== 'project') return null;
+  return { type: 'taskTypes', projectId: value.projectId, scope: value.scope, summary: value.summary, change: value.change };
+}
+
 function gridWidget(value: Record<string, unknown>): GridWidget | null {
   if (!text(value.event)) return null;
   const grid = value.grid;
@@ -188,6 +197,7 @@ const TOP_LEVEL_FIELDS: Record<ChatWidget['type'], Set<string>> = {
   explainer: new Set(['type', 'layout', 'title', 'summary', 'nodes', 'edges', 'steps', 'evidence']),
   task: new Set(['type', 'title', 'event', 'task', 'proposal', 'detail']),
   grid: new Set(['type', 'title', 'event', 'grid', 'cell', 'template', 'audit']),
+  taskTypes: new Set(['type', 'projectId', 'scope', 'summary', 'change']),
 };
 
 const fieldsAre = (value: Record<string, unknown>, allowed: Set<string>) =>

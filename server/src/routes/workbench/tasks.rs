@@ -191,7 +191,8 @@ pub(super) struct KindsChange {
     session: Option<String>,
     project: Option<String>,
     /// `atelier task types create|edit|disable|enable`'s change
-    /// (catalog.rs `change`), or `{action: undo, scope}` from the owner.
+    /// (catalog.rs `change`), or `{action: undo, scope, id?}` from the owner:
+    /// with `id`, only if that change is still the scope's last.
     change: Value,
 }
 
@@ -200,18 +201,24 @@ pub(super) struct KindsChange {
 pub(super) async fn change_kinds(State(state): State<WorkbenchState>, Json(request): Json<KindsChange>) -> Result<Json<Value>, ApiError> {
     let project = kinds_project(&state, request.session.as_deref(), request.project.as_deref()).await?;
     let (data, dir) = kinds_folders(&state, project.as_deref())?;
-    let summary = if request.change["action"] == "undo" {
-        let scope = request.change["scope"].as_str().unwrap_or("project");
-        tasks::catalog::undo(&data, dir.as_deref(), scope)?
+    let scope = request.change["scope"].as_str().unwrap_or("project");
+    let (summary, id) = if request.change["action"] == "undo" {
+        let id = request.change["id"].as_str().filter(|id| !id.is_empty());
+        (tasks::catalog::undo_change(&data, dir.as_deref(), scope, id)?, None)
     } else {
-        tasks::catalog::change(&data, dir.as_deref(), &request.change)?
+        tasks::catalog::change_with_id(&data, dir.as_deref(), &request.change)?
     };
+    let mut answer = json!({"summary": summary});
     if let Some(project) = &project {
         let _ = state.watch_polls.send(json!({
             "type": "taskTypes.changed", "kind": "taskTypes.changed", "projectId": project, "summary": summary,
         }));
+        // The card the chat shows for the change, with its Undo.
+        if let Some(id) = &id {
+            answer["widget"] = json!(tasks::catalog::widget(project, scope, &summary, id)?);
+        }
     }
-    Ok(Json(json!({"summary": summary})))
+    Ok(Json(answer))
 }
 
 #[derive(Deserialize)]

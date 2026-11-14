@@ -113,6 +113,17 @@ export interface Task {
   sessionTitle?: string | null;
   createdBy?: string | null;
   plan: Record<string, unknown>;
+  /**
+   * The agent's reason for each type it could have picked, its own type's
+   * first among them (docs/tasks.md, "Task types"). Absent on tasks made
+   * before reasons were asked for, or by the owner.
+   */
+  decisions?: Record<string, string> | null;
+  /**
+   * The built-in type whose plan and result the task follows: its own type,
+   * or `general` for a type the install or project made.
+   */
+  shape?: TaskType | string;
   result: (Record<string, unknown> & SharedDone) | null;
   shortfalls: boolean;
   blocked: { cause: string; needed_to_resume: string } | null;
@@ -199,6 +210,17 @@ export interface TaskProposal {
   title: string;
   why: string;
   plan: Record<string, unknown>;
+  /**
+   * The agent's reason for each type it could have picked, its own type's
+   * first among them (docs/tasks.md, "Task types"). Absent on tasks made
+   * before reasons were asked for, or by the owner.
+   */
+  decisions?: Record<string, string> | null;
+  /**
+   * The built-in type whose plan and result the task follows: its own type,
+   * or `general` for a type the install or project made.
+   */
+  shape?: TaskType | string;
   status: ProposalStatus;
   /** The task it became, once the owner said Create task. */
   taskNumber: number | null;
@@ -223,7 +245,47 @@ export interface TaskEvent {
   payload: unknown;
 }
 
-export interface TaskTypeInfo { name: string; code: boolean; review: boolean; plan: unknown; result: unknown }
+export interface TaskTypeInfo {
+  name: string;
+  code: boolean;
+  review: boolean;
+  plan: unknown;
+  result: unknown;
+  /** Made by the install or the project, not built in. */
+  custom?: boolean;
+  description?: string;
+  /** The default items every task of the type answers. */
+  items?: TaskTypeItem[];
+}
+
+export interface TaskTypeItem { id: string; text: string; checks?: unknown[] }
+
+/** `GET /api/workbench/task-types`: the types that are on, and those turned off. */
+export interface TaskTypesListing {
+  types: TaskTypeInfo[];
+  /** Types turned off, by the install or the project. */
+  off?: string[];
+  /** Of those, the ones the install turned off, which a project cannot turn on. */
+  offInstall?: string[];
+}
+
+/** A change to a scope's task types (catalog.rs `change`), or the owner's undo. */
+export type TaskTypesChange =
+  | { action: 'disable' | 'enable'; scope: 'install' | 'project'; name: string; item?: string }
+  | { action: 'undo'; scope: 'install' | 'project'; id?: string };
+
+/**
+ * The `taskTypes` chat widget: the card a types change prints, with the
+ * change's id for the owner's Undo.
+ */
+export interface TaskTypesWidget {
+  type: 'taskTypes';
+  title?: string;
+  projectId: string;
+  scope: 'install' | 'project';
+  summary: string;
+  change: string;
+}
 
 /**
  * What one change recorded, beside the task as it stood after it: the

@@ -34,6 +34,7 @@ mod one_version_for_the_whole_product;
 mod skill_folders;
 mod skill_locations;
 mod task_types;
+mod task_types_card;
 mod shared_memory_tool;
 mod the_git_panel_speaks_to_real_git;
 mod the_install_recipe_takes_over_nothing;

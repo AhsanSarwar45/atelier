@@ -627,9 +627,10 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
         ][..],
         "task" => &["type", "event", "task", "proposal", "detail"][..],
         "grid" => &["type", "title", "event", "grid", "cell", "template", "audit"][..],
+        "taskTypes" => &["type", "projectId", "scope", "summary", "change"][..],
         other => {
             return Err(format!(
-                "{other} is not a widget type: use metrics, chart, progress, timeline, table, video, image, image_compare, artifact, explainer, task or grid"
+                "{other} is not a widget type: use metrics, chart, progress, timeline, table, video, image, image_compare, artifact, explainer, task, grid or taskTypes"
             ))
         }
     };
@@ -875,6 +876,14 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
             }
             required_string(task, "title", 480)?;
             one_of(task, "status", crate::workbench::tasks::STATUSES, true)?;
+        }
+        "taskTypes" => {
+            // The card a task types change prints (tasks/catalog.rs): what
+            // changed, and the change's id for the owner's Undo.
+            required_string(object, "projectId", 400)?;
+            one_of(object, "scope", &["install", "project"], true)?;
+            required_string(object, "summary", 1000)?;
+            required_string(object, "change", 100)?;
         }
         "grid" => {
             // The card `atelier grid` prints (docs/grids.md): the change and

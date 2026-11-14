@@ -28,7 +28,7 @@ import { useLiveSessions } from '@/workbench/live';
 import { openTaskDetail } from '@/workbench/tasks/open-task';
 import { tallyLine } from '@/workbench/tasks/checks';
 import { diffLine, planDiff, same, type PlanDiff } from '@/workbench/tasks/plan-diff';
-import { ITEM_LISTS, VISUAL_TYPES, entryOutcome, itemProgress, itemText, recordedEntries } from '@/workbench/tasks/progress';
+import { ITEM_LISTS, VISUAL_TYPES, entryOutcome, itemProgress, itemText, recordedEntries, shapeOf } from '@/workbench/tasks/progress';
 import { AmendDiff, DoneSummary, ShotPair, TaskOwnerActions, countsLine } from '@/workbench/tasks/task-card';
 import type { OwnerAction, Task, TaskEventDetail } from '@/workbench/tasks/types';
 import { useLiveTask } from '@/workbench/tasks/use-tasks';
@@ -81,11 +81,13 @@ const ICON: Record<string, LucideIcon> = {
 function checked(task: Task, detail: TaskEventDetail): { name: string; met: boolean | null; reason: string } | null {
   const id = str(detail.item);
   if (!id) return null;
-  const lists = ITEM_LISTS[task.type];
+  const type = shapeOf(task);
+  const lists = ITEM_LISTS[type];
   const item = lists ? list(rec(task.plan)[lists.plan]).find((row) => str(row.id) === id) : undefined;
-  const name = (item && itemText(task.type, item)) || id;
+  const required = list(rec(task.plan).requirements).find((row) => str(row.id) === id);
+  const name = (item && itemText(type, item)) || (required && str(required.text)) || id;
   const entry = recordedEntries(task).get(id);
-  const outcome = item && entry ? entryOutcome(task.type, item, entry) : null;
+  const outcome = item && entry ? entryOutcome(type, item, entry) : null;
   const met = typeof detail.met === 'boolean' ? detail.met : outcome ? outcome.state === 'met' : null;
   return { name, met, reason: str(detail.reason) || (outcome?.state === 'missed' ? outcome.note : '') };
 }
@@ -133,7 +135,7 @@ export function eventText(event: string, task: Task, detail: TaskEventDetail = {
     }
     case 'amend': {
       if (detail.previous === undefined) return 'Plan changed';
-      const diff = planDiff(task.type, detail.previous, task.plan);
+      const diff = planDiff(shapeOf(task), detail.previous, task.plan);
       return `Plan changed: ${unfolded ? diffCounts(diff) : diffLine(diff)}`;
     }
     case 'done': {
@@ -178,7 +180,7 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
     const weakens = Array.isArray(detail.weakens) ? detail.weakens.map(str).filter(Boolean) : [];
     more = (
       <div className="space-y-2">
-        <AmendDiff type={printed.type} plan={detail.previous} amend={printed.plan} reason={str(detail.reason) || null} />
+        <AmendDiff type={shapeOf(printed)} plan={detail.previous} amend={printed.plan} reason={str(detail.reason) || null} />
         {weakens.length > 0 && (
           <div data-testid="task-amend-weakens" className="text-sm">
             <span className="text-muted-foreground">May weaken the approved checks: </span>{weakens.join('; ')}
@@ -191,7 +193,7 @@ export function TaskEventRow({ task: printed, event, detail = {} }: { task: Task
     more = <DoneSummary task={same(now.result, printed.result) ? { ...printed, merged: now.merged } : printed} cwd={cwd} counted />;
   } else if (event === 'block' && str(detail.needed_to_resume)) {
     more = <div className="text-sm"><span className="text-muted-foreground">Needed to continue: </span>{str(detail.needed_to_resume)}</div>;
-  } else if (event === 'check' && VISUAL_TYPES.has(printed.type) && item) {
+  } else if (event === 'check' && VISUAL_TYPES.has(shapeOf(printed)) && item) {
     const entry = recordedEntries(printed).get(str(detail.item));
     if (entry) more = <ShotPair name={item.name} before={str(entry.before) || undefined} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} inline />;
   }

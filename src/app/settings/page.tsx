@@ -12,7 +12,7 @@ import { Suspense, useCallback, useMemo } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { Bell, FileCode2, Gauge, GitBranch, Globe, HardDrive, Info, MemoryStick, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
+import { Bell, FileCode2, Gauge, GitBranch, Globe, HardDrive, Info, ListChecks, MemoryStick, Palette, Puzzle, Search, SquareTerminal, Tag, Users } from 'lucide-react';
 
 import { AboutSettings } from '@/components/settings/about-settings';
 import { AgentFilesBrowser } from '@/components/agent-files-browser';
@@ -27,6 +27,7 @@ import { SettingsScreen, type SettingsSectionDef } from '@/components/settings/s
 import { TagsSettings } from '@/components/settings/tags-settings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { stepsOut } from '@/lib/address';
+import { TaskTypesSettings } from '@/components/settings/task-types-settings';
 import { SignedOutMark, useStanding } from '@/workbench/account-standing';
 import { AccountsSettings } from '@/workbench/accounts-settings';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
@@ -49,6 +50,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'files', label: 'Agent files', hint: 'Per account', icon: <FileCode2 /> },
   { id: 'search', label: 'Search', hint: 'AI search', icon: <Search /> },
   { id: 'git', label: 'Git', hint: 'Commit messages', icon: <GitBranch /> },
+  { id: 'task-types', label: 'Task types', hint: 'Types, default items', icon: <ListChecks /> },
   { id: 'limits', label: 'Usage limits', hint: 'Resume', icon: <Gauge /> },
   { id: 'memory', label: 'Memory', hint: 'Chat limit', icon: <MemoryStick /> },
   { id: 'storage', label: 'Storage', hint: 'Usage, cleanup', icon: <HardDrive /> },
@@ -127,6 +129,7 @@ function Settings() {
       {(known ?? 'appearance') === 'appearance' && <AppearanceSettings />}
       {known === 'notifications' && <NotificationSettings />}
       {known === 'library' && <SharedLibrary />}
+      {known === 'task-types' && <TaskTypesSettings />}
       {known === 'accounts' && (
         <SettingsGroup>
           <div className="p-3">

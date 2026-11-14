@@ -21,6 +21,7 @@ import { ZoomableImage } from '@/workbench/zoomable-image';
 import { useOpenPath } from '@/workbench/open-path';
 import { presentationAssetUrl } from '@/workbench/attachment-store';
 import { GridCard } from '@/workbench/grids/grid-card';
+import { TaskTypesCard } from '@/workbench/tasks/task-types-card';
 import { ProposalCard, TaskCard } from '@/workbench/tasks/task-card';
 
 // Diagrams bring mermaid, ELK, React Flow and motion — megabytes a chat with
@@ -294,6 +295,7 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   );
   // A grid change is a line of its own, like a task's (grid-card.tsx).
   if (widget.type === 'grid') return <GridCard widget={widget} />;
+  if (widget.type === 'taskTypes') return <TaskTypesCard widget={widget} />;
   if (widget.type === 'image') return (
     <WidgetFrame kind="image" title={widget.title}>
       <ZoomableImage src={presentationAssetUrl(widget.asset)} alt={widget.alt} caption={widget.caption} />

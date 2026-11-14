@@ -373,7 +373,12 @@ async fn change_types(rest: &[String]) -> Result<i32, String> {
     if !status.is_success() {
         return Err(value["error"].as_str().unwrap_or("Atelier refused the type change").to_string());
     }
+    let card = value["widget"].as_str().unwrap_or_default();
+    print!("{card}");
     println!("{} The owner sees the change and can undo it.", value["summary"].as_str().unwrap_or_default());
+    if !card.is_empty() {
+        println!("{PRESENTED}");
+    }
     Ok(0)
 }
 

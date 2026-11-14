@@ -41,12 +41,18 @@ pub struct Entry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Catalog {
     entries: Vec<Entry>,
+    /// The types turned off, by the install or the project, in the order
+    /// they would be listed.
+    off: Vec<String>,
+    /// Of those, the ones the install turned off: a project cannot turn
+    /// them back on.
+    off_install: Vec<String>,
 }
 
 impl Default for Catalog {
     /// The built-in types with no default items.
     fn default() -> Self {
-        Catalog { entries: types::TYPES.iter().map(built_in).collect() }
+        Catalog { entries: types::TYPES.iter().map(built_in).collect(), off: Vec::new(), off_install: Vec::new() }
     }
 }
 
@@ -99,9 +105,11 @@ impl Catalog {
                 }
             }
         }
-        let off = |name: &str| layers.iter().any(|layer| listed(&layer["disabled"], name));
-        entries.retain(|entry| !off(&entry.name));
-        Ok(Catalog { entries })
+        let is_off = |name: &str| layers.iter().any(|layer| listed(&layer["disabled"], name));
+        let off: Vec<String> = entries.iter().filter(|entry| is_off(&entry.name)).map(|entry| entry.name.clone()).collect();
+        let off_install = off.iter().filter(|name| listed(&layers[0]["disabled"], name)).cloned().collect();
+        entries.retain(|entry| !is_off(&entry.name));
+        Ok(Catalog { entries, off, off_install })
     }
 
     /// The names of the types that are on.
@@ -135,7 +143,7 @@ impl Catalog {
                 "result": shape.map_or(types::find("general").unwrap().result, |kind| kind.result),
                 "items": entry.items,
             })
-        }).collect::<Vec<_>>()})
+        }).collect::<Vec<_>>(), "off": self.off, "offInstall": self.off_install})
     }
 }
 
@@ -228,6 +236,12 @@ fn check_items(items: &Value, at: &str) -> Result<Vec<Value>, String> {
 /// - `{action: disable|enable, scope, name, item?}`: turn a type, or one of
 ///   its items, off or back on in this scope.
 pub fn change(global: &Path, project: Option<&Path>, change: &Value) -> Result<String, String> {
+    change_with_id(global, project, change).map(|(summary, _)| summary)
+}
+
+/// `change`, with the id of the change kept for undo; `None` when nothing
+/// was different, so there is nothing to undo.
+pub fn change_with_id(global: &Path, project: Option<&Path>, change: &Value) -> Result<(String, Option<String>), String> {
     let action = text(change, "action", "create, edit, disable or enable")?;
     let scope = text(change, "scope", "install or project")?;
     let dir = folder(global, project, scope)?;
@@ -330,11 +344,11 @@ pub fn change(global: &Path, project: Option<&Path>, change: &Value) -> Result<S
         other => return Err(format!("action must be create, edit, disable or enable, not \"{other}\"")),
     };
     if file == before {
-        return Ok(format!("{summary} Nothing was different."));
+        return Ok((format!("{summary} Nothing was different."), None));
     }
     write(&path, &file)?;
-    remember(&dir, &before, &summary)?;
-    Ok(summary)
+    let id = remember(&dir, &before, &summary)?;
+    Ok((summary, Some(id)))
 }
 
 fn row_has_type(file: &Value, name: &str) -> bool {
@@ -367,21 +381,37 @@ fn toggle(list: &mut Value, name: &str, on: bool) {
     }
 }
 
-/// Keep the file as it was before a change, for undo.
-fn remember(dir: &Path, before: &Value, summary: &str) -> Result<(), String> {
+/// Keep the file as it was before a change, for undo. Returns the change's id.
+fn remember(dir: &Path, before: &Value, summary: &str) -> Result<String, String> {
     let path = dir.join(HISTORY);
     let mut history = match read(&path)? {
         Value::Object(row) => row.get("changes").and_then(Value::as_array).cloned().unwrap_or_default(),
         _ => Vec::new(),
     };
-    history.push(json!({"summary": summary, "before": before}));
+    let id = new_id(&history);
+    history.push(json!({"id": id, "summary": summary, "before": before}));
     if history.len() > HISTORY_MAX {
         history.drain(..history.len() - HISTORY_MAX);
     }
-    write(&path, &json!({"changes": history}))
+    write(&path, &json!({"changes": history}))?;
+    Ok(id)
 }
 
-/// The scope's changes, newest last: `[{summary, before}]`.
+/// An id no change in the history has: the time in milliseconds, made
+/// unique against the history.
+fn new_id(history: &[Value]) -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_millis());
+    let taken = |id: &str| history.iter().any(|change| change["id"] == id);
+    let mut id = format!("{now:x}");
+    let mut more = 1;
+    while taken(&id) {
+        id = format!("{now:x}-{more}");
+        more += 1;
+    }
+    id
+}
+
+/// The scope's changes, newest last: `[{id, summary, before}]`.
 pub fn history(global: &Path, project: Option<&Path>, scope: &str) -> Result<Vec<Value>, String> {
     let dir = folder(global, project, scope)?;
     Ok(read(&dir.join(HISTORY))?["changes"].as_array().cloned().unwrap_or_default())
@@ -390,9 +420,23 @@ pub fn history(global: &Path, project: Option<&Path>, scope: &str) -> Result<Vec
 /// The owner's undo: put the scope's file back as it was before its last
 /// change. Returns what was undone.
 pub fn undo(global: &Path, project: Option<&Path>, scope: &str) -> Result<String, String> {
+    undo_change(global, project, scope, None)
+}
+
+/// Undo the change `id`, which must be the scope's last: a change's card
+/// cannot undo the changes made after it. `None` undoes the last change.
+pub fn undo_change(global: &Path, project: Option<&Path>, scope: &str, id: Option<&str>) -> Result<String, String> {
     let dir = folder(global, project, scope)?;
     let path = dir.join(HISTORY);
     let mut changes = read(&path)?["changes"].as_array().cloned().unwrap_or_default();
+    if let Some(id) = id {
+        if !changes.iter().any(|change| change["id"] == id) {
+            return Err(format!("that change to the {scope}'s task types was already undone"));
+        }
+        if changes.last().is_some_and(|last| last["id"] != id) {
+            return Err(format!("a later change was made to the {scope}'s task types; undo that first"));
+        }
+    }
     let last = changes.pop().ok_or_else(|| format!("there is no change to the {scope}'s task types to undo"))?;
     let before = last["before"].clone();
     let file = dir.join(FILE);
@@ -407,6 +451,13 @@ pub fn undo(global: &Path, project: Option<&Path>, scope: &str) -> Result<String
     }
     write(&path, &json!({"changes": changes}))?;
     Ok(format!("Undid: {}", last["summary"].as_str().unwrap_or("the last change")))
+}
+
+/// The chat card for a change: what changed and its id, for the owner's Undo.
+pub fn widget(project: &str, scope: &str, summary: &str, id: &str) -> Result<String, String> {
+    crate::workbench::media::widget_block(&json!({
+        "type": "taskTypes", "projectId": project, "scope": scope, "summary": summary, "change": id,
+    }))
 }
 
 /// The folder a project's file lives in: its manifest's, `None` for a

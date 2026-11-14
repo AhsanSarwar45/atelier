@@ -377,8 +377,11 @@ a type or an item off (`disabled`, `disabled_items`). The file:
 ```
 
 Agents change it with `atelier task types create|edit|disable|enable`; each
-change keeps the file as it was in `task-types.history.json`, and
-`atelier task types undo` (or the owner) puts it back. Built-in types keep
+change keeps the file as it was in `task-types.history.json` under an id,
+and `atelier task types undo` (or the owner) puts it back. A change prints a
+`taskTypes` card in the chat with **Undo** for that change; the server
+refuses it once a later change was made to the scope (`a later change was
+made …; undo that first`). Built-in types keep
 their shape; only their items change. A custom type is planned and checked
 like `general`; its `code` and `review` are kept on each task (`typeDef`)
 as they were at create.
@@ -469,10 +472,14 @@ are no commits or git could not tell (see Merging).
 - `GET /api/workbench/tasks/:project/:number` → `{task, events: TaskEvent[]}`
   (`TaskEvent = {seq, at, kind, sessionId, actor, payload}`)
 - `GET /api/workbench/task-types[?session=ID|project=ID]` → `{types: [{name, code, review, custom,
-  description, plan, result, items}]}`: the types on for the chat's (or the project's)
-  project, or the install's alone. `plan` and `result` are short field descriptions.
-- `POST /api/workbench/task-types` with `{session?|project?, change}` → `{summary}`: a
-  types change (`change.action` `create edit disable enable`, or `undo` with `scope`).
+  description, plan, result, items}], off, offInstall}`: the types on for the chat's (or
+  the project's) project, or the install's alone, and the types turned off (`offInstall`:
+  by the install, which a project cannot turn back on). `plan` and `result` are short
+  field descriptions.
+- `POST /api/workbench/task-types` with `{session?|project?, change}` → `{summary, widget?}`: a
+  types change (`change.action` `create edit disable enable`, or `undo` with `scope` and,
+  from a card, the change's `id`). `widget` is the `taskTypes` card
+  (`{projectId, scope, summary, change}`) for a change made in a project.
   It sends `taskTypes.changed {projectId, summary}` to the app.
 - `POST /api/workbench/task` with `{action, actor, session?, project?, number?, payload?}`
   → `{task, widget, summary}` or `400 {error}`. `actor` is `agent` (the CLI; `session`
@@ -718,5 +725,19 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
   waits, and what became of it once answered. It rereads the proposal on
   `tasks.changed`, so an answer given elsewhere shows.
 - **Merged badge** on a done task's card, next to its commits.
+- **Why this type**: a fold under a task's or proposal's header with the
+  agent's reason for each type, its own type's first.
+- **Custom types and default items**: a custom type's plan is drawn like
+  the type it is planned as (`shape`). A type's default items
+  (`plan.requirements`) are listed after the plan's own: those with checks
+  tick like any item, declined ones show their reason and are not counted.
+- **Types change card** (widget type `taskTypes`): one line saying what
+  changed, with **Undo** for that change, `Undone` once undone, or the
+  server's reason when it is refused.
+- **Settings > Task types**, and **Task types** in a project's settings:
+  every type with its description and default items, custom types marked,
+  and a switch that turns it on or off for all projects or the project.
+  `general` stays on; a type the install turned off shows `Off for all
+  projects` in a project.
 - **`@merge`** in the composer: "Merge branch" in the `@` menu, offered
   while what is typed after `@` starts "merge".

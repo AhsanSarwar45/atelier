@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { AlertTriangle, Ban, Check, Circle, CircleDot, GitMerge, Images, Minus, Pause, Pencil, Plus } from 'lucide-react';
+import { AlertTriangle, Ban, Check, Circle, CircleDot, CircleSlash, GitMerge, Images, Minus, Pause, Pencil, Plus } from 'lucide-react';
 
 import { MarkdownBody } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
@@ -50,7 +50,7 @@ import {
   type TaskProposal,
   type TaskStatus,
 } from '@/workbench/tasks/types';
-import { ITEM_LISTS, VISUAL_TYPES, entryOutcome, gated, itemCounts, itemProgress, itemText, recordedEntries, withCheckedEntries, type ItemProgress } from '@/workbench/tasks/progress';
+import { ITEM_LISTS, VISUAL_TYPES, entryOutcome, gated, itemCounts, itemProgress, itemText, recordedEntries, shapeOf, withCheckedEntries, type ItemProgress } from '@/workbench/tasks/progress';
 import { tasksChangedFor, useLiveTask } from '@/workbench/tasks/use-tasks';
 import { ZoomableImage } from '@/workbench/zoomable-image';
 
@@ -168,14 +168,25 @@ function Evidence({ value, cwd }: { value: string; cwd?: string | null }) {
 }
 
 /** One promised item and how it came out: the shape of feature, general, qa, chore and the rest. */
-function CheckRow({ ok, text, children, testId, itemId }: { ok: boolean | null; text: ReactNode; children?: ReactNode; testId?: string; itemId?: string }) {
-  const Icon = ok === null ? Circle : ok ? Check : AlertTriangle;
+function CheckRow({ ok, text, children, testId, itemId, full, declined }: {
+  ok: boolean | null;
+  text: ReactNode;
+  children?: ReactNode;
+  testId?: string;
+  itemId?: string;
+  /** The item's text, for a row whose `text` is drawn from more than it. */
+  full?: string;
+  /** Why the agent declined one of the type's default items. */
+  declined?: string;
+}) {
+  const Icon = declined !== undefined ? CircleSlash : ok === null ? Circle : ok ? Check : AlertTriangle;
   return (
-    <li data-testid={testId} data-item={itemId} data-met={ok === null ? 'pending' : ok ? 'yes' : 'no'} className="flex gap-2 py-1.5">
+    <li data-testid={testId} data-item={itemId} data-full={full} data-declined={declined} data-met={ok === null ? 'pending' : ok ? 'yes' : 'no'} className="flex gap-2 py-1.5">
       <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0',
         ok === null ? 'text-muted-foreground' : ok ? 'text-[var(--color-success-accent)]' : 'text-[var(--color-warning-accent)]')} />
       <div className="min-w-0 flex-1 space-y-0.5">
-        <div className="break-words text-sm text-foreground">{text}</div>
+        <div className={cn('break-words text-sm', declined !== undefined ? 'text-muted-foreground' : 'text-foreground')}>{text}</div>
+        {declined !== undefined && <div className="text-xs text-muted-foreground">{`Declined: ${declined}`}</div>}
         {children}
       </div>
     </li>
@@ -359,7 +370,7 @@ function PlanItem({ type, item, entries, cwd, text, children }: {
     ? (gate.met[id] === true ? true : null)
     : entry ? entryOutcome(type, item, entry).state === 'met' : null;
   return (
-    <CheckRow testId="task-plan-item" itemId={id} ok={ok} text={text}>
+    <CheckRow testId="task-plan-item" itemId={id} ok={ok} text={text} full={typeof text === 'string' ? text : undefined}>
       {children}
       {entry && <EntryDetail type={type} item={item} entry={entry} cwd={cwd} />}
       <ItemChecks itemId={id} checks={checks} />
@@ -388,8 +399,58 @@ export function PlanView({ type, plan, entries, cwd }: {
   // bug, plan and review keep their checks on the plan itself.
   const own = itemChecks(plan);
   const fields = <PlanFields type={type} plan={plan} entries={entries} cwd={cwd} />;
-  if (!own.length || ITEM_LISTS[type]) return fields;
-  return <div className="space-y-2">{fields}<PlanChecks checks={own} /></div>;
+  const defaults = <Requirements type={type} plan={plan} entries={entries} cwd={cwd} />;
+  if (!own.length || ITEM_LISTS[type]) return <>{fields}{defaults}</>;
+  return <div className="space-y-2">{fields}<PlanChecks checks={own} />{defaults}</div>;
+}
+
+/**
+ * The type's default items (`plan.requirements`): each with the checks that
+ * prove it, or the reason the agent declined it.
+ */
+function Requirements({ type, plan, entries, cwd }: {
+  type: string;
+  plan: unknown;
+  entries?: ReadonlyMap<string, Loose>;
+  cwd?: string | null;
+}) {
+  const items = list(rec(plan).requirements);
+  if (!items.length) return null;
+  return (
+    <div data-testid="task-requirements" className="pt-2">
+      <Label>Default items</Label>
+      <Checklist>
+        {items.map((item) => (str(item.declined)
+          ? <CheckRow key={str(item.id)} testId="task-plan-item" itemId={str(item.id)} ok={null} text={str(item.text)} full={str(item.text)} declined={str(item.declined)} />
+          : <PlanItem key={str(item.id)} type={type} item={item} entries={entries} cwd={cwd} text={str(item.text)} />))}
+      </Checklist>
+    </div>
+  );
+}
+
+/**
+ * The agent's reason for each type it could have picked, its own type's
+ * first (docs/tasks.md, "Task types"), folded behind "Why this type".
+ */
+export function TypeDecisions({ type, decisions }: { type: string; decisions?: Record<string, string> | null }) {
+  const reasons = Object.entries(decisions ?? {}).filter(([, why]) => typeof why === 'string' && why.trim());
+  if (!reasons.length) return null;
+  reasons.sort(([a], [b]) => Number(b === type) - Number(a === type));
+  return (
+    <Collapsible>
+      <CollapsibleTriggerRow size="sm">Why this type</CollapsibleTriggerRow>
+      <CollapsibleContent className="pt-1">
+        <ul data-testid="task-decisions" className="space-y-0.5 text-xs">
+          {reasons.map(([name, why]) => (
+            <li key={name} data-testid="task-decision" data-chosen={name === type ? 'yes' : 'no'}
+              className={cn('break-words', name === type ? 'text-foreground' : 'text-muted-foreground')}>
+              <span className={cn('font-mono', name === type && 'font-semibold')}>{name}</span>{`: ${why}`}
+            </li>
+          ))}
+        </ul>
+      </CollapsibleContent>
+    </Collapsible>
+  );
 }
 
 function PlanFields({ type, plan, entries, cwd }: {
@@ -1064,7 +1125,8 @@ export function DoneSummary({ task, cwd, counted = false }: {
   const commits = Array.isArray(result.commits) ? result.commits.filter((c): c is string => typeof c === 'string') : [];
   const followups = Array.isArray(result.followups) ? result.followups : [];
   const r = rec(result);
-  const visual = VISUAL_TYPES.has(task.type);
+  const shape = shapeOf(task);
+  const visual = VISUAL_TYPES.has(shape);
   return (
     <div data-testid="task-done-summary" className="space-y-2">
       {task.type === 'plan' && <PlanDocument result={r} />}
@@ -1091,7 +1153,7 @@ export function DoneSummary({ task, cwd, counted = false }: {
       )}
       {typeof result.summary === 'string' && result.summary && <p className="whitespace-pre-wrap break-words text-sm">{result.summary}</p>}
       {(task.type === 'feature' || task.type === 'bug') && <Screenshots result={r} cwd={cwd} />}
-      {visual && <VisualResult type={task.type} plan={rec(task.plan)} result={r} cwd={cwd} inline />}
+      {visual && <VisualResult type={shape} plan={rec(task.plan)} result={r} cwd={cwd} inline />}
       {commits.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           <Label>Commits</Label>
@@ -1103,7 +1165,7 @@ export function DoneSummary({ task, cwd, counted = false }: {
         <Collapsible>
           <CollapsibleTriggerRow size="sm" data-testid="task-result-all">{total ? `Show all ${total}` : 'Show the whole result'}</CollapsibleTriggerRow>
           <CollapsibleContent className="space-y-3 pt-2">
-            <ResultView type={task.type} plan={task.plan} result={withCheckedEntries(task)} cwd={cwd} summarised />
+            <ResultView type={shape} plan={task.plan} result={withCheckedEntries(task)} cwd={cwd} summarised />
             <Followups label="Follow-ups" items={followups as Followup[]} />
           </CollapsibleContent>
         </Collapsible>
@@ -1132,18 +1194,20 @@ const LEAD: Record<string, string> = {
 export function CompactPlan({ task }: { task: Task }) {
   const [all, setAll] = useState(false);
   const items = useMemo(() => itemProgress(task), [task]);
-  if (!ITEM_LISTS[task.type]) return <PlanView type={task.type} plan={task.plan} />;
-  const lead = LEAD[task.type] ? str(rec(task.plan)[LEAD[task.type]!]) : '';
+  const shape = shapeOf(task);
+  if (!ITEM_LISTS[shape]) return <PlanView type={shape} plan={task.plan} />;
+  const lead = LEAD[shape] ? str(rec(task.plan)[LEAD[shape]!]) : '';
   const shown = all ? items : items.slice(0, ITEMS_SHOWN);
   return (
     <div className="space-y-1">
       {lead && <Tooltip label={lead}><p tabIndex={0} className="truncate text-sm text-foreground">{lead}</p></Tooltip>}
       <ul data-testid="task-plan-items" className="space-y-0.5">
         {shown.map((item) => {
-          const Icon = item.state === 'open' ? Circle : item.state === 'met' ? Check : AlertTriangle;
+          const Icon = item.declined !== undefined ? CircleSlash : item.state === 'open' ? Circle : item.state === 'met' ? Check : AlertTriangle;
+          const why = item.declined !== undefined ? `Declined: ${item.declined}` : item.note;
           return (
-            <Tooltip key={item.id} label={item.note ? `${item.text} — ${item.note}` : item.text}>
-            <li data-testid="task-plan-item" data-item={item.id} data-full={item.text} tabIndex={0}
+            <Tooltip key={item.id} label={why ? `${item.text} — ${why}` : item.text}>
+            <li data-testid="task-plan-item" data-item={item.id} data-full={item.text} data-declined={item.declined} tabIndex={0}
               data-met={item.state === 'open' ? 'pending' : item.state === 'met' ? 'yes' : 'no'}
               className="flex min-w-0 items-center gap-2 rounded-sm text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <Icon aria-label={item.state === 'met' ? 'Met' : item.state === 'missed' ? 'Missed' : 'Open'} className={cn('size-3.5 shrink-0',
@@ -1196,7 +1260,8 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
   const result = task.result;
   const reviewing = task.status === 'review';
   // Plan items checked so far, ticked on the plan while the work goes on.
-  const checked = useMemo(() => recordedEntries({ type: task.type, result: null, checks: task.checks }), [task.type, task.checks]);
+  const shape = shapeOf(task);
+  const checked = useMemo(() => recordedEntries({ type: shape, result: null, checks: task.checks }), [shape, task.checks]);
   const counts = countsLine(itemProgress(task));
   const flags = useMemo(() => readFlags(task.checkFlags), [task.checkFlags]);
   const gate = useMemo<CheckGate | null>(() => (gated(task) || flags.length
@@ -1224,6 +1289,7 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
         {task.why && (event
           ? <Tooltip label={task.why}><p tabIndex={0} className="truncate text-xs text-muted-foreground">{task.why}</p></Tooltip>
           : <p className="text-xs text-muted-foreground">{task.why}</p>)}
+        <TypeDecisions type={task.type} decisions={task.decisions} />
     </header>
   );
 
@@ -1261,12 +1327,12 @@ export function TaskCard({ task: snapshot, event, actions = ['approve', 'reopen'
           )}
           <Collapsible>
             <CollapsibleTriggerRow size="sm">Plan</CollapsibleTriggerRow>
-            <CollapsibleContent className="pt-2"><CheckGateProvider gate={gate}><PlanView type={task.type} plan={task.plan} /></CheckGateProvider></CollapsibleContent>
+            <CollapsibleContent className="pt-2"><CheckGateProvider gate={gate}><PlanView type={shape} plan={task.plan} /></CheckGateProvider></CollapsibleContent>
           </Collapsible>
         </>
       ) : (
-        <PlanSection type={task.type}>
-          <CheckGateProvider gate={gate}><PlanView type={task.type} plan={task.plan} entries={checked} cwd={cwd} /></CheckGateProvider>
+        <PlanSection type={shape}>
+          <CheckGateProvider gate={gate}><PlanView type={shape} plan={task.plan} entries={checked} cwd={cwd} /></CheckGateProvider>
           <FlagLines flags={flagsFor(flags, undefined)} />
         </PlanSection>
       )}
@@ -1335,9 +1401,10 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
         </div>
         <h4 className={cn('text-sm font-semibold text-foreground', proposal.status === 'cancelled' && 'text-muted-foreground line-through')}>{proposal.title}</h4>
         {proposal.why && <p className="text-xs text-muted-foreground">{proposal.why}</p>}
+        <TypeDecisions type={proposal.type} decisions={proposal.decisions} />
       </header>
-      <PlanSection type={proposal.type}>
-        <CheckGateProvider gate={proposalGate}><PlanView type={proposal.type} plan={proposal.plan} /></CheckGateProvider>
+      <PlanSection type={shapeOf(proposal)}>
+        <CheckGateProvider gate={proposalGate}><PlanView type={shapeOf(proposal)} plan={proposal.plan} /></CheckGateProvider>
         <FlagLines flags={flagsFor(proposalGate.flags ?? [], undefined)} />
       </PlanSection>
       <ProposalCells proposal={proposal} />

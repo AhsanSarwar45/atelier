@@ -32,6 +32,12 @@ export const ITEM_LISTS: Readonly<Record<string, { plan: string; result: string 
   chore: { plan: 'steps', result: 'steps' },
 };
 
+/**
+ * The type whose plan and result a task follows: its own, or the built-in
+ * one a type the install or project made is planned like (`shape`).
+ */
+export const shapeOf = (task: { type: string; shape?: string | null }): string => task.shape || task.type;
+
 /** Met, missed (with its reason), or not recorded yet. */
 export type ItemState = 'met' | 'missed' | 'open';
 
@@ -45,6 +51,11 @@ export interface ItemProgress {
   note: string;
   /** For an item with checks: how many pass. */
   checks?: CheckTally;
+  /**
+   * For one of the type's default items the agent declined: why it does not
+   * apply. Such an item is answered and is not counted.
+   */
+  declined?: string;
 }
 
 type Gated = Pick<Task, 'checked' | 'checkMet' | 'checkRuns'>;
@@ -105,8 +116,8 @@ export function entryOutcome(type: string, item: Loose, entry: Loose): ItemOutco
  * The entries recorded for a task's items, by id: the done result's, with
  * the ones checked since laid over them.
  */
-export function recordedEntries(task: Pick<Task, 'type' | 'result' | 'checks'>): Map<string, Loose> {
-  const lists = ITEM_LISTS[task.type];
+export function recordedEntries(task: Pick<Task, 'type' | 'shape' | 'result' | 'checks'>): Map<string, Loose> {
+  const lists = ITEM_LISTS[shapeOf(task)];
   const found = new Map<string, Loose>();
   if (!lists) return found;
   for (const entry of [...list(rec(task.result)[lists.result]), ...list(rec(task.checks)[lists.result])]) {
@@ -115,26 +126,37 @@ export function recordedEntries(task: Pick<Task, 'type' | 'result' | 'checks'>):
   return found;
 }
 
-/** Each plan item and where it stands. Empty for a type with no items. */
-export function itemProgress(task: Pick<Task, 'type' | 'plan' | 'result' | 'checks'> & Partial<Gated>): ItemProgress[] {
-  const lists = ITEM_LISTS[task.type];
-  if (!lists) return [];
+/**
+ * Each plan item and where it stands, then the type's default items
+ * (`plan.requirements`): those with checks are ticked by them, those declined
+ * carry their reason. Empty for a type with no items and no default items.
+ */
+export function itemProgress(task: Pick<Task, 'type' | 'shape' | 'plan' | 'result' | 'checks'> & Partial<Gated>): ItemProgress[] {
+  const type = shapeOf(task);
+  const lists = ITEM_LISTS[type];
   const entries = recordedEntries(task);
   const byChecks = gated(task);
-  return list(rec(task.plan)[lists.plan]).map((item) => {
+  const progress = (item: Loose, text: string): ItemProgress => {
     const id = str(item.id);
     const checks = itemChecks(item);
     if (byChecks && (checks.length || task.checkMet?.[id] !== undefined)) {
       // Ticked only by its checks; one that fails stays open with its tally.
       return {
-        id, text: itemText(task.type, item), state: task.checkMet?.[id] === true ? 'met' : 'open', note: '',
+        id, text, state: task.checkMet?.[id] === true ? 'met' : 'open', note: '',
         ...(checks.length ? { checks: tally(checks, itemRuns(task.checkRuns, id)) } : {}),
       };
     }
     const entry = entries.get(id);
-    const outcome = entry ? entryOutcome(task.type, item, entry) : null;
-    return { id, text: itemText(task.type, item), state: outcome?.state ?? 'open', note: outcome?.note ?? '' };
+    const outcome = entry ? entryOutcome(type, item, entry) : null;
+    return { id, text, state: outcome?.state ?? 'open', note: outcome?.note ?? '' };
+  };
+  const planned = lists ? list(rec(task.plan)[lists.plan]).map((item) => progress(item, itemText(type, item))) : [];
+  const defaults = list(rec(task.plan).requirements).map((item): ItemProgress => {
+    const declined = str(item.declined);
+    if (declined) return { id: str(item.id), text: str(item.text), state: 'open', note: '', declined };
+    return progress(item, str(item.text));
   });
+  return [...planned, ...defaults];
 }
 
 /** The types whose items are proved with before and after images. */
@@ -143,7 +165,8 @@ export const VISUAL_TYPES: ReadonlySet<string> = new Set(['ui_change', 'ui_featu
 export interface ItemCounts { met: number; missed: number; total: number }
 
 /** How many plan items are met and missed, out of all of them. */
-export function itemCounts(items: readonly ItemProgress[]): ItemCounts {
+export function itemCounts(all: readonly ItemProgress[]): ItemCounts {
+  const items = all.filter((item) => item.declined === undefined);
   return {
     met: items.filter((item) => item.state === 'met').length,
     missed: items.filter((item) => item.state === 'missed').length,
@@ -156,9 +179,10 @@ export function itemCounts(items: readonly ItemProgress[]): ItemCounts {
  * result carries no entries of its own, so the result lists would read as
  * open. The entry says the checks passed, in the type's own words.
  */
-export function withCheckedEntries<T extends Pick<Task, 'type' | 'result'> & Partial<Gated>>(task: T): T['result'] {
-  const lists = ITEM_LISTS[task.type];
-  if (!task.result || !lists || !gated(task) || VISUAL_TYPES.has(task.type) || task.type === 'optimization') return task.result;
+export function withCheckedEntries<T extends Pick<Task, 'type' | 'shape' | 'result'> & Partial<Gated>>(task: T): T['result'] {
+  const type = shapeOf(task);
+  const lists = ITEM_LISTS[type];
+  if (!task.result || !lists || !gated(task) || VISUAL_TYPES.has(type) || type === 'optimization') return task.result;
   const given = list(rec(task.result)[lists.result]);
   const have = new Set(given.map((entry) => str(entry.id)));
   const added: Loose[] = [];
