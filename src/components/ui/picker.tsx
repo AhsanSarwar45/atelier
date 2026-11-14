@@ -188,9 +188,11 @@ export function Picker({
               <Check
                 className={cn('size-3.5 shrink-0', choice.value === value ? 'opacity-100' : 'opacity-0')}
               />
-              <span className="truncate">{choice.label}</span>
+              {/* The name is what tells two choices apart, so the hint gives
+                  way first: the name keeps up to most of the row. */}
+              <span className="max-w-[75%] shrink-0 truncate">{choice.label}</span>
               {choice.hint ? (
-                <span className="ml-auto truncate text-xs text-muted-foreground">{choice.hint}</span>
+                <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">{choice.hint}</span>
               ) : null}
             </button>
           ))}
