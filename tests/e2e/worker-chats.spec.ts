@@ -92,6 +92,10 @@ test('workers sit under their orchestrator and link back to it', async ({ page, 
       title: 'Plan the login work', workers: { brand: 'codex', profileId: 'system' },
     });
     started.push(orchestrator.id as string);
+    // With no workers yet the chat looks as it did before workers existed.
+    await page.goto(`/project?id=${made.id}&tab=chat&chat=${orchestrator.id}`);
+    await expect(page.getByTestId('chat-sidebar').getByText('Plan the login work')).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/chat-before.png` });
     const worker = await command(request, {
       type: 'session.start', brand: 'codex', projectId: made.id, projectPath: made.path,
       title: 'Login form', parentSessionId: orchestrator.id,
