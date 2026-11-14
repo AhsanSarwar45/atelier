@@ -1492,7 +1492,9 @@ export function ProposalActions({ projectId, id, onAnswered, className }: {
   };
 
   return (
-    <div className={cn('space-y-2', className)}>
+    // The note takes its own full-width line when the actions sit in a row
+    // beside the proposal's title.
+    <div className={cn('space-y-2', asking && 'w-full basis-full', className)}>
       {asking ? (
         <form
           className="space-y-2"
