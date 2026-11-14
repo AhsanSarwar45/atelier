@@ -527,6 +527,11 @@ are no commits or git could not tell (see Merging).
   `check` takes `{item, entry}` and, like `done`, `files`.
   Owner actions: `approve reopen undo_amend cancel release answer_proposal`.
   `widget` is the fenced `atelier-widget` text the CLI prints.
+  The server also keeps an agent's card (task, proposal, grid and task types)
+  for its chat and puts it on that chat's next completed tool call
+  (`wire::printed_card`), so a command whose output was piped away
+  (`| grep`, `> /dev/null`) still shows its card. A call whose output kept
+  the card draws it once.
   `propose` answers `{proposal, widget, summary}`. `answer_proposal` takes
   the proposal id as `number` and `{choice: create|just_do_it|cancel}`, or
   `{choice: changes, note}`, as `payload`, and answers `{proposal, task, summary}` (`task` is null unless

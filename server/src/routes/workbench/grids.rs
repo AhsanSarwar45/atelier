@@ -382,7 +382,7 @@ pub(super) async fn act(
                 return Err(format!("discovery for \"{slug}\" is already running").into());
             };
             let outcome = discover(&state, &project, &slug, session.clone(), &asked.actor).await?;
-            return respond(&state, &project, outcome).await;
+            return respond(&state, &project, outcome, session.clone()).await;
         }
         "prove" => return prove(&state, request, asked.files, asked.ephemeral).await,
         "verify" => return verify(&state, request).await,
@@ -405,7 +405,7 @@ pub(super) async fn act(
         _ => {}
     }
     let outcome = apply(&state, request).await?;
-    respond(&state, &project, outcome).await
+    respond(&state, &project, outcome, session).await
 }
 
 /// The folder a grid's row search runs in: the project's for an approved
@@ -466,7 +466,14 @@ async fn discover(
 
 /// The answer to a change: the grid, the cell, the card and the summary.
 /// Tells the chats waiting on it and announces it.
-async fn respond(state: &WorkbenchState, project: &str, outcome: grids::Outcome) -> Result<Json<Value>, ApiError> {
+/// `printed_for` is the agent's chat, where the card is drawn even if the
+/// command's output was piped away.
+async fn respond(
+    state: &WorkbenchState,
+    project: &str,
+    outcome: grids::Outcome,
+    printed_for: Option<String>,
+) -> Result<Json<Value>, ApiError> {
     let mut touched = outcome.grids.clone();
     if let Some(slug) = &outcome.slug {
         if !touched.contains(slug) {
@@ -502,7 +509,12 @@ async fn respond(state: &WorkbenchState, project: &str, outcome: grids::Outcome)
             if let Some(audit) = &outcome.audit {
                 card["audit"] = audit.clone();
             }
-            Some(crate::workbench::media::widget_block(&card).map_err(failed)?)
+            let widget = crate::workbench::media::widget_block(&card).map_err(failed)?;
+            // Drawn in the agent's chat even if the command's output was piped away.
+            if let Some(chat) = printed_for.as_deref() {
+                crate::workbench::wire::printed_card(chat, &widget);
+            }
+            Some(widget)
         }
         None => None,
     };
@@ -560,6 +572,7 @@ async fn prove(
     files: BTreeMap<String, String>,
     ephemeral: bool,
 ) -> Result<Json<Value>, ApiError> {
+    let printed_for = request.session.clone();
     if let Some(evidence) = request.payload.get_mut("evidence") {
         let directory = presentation_directory(state, ephemeral)?;
         store_evidence(evidence, files, &directory)?;
@@ -616,7 +629,7 @@ async fn prove(
     }
     let project = request.project.clone();
     let outcome = apply(state, request).await?;
-    respond(state, &project, outcome).await
+    respond(state, &project, outcome, printed_for).await
 }
 
 /// Re-run one proved cell's checks in the project's folder, and apply.
@@ -661,11 +674,12 @@ async fn verify_one(state: &WorkbenchState, base: &Request, row: &str, col: &str
 /// `verify`: one cell, or every proved cell of the grid one at a time
 /// (`staleOnly`: the stale ones), each announced as it lands.
 async fn verify(state: &WorkbenchState, request: Request) -> Result<Json<Value>, ApiError> {
+    let printed_for = request.session.clone();
     let project = request.project.clone();
     let slug = request.slug.clone().ok_or_else(|| "slug is required for verify".to_string())?;
     if let (Some(row), Some(col)) = (request.row.clone(), request.col.clone()) {
         let outcome = verify_one(state, &request, &row, &col).await?;
-        return respond(state, &project, outcome).await;
+        return respond(state, &project, outcome, printed_for).await;
     }
     let stale_only = request.payload["staleOnly"].as_bool().unwrap_or(false);
     let loaded = load_all(state, &project, Some(vec![slug.clone()])).await.map_err(failed)?;

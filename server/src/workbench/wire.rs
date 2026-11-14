@@ -4,7 +4,7 @@ use super::protocol::{Event, EventKind};
 use base64::Engine;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 const KEPT: usize = 4_000;
 const COMMAND_KEPT: usize = 20_000;
@@ -114,6 +114,61 @@ fn kept_picture(
     Some((asset, bytes.len(), super::media::picture_dimensions(&bytes)))
 }
 
+/// Cards the task, grid and task types commands answered an agent with, by
+/// chat, until that chat's next tool call completes. The chat draws a card
+/// from the command's printed output, which an agent can pipe away
+/// (`| grep`, `> /dev/null`); the call that ran it still gets its card.
+static PRINTED_CARDS: Mutex<Vec<PrintedCard>> = Mutex::new(Vec::new());
+
+struct PrintedCard {
+    session: String,
+    at: chrono::DateTime<chrono::Utc>,
+    card: Value,
+}
+
+/// A card kept this long with no call to draw it at is dropped.
+const PRINTED_CARD_KEPT: chrono::TimeDelta = chrono::TimeDelta::minutes(10);
+
+/// Keeps the cards in `widget`, the fenced text a command prints, for the
+/// chat `session`'s next completed tool call.
+pub fn printed_card(session: &str, widget: &str) {
+    let cards = super::media::widget_specs(widget);
+    if cards.is_empty() {
+        return;
+    }
+    let at = chrono::Utc::now();
+    let mut kept = PRINTED_CARDS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    kept.retain(|card| at - card.at < PRINTED_CARD_KEPT);
+    kept.extend(cards.into_iter().map(|card| PrintedCard { session: session.to_string(), at, card }));
+}
+
+/// The cards printed for the chat a completed call belongs to, taken so no
+/// later call draws them again. A call that finished before a card was
+/// printed (an old one read back from the store) takes nothing.
+fn take_printed_cards(event: &Event) -> Vec<Value> {
+    let Some(session) = event.fields.get("sessionId").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let finished = event
+        .fields
+        .get("at")
+        .and_then(Value::as_str)
+        .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+        .map(|at| at.with_timezone(&chrono::Utc));
+    let mut kept = PRINTED_CARDS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut taken = Vec::new();
+    kept.retain(|card| {
+        // Event times may be cut to the second; allow for that.
+        let before = finished.is_some_and(|finished| finished < card.at - chrono::TimeDelta::seconds(2));
+        if card.session != session || before {
+            return true;
+        }
+        taken.push(card.card.clone());
+        false
+    });
+    taken
+}
+
 /// Bound the fields whose native provider shapes are intentionally unbounded.
 /// This is applied once by the durable actor for every provider and delivery.
 pub fn bound_event(event: &mut Event) {
@@ -150,7 +205,9 @@ pub fn bound_event(event: &mut Event) {
                     .filter(|text| text.contains("```atelier-widget"))
                     .map(super::media::widget_specs)
                     .find(|found| !found.is_empty());
-                if let Some(presented) = presented {
+                // Taken either way: a card the output kept is the same card.
+                let printed = take_printed_cards(event);
+                if let Some(presented) = presented.or_else(|| (!printed.is_empty()).then_some(printed)) {
                     event.fields.insert("presented".into(), Value::Array(presented));
                 }
             }
@@ -284,6 +341,26 @@ mod tests {
         }));
         bound_event(&mut codex);
         assert_eq!(codex.fields["presented"], json!([{"columns":["A"],"rows":[["1"]],"type":"table"}]));
+    }
+
+    /// A card printed while a call runs goes to that chat's next completed
+    /// call, not to an older call read back from the store, nor another chat's.
+    #[test]
+    fn a_printed_card_goes_to_its_own_chats_next_call_only() {
+        let card = json!({"type":"table","columns":["A"],"rows":[["1"]]});
+        printed_card("own-chat", &format!("```atelier-widget\n{card}\n```\n"));
+        let completed = |session: &str, at: &str| {
+            event(json!({"type":"tool.completed","sessionId":session,"seq":3,"at":at,"toolCallId":"t","ok":true,"output":"done"}))
+        };
+        let mut other = completed("other-chat", "now");
+        bound_event(&mut other);
+        assert!(!other.fields.contains_key("presented"));
+        let mut old = completed("own-chat", "2020-01-01T00:00:00Z");
+        bound_event(&mut old);
+        assert!(!old.fields.contains_key("presented"));
+        let mut next = completed("own-chat", &chrono::Utc::now().to_rfc3339());
+        bound_event(&mut next);
+        assert_eq!(next.fields["presented"], json!([card]));
     }
 
     #[test]

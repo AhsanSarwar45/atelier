@@ -227,7 +227,11 @@ pub(super) async fn change_kinds(State(state): State<WorkbenchState>, Json(reque
         }));
         // The card the chat shows for the change, with its Undo.
         if let Some(id) = &id {
-            answer["widget"] = json!(tasks::catalog::widget(project, scope, &summary, id)?);
+            let widget = tasks::catalog::widget(project, scope, &summary, id)?;
+            if let Some(chat) = request.session.as_deref() {
+                crate::workbench::wire::printed_card(chat, &widget);
+            }
+            answer["widget"] = json!(widget);
         }
     }
     Ok(Json(answer))
@@ -416,6 +420,9 @@ pub(super) async fn act(
         ),
         other => return Err(format!("actor must be agent or owner, not \"{other}\"").into()),
     };
+    // The chat an agent's card is drawn in, whatever the agent does with the
+    // command's output.
+    let printed_for = session.clone();
     if request.action == "propose" && request.actor == "agent" {
         let session = session.unwrap_or_default();
         let payload = request.payload;
@@ -434,6 +441,7 @@ pub(super) async fn act(
             .map_err(failed)?;
         let (proposal, summary) = refused_or(outcome)?;
         let widget = tasks::proposal_widget(&proposal).map_err(failed)?;
+        crate::workbench::wire::printed_card(printed_for.as_deref().unwrap_or_default(), &widget);
         announce(&state, &proposal["projectId"], &Value::Null);
         return Ok(Json(json!({"proposal": proposal, "widget": widget, "summary": summary})));
     }
@@ -592,6 +600,9 @@ pub(super) async fn act(
         .map_err(failed)?;
     let (task, summary, grids, detail, row, folder) = refused_or(outcome)?;
     let widget = tasks::widget(&action, &task, &detail).map_err(failed)?;
+    if let Some(chat) = printed_for.as_deref() {
+        crate::workbench::wire::printed_card(chat, &widget);
+    }
     announce(&state, &task["projectId"], &task["number"]);
     announce_grids(&state, &announced, &grids);
     // The owner's approve, reopen and plan-change answers are told to the
@@ -978,7 +989,7 @@ mod tests {
     /// A chat `worker` in a repository holding an in-progress task under the
     /// check rules, whose one check leaves `ran` behind each time it runs.
     /// Returns the repository, the task's number and the HEAD commit.
-    async fn started_with_a_check(state: &WorkbenchState, project: &str) -> (tempfile::TempDir, i64, String) {
+    async fn started_with_a_check(state: &WorkbenchState, project: &str, chat: &str) -> (tempfile::TempDir, i64, String) {
         let repo = tempfile::tempdir().unwrap();
         let dir = repo.path().to_path_buf();
         git(&dir, &["init", "-q", "-b", "main"]);
@@ -992,7 +1003,7 @@ mod tests {
         git(&dir, &["add", "-A"]);
         git(&dir, &["commit", "-q", "-m", "start"]);
         let session = Session {
-            id: "worker".into(),
+            id: chat.into(),
             brand: "claude".into(),
             external_id: None,
             project_id: project.to_string(),
@@ -1023,15 +1034,17 @@ mod tests {
             tasks::types::TYPES.iter().map(|kind| (kind.name.to_string(), json!(format!("{} or not", kind.name)))).collect();
         let gate = checks::draft_gate(&dir, "feature", &plan, &[]);
         let asked = project.to_string();
+        let asked_chat = chat.to_string();
         let number = state
             .database()
             .write_tasks(move |store| {
-                store.open_message("worker", "m0", "user", "2026-11-14T00:00:00Z").unwrap();
-                store.grow_message("worker", "m0", "@task do it").unwrap();
+                let chat = asked_chat.as_str();
+                store.open_message(chat, "m0", "user", "2026-11-14T00:00:00Z").unwrap();
+                store.grow_message(chat, "m0", "@task do it").unwrap();
                 let request = tasks::Request {
                     action: "create".into(),
                     actor: "agent".into(),
-                    session: Some("worker".into()),
+                    session: Some(chat.into()),
                     project: asked,
                     payload: json!({"type": "feature", "title": "T", "why": "W", "plan": plan, "decisions": decisions}),
                     gate: Some(gate),
@@ -1044,13 +1057,14 @@ mod tests {
             .unwrap();
         let start = task_gate(state, project, Some(number), "start", "agent", Some(&dir.display().to_string()), &json!({})).await;
         let asked = project.to_string();
+        let asked_chat = chat.to_string();
         state
             .database()
             .write_tasks(move |store| {
                 let request = tasks::Request {
                     action: "start".into(),
                     actor: "agent".into(),
-                    session: Some("worker".into()),
+                    session: Some(asked_chat),
                     project: asked,
                     number: Some(number),
                     gate: start,
@@ -1066,10 +1080,14 @@ mod tests {
     }
 
     async fn done(state: &WorkbenchState, number: i64, payload: Value) -> Result<Json<Value>, ApiError> {
+        agent_act(state, "worker", "done", number, payload).await
+    }
+
+    async fn agent_act(state: &WorkbenchState, chat: &str, action: &str, number: i64, payload: Value) -> Result<Json<Value>, ApiError> {
         let request = ActionRequest {
-            action: "done".into(),
+            action: action.into(),
             actor: "agent".into(),
-            session: Some("worker".into()),
+            session: Some(chat.into()),
             project: None,
             number: Some(number),
             payload,
@@ -1087,7 +1105,7 @@ mod tests {
     #[tokio::test]
     async fn a_done_with_a_malformed_followup_is_refused_before_any_check_runs() {
         let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
-        let (repo, number, head) = started_with_a_check(&state, &project).await;
+        let (repo, number, head) = started_with_a_check(&state, &project, "worker").await;
         let ran = repo.path().join("ran");
         std::fs::remove_file(&ran).unwrap();
         let payload = json!({"summary": "s", "commits": [head], "followups": ["look at the export later"], "result": {}});
@@ -1103,7 +1121,7 @@ mod tests {
     #[tokio::test]
     async fn a_done_with_a_result_entry_for_a_checked_item_is_refused_before_any_check_runs() {
         let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
-        let (repo, number, head) = started_with_a_check(&state, &project).await;
+        let (repo, number, head) = started_with_a_check(&state, &project, "worker").await;
         let ran = repo.path().join("ran");
         std::fs::remove_file(&ran).unwrap();
         let payload = json!({"summary": "s", "commits": [head], "result": {"criteria": [{"id": "value", "met": true, "evidence": "it is 2"}]}});
@@ -1119,7 +1137,7 @@ mod tests {
     #[tokio::test]
     async fn a_well_formed_done_still_runs_the_checks() {
         let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
-        let (repo, number, _) = started_with_a_check(&state, &project).await;
+        let (repo, number, _) = started_with_a_check(&state, &project, "worker").await;
         std::fs::write(repo.path().join("value.txt"), "2\n").unwrap();
         git(repo.path(), &["commit", "-qam", "fix"]);
         let head = git(repo.path(), &["rev-parse", "HEAD"]);
@@ -1129,5 +1147,42 @@ mod tests {
         let Json(finished) = done(&state, number, payload).await.map_err(|error| error.message).unwrap();
         assert!(ran.exists(), "done ran the check");
         assert_eq!(finished["task"]["status"], "done", "{finished}");
+    }
+
+    /// The chat draws a task's card from the command's output. An agent that
+    /// pipes the output away (`| grep`, `> /dev/null`) still gets its card at
+    /// the call, and a call whose output kept the card does not draw it twice.
+    #[tokio::test]
+    async fn a_card_whose_output_was_piped_away_is_still_drawn_at_the_call() {
+        let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
+        let (_repo, number, _) = started_with_a_check(&state, &project, "piped").await;
+        let completed = |output: &str| -> crate::workbench::protocol::Event {
+            serde_json::from_value(json!({"type": "tool.completed", "sessionId": "piped", "seq": 0, "at": "now",
+                "toolCallId": "t", "ok": true, "output": output}))
+            .unwrap()
+        };
+
+        let _ = agent_act(&state, "piped", "block", number, json!({"cause": "c", "needed_to_resume": "n"}))
+            .await
+            .map_err(|error| error.message)
+            .unwrap();
+        let mut piped = completed("Blocked\n");
+        crate::workbench::wire::bound_event(&mut piped);
+        let presented = piped.fields.get("presented").cloned().unwrap_or(Value::Null);
+        assert_eq!(presented[0]["event"], "block", "no card was drawn for the piped command: {presented}");
+
+        let Json(answer) = agent_act(&state, "piped", "unblock", number, json!({}))
+            .await
+            .map_err(|error| error.message)
+            .unwrap();
+        let mut kept = completed(answer["widget"].as_str().unwrap());
+        crate::workbench::wire::bound_event(&mut kept);
+        let presented = kept.fields.get("presented").cloned().unwrap_or(Value::Null);
+        assert_eq!(presented.as_array().map(Vec::len), Some(1), "the card was drawn twice: {presented}");
+        assert_eq!(presented[0]["event"], "unblock", "{presented}");
+
+        let mut next = completed("ok\n");
+        crate::workbench::wire::bound_event(&mut next);
+        assert!(!next.fields.contains_key("presented"), "a later call drew an earlier card again: {:?}", next.fields.get("presented"));
     }
 }
