@@ -3336,6 +3336,8 @@ mod tests {
         git(repo, &["init", "-q"]);
         git(repo, &["config", "user.name", "Atelier test"]);
         git(repo, &["config", "user.email", "atelier@example.invalid"]);
+        // A user who signs tags would turn this plain tag into one that asks for a message.
+        git(repo, &["config", "tag.gpgsign", "false"]);
         std::fs::write(repo.join("kept"), "one\n").unwrap();
         git(repo, &["add", "kept"]);
         git(repo, &["commit", "-qm", "first"]);
