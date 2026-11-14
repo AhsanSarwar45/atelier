@@ -92,7 +92,7 @@ todo ──start──▶ in_progress ──done──▶ done
   (`session_id = null`). Anyone can `take` them.
 - The front end shows an `in_progress` task whose session is not running as
   **paused**. This is a display state, not stored.
-- Review types (`plan` and the visual types `ui_change`, `ui_feature`, `visual_bug`, `render_change`, `render_feature`) go to `review` on `done`. The owner
+- Review types (`plan` and the visual types `ui_change`, `ui_feature`, `ui_bug`, `render_change`, `render_feature`, `render_bug`) go to `review` on `done`. The owner
   approves (→ `done`) or reopens with a note (→ `in_progress`; → `todo` if
   the task is unassigned or its session already has another task in progress).
 - `amend` applies at once: the plan is replaced and `done` is validated
@@ -119,8 +119,8 @@ entry. Only the chat holding the task may check, only while it is
 `event: "check"`.
 
 The types with items: `feature` (criteria), `general` (done_when),
-`ui_change` (screens), `ui_feature` (screens), `visual_bug` (screens),
-`render_change` (scenes), `render_feature` (scenes),
+`ui_change` (screens), `ui_feature` (screens), `ui_bug` (screens),
+`render_change` (scenes), `render_feature` (scenes), `render_bug` (scenes),
 `optimization` (targets), `investigation` (questions,
 answered in answers), `refactor` (invariants), `tests` (behaviors), `qa`
 (scenarios), `docs` (pages), `chore` (steps). `bug`, `plan` and `review`
@@ -386,6 +386,26 @@ their shape; only their items change. A custom type is planned and checked
 like `general`; its `code` and `review` are kept on each task (`typeDef`)
 as they were at create.
 
+Each built-in type has a description that says when to use it (and what
+to use instead), and default items (`types.rs`, `TYPES`):
+
+| Type | Default items |
+|---|---|
+| `bug` | `repro-test`, `same-bug-elsewhere` |
+| `feature` | `edge-cases`, `docs-updated` |
+| `ui_change`, `ui_feature` | `existing-components`, `screen-sizes`, `ui-copy`, `edge-cases`, `keyboard` |
+| `ui_bug` | `repro-test` and the five above |
+| `render_change`, `render_feature` | `same-view`, `frame-time`, `artifacts` |
+| `render_bug` | `repro-scene`, `same-view`, `frame-time` |
+| `optimization` | `measured-runs`, `behaviour-unchanged` |
+| `refactor` | `behaviour-unchanged` |
+| `tests` | `not-flaky` |
+| `docs` | `commands-work` |
+| `plan` | `options-weighed` |
+| `investigation`, `review`, `qa`, `chore`, `general` | none |
+
+The install or a project turns any of them off with `disabled_items`.
+
 Every create and propose by an agent gives `decisions`: `{TYPE: reason}`
 with a non-blank line for every type that is on. The server checks only that
 every type is there; the reasons are kept on the task for the owner.
@@ -537,9 +557,15 @@ Lists in a plan have an `id` (string, unique in the list). Each result list
 must have exactly one entry per plan id.
 
 Anything you can see on screen or in a render uses a visual type:
-`ui_change`, `ui_feature`, `visual_bug`, `render_change` or
-`render_feature`. New work you can see is `ui_feature` or `render_feature`,
-not `feature`; a bug you can see is `visual_bug`, not `bug`.
+`ui_change`, `ui_feature`, `ui_bug`, `render_change`, `render_feature` or
+`render_bug`. New work you can see is `ui_feature` or `render_feature`,
+not `feature`. A bug you see in the app's interface is `ui_bug`; a bug in
+what a 3D scene renders is `render_bug`; neither is `bug`.
+
+The old visual-bug type was split into those two. The server renames its
+stored tasks and proposals to `ui_bug` at start (they were all bugs on a
+screen), and the front end draws one of its cards saved in a chat as a
+`ui_bug` (`LEGACY_TYPES`).
 
 ### `bug` (code)
 - plan: `symptom`, `repro_steps[]`, `expected`, `actual`, `suspected_area?`
@@ -561,9 +587,14 @@ not `feature`; a bug you can see is `visual_bug`, not `bug`.
   a screen whose plan item says `existed: true`; a new screen has only an
   `after`.
 
-### `visual_bug` (code, review)
+### `ui_bug` (code, review)
 - plan: the `bug` fields (`symptom`, `repro_steps[]`, `expected`, `actual`, `suspected_area?`) and `screens[] {id, name, how_to_reach}`
 - result: `root_cause`, `fix`, `screens[] {id, before, after, notes?}`
+
+### `render_bug` (code, review)
+- plan: the `bug` fields and `scenes[] {id, scene, camera, reference?}`
+- result: `root_cause`, `fix`, `scenes[] {id, before, after, reference?, notes?}`
+  (`before` renders the bug, `after` the same scene and camera fixed)
 
 ### `render_change` (code, review)
 - plan: `scenes[] {id, scene, camera, change, reference?}` (`reference: true` asks for a reference image of that scene)
@@ -579,8 +610,8 @@ not `feature`; a bug you can see is `visual_bug`, not `bug`.
 ### Before and after images
 
 For the visual types, `check` and `done` are refused unless each item's
-`after`, its `before` (always for `ui_change`, `visual_bug` and
-`render_change`; where the screen or scene existed for `ui_feature` and
+`after`, its `before` (always for `ui_change`, `ui_bug`,
+`render_change` and `render_bug`; where the screen or scene existed for `ui_feature` and
 `render_feature`) and a `reference` (where given or asked for) are images
 uploaded as presentation assets: the CLI uploads files named in the
 payload, and the server stores them as
@@ -699,7 +730,7 @@ visual_files = [".tsx", ".css", "assets/**/*.svg"]
   detail's pending change panel.
 - **Done summary**: met and missed counts, the check flags (proves
   nothing, added skips, deleted tests, exit calls in tests), only the missed items with their
-  reasons, root cause and fix for `bug` and `visual_bug`, the summary, and
+  reasons, root cause and fix for `bug`, `ui_bug` and `render_bug`, the summary, and
   the commits with the Merged badge, and a `feature` or `bug` result's
   screenshots behind their toggles. The whole result per type
   (optimization as a before/after/target table, the visual types as image

@@ -333,7 +333,7 @@ function EntryDetail({ type, item, entry, cwd }: { type: string; item: Loose; en
     case 'investigation':
       shown = <div className="whitespace-pre-wrap text-xs text-muted-foreground">{str(entry.answer)}</div>;
       break;
-    case 'ui_change': case 'ui_feature': case 'visual_bug': case 'render_change': case 'render_feature':
+    case 'ui_change': case 'ui_feature': case 'ui_bug': case 'render_change': case 'render_feature': case 'render_bug':
       shown = <ShotPair name={itemText(type, item)} before={str(entry.before) || undefined} after={str(entry.after)} reference={str(entry.reference) || undefined} cwd={cwd} />;
       break;
   }
@@ -530,7 +530,7 @@ function PlanFields({ type, plan, entries, cwd }: {
           </div>
         </div>
       );
-    case 'visual_bug':
+    case 'ui_bug':
       return (
         <div className="space-y-2">
           <PlanView type="bug" plan={p} />
@@ -538,6 +538,19 @@ function PlanFields({ type, plan, entries, cwd }: {
             <Checklist>{list(p.screens).map((s) => (
               <PlanItem key={str(s.id)} type={type} item={s} entries={entries} cwd={cwd} text={<span className="font-medium">{str(s.name)}</span>}>
                 <div className="text-xs text-muted-foreground">{str(s.how_to_reach)}</div>
+              </PlanItem>
+            ))}</Checklist>
+          </div>
+        </div>
+      );
+    case 'render_bug':
+      return (
+        <div className="space-y-2">
+          <PlanView type="bug" plan={p} />
+          <div><Label>Scenes</Label>
+            <Checklist>{list(p.scenes).map((s) => (
+              <PlanItem key={str(s.id)} type={type} item={s} entries={entries} cwd={cwd} text={<span className="font-medium">{str(s.scene)}</span>}>
+                <div className="text-xs text-muted-foreground">{`Camera: ${str(s.camera)}${s.reference === true ? ' · reference image asked for' : ''}`}</div>
               </PlanItem>
             ))}</Checklist>
           </div>
@@ -780,12 +793,13 @@ export function ResultView({ type, plan, result, cwd, summarised = false }: {
     case 'render_change':
     case 'render_feature':
       return <VisualResult type={type} plan={p} result={r} cwd={cwd} />;
-    case 'visual_bug':
+    case 'ui_bug':
+    case 'render_bug':
       return (
         <div className="space-y-2">
           {!summarised && <Field label="Root cause">{str(r.root_cause)}</Field>}
           {!summarised && <Field label="Fix">{str(r.fix)}</Field>}
-          <div><Label>Screens</Label><VisualResult type={type} plan={p} result={r} cwd={cwd} /></div>
+          <div><Label>{type === 'render_bug' ? 'Scenes' : 'Screens'}</Label><VisualResult type={type} plan={p} result={r} cwd={cwd} /></div>
         </div>
       );
     case 'plan':
@@ -1019,7 +1033,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 
 /** The types whose plan starts with a heading of its own (Outcome, Steps, Symptom…). */
 const PLAN_HEADED: ReadonlySet<string> = new Set([
-  'bug', 'feature', 'general', 'ui_feature', 'render_feature', 'visual_bug', 'render_change', 'plan',
+  'bug', 'feature', 'general', 'ui_feature', 'render_feature', 'ui_bug', 'render_bug', 'render_change', 'plan',
   'investigation', 'refactor', 'tests', 'review', 'qa', 'docs', 'chore',
 ]);
 
@@ -1145,7 +1159,7 @@ export function DoneSummary({ task, cwd, counted = false }: {
           ))}
         </Checklist>
       )}
-      {(task.type === 'bug' || task.type === 'visual_bug') && (
+      {['bug', 'ui_bug', 'render_bug'].includes(shapeOf(task)) && (
         <>
           <Field label="Root cause">{str(r.root_cause)}</Field>
           <Field label="Fix">{str(r.fix)}</Field>
@@ -1181,7 +1195,7 @@ export const ITEMS_SHOWN = 5;
 
 /** The field a type leads its plan with, drawn as one line above its items. */
 const LEAD: Record<string, string> = {
-  feature: 'outcome', general: 'outcome', refactor: 'change', docs: 'audience', visual_bug: 'symptom',
+  feature: 'outcome', general: 'outcome', refactor: 'change', docs: 'audience', ui_bug: 'symptom', render_bug: 'symptom',
   ui_feature: 'outcome', render_feature: 'outcome',
 };
 

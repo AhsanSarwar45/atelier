@@ -10,7 +10,7 @@ use crate::gaps::*;
 use serde_json::{json, Value};
 
 const BUILT_IN: &[&str] = &[
-    "bug", "feature", "ui_change", "ui_feature", "visual_bug", "render_change", "render_feature",
+    "bug", "feature", "ui_change", "ui_feature", "ui_bug", "render_bug", "render_change", "render_feature",
     "optimization", "plan", "investigation", "refactor", "tests", "review", "qa", "docs", "chore", "general",
 ];
 
@@ -77,6 +77,15 @@ fn api_type() -> Value {
         "items": [{"id": "bad-input", "text": "Bad input gets a 4xx with a clear message"}]}})
 }
 
+/// Declined answers for a type's built-in default items other than `keep`,
+/// for a test about other items.
+fn decline_built_in(name: &str, keep: &[&str]) -> Vec<Value> {
+    let kind = atelier::workbench::tasks::types::find(name).unwrap();
+    kind.items.iter().filter(|(id, _)| !keep.contains(id))
+        .map(|(id, text)| json!({"id": id, "text": text, "declined": "not what this test is about"}))
+        .collect()
+}
+
 // --- catalog: inheritance -------------------------------------------------
 
 #[test]
@@ -96,13 +105,14 @@ fn a_project_inherits_the_install_types_and_can_turn_one_off() {
 #[test]
 fn a_project_adds_its_own_items_and_turns_inherited_items_off() {
     let (_root, global, project) = folders();
-    change(&global, None, json!({"action": "edit", "scope": "install", "name": "ui_change",
+    // chore has no built-in items, so the list is only what this test sets.
+    change(&global, None, json!({"action": "edit", "scope": "install", "name": "chore",
         "items": [{"id": "existing-components", "text": "Uses the app's existing components"},
                   {"id": "long-text", "text": "Long text does not break the layout"}]}));
-    change(&global, Some(&project), json!({"action": "edit", "scope": "project", "name": "ui_change",
+    change(&global, Some(&project), json!({"action": "edit", "scope": "project", "name": "chore",
         "items": [{"id": "phone", "text": "Fits a 390 pixel wide screen"}]}));
-    change(&global, Some(&project), json!({"action": "disable", "scope": "project", "name": "ui_change", "item": "long-text"}));
-    let items = load(&global, Some(&project)).items("ui_change");
+    change(&global, Some(&project), json!({"action": "disable", "scope": "project", "name": "chore", "item": "long-text"}));
+    let items = load(&global, Some(&project)).items("chore");
     assert_eq!(items, vec!["existing-components".to_string(), "phone".to_string()], "inherited, minus the one turned off, plus the project's own");
 }
 
@@ -159,8 +169,10 @@ fn a_type_turned_off_need_not_be_listed() {
     let types = load(&global, Some(&project));
     let names: Vec<&str> = BUILT_IN.iter().copied().filter(|name| *name != "render_change").collect();
     let (_d, store) = task_store();
+    let mut plan = feature_plan();
+    plan["requirements"] = json!(decline_built_in("feature", &[]));
     ask_with(&store, &types, "create", None,
-        json!({"type": "feature", "title": "T", "why": "W", "plan": feature_plan(), "decisions": decisions(&names, "feature")})).unwrap();
+        json!({"type": "feature", "title": "T", "why": "W", "plan": plan, "decisions": decisions(&names, "feature")})).unwrap();
 }
 
 // --- defaults: a type's items must be answered -------------------------------
@@ -189,9 +201,11 @@ fn a_types_default_items_must_each_have_checks_or_a_reason() {
         {"id": "long-text", "text": "Long text does not break the layout", "declined": " "}]))));
     assert!(message.contains("long-text"), "a blank reason is refused: {message}");
 
-    ask_with(&store, &types, "create", None, payload(json!([
-        {"id": "existing-components", "text": "Uses the app's existing components", "checks": [check("reuse")]},
-        {"id": "long-text", "text": "Long text does not break the layout", "declined": "the screen shows no user text"}]))).unwrap();
+    let mut answered = vec![
+        json!({"id": "existing-components", "text": "Uses the app's existing components", "checks": [check("reuse")]}),
+        json!({"id": "long-text", "text": "Long text does not break the layout", "declined": "the screen shows no user text"})];
+    answered.extend(decline_built_in("ui_change", &["existing-components"]));
+    ask_with(&store, &types, "create", None, payload(json!(answered))).unwrap();
 }
 
 #[test]

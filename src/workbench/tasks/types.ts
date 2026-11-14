@@ -14,7 +14,7 @@ export const TASK_STATUSES = ['todo', 'in_progress', 'blocked', 'review', 'done'
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export const TASK_TYPES = [
-  'bug', 'feature', 'ui_change', 'ui_feature', 'visual_bug', 'render_change', 'render_feature', 'optimization', 'plan', 'investigation',
+  'bug', 'feature', 'ui_change', 'ui_feature', 'ui_bug', 'render_bug', 'render_change', 'render_feature', 'optimization', 'plan', 'investigation',
   'refactor', 'tests', 'review', 'qa', 'docs', 'chore', 'general',
 ] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
@@ -321,7 +321,8 @@ export const TYPE_LABEL: Record<TaskType, string> = {
   feature: 'Feature',
   ui_change: 'UI change',
   ui_feature: 'UI feature',
-  visual_bug: 'Visual bug',
+  ui_bug: 'UI bug',
+  render_bug: 'Render bug',
   render_change: 'Render change',
   render_feature: 'Render feature',
   optimization: 'Optimization',
@@ -336,7 +337,11 @@ export const TYPE_LABEL: Record<TaskType, string> = {
   general: 'General',
 };
 
-export const typeLabel = (type: string): string => TYPE_LABEL[type as TaskType] ?? type;
+/** `visual_bug` was split into `ui_bug` and `render_bug`; a task card saved in a
+ * chat before then still names it, and it was always a bug on a screen. */
+export const LEGACY_TYPES: Readonly<Record<string, TaskType>> = { visual_bug: 'ui_bug' };
+
+export const typeLabel = (type: string): string => TYPE_LABEL[(LEGACY_TYPES[type] ?? type) as TaskType] ?? type;
 
 /** Whether an optimization target was reached, from the numbers alone. */
 export function targetMet(target: Pick<OptimizationTarget, 'target' | 'higher_is_better'>, after: number): boolean {

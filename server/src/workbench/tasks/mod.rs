@@ -126,6 +126,12 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
             connection.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} TEXT;"))?;
         }
     }
+    // visual_bug was split into ui_bug and render_bug; every task made as a
+    // visual_bug was a bug on a screen, the shape ui_bug keeps.
+    connection.execute_batch(
+        "UPDATE task SET type = 'ui_bug' WHERE type = 'visual_bug';
+         UPDATE task_proposal SET type = 'ui_bug' WHERE type = 'visual_bug';",
+    )?;
     Ok(())
 }
 
@@ -1894,7 +1900,7 @@ mod tests {
             let error = refused(apply(&store, &request));
             assert!(error.contains("the commits change visual files (src/card.tsx, shaders/sky.wgsl)"), "{error}");
             assert!(error.contains("\"screens\""), "{error}");
-            assert!(error.contains("ui_change, ui_feature, visual_bug, render_change, render_feature"), "{error}");
+            assert!(error.contains("ui_change, ui_feature, ui_bug, render_change, render_feature, render_bug"), "{error}");
             // Screenshots are held to the image rule.
             request.payload["result"]["screens"] = json!([{"name": "Card", "before": shot('a'), "after": shot('a')}]);
             assert!(refused(apply(&store, &request)).contains("same image"), "{kind}");
@@ -2453,7 +2459,7 @@ mod tests {
     fn visual_tasks_are_refused_without_two_different_images() {
         let (_d, store) = store();
         let shot = |c: char| json!(format!("{}{}.png", types::SERVED, c.to_string().repeat(64)));
-        for (index, kind) in ["ui_change", "visual_bug", "render_change"].iter().enumerate() {
+        for (index, kind) in ["ui_change", "ui_bug", "render_change", "render_bug"].iter().enumerate() {
             let session = format!("v{index}");
             let one = create(&store, &session, kind);
             agent(&store, &session, "start", Some(one), json!({})).unwrap();

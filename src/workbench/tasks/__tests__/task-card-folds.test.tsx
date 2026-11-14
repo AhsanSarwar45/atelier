@@ -76,11 +76,11 @@ describe('the create card', () => {
   });
 
   it.each([
-    ['visual_bug', { symptom: 'Blurry icons', repro_steps: ['Open'], expected: 'Sharp', actual: 'Blurry', screens: [{ id: 'menu', name: 'Settings menu', how_to_reach: 'Header' }] }, 'Settings menu'],
+    ['ui_bug', { symptom: 'Blurry icons', repro_steps: ['Open'], expected: 'Sharp', actual: 'Blurry', screens: [{ id: 'menu', name: 'Settings menu', how_to_reach: 'Header' }] }, 'Settings menu'],
     ['render_change', { scenes: [{ id: 'hall', scene: 'Great hall', camera: 'door', change: 'Warmer light', reference: true }] }, 'Great hall'],
   ])('draws a %s by its items', (type, typePlan, name) => {
     show('create', makeTask({ type, plan: typePlan }));
-    expect(screen.getByText(type === 'visual_bug' ? 'Visual bug' : 'Render change')).toBeVisible();
+    expect(screen.getByText(type === 'ui_bug' ? 'UI bug' : 'Render change')).toBeVisible();
     expect(screen.getByTestId('task-plan-item')).toHaveTextContent(name);
   });
 });

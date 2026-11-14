@@ -20,60 +20,142 @@ pub struct TaskType {
     /// Short field descriptions, as the docs give them.
     pub plan: &'static str,
     pub result: &'static str,
+    /// When to use the type, and what to use instead.
+    pub description: &'static str,
+    /// The default items every task of the type answers (catalog.rs):
+    /// `(id, text)`.
+    pub items: &'static [(&'static str, &'static str)],
 }
+
+const UI_ITEMS: &[(&str, &str)] = &[
+    ("existing-components", "Uses the app's existing components and styles; nothing new is built where one already exists"),
+    ("screen-sizes", "Screenshots at phone and desktop widths show nothing overflows, overlaps or is cut off"),
+    ("ui-copy", "New or changed text follows the ui-copy skill"),
+    ("edge-cases", "Long text, empty, loading and error states don't break the layout"),
+    ("keyboard", "Every control works with the keyboard and has an accessible name"),
+];
+
+const UI_BUG_ITEMS: &[(&str, &str)] = &[
+    ("repro-test", "A test reproduces the bug and fails before the fix"),
+    ("existing-components", "Uses the app's existing components and styles; nothing new is built where one already exists"),
+    ("screen-sizes", "Screenshots at phone and desktop widths show nothing overflows, overlaps or is cut off"),
+    ("ui-copy", "New or changed text follows the ui-copy skill"),
+    ("edge-cases", "Long text, empty, loading and error states don't break the layout"),
+    ("keyboard", "Every control works with the keyboard and has an accessible name"),
+];
+
+const RENDER_ITEMS: &[(&str, &str)] = &[
+    ("same-view", "Before and after are rendered from the same scene, camera and settings"),
+    ("frame-time", "Frame time is measured before and after, and is not worse beyond noise"),
+    ("artifacts", "Checked for new artifacts such as flicker, aliasing or banding, including in motion"),
+];
+
+const RENDER_BUG_ITEMS: &[(&str, &str)] = &[
+    ("repro-scene", "A saved scene shows the bug, so it can be rendered again"),
+    ("same-view", "Before and after are rendered from the same scene, camera and settings"),
+    ("frame-time", "Frame time is measured before and after, and is not worse beyond noise"),
+];
 
 pub const TYPES: &[TaskType] = &[
     TaskType { name: "bug", code: true, review: false,
         plan: "symptom, repro_steps[], expected, actual, suspected_area?",
-        result: "root_cause, fix, proof (evidence that it failed before and passes after), regression_checked[], screens[]? {name, before?, after} (required when the commits change visual files; use visual_bug for a bug you can see)" },
+        result: "root_cause, fix, proof (evidence that it failed before and passes after), regression_checked[], screens[]? {name, before?, after} (required when the commits change visual files; use ui_bug or render_bug for a bug you can see)",
+        description: "Something works wrong: a wrong result, a crash, an error, data lost. Not for a bug you judge by looking: use ui_bug for one on a screen, render_bug for one in a 3D render.",
+        items: &[
+            ("repro-test", "A test reproduces the bug and fails before the fix"),
+            ("same-bug-elsewhere", "Other code with the same pattern is checked for the same mistake"),
+        ] },
     TaskType { name: "feature", code: true, review: false,
         plan: "outcome, criteria[] {id, text}",
-        result: "criteria[] {id, met, evidence, reason?} (reason required when not met), screens[]? {name, before?, after} (required when the commits change visual files; use ui_feature or render_feature for anything visible)" },
+        result: "criteria[] {id, met, evidence, reason?} (reason required when not met), screens[]? {name, before?, after} (required when the commits change visual files; use ui_feature or render_feature for anything visible)",
+        description: "New behaviour with nothing new to see: a command, an API, a server or data feature. New work on a screen is ui_feature; in a 3D render, render_feature.",
+        items: &[
+            ("edge-cases", "Tests cover errors and edge cases, not just the main path"),
+            ("docs-updated", "Docs are updated where the feature changes how something is used"),
+        ] },
     TaskType { name: "ui_change", code: true, review: true,
         plan: "screens[] {id, name, how_to_reach, change}",
-        result: "screens[] {id, before, after, notes?} (before and after are paths to two different images)" },
+        result: "screens[] {id, before, after, notes?} (before and after are paths to two different images)",
+        description: "Change how a screen that already exists in the app looks or works: layout, wording, controls, styling. A new screen or control is ui_feature; something on screen that is broken is ui_bug.",
+        items: UI_ITEMS },
     TaskType { name: "ui_feature", code: true, review: true,
         plan: "outcome, screens[] {id, name, how_to_reach, shows, existed?} (shows: what the screen must show; existed: true when the screen was already there)",
-        result: "screens[] {id, after, before?, notes?} (after is an image of the screen with the feature; before is an image, required when the plan item has existed: true, and different from after)" },
-    TaskType { name: "visual_bug", code: true, review: true,
+        result: "screens[] {id, after, before?, notes?} (after is an image of the screen with the feature; before is an image, required when the plan item has existed: true, and different from after)",
+        description: "Add something new to the app's interface: a screen, panel, dialog, control or widget. Changing one that exists is ui_change.",
+        items: UI_ITEMS },
+    TaskType { name: "ui_bug", code: true, review: true,
         plan: "symptom, repro_steps[], expected, actual, suspected_area?, screens[] {id, name, how_to_reach}",
-        result: "root_cause, fix, screens[] {id, before, after, notes?} (before shows the bug, after shows it fixed: paths to two different images)" },
+        result: "root_cause, fix, screens[] {id, before, after, notes?} (before shows the bug, after shows it fixed: paths to two different images)",
+        description: "A bug you can see in the app's interface: a broken or overlapping layout, cut-off text, a control that doesn't respond, the wrong state shown. A bug in a 3D render is render_bug; a wrong result with nothing to see is bug.",
+        items: UI_BUG_ITEMS },
+    TaskType { name: "render_bug", code: true, review: true,
+        plan: "symptom, repro_steps[], expected, actual, suspected_area?, scenes[] {id, scene, camera, reference?} (camera is the camera settings as text; reference: true when a reference image must be given)",
+        result: "root_cause, fix, scenes[] {id, before, after, reference?, notes?} (before is a render showing the bug, after the same scene and camera fixed: two different images; reference is required when the plan item has reference: true)",
+        description: "A bug in what a 3D scene renders: wrong colours, lighting or shadows, artifacts such as flicker, aliasing or banding, missing or broken geometry. A bug in the app's interface is ui_bug.",
+        items: RENDER_BUG_ITEMS },
     TaskType { name: "render_change", code: true, review: true,
         plan: "scenes[] {id, scene, camera, change, reference?} (camera is the camera settings as text; reference: true when a reference image must be given)",
-        result: "scenes[] {id, before, after, reference?, notes?} (before and after are renders of the same scene and camera, two different images; reference is an image, required when the plan item has reference: true)" },
+        result: "scenes[] {id, before, after, reference?, notes?} (before and after are renders of the same scene and camera, two different images; reference is an image, required when the plan item has reference: true)",
+        description: "Change what an existing 3D scene renders: lighting, shading, materials, post-processing, camera. A new effect or technique is render_feature; something rendering wrong is render_bug.",
+        items: RENDER_ITEMS },
     TaskType { name: "render_feature", code: true, review: true,
         plan: "outcome, scenes[] {id, name, scene, camera, shows, existed?, reference?} (camera is the camera settings as text; shows: what the render must show; existed: true when the scene already rendered; reference: true when a reference image must be given)",
-        result: "scenes[] {id, after, before?, reference?, notes?} (images: before is required when the plan item has existed: true and differs from after; reference is required when the plan item has reference: true)" },
+        result: "scenes[] {id, after, before?, reference?, notes?} (images: before is required when the plan item has existed: true and differs from after; reference is required when the plan item has reference: true)",
+        description: "Add a new rendering capability to the 3D renderer: an effect, a pass, a technique. Changing how an existing scene looks is render_change.",
+        items: RENDER_ITEMS },
     TaskType { name: "optimization", code: true, review: false,
         plan: "targets[] {id, name, metric, unit, baseline, target, how_measured, environment, higher_is_better?} (baseline and target are numbers; lower is better unless higher_is_better)",
-        result: "method, targets[] {id, before, after, runs, why_faster?, failure_reason?} (met is worked out from after and target; why_faster required when met, failure_reason when not)" },
+        result: "method, targets[] {id, before, after, runs, why_faster?, failure_reason?} (met is worked out from after and target; why_faster required when met, failure_reason when not)",
+        description: "Make something measurably faster, smaller or cheaper, with a number before and after. Not for a fix that happens to be faster: that is bug.",
+        items: &[
+            ("measured-runs", "Measured over several runs after a warm-up, on the same machine and build, before and after"),
+            ("behaviour-unchanged", "Results are the same as before: tests pass, or outputs are compared"),
+        ] },
     TaskType { name: "plan", code: false, review: true,
         plan: "question, scope, constraints[]",
-        result: "document (markdown), decisions[], open_questions[], proposed_tasks[] {type, title, why}" },
+        result: "document (markdown), decisions[], open_questions[], proposed_tasks[] {type, title, why}",
+        description: "Decide how to do something before doing it: a written plan the owner reviews, ending in proposed tasks. No code changes.",
+        items: &[("options-weighed", "The options considered are listed, with why the others were rejected")] },
     TaskType { name: "investigation", code: false, review: false,
         plan: "questions[] {id, text}",
-        result: "answers[] {id, answer, evidence[], confidence: low|medium|high, recommendation?}" },
+        result: "answers[] {id, answer, evidence[], confidence: low|medium|high, recommendation?}",
+        description: "Answer questions about the code, a problem or a tool without changing code, with evidence for each answer.",
+        items: &[] },
     TaskType { name: "refactor", code: true, review: false,
         plan: "change, reason, invariants[] {id, text}",
-        result: "invariants[] {id, how_verified}, files_changed, net_lines, deviations[]" },
+        result: "invariants[] {id, how_verified}, files_changed, net_lines, deviations[]",
+        description: "Change how code is structured without changing what it does. Anything users would notice is not a refactor.",
+        items: &[("behaviour-unchanged", "Characterisation tests pin the current behaviour and pass before and after")] },
     TaskType { name: "tests", code: true, review: false,
         plan: "behaviors[] {id, text}",
-        result: "behaviors[] {id, test_path, test_name, fails_without_code, reason?} (reason required when fails_without_code is false)" },
+        result: "behaviors[] {id, test_path, test_name, fails_without_code, reason?} (reason required when fails_without_code is false)",
+        description: "Add or fix tests for behaviour that already exists, without changing that behaviour.",
+        items: &[("not-flaky", "The new tests pass several runs in a row")] },
     TaskType { name: "review", code: false, review: false,
         plan: "target (diff, branch or commit range), focus[]",
-        result: "verdict: approve|changes_needed, findings[] {severity: high|medium|low, location, summary, failure_scenario}" },
+        result: "verdict: approve|changes_needed, findings[] {severity: high|medium|low, location, summary, failure_scenario}",
+        description: "Review a diff, branch or range of commits and report findings. No code changes.",
+        items: &[] },
     TaskType { name: "qa", code: false, review: false,
         plan: "scenarios[] {id, steps[], expected}",
-        result: "scenarios[] {id, passed, evidence, notes?} (notes required when not passed)" },
+        result: "scenarios[] {id, passed, evidence, notes?} (notes required when not passed)",
+        description: "Test a change the way a user would, in the running app, and report what passed and failed. No code changes.",
+        items: &[] },
     TaskType { name: "docs", code: true, review: false,
         plan: "audience, pages[] {id, path, change}",
-        result: "pages[] {id, path, what_changed}" },
+        result: "pages[] {id, path, what_changed}",
+        description: "Write or update documentation: guides, references, READMEs, agent guidance.",
+        items: &[("commands-work", "Every command, path and option in the changed pages exists and works as written")] },
     TaskType { name: "chore", code: true, review: false,
         plan: "steps[] {id, text}",
-        result: "steps[] {id, done, output?, reason?} (reason required when not done)" },
+        result: "steps[] {id, done, output?, reason?} (reason required when not done)",
+        description: "Upkeep with no change in behaviour: dependencies, config, build scripts, cleanup.",
+        items: &[] },
     TaskType { name: "general", code: false, review: false,
         plan: "outcome, done_when[] {id, text}",
-        result: "done_when[] {id, met, evidence, reason?} (reason required when not met)" },
+        result: "done_when[] {id, met, evidence, reason?} (reason required when not met)",
+        description: "Work that fits no other type. Pick a more specific type whenever one fits.",
+        items: &[] },
 ];
 
 pub fn find(name: &str) -> Option<&'static TaskType> {
@@ -220,11 +302,17 @@ pub(super) fn examples(name: &str) -> (Value, Value) {
                 {"id": "sponza", "name": "Sponza at noon", "scene": "scenes/sponza.gltf", "camera": "position 0 2 8, look at 0 1 0, fov 60", "shows": "Sky light and soft sky shadows", "existed": true, "reference": true}]}),
             json!({"scenes": [{"id": "sponza", "before": "renders/sponza-before.png", "after": "renders/sponza-after.png", "reference": "renders/sponza-reference.png", "notes": "1024 samples"}]}),
         ),
-        "visual_bug" => (
+        "ui_bug" => (
             json!({"symptom": "Menu icons are blurry on 2x screens", "repro_steps": ["Open the app on a 2x display", "Open the settings menu"], "expected": "Sharp icons", "actual": "Blurry icons", "suspected_area": "src/icons/sprite.png",
                 "screens": [{"id": "menu", "name": "Settings menu", "how_to_reach": "Header > Settings"}]}),
             json!({"root_cause": "Icons were 1x PNG sprites scaled up", "fix": "Draw the icons as inline SVG",
                 "screens": [{"id": "menu", "before": "shots/menu-before.png", "after": "shots/menu-after.png", "notes": "Dark theme checked too"}]}),
+        ),
+        "render_bug" => (
+            json!({"symptom": "Shadows flicker on the floor as the camera moves", "repro_steps": ["Open scenes/sponza.gltf", "Move the camera slowly along the hall"], "expected": "Steady shadows", "actual": "Shadow edges flicker", "suspected_area": "src/render/shadows.rs",
+                "scenes": [{"id": "sponza", "scene": "scenes/sponza.gltf", "camera": "position 0 2 8, look at 0 1 0, fov 60"}]}),
+            json!({"root_cause": "The shadow map was not snapped to texels, so it shimmered as the camera moved", "fix": "Snap the shadow camera to whole texels",
+                "scenes": [{"id": "sponza", "before": "renders/sponza-before.png", "after": "renders/sponza-after.png", "notes": "Checked in motion too"}]}),
         ),
         "render_change" => (
             json!({"scenes": [{"id": "sponza", "scene": "scenes/sponza.gltf", "camera": "position 0 2 8, look at 0 1 0, fov 60", "change": "Soft shadows from the sun light", "reference": true}]}),
@@ -681,7 +769,7 @@ fn check_plan_fields(kind: &str, plan: &Value) -> Result<(), String> {
                 optional_boolean(entry, "reference", &path)?;
             }
         }
-        "visual_bug" => {
+        "ui_bug" => {
             only(row, &["symptom", "repro_steps", "expected", "actual", "suspected_area", "screens"], at)?;
             text(row, "symptom", at)?;
             texts(row, "repro_steps", at, 1)?;
@@ -693,6 +781,20 @@ fn check_plan_fields(kind: &str, plan: &Value) -> Result<(), String> {
                 text(entry, "how_to_reach", &path)?;
             }
         }
+        "render_bug" => {
+            only(row, &["symptom", "repro_steps", "expected", "actual", "suspected_area", "scenes"], at)?;
+            text(row, "symptom", at)?;
+            texts(row, "repro_steps", at, 1)?;
+            text(row, "expected", at)?;
+            text(row, "actual", at)?;
+            optional_text(row, "suspected_area", at)?;
+            for (_, entry, path) in plan_items(row, "scenes", at, &["id", "scene", "camera", "reference"])? {
+                text(entry, "scene", &path)?;
+                text(entry, "camera", &path)?;
+                optional_boolean(entry, "reference", &path)?;
+            }
+        }
+        "visual_bug" => return Err("visual_bug is no longer a task type: use ui_bug for a bug you see in the app's interface, or render_bug for a bug in what a 3D scene renders".into()),
         "render_change" => {
             only(row, &["scenes"], at)?;
             for (_, entry, path) in plan_items(row, "scenes", at, &["id", "scene", "camera", "change", "reference"])? {
@@ -808,8 +910,8 @@ pub fn item_lists(kind: &str) -> Option<(&'static str, &'static str)> {
     Some(match shape(kind) {
         "feature" => ("criteria", "criteria"),
         "general" => ("done_when", "done_when"),
-        "ui_change" | "ui_feature" | "visual_bug" => ("screens", "screens"),
-        "render_change" | "render_feature" => ("scenes", "scenes"),
+        "ui_change" | "ui_feature" | "ui_bug" => ("screens", "screens"),
+        "render_change" | "render_feature" | "render_bug" => ("scenes", "scenes"),
         "optimization" => ("targets", "targets"),
         "investigation" => ("questions", "answers"),
         "refactor" => ("invariants", "invariants"),
@@ -825,8 +927,8 @@ pub fn item_lists(kind: &str) -> Option<(&'static str, &'static str)> {
 fn entry_fields(kind: &str) -> &'static [&'static str] {
     match shape(kind) {
         "feature" | "general" => &["id", "met", "evidence", "reason"],
-        "ui_change" | "ui_feature" | "visual_bug" => &["id", "before", "after", "notes"],
-        "render_change" | "render_feature" => &["id", "before", "after", "reference", "notes"],
+        "ui_change" | "ui_feature" | "ui_bug" => &["id", "before", "after", "notes"],
+        "render_change" | "render_feature" | "render_bug" => &["id", "before", "after", "reference", "notes"],
         "optimization" => &["id", "before", "after", "runs", "why_faster", "failure_reason"],
         "investigation" => &["id", "answer", "evidence", "confidence", "recommendation"],
         "refactor" => &["id", "how_verified"],
@@ -855,7 +957,7 @@ fn check_item(kind: &str, plan_item: &Value, entry: &Row, path: &str) -> Result<
             let reason = optional_text(entry, "reason", path)?;
             unmet(met, reason, "reason", "met is false")
         }
-        "ui_change" | "ui_feature" | "visual_bug" | "render_change" | "render_feature" => {
+        "ui_change" | "ui_feature" | "ui_bug" | "render_change" | "render_feature" | "render_bug" => {
             // A feature's new screen or scene has nothing to show before it.
             let feature = matches!(kind, "ui_feature" | "render_feature");
             let existed = plan_item.get("existed").and_then(Value::as_bool).unwrap_or(false);
@@ -941,7 +1043,7 @@ fn check_item(kind: &str, plan_item: &Value, entry: &Row, path: &str) -> Result<
 
 /// The types whose every item is proved with images: what to use for
 /// anything visible.
-pub const VISUAL_TYPES: &[&str] = &["ui_change", "ui_feature", "visual_bug", "render_change", "render_feature"];
+pub const VISUAL_TYPES: &[&str] = &["ui_change", "ui_feature", "ui_bug", "render_change", "render_feature", "render_bug"];
 
 /// Whether a type's every item is proved with before and after images.
 pub fn is_visual(kind: &str) -> bool {
@@ -1054,8 +1156,9 @@ pub fn check_result(kind: &str, plan: &Value, result: &Value) -> Result<Vec<Stri
     let mut unmet = Vec::new();
     let kind = shape(kind);
     match kind {
-        "visual_bug" => {
-            only(row, &["root_cause", "fix", "screens"], at)?;
+        "ui_bug" | "render_bug" => {
+            let (_, list) = item_lists(kind).unwrap();
+            only(row, &["root_cause", "fix", list], at)?;
             text(row, "root_cause", at)?;
             text(row, "fix", at)?;
             check_items(kind, plan, row, at, &mut unmet)?;
@@ -1274,7 +1377,7 @@ mod tests {
 
     #[test]
     fn visual_types_need_two_different_stored_images() {
-        for kind in ["ui_change", "visual_bug", "render_change"] {
+        for kind in ["ui_change", "ui_bug", "render_change"] {
             let (plan, mut result) = examples(kind);
             let key = item_lists(kind).unwrap().1;
             result[key][0]["reference"] = json!(asset('c'));
@@ -1302,19 +1405,19 @@ mod tests {
     }
 
     #[test]
-    fn visual_bug_has_the_bug_fields_and_screens() {
-        let plan = examples("visual_bug").0;
+    fn ui_bug_has_the_bug_fields_and_screens() {
+        let plan = examples("ui_bug").0;
         let mut without = plan.clone();
         without.as_object_mut().unwrap().remove("screens");
-        assert_eq!(plan_error("visual_bug", without), "plan: screens is required (a list)");
-        assert!(plan_error("visual_bug", json!({"symptom": "s", "repro_steps": ["a"], "expected": "e", "actual": "a",
+        assert_eq!(plan_error("ui_bug", without), "plan: screens is required (a list)");
+        assert!(plan_error("ui_bug", json!({"symptom": "s", "repro_steps": ["a"], "expected": "e", "actual": "a",
             "screens": [{"id": "x", "name": "n"}]})).contains("how_to_reach is required"));
         let screens = json!([{"id": "menu", "before": asset('a'), "after": asset('b')}]);
-        assert_eq!(result_error("visual_bug", plan.clone(), json!({"fix": "f", "screens": screens})),
+        assert_eq!(result_error("ui_bug", plan.clone(), json!({"fix": "f", "screens": screens})),
             "result: root_cause is required (text)");
-        assert!(check_result("visual_bug", &plan, &json!({"root_cause": "r", "fix": "f", "screens": screens})).unwrap().is_empty());
-        assert_eq!(item_lists("visual_bug"), Some(("screens", "screens")));
-        assert!(find("visual_bug").unwrap().review && find("visual_bug").unwrap().code);
+        assert!(check_result("ui_bug", &plan, &json!({"root_cause": "r", "fix": "f", "screens": screens})).unwrap().is_empty());
+        assert_eq!(item_lists("ui_bug"), Some(("screens", "screens")));
+        assert!(find("ui_bug").unwrap().review && find("ui_bug").unwrap().code);
     }
 
     #[test]
@@ -1465,7 +1568,7 @@ mod tests {
     fn plan_type() {
         let plan = examples("plan").0;
         assert_eq!(result_error("plan", plan.clone(), json!({"document": "d", "decisions": [], "open_questions": [], "proposed_tasks": [{"type": "epic", "title": "t", "why": "w"}]})),
-            "result.proposed_tasks[0]: type \"epic\" is not a task type (types: bug, feature, ui_change, ui_feature, visual_bug, render_change, render_feature, optimization, plan, investigation, refactor, tests, review, qa, docs, chore, general)");
+            "result.proposed_tasks[0]: type \"epic\" is not a task type (types: bug, feature, ui_change, ui_feature, ui_bug, render_bug, render_change, render_feature, optimization, plan, investigation, refactor, tests, review, qa, docs, chore, general)");
         assert_eq!(result_error("plan", plan, json!({"decisions": [], "open_questions": [], "proposed_tasks": []})),
             "result: document is required (text)");
     }

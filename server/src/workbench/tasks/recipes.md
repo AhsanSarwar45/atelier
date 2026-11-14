@@ -137,7 +137,7 @@ only against an approved baseline listed in `files`.
 ]
 ```
 
-## visual_bug
+## ui_bug
 
 A Playwright test that reproduces what is wrong on screen, asserting a
 measurable fact (an element visible, a box inside its parent, a computed
@@ -149,6 +149,22 @@ style), plus a screenshot compare when an approved good capture exists.
    "command": "npx playwright test tests/e2e/sidebar.spec.ts -g 'long titles stay inside'",
    "given": "a chat titled with 200 characters", "when": "the sidebar is 240px wide", "then": "the title's box ends inside the sidebar",
    "red": "long titles stay inside.*failed|toBeLessThanOrEqual", "files": ["tests/e2e/sidebar.spec.ts"]}
+]
+```
+
+## render_bug
+
+A render of a saved scene that shows the bug, compared against an approved
+good reference or checked for a measurable fact (no pixel differs between
+two frames of a still camera, a region's mean colour within a tolerance),
+plus determinism.
+
+```json
+[
+  {"name": "no-shadow-flicker", "kind": "test",
+   "command": "cargo run -q -p render-check -- --scene scenes/hall.ron --camera door --frames 2 --max-frame-rmse 0",
+   "given": "the hall scene from the door camera, standing still", "when": "two frames render", "then": "the frames are identical: the shadows do not flicker",
+   "red": "frame rmse=[0-9.]+ > 0", "files": ["scenes/hall.ron", "tools/render-check/src/main.rs"]}
 ]
 ```
 

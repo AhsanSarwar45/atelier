@@ -260,7 +260,7 @@ async fn print_types(rest: &[String]) -> Result<i32, String> {
                 "Every create and propose gives `decisions`: one line for every type above, why the chosen type fits and why each other one does not. A type's default items go in plan.requirements, each with checks or a declined reason."
             );
             println!(
-                "\nAnything visible on screen or in a render uses a visual type: {}. Pick ui_feature or render_feature for new work you can see (not feature), visual_bug for a bug you can see (not bug). Every item needs real images: an after, and a before (different from it) where the screen or scene already existed.",
+                "\nAnything visible on screen or in a render uses a visual type: {}. Pick ui_feature or render_feature for new work you can see (not feature); ui_bug for a bug in the app's interface and render_bug for a bug in what a 3D scene renders (not bug). Every item needs real images: an after, and a before (different from it) where the screen or scene already existed.",
                 types::VISUAL_TYPES.join(", ")
             );
             println!(

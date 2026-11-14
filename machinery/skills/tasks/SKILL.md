@@ -65,8 +65,8 @@ Run each `atelier task` command as its own command and leave its output
 alone. It prints the task card the owner sees in the chat. Never send it to
 `/dev/null`, pipe it away, or bundle it into one command with the work.
 
-Types: `bug`, `feature`, `ui_change`, `ui_feature`, `visual_bug`,
-`render_change`, `render_feature`, `optimization`, `plan`, `investigation`,
+Types: `bug`, `feature`, `ui_change`, `ui_feature`, `ui_bug`,
+`render_change`, `render_feature`, `render_bug`, `optimization`, `plan`, `investigation`,
 `refactor`, `tests`, `review`, `qa`, `docs`, `chore`, `general`, plus any
 the install or project adds. `atelier task types` lists the ones on for
 this project, with their default items. Use `general` only when no other
@@ -103,8 +103,12 @@ owner asks or the project clearly repeats the same work.
 Anything you can see on screen or in a render takes a visual type:
 `ui_feature` for new work you can see on screen, `render_feature` for new
 work you can see in a 3D render (not `feature`), `ui_change` to change a
-screen that is there, `render_change` to change what a scene renders, and
-`visual_bug` for a bug you can see (not `bug`). Their checks test behaviour;
+screen that is there, `render_change` to change what a scene renders,
+`ui_bug` for a bug you see in the app's interface (a broken layout, cut-off
+text, a control that doesn't respond) and `render_bug` for a bug in what a
+3D scene renders (wrong lighting or shadows, flicker, aliasing, missing
+geometry). Neither is `bug`, which is for wrong behaviour with nothing to
+see. Their checks test behaviour;
 the owner judges the look at review from the `before`, `after` (and
 `reference`) images the type's result asks for.
 

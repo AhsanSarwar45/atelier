@@ -50,20 +50,23 @@ pub struct Catalog {
 }
 
 impl Default for Catalog {
-    /// The built-in types with no default items.
+    /// The built-in types without their default items: what a request
+    /// carries when its caller gave no catalog. The app always loads one
+    /// (`Catalog::load`), which has the default items.
     fn default() -> Self {
-        Catalog { entries: types::TYPES.iter().map(built_in).collect(), off: Vec::new(), off_install: Vec::new() }
+        let entries = types::TYPES.iter().map(built_in).map(|entry| Entry { items: Vec::new(), ..entry }).collect();
+        Catalog { entries, off: Vec::new(), off_install: Vec::new() }
     }
 }
 
 fn built_in(kind: &types::TaskType) -> Entry {
     Entry {
         name: kind.name.into(),
-        description: format!("plan: {}", kind.plan),
+        description: kind.description.into(),
         code: kind.code,
         review: kind.review,
         custom: false,
-        items: Vec::new(),
+        items: kind.items.iter().map(|(id, text)| json!({"id": id, "text": text})).collect(),
     }
 }
 

@@ -7,7 +7,7 @@
  * holds them. Read loosely, like the rest of the card.
  */
 import { itemChecks, itemRuns, tally, type CheckTally } from '@/workbench/tasks/checks';
-import { targetMet, type OptimizationTarget, type Task } from '@/workbench/tasks/types';
+import { LEGACY_TYPES, targetMet, type OptimizationTarget, type Task } from '@/workbench/tasks/types';
 
 type Loose = Record<string, unknown>;
 const rec = (value: unknown): Loose => (typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Loose : {});
@@ -20,7 +20,8 @@ export const ITEM_LISTS: Readonly<Record<string, { plan: string; result: string 
   general: { plan: 'done_when', result: 'done_when' },
   ui_change: { plan: 'screens', result: 'screens' },
   ui_feature: { plan: 'screens', result: 'screens' },
-  visual_bug: { plan: 'screens', result: 'screens' },
+  ui_bug: { plan: 'screens', result: 'screens' },
+  render_bug: { plan: 'scenes', result: 'scenes' },
   render_change: { plan: 'scenes', result: 'scenes' },
   render_feature: { plan: 'scenes', result: 'scenes' },
   optimization: { plan: 'targets', result: 'targets' },
@@ -36,7 +37,7 @@ export const ITEM_LISTS: Readonly<Record<string, { plan: string; result: string 
  * The type whose plan and result a task follows: its own, or the built-in
  * one a type the install or project made is planned like (`shape`).
  */
-export const shapeOf = (task: { type: string; shape?: string | null }): string => task.shape || task.type;
+export const shapeOf = (task: { type: string; shape?: string | null }): string => task.shape || LEGACY_TYPES[task.type] || task.type;
 
 /** Met, missed (with its reason), or not recorded yet. */
 export type ItemState = 'met' | 'missed' | 'open';
@@ -73,11 +74,12 @@ export function itemText(type: string, item: Loose): string {
   switch (type) {
     case 'ui_change':
     case 'ui_feature':
-    case 'visual_bug':
+    case 'ui_bug':
     case 'render_feature':
     case 'optimization':
       return str(item.name);
     case 'render_change':
+    case 'render_bug':
       return str(item.scene);
     case 'qa':
       return str(item.expected);
@@ -160,7 +162,7 @@ export function itemProgress(task: Pick<Task, 'type' | 'shape' | 'plan' | 'resul
 }
 
 /** The types whose items are proved with before and after images. */
-export const VISUAL_TYPES: ReadonlySet<string> = new Set(['ui_change', 'ui_feature', 'visual_bug', 'render_change', 'render_feature']);
+export const VISUAL_TYPES: ReadonlySet<string> = new Set(['ui_change', 'ui_feature', 'ui_bug', 'render_change', 'render_feature', 'render_bug']);
 
 export interface ItemCounts { met: number; missed: number; total: number }
 
