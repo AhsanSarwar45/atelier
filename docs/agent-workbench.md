@@ -2480,6 +2480,42 @@ No price, ever: tokens are never converted into money anywhere in this app
 
 ---
 
+### 8.8 Orchestrator chats and their workers
+
+A chat can hand its coding to worker chats. The owner turns on **Workers** in
+the New chat dialog and picks the agent and account the workers run on. That
+chat is the orchestrator: it turns requests into plans, starts workers, reads
+their reports and checks their work. It may still edit files itself.
+
+The orchestrator drives its workers with one command, run from inside its own
+chat (the chat is named by `ATELIER_CHAT_SESSION_ID`):
+
+```
+atelier tool worker start --title TITLE [--brief FILE | --text TEXT]   brief from stdin otherwise
+atelier tool worker send ID [--message FILE | --text TEXT]             message from stdin otherwise
+atelier tool worker list
+atelier tool worker read ID [--all]
+atelier tool worker stop ID
+```
+
+- A worker is an ordinary chat in the orchestrator's folder, on the chosen
+  agent and account, with `parentSessionId` set to the orchestrator.
+- Only one worker may be mid-turn in a folder at a time; `start` and `send`
+  refuse while another is working there.
+- When a worker's turn ends, Atelier tells the orchestrator: a short line
+  ("Worker "Login form" finished") and the worker's latest messages in an
+  `atelier_worker_report` block. An orchestrator mid-turn gets it when its turn
+  ends.
+- Both roles get their own section in the system prompt
+  (`session_policy::role_section`): the orchestrator learns the commands and to
+  end its turn while workers run; a worker learns to finish with Done, Left,
+  Blocked, Files changed and Checks run.
+- In the chat list, workers sit under their orchestrator and fold away with
+  **Hide workers**. The orchestrator's details list its workers with a **Stop
+  workers** button; a worker's details link back with **Worker of …**.
+
+The design is docs/designs/orchestrator-workers.md.
+
 ## 9. Files
 
 ### 9.1 Upstream files touched — the whole budget

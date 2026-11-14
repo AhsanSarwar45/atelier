@@ -55,6 +55,10 @@ pub const COMMAND: &str = "atelier_command";
 /// What the chats, skills, diffs and tasks a message names are, sent after it
 /// (`references.rs`, bw-mi3s.2).
 pub const REFERENCES: &str = "atelier_references";
+/// What a worker chat did in the turn that just ended, sent to its
+/// orchestrator after the short line the owner sees
+/// (docs/designs/orchestrator-workers.md).
+pub const WORKER_REPORT: &str = "atelier_worker_report";
 
 /// One block Atelier adds to a message, in the form `persons_words` removes.
 ///
@@ -63,7 +67,7 @@ pub const REFERENCES: &str = "atelier_references";
 /// `&lt;` and cannot end the block early (bw-zldt.1).
 pub fn added_by_atelier(tag: &str, body: &str) -> String {
     let mut body = body.to_string();
-    for inner in [GUIDANCE, HANDOFF, COMMAND, REFERENCES] {
+    for inner in [GUIDANCE, HANDOFF, COMMAND, REFERENCES, WORKER_REPORT] {
         for written in [format!("<{inner}>"), format!("</{inner}>")] {
             body = body.replace(&written, &format!("&lt;{}", &written[1..]));
         }
@@ -77,7 +81,7 @@ pub fn persons_words(message: &str) -> String {
     // A command's instructions are added after what the person typed, and
     // their own tags inside it are escaped, so the last opening is Atelier's;
     // one the person typed in front of it is theirs (bw-zldt.1).
-    for tag in [REFERENCES, COMMAND] {
+    for tag in [REFERENCES, COMMAND, WORKER_REPORT] {
         let (opening, closing) = (format!("<{tag}>"), format!("</{tag}>"));
         if let Some(start) = rest.rfind(&opening) {
             if let Some(at) = rest[start..].find(&closing) {

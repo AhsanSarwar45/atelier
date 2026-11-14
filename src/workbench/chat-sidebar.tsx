@@ -23,7 +23,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ArrowLeftRight, Bot, ChevronDown, Copy, ExternalLink, Hand, MoreVertical, Pencil, Plus, Power, Search } from 'lucide-react';
+import { ArrowLeftRight, Bot, ChevronDown, ChevronRight, Copy, ExternalLink, Hand, MoreVertical, Pencil, Plus, Power, Search } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -130,6 +130,26 @@ export function groupRows(rows: RestoreRow[], now = new Date()): { heading: stri
     else groups.push({ heading, rows: [row] });
   }
   return groups;
+}
+
+/**
+ * The list with worker chats taken out of it, and each orchestrator's
+ * workers in list order. A worker whose orchestrator is not in the list
+ * stays a row of its own, so no chat is ever out of sight.
+ */
+export function nestWorkers(rows: RestoreRow[]): { topLevel: RestoreRow[]; workersOf: Map<string, RestoreRow[]> } {
+  const present = new Set(rows.map((row) => row.sessionId).filter(Boolean));
+  const workersOf = new Map<string, RestoreRow[]>();
+  const topLevel: RestoreRow[] = [];
+  for (const row of rows) {
+    const parent = row.parentSessionId;
+    if (parent && present.has(parent) && parent !== row.sessionId) {
+      workersOf.set(parent, [...(workersOf.get(parent) ?? []), row]);
+    } else {
+      topLevel.push(row);
+    }
+  }
+  return { topLevel, workersOf };
 }
 
 function rowKey(row: RestoreRow): string {
@@ -1041,6 +1061,15 @@ export const ChatSidebar = memo(function ChatSidebar({
   // would otherwise draw every one of them before the first is on screen
   // (docs/designs/app-shell.md §1.6, §3).
   const [shown, setShown] = useState(SCREENFUL);
+  // Orchestrators whose workers the owner folded away, by row key.
+  const [foldedWorkers, setFoldedWorkers] = useState<ReadonlySet<string>>(() => new Set());
+  const flipWorkers = useCallback((key: string) => {
+    setFoldedWorkers((folded) => {
+      const next = new Set(folded);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }, []);
   const foot = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => setShown(SCREENFUL), [projectId]);
@@ -1216,7 +1245,11 @@ export const ChatSidebar = memo(function ChatSidebar({
     </>
   ), [rename, renaming, title]);
 
-  const groups = groupRows(rows.slice(0, shown));
+  // Worker chats sit under the orchestrator that started them rather than in
+  // the day groups, when that orchestrator is in the list too
+  // (docs/designs/orchestrator-workers.md).
+  const { topLevel, workersOf } = useMemo(() => nestWorkers(rows), [rows]);
+  const groups = groupRows(topLevel.slice(0, shown));
 
   return (
     <aside
@@ -1263,18 +1296,46 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
             {group.rows.map((row) => {
               const key = rowKey(row);
+              const drawRow = (one: RestoreRow) => {
+                const oneKey = rowKey(one);
+                return (
+                  <ChatRow
+                    key={oneKey}
+                    row={one}
+                    open={Boolean(one.sessionId) && one.sessionId === openSessionId}
+                    busy={busy === oneKey}
+                    ending={ending === oneKey}
+                    onEnter={enter}
+                    onEnd={end}
+                    onMenu={openMenu}
+                    waiting={badgeWord(waitingInChat(waiting, one.sessionId))}
+                  />
+                );
+              };
+              const workers = row.sessionId ? workersOf.get(row.sessionId) : undefined;
+              if (!workers) return drawRow(row);
+              const folded = foldedWorkers.has(key);
               return (
-                <ChatRow
-                  key={key}
-                  row={row}
-                  open={Boolean(row.sessionId) && row.sessionId === openSessionId}
-                  busy={busy === key}
-                  ending={ending === key}
-                  onEnter={enter}
-                  onEnd={end}
-                  onMenu={openMenu}
-                  waiting={badgeWord(waitingInChat(waiting, row.sessionId))}
-                />
+                <div key={key} data-testid="orchestrator-rows">
+                  {drawRow(row)}
+                  <Button
+                    variant="ghost"
+                    size="2xs"
+                    aria-label={folded ? 'Show workers' : 'Hide workers'}
+                    aria-expanded={!folded}
+                    data-testid="workers-fold"
+                    onClick={() => flipWorkers(key)}
+                    className="ml-4 text-muted-foreground"
+                  >
+                    {folded ? <ChevronRight /> : <ChevronDown />}
+                    {workers.length === 1 ? '1 worker' : `${workers.length} workers`}
+                  </Button>
+                  {!folded && (
+                    <div data-testid="worker-rows" className="ml-5 border-l border-border/60">
+                      {workers.map(drawRow)}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

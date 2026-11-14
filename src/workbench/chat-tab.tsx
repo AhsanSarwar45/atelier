@@ -69,7 +69,9 @@ import { currentProviderMessages } from '@/workbench/provider-messages';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { openableAsks, openableIn } from '@/workbench/mentions';
-import { loadNewChatDefaults, NO_DEFAULTS, saveNewChatProfile, saveNewChatProvider, type NewChatDefaults } from '@/workbench/new-chat-defaults';
+import { loadNewChatDefaults, NO_DEFAULTS, saveNewChatProfile, saveNewChatProvider, saveNewChatWorkers, type NewChatDefaults } from '@/workbench/new-chat-defaults';
+import { WorkersChoicePicker } from '@/workbench/workers-choice';
+import { useWorkerLinks } from '@/workbench/workers-section';
 import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
 import { pathsIn, type Rooted } from '@/workbench/paths';
@@ -79,7 +81,7 @@ import { usePathsOnDisk, type Disk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, HeldMessage, ImagePayload, LookableImage, OnLook, ProfileChoice, SessionConfigOption } from '@/workbench/protocol';
+import type { Brand, HeldMessage, ImagePayload, LookableImage, OnLook, ProfileChoice, SessionConfigOption, WorkersChoice } from '@/workbench/protocol';
 import { opens } from '@/workbench/attachment-look';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
@@ -1198,6 +1200,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       .then(setNewChatDefaults)
       .catch((e: unknown) => setStartError(e instanceof Error ? e.message : String(e)));
   }, []);
+  /**
+   * Where the next chat's workers run, as picked in this dialog; `undefined`
+   * until something is picked, which leaves the dialog on the choice last
+   * used (docs/designs/orchestrator-workers.md).
+   */
+  const [newWorkers, setNewWorkers] = useState<WorkersChoice | null | undefined>(undefined);
+  const workersChoice = newWorkers === undefined ? newChatDefaults.workers ?? null : newWorkers;
   /** What went wrong the last time he changed the mode or the model. */
   const [steerError, setSteerError] = useState<string | null>(null);
   /** Why the last thing he wrote did not go, if it did not go. */
@@ -1216,6 +1225,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     brand: Brand = newBrand,
     where: Where = { kind: 'project' },
     profileId?: string,
+    workers?: WorkersChoice | null,
   ) => {
     if (!projectId || !projectPath) return;
     if (!providerIsAvailable(providers, brand)) {
@@ -1257,7 +1267,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       }
       open(id);
       moved = true;
-      await sendCommand(startingChat(projectId, projectPath, brand, workingIn, profileId, id));
+      await sendCommand(startingChat(projectId, projectPath, brand, workingIn, profileId, id, workers));
       setStarting(null);
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e));
@@ -1417,6 +1427,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // is not a press outside it.
   const chatListId = useId();
   const detailsId = useId();
+  // Worker chats this one started, or the chat that started it (docs/designs/orchestrator-workers.md).
+  const workerLinks = useWorkerLinks(projectId ?? '', projectPath ?? '', sessionId ?? '');
   /**
    * Whether this chat's diff is on screen (bw-v79ny.4).
    *
@@ -2582,6 +2594,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               )}
             </div>
           )}
+          {!moving && (
+            <WorkersChoicePicker
+              choice={workersChoice}
+              onChange={setNewWorkers}
+              providers={providers}
+              accounts={accounts}
+              starred={newChatDefaults.profiles}
+              chatBrand={newBrand}
+            />
+          )}
           {projectPath && !moving && (
             <WhereToWork
               projectPath={projectPath}
@@ -2612,7 +2634,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               onClick={() => {
                 setShowing(null);
                 setRailOpen(false);
-                void start(newBrand, newWhere, newBrand === 'local' ? undefined : newAccount);
+                void start(newBrand, newWhere, newBrand === 'local' ? undefined : newAccount, workersChoice);
+                // Remembered like the stars are: the next chat opens on it.
+                setNewChatDefaults((was) => ({ ...was, workers: workersChoice }));
+                setNewWorkers(undefined);
+                void saveNewChatWorkers(workersChoice)
+                  .then(setNewChatDefaults)
+                  .catch((e: unknown) => setStartError(e instanceof Error ? e.message : String(e)));
               }}
             >
               {starting ? 'Starting…' : 'Start chat'}
@@ -2622,7 +2650,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </DialogContent>
       </Dialog>
     </>
-  ), [confirmSwitch, moving, newAccount, newAccounts, newAccountsUnread, newBrand, newStanding, newBrandAvailable, newChatDefault, newChatDefaults.profiles, newWhere, projectId, projectPath, providers, sessionBrand, sessionId, setNewChatDefault, setNewChatProfile, showing, start, starting, switchError, view.profile, whereMissing]);
+  ), [accounts, confirmSwitch, moving, newAccount, newAccounts, newAccountsUnread, newBrand, newStanding, newBrandAvailable, newChatDefault, newChatDefaults.profiles, newWhere, projectId, projectPath, providers, sessionBrand, sessionId, setNewChatDefault, setNewChatProfile, showing, start, starting, switchError, view.profile, whereMissing, workersChoice]);
 
   const chatList = useMemo(() => (
     <>
@@ -2706,6 +2734,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             sessionId={sessionId}
             agentControls={view.menu.agentControls}
             onOpenAgent={selectAgent}
+            workers={workerLinks.workers}
+            orchestrator={workerLinks.orchestrator}
+            onOpenChat={open}
             open={rightOpen}
             view={gitOpen ? 'git' : 'chat'}
             projectPath={projectPath}
@@ -2728,7 +2759,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </>
       )}
     </>
-  ), [changeRightWidth, detailsId, diffOpen, facts, flipRight, gitOpen, leftOpen, leftWidth, openCommit, pickView, projectId, projectPath, resizingRight, rightOpen, rightWidth, sessionId, showCommitInDiff, showFileInDiff, showTheDiff, showWorkingTreeInDiff, view.agents, view.finishedAgentCount, railItems, view.menu.agentControls, selectAgent]);
+  ), [changeRightWidth, detailsId, diffOpen, facts, flipRight, gitOpen, leftOpen, leftWidth, openCommit, pickView, projectId, projectPath, resizingRight, rightOpen, rightWidth, sessionId, showCommitInDiff, showFileInDiff, showTheDiff, showWorkingTreeInDiff, view.agents, view.finishedAgentCount, railItems, view.menu.agentControls, selectAgent, workerLinks, open]);
 
   const statusLine = useMemo(() => (
     <>

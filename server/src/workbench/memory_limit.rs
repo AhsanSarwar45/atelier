@@ -672,6 +672,8 @@ mod tests {
                 begun_by: Some("person".into()),
                 named_by_owner: false,
                 auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             }
         }
 

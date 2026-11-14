@@ -1797,6 +1797,8 @@ mod tests {
             collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
             origin: "app".into(), created_at: "2026-09-14T00:00:00Z".into(),
             last_active_at: "2026-09-14T00:00:00Z".into(), last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         for row in [session("open", "codex"), session("saved", "codex"), session("other", "claude")] {
             store.create_session(&row).unwrap();
@@ -1851,6 +1853,8 @@ mod tests {
             collaboration_mode: None, profile: Some("azeem".into()), title: None, state: "dormant".into(),
             origin: "app".into(), created_at: "2026-10-06T00:00:00Z".into(),
             last_active_at: "2026-10-06T00:00:00Z".into(), last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         for id in ["spoke", "imported", "haiku"] {
             store.create_session(&session(id)).unwrap();
@@ -1912,6 +1916,8 @@ mod tests {
             collaboration_mode: None, profile: profile.map(str::to_string), title: None, state: "dormant".into(),
             origin: "app".into(), created_at: "2026-09-14T00:00:00Z".into(),
             last_active_at: "2026-09-14T00:00:00Z".into(), last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         for row in [
             session("spoke", "here", None),
@@ -1982,6 +1988,8 @@ mod tests {
             collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
             origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
             last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         for row in [
             session("main", "/repo"),
@@ -2029,6 +2037,8 @@ mod tests {
                 collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
                 origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
                 last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             }).await.unwrap();
         }
         let menu = |id: &str, commands: serde_json::Value| -> Event {
@@ -2069,6 +2079,8 @@ mod tests {
                 collaboration_mode: None, profile: None, title: None, state: state.into(),
                 origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
                 last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             }).await.unwrap();
             let mut updates = database.subscribe_session(&id);
             database.offer_catalogue(
@@ -2089,6 +2101,8 @@ mod tests {
             collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
             origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
             last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }).await.unwrap();
         let mut updates = database.subscribe_session("never-answered");
         database.settle_menu("never-answered".into(), vec![json!({"name":"skill:demo","execution":"shared"})]).await.unwrap();
@@ -2172,6 +2186,8 @@ mod tests {
             collaboration_mode: None, profile: None, title: None, state: "running".into(),
             origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
             last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }).await.unwrap();
         let (started, mut all_started) = tokio::sync::mpsc::unbounded_channel();
         let slow: Vec<_> = (0..READERS)
@@ -2465,6 +2481,8 @@ mod tests {
                 begun_by: None,
                 named_by_owner: false,
                 auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             })
             .await
             .unwrap();
@@ -2537,6 +2555,8 @@ mod tests {
                 begun_by: None,
                 named_by_owner: false,
                 auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             })
             .await
             .unwrap();
@@ -2571,6 +2591,8 @@ mod tests {
             collaboration_mode: Some("default".into()), profile: None, title: Some("Generated title".into()),
             state: "idle".into(), origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
             last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }).await.unwrap();
         for value in [
             json!({

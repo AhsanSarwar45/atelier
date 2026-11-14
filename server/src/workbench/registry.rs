@@ -3101,6 +3101,8 @@ mod tests {
             begun_by: Some("person".into()),
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }
     }
 
@@ -4040,6 +4042,8 @@ mod tests {
             begun_by: Some("person".into()),
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }).await.unwrap();
         for value in [
             json!({"type":"message.started","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","role":"user"}),
@@ -4104,6 +4108,8 @@ mod tests {
             begun_by: Some("person".into()),
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }).await.unwrap();
         for value in [
             json!({"type":"message.started","sessionId":"session-1","seq":0,"at":"2026-09-13T00:00:01Z","messageId":"u1","role":"user"}),
@@ -4362,6 +4368,8 @@ mod tests {
                 begun_by: None,
                 named_by_owner: false,
                 auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             })
             .await
             .unwrap();
@@ -4438,6 +4446,8 @@ mod tests {
             begun_by: None,
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         database.create_session(session.clone()).await.unwrap();
         let registry = WorkbenchRegistry::new(
@@ -4504,6 +4514,8 @@ mod tests {
                 begun_by: None,
                 named_by_owner: false,
                 auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             })
             .await
             .unwrap();
@@ -4576,6 +4588,8 @@ mod tests {
             begun_by: None,
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         database
             .create_session(chat("working", "running_tool"))
@@ -4673,6 +4687,8 @@ mod tests {
                 begun_by: None,
                 named_by_owner: false,
                 auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             })
             .await
             .unwrap();
@@ -4843,6 +4859,8 @@ mod tests {
                 begun_by: None,
                 named_by_owner: false,
                 auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             })
             .await
             .unwrap();
@@ -4960,6 +4978,8 @@ mod tests {
                 begun_by: None,
                 named_by_owner: false,
                 auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             })
             .await
             .unwrap();

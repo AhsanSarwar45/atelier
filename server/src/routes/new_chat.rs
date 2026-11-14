@@ -51,6 +51,9 @@ const PROVIDER: &str = "workbench.new-chat.provider";
 /// browser still holding a copy of it cannot undo a choice made since.
 const MIGRATED: &str = "workbench.new-chat.migrated";
 
+/// The workers choice the dialog opens on, as JSON, or nothing for workers off.
+const WORKERS: &str = "workbench.new-chat.workers";
+
 /// Which account of `brand` the dialog opens on.
 fn profile_key(brand: &str) -> String {
     format!("workbench.new-chat.profile.{brand}")
@@ -73,6 +76,9 @@ struct NewChatDefaults {
     profiles: BTreeMap<String, String>,
     /// Whether the browser's old value has already been carried across.
     migrated: bool,
+    /// The workers choice last used: `{brand, profileId?, model?}`, or `null`
+    /// for a chat without workers (docs/designs/orchestrator-workers.md).
+    workers: Option<serde_json::Value>,
 }
 
 /// What the dialog sends when a star is pressed.
@@ -91,6 +97,8 @@ enum Choosing {
         brand: String,
         profile: Option<String>,
     },
+    /// Where a new chat's workers run. `null` turns workers off.
+    Workers { workers: Option<serde_json::Value> },
 }
 
 /// What the browser sends once, carrying `workbench.new-chat-default` across.
@@ -137,6 +145,16 @@ async fn write(
                 ));
             }
             save(&db, &profile_key(brand), trimmed(profile.as_deref()))?;
+        }
+        Choosing::Workers { workers } => {
+            let workers = workers.filter(|choice| !choice.is_null());
+            if let Some(choice) = &workers {
+                let brand = choice["brand"].as_str().unwrap_or_default();
+                if !BRANDS.contains(&brand) {
+                    return Err(unknown_brand(brand));
+                }
+            }
+            save(&db, WORKERS, workers.map(|choice| choice.to_string()).as_deref())?;
         }
     }
 
@@ -196,6 +214,7 @@ fn as_it_stands(db: &AppState) -> Result<NewChatDefaults, Refusal> {
         provider: read(PROVIDER)?,
         profiles: profiles_chosen,
         migrated: read(MIGRATED)?.is_some(),
+        workers: read(WORKERS)?.and_then(|json| serde_json::from_str(&json).ok()),
     })
 }
 

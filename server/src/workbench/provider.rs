@@ -427,6 +427,16 @@ pub(super) fn new_session(
             .get("autoApprove")
             .and_then(Value::as_bool)
             .unwrap_or_else(|| owner.as_ref().is_some_and(|settings| settings.auto_approve)),
+        // Set by the app when it starts a chat: a worker names the
+        // orchestrator that started it, and an orchestrator carries the
+        // owner's choice of where its workers run.
+        parent_session_id: field(command, "parentSessionId").map(str::to_string),
+        workers: command
+            .fields
+            .get("workers")
+            .filter(|choice| !choice.is_null())
+            .and_then(|choice| serde_json::from_value(choice.clone()).ok())
+            .filter(|choice: &super::store::WorkersChoice| !choice.brand.is_empty()),
     })
 }
 
@@ -1069,6 +1079,8 @@ mod tests {
             begun_by: None,
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         database.create_session(session.clone()).await.unwrap();
         record_user_for_transport(
@@ -1344,6 +1356,8 @@ mod tests {
             begun_by: None,
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }
     }
 

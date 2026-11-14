@@ -35,8 +35,9 @@ import { NOT_PHONE_SCREEN, usePhoneScreen } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import { GitView } from '@/workbench/git-view';
-import type { AgentControl } from '@/workbench/protocol';
+import type { AgentControl, RestoreRow } from '@/workbench/protocol';
 import { SentAwayPanel } from '@/workbench/sent-away';
+import { OrchestratorLink, WorkersList } from '@/workbench/workers-section';
 
 /** Where the rail's open-or-shut is remembered between visits. */
 const RIGHT_RAIL = 'workbench.right-rail';
@@ -167,12 +168,13 @@ export function useGitDiff(): { diffOpen: boolean; flipDiff: () => void } {
   return { diffOpen, flipDiff };
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, region = false, children }: { title: string; region?: boolean; children: React.ReactNode }) {
+  const Tag = region ? 'section' : 'div';
   return (
-    <div className="flex flex-col gap-1.5 px-3 py-2">
+    <Tag className="flex flex-col gap-1.5 px-3 py-2" aria-label={region ? title : undefined}>
       <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</h3>
       {children}
-    </div>
+    </Tag>
   );
 }
 
@@ -207,6 +209,12 @@ export interface ChatRightRailProps {
   agentControls?: AgentControl[];
   /** Opening one of them onto its own conversation. */
   onOpenAgent?: (id: string, row?: SentAway) => void;
+  /** The worker chats this chat started, when it is an orchestrator. */
+  workers?: RestoreRow[];
+  /** The chat that started this one, when it is a worker. */
+  orchestrator?: RestoreRow | null;
+  /** Opening another chat of the project, a worker or its orchestrator. */
+  onOpenChat?: (id: string) => void;
   open: boolean;
   /** Which view is drawn. What this chat has touched, unless Git was asked for. */
   view?: RailView;
@@ -275,6 +283,9 @@ export function ChatRightRail({
   sessionId = '',
   agentControls = NOTHING,
   onOpenAgent = () => {},
+  workers = NOTHING,
+  orchestrator = null,
+  onOpenChat,
   open,
   view = 'chat',
   projectPath = null,
@@ -411,6 +422,16 @@ export function ChatRightRail({
 
           {view === 'chat' && (
             <>
+          {orchestrator && onOpenChat && (
+            <Section title="Orchestrator" region>
+              <OrchestratorLink orchestrator={orchestrator} onOpen={onOpenChat} />
+            </Section>
+          )}
+          {workers.length > 0 && onOpenChat && (
+            <Section title="Workers" region>
+              <WorkersList workers={workers} onOpen={onOpenChat} />
+            </Section>
+          )}
           {(agents.length > 0 || (finishedAgentCount ?? 0) > 0) && (
             <Section title="Subagents">
               <SentAwayPanel

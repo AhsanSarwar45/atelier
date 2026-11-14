@@ -364,6 +364,27 @@ pub struct Session {
     /// included (`workbench::answering`).
     #[serde(default)]
     pub auto_approve: bool,
+    /// The orchestrator chat that started this one as its worker
+    /// (docs/designs/orchestrator-workers.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    /// The provider, account and model this chat's workers run on. A chat
+    /// with this set is an orchestrator; its workers cannot choose another.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workers: Option<WorkersChoice>,
+}
+
+/// The owner's choice of where an orchestrator's workers run.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkersChoice {
+    pub brand: String,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 /// `Some(None)` clears a nullable setting; `None` leaves it untouched.
@@ -640,8 +661,9 @@ impl Store {
             r#"INSERT INTO session
                  (id, brand, external_id, project_id, project_path, cwd, model,
                   permission_mode, effort, collaboration_mode, profile, title, state,
-                  origin, created_at, last_active_at, last_spoke_at, begun_by, auto_approve)
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"#,
+                  origin, created_at, last_active_at, last_spoke_at, begun_by, auto_approve,
+                  parent_session_id, workers)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)"#,
             params![
                 session.id,
                 session.brand,
@@ -662,6 +684,8 @@ impl Store {
                 session.last_spoke_at,
                 session.begun_by,
                 session.auto_approve,
+                session.parent_session_id,
+                session.workers.as_ref().map(|choice| serde_json::to_string(choice).unwrap_or_default()),
             ],
         )?;
         Ok(())
@@ -3636,6 +3660,10 @@ pub(crate) fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
         begun_by: row.get("begun_by")?,
         named_by_owner: row.get::<_, Option<i64>>("named_by_owner")?.unwrap_or(0) != 0,
         auto_approve: row.get::<_, Option<i64>>("auto_approve")?.unwrap_or(0) != 0,
+        parent_session_id: row.get("parent_session_id")?,
+        workers: row
+            .get::<_, Option<String>>("workers")?
+            .and_then(|json| serde_json::from_str(&json).ok()),
     })
 }
 
@@ -3928,6 +3956,16 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
                SET auto_approve = 1,
                    permission_mode = CASE brand WHEN 'claude' THEN 'default' ELSE 'on-request' END
                WHERE permission_mode = 'atelierAuto';"#,
+        )?;
+    }
+    // Orchestrator chats and their workers (docs/designs/orchestrator-workers.md).
+    if !columns(transaction, "session")?
+        .iter()
+        .any(|name| name == "parent_session_id")
+    {
+        transaction.execute_batch(
+            r#"ALTER TABLE session ADD COLUMN parent_session_id TEXT;
+               ALTER TABLE session ADD COLUMN workers TEXT;"#,
         )?;
     }
     /*
@@ -4618,6 +4656,8 @@ mod tests {
             begun_by: None,
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }
     }
 

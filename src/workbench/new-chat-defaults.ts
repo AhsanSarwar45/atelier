@@ -17,7 +17,7 @@
 
 import { request } from '@/lib/api';
 
-import type { Brand } from './protocol';
+import type { Brand, WorkersChoice } from './protocol';
 
 /** Where the provider half used to be kept, before the server held it. */
 export const NEW_CHAT_DEFAULT = 'workbench.new-chat-default';
@@ -33,6 +33,8 @@ export interface NewChatDefaults {
   profiles: Partial<Record<Brand, string>>;
   /** Whether the browser's old value has already been carried across. */
   migrated: boolean;
+  /** The workers choice last used, or null for a chat without workers. */
+  workers?: WorkersChoice | null;
 }
 
 /** Nothing chosen, which is what a browser that cannot reach the app draws. */
@@ -76,6 +78,11 @@ export async function saveNewChatProfile(
   profile: string | null,
 ): Promise<NewChatDefaults> {
   return answered(WHERE, sending({ set: 'profile', brand, profile }));
+}
+
+/** Remember where new chats' workers run. `null` turns workers off. */
+export async function saveNewChatWorkers(workers: WorkersChoice | null): Promise<NewChatDefaults> {
+  return answered(WHERE, sending({ set: 'workers', workers }));
 }
 
 /**

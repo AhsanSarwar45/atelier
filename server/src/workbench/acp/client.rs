@@ -2522,6 +2522,13 @@ impl AcpDriver {
         // The chat's open tasks, read now: each connection is told them
         // afresh, so a chat picked up again knows what it still holds.
         let open_tasks = open_tasks_section(&database, &session.id).await;
+        // An orchestrator or worker chat is also told its role, beside its
+        // tasks (docs/designs/orchestrator-workers.md).
+        let open_tasks = [session_policy::role_section(&session), open_tasks]
+            .into_iter()
+            .filter(|section| !section.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
         let task_policy = session_policy::with_open_tasks(
             session_policy::build_with_library(Path::new(&session.cwd), &shared_library),
             &open_tasks,
@@ -4159,6 +4166,8 @@ mod tests {
             begun_by: None,
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }
     }
 
@@ -5273,6 +5282,8 @@ mod tests {
             begun_by: None,
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         database.create_session(session.clone()).await.unwrap();
         for (agent_id, tool_id) in [("stop-me", "tool-1"), ("park-me", "tool-2")] {
@@ -5367,6 +5378,8 @@ mod tests {
             begun_by: None,
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         database.create_session(session.clone()).await.unwrap();
         let (controls, _) = mpsc::unbounded_channel();

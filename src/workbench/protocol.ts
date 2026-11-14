@@ -1205,6 +1205,10 @@ export type WbpCommand =
       projectId: string;
       projectPath: string;
       brand: Brand;
+      /** Where this chat's workers run: set, the chat is an orchestrator. */
+      workers?: WorkersChoice;
+      /** The orchestrator chat starting this one as its worker. */
+      parentSessionId?: string;
       /**
        * Where the chat will work: one of the project's worktrees, or a folder
        * inside one. Left off for a chat that works in the project itself,
@@ -1407,6 +1411,18 @@ export interface RestoreRow {
   activityCall?: RanCall | null;
   /** When that began, ISO, for the count beside the word. */
   busySince?: string | null;
+  /** The orchestrator chat that started this one as its worker. */
+  parentSessionId?: string | null;
+  /** Where this chat's workers run; set on an orchestrator chat. */
+  workers?: WorkersChoice | null;
+}
+
+/** The owner's choice of where an orchestrator chat's workers run. */
+export interface WorkersChoice {
+  brand: Brand;
+  profileId?: string | null;
+  model?: string | null;
+  effort?: string | null;
 }
 
 /**
@@ -1604,6 +1620,8 @@ export function startingChat(
   /** The name the chat is to be made under, when the screen has already moved
    *  to it. Left off, the server names it. */
   sessionId?: string,
+  /** Where the chat's workers run, for an orchestrator chat. */
+  workers?: WorkersChoice | null,
 ): Extract<WbpCommand, { type: 'session.start' }> {
   const command: Extract<WbpCommand, { type: 'session.start' }> = {
     type: 'session.start',
@@ -1615,6 +1633,7 @@ export function startingChat(
   const where = workingIn?.replace(/\/+$/, '');
   if (where && where !== projectPath.replace(/\/+$/, '')) command.cwd = where;
   if (profileId && profileId !== 'system') command.profileId = profileId;
+  if (workers) command.workers = workers;
   return command;
 }
 

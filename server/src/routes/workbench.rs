@@ -29,6 +29,7 @@ mod ai_search;
 mod grids;
 mod tasks;
 mod tell;
+mod workers;
 
 use crate::workbench::{
     actor::ChatDb,
@@ -166,7 +167,7 @@ impl Drop for WatchPollLease {
 impl WorkbenchState {
     pub fn new(registry: WorkbenchRegistry) -> Self {
         let (watch_polls, _) = broadcast::channel(16);
-        Self {
+        let state = Self {
             registry: Arc::new(registry),
             hold_memory: Arc::new(tokio::sync::Mutex::new(HoldMemory::default())),
             usage_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -190,7 +191,9 @@ impl WorkbenchState {
             chat_followers: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             search: None,
             projects: None,
-        }
+        };
+        workers::watch(state.clone());
+        state
     }
 
     pub fn with_projects(mut self, projects: Arc<crate::db::Database>) -> Self {
@@ -1196,6 +1199,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/grids/:project/:slug/next", get(grids::next))
         .route("/grids/:project/:slug/cells/:row/:col", get(grids::cell))
         .route("/grid", post(grids::act))
+        .route("/workers", post(workers::act))
         // A prompt carries its pictures inline, as base64 inside the JSON, and
         // there is no ceiling on how many a person may attach to one message.
         // Axum otherwise buffers every body under a 2 MiB default nobody here
@@ -1783,6 +1787,7 @@ fn restore_row(
         "projectId": session.project_id, "projectPath": session.project_path,
         "namedByOwner": session.named_by_owner, "cwdHint": session.cwd, "folder": folder,
         "branch": branch, "runningElsewhere": held.is_some(), "held": held,
+        "parentSessionId": session.parent_session_id, "workers": session.workers,
     })
 }
 
@@ -2553,6 +2558,8 @@ async fn restore(
                     .map(str::to_string),
                 named_by_owner: false,
                 auto_approve: false,
+                parent_session_id: None,
+                workers: None,
             };
             // The rows above are only the ones this request's own listing
             // drew. A row cached by a request already in flight — the sidebar
@@ -3359,6 +3366,8 @@ mod command_asks_tests {
             collaboration_mode: None, profile: None, title: None, state: "dormant".into(),
             origin: "app".into(), created_at: "now".into(), last_active_at: "now".into(),
             last_spoke_at: None, begun_by: None, named_by_owner: false, auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         assert_eq!(super::ask_key(&chat("/repo")), super::ask_key(&chat("/repo")));
         assert_ne!(super::ask_key(&chat("/repo")), super::ask_key(&chat("/repo/worktrees/a")));
@@ -4164,6 +4173,8 @@ mod tests {
             begun_by: None,
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         }
     }
 
@@ -4812,6 +4823,8 @@ mod tests {
             begun_by: Some("person".into()),
             named_by_owner: false,
             auto_approve: false,
+            parent_session_id: None,
+            workers: None,
         };
         state.database().create_session(session).await.unwrap();
         let archives = directory.path().join("chat-archive");

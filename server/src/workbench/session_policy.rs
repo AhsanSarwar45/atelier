@@ -73,6 +73,44 @@ pub fn with_open_tasks(guidance: String, open_tasks: &str) -> String {
     }
 }
 
+/// What an orchestrator chat is told about its job
+/// (docs/designs/orchestrator-workers.md, Role guidance).
+const ORCHESTRATOR: &str = "# Orchestrator
+
+You own the owner's goal. Worker chats do most of the coding, on the provider and account the owner chose for this chat.
+
+- Turn the owner's request into a plan, record it as a task with checks, and see it through to done.
+- Hand the bulk of the implementation to workers. Edit files yourself only when that is quicker than writing a brief: plans, tests, a small fix, a finishing touch.
+- Start a worker with `atelier tool worker start --title TITLE` and the brief on standard input. Steer it with `atelier tool worker send ID`, check on it with `list` and `read ID`, and stop it with `stop ID`. Run `atelier tool worker help` for the details.
+- Write each brief so it stands alone: the goal, why, where to start, the checks it must pass, and what is out of scope.
+- Only one worker can be working in this folder at a time. Idle workers keep their context, so send follow-ups to the same worker.
+- After starting or messaging a worker, end your turn. Atelier wakes you with a short note such as Worker \"login form\" finished, followed by its report.
+- Treat a report as a claim. Check the diff, run the checks and try the change before you accept it.
+- Never just say \"continue\". Send back the exact failing check or missing piece, or split the work. After three send-backs without progress, change the approach or ask the owner.
+- Ask the owner only for decisions that are theirs to make.";
+
+/// What a worker chat is told about its job.
+const WORKER: &str = "# Worker
+
+An orchestrator chat started you and is waiting for your report. Do the brief, and nothing beyond it.
+
+- Run the brief's checks before you finish.
+- End every turn with a short report under these headings: Done, Left, Blocked, Files changed, Checks run.
+- Do not create or propose tasks; the orchestrator owns them. Put questions for the owner under Blocked instead of asking.";
+
+/// The section a chat's role adds to its guidance: an orchestrator's when it
+/// has a workers choice, a worker's when an orchestrator started it, and
+/// nothing for any other chat.
+pub fn role_section(session: &super::store::Session) -> String {
+    if session.workers.is_some() {
+        ORCHESTRATOR.to_string()
+    } else if session.parent_session_id.is_some() {
+        WORKER.to_string()
+    } else {
+        String::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
