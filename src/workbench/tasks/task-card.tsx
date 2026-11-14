@@ -7,7 +7,7 @@
  * The same card is the `task` chat widget and the body of the Tasks tab's
  * detail panel.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { AlertTriangle, Ban, Check, Circle, CircleDot, CircleSlash, GitMerge, Images, Minus, Pause, Pencil, Plus } from 'lucide-react';
 
@@ -1458,6 +1458,14 @@ export function ProposalActions({ projectId, id, onAnswered, className }: {
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [note, setNote] = useState('');
+  const noteBox = useRef<HTMLTextAreaElement>(null);
+  // The note box grows with what is typed, up to a cap, so a long note shows whole.
+  useLayoutEffect(() => {
+    const box = noteBox.current;
+    if (!box) return;
+    box.style.height = 'auto';
+    box.style.height = `${Math.min(box.scrollHeight + 2, 240)}px`;
+  }, [note, asking]);
 
   const answer = async (choice: ProposalChoice, words?: string) => {
     setBusy(choice);
@@ -1488,6 +1496,7 @@ export function ProposalActions({ projectId, id, onAnswered, className }: {
           }}
         >
           <Textarea
+            ref={noteBox}
             autoFocus
             rows={3}
             aria-label="What should change?"
@@ -1501,7 +1510,7 @@ export function ProposalActions({ projectId, id, onAnswered, className }: {
           </div>
         </form>
       ) : (
-        <div className="flex flex-wrap gap-2" data-testid="proposal-actions">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap" data-testid="proposal-actions">
           <Button type="button" size="sm" disabled={busy !== null} loading={busy === 'create'} onClick={() => void answer('create')}>Create task</Button>
           <Button type="button" size="sm" variant="outline" disabled={busy !== null} loading={busy === 'just_do_it'} onClick={() => void answer('just_do_it')}>Just do it</Button>
           <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => setAsking(true)}>Request changes</Button>
