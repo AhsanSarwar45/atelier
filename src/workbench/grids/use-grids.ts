@@ -46,9 +46,16 @@ export interface Read<T> {
  * project's grids change, and after a dropped connection, which may have
  * missed a change.
  */
+// The last answer of each read. A long chat unmounts the cards far from the
+// screen, and a card drawn again must start from what it last read: starting
+// empty draws its stored copy, which changes its height when the read returns
+// and makes a chat held at the end scroll it out and back in, over and over.
+const lastRead = new Map<string, unknown>();
+
 function useLiveRead<T>(projectId: string | null, key: string | null, read: (() => Promise<T>) | null, alsoTasks = false): Read<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const known = key !== null && lastRead.has(key);
+  const [data, setData] = useState<T | null>(known ? (lastRead.get(key!) as T) : null);
+  const [loaded, setLoaded] = useState(known);
   const [error, setError] = useState<Error | null>(null);
   const [round, setRound] = useState(0);
   const refetch = useCallback(() => setRound((n) => n + 1), []);
@@ -56,8 +63,9 @@ function useLiveRead<T>(projectId: string | null, key: string | null, read: (() 
   reader.current = read;
 
   useEffect(() => {
-    setData(null);
-    setLoaded(false);
+    const seen = key !== null && lastRead.has(key);
+    setData(seen ? (lastRead.get(key!) as T) : null);
+    setLoaded(seen);
     setError(null);
   }, [key]);
 
@@ -67,6 +75,7 @@ function useLiveRead<T>(projectId: string | null, key: string | null, read: (() 
     reader.current()
       .then((found) => {
         if (!alive) return;
+        lastRead.set(key, found);
         setData(found);
         setError(null);
         setLoaded(true);

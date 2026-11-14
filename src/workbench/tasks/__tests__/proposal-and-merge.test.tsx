@@ -5,7 +5,7 @@ import { ChatWidgetView } from '@/workbench/chat-widget-view';
 import { widget } from '@/workbench/chat-widgets';
 import { offersMerge } from '@/workbench/composer-files';
 import { makeTask } from '@/workbench/tasks/__tests__/fixtures';
-import { MergeBadge } from '@/workbench/tasks/task-card';
+import { forgetProposalReads, MergeBadge } from '@/workbench/tasks/task-card';
 import type { TaskProposal, TaskWidget } from '@/workbench/tasks/types';
 
 const answerProposal = vi.fn();
@@ -47,6 +47,7 @@ const draft: TaskProposal = {
 const proposed: TaskWidget = { type: 'task', event: 'propose', proposal: draft };
 
 beforeEach(() => {
+  forgetProposalReads();
   answerProposal.mockReset();
   proposal.mockReset();
   proposal.mockResolvedValue(draft);

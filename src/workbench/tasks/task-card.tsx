@@ -1392,8 +1392,15 @@ const ANSWERED: Record<Exclude<TaskProposal['status'], 'pending'>, (proposal: Ta
  * proposal the chat replaced with a newer one folds to a line
  * (docs/tasks.md, "Proposals").
  */
+// The last read of each proposal, so a card a long chat drew again starts
+// from its answer, not the stored waiting copy (see useLiveRead in use-grids).
+const lastProposal = new Map<string, TaskProposal>();
+const remember = (now: TaskProposal) => { lastProposal.set(`${now.projectId}:${now.id}`, now); return now; };
+/** Forgets every remembered proposal read; for tests that reuse one id. */
+export const forgetProposalReads = () => lastProposal.clear();
+
 export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal }) {
-  const [proposal, setProposal] = useState<TaskProposal>(snapshot);
+  const [proposal, setProposal] = useState<TaskProposal>(() => (snapshot.status === 'pending' && lastProposal.get(`${snapshot.projectId}:${snapshot.id}`)) || snapshot);
   const pending = proposal.status === 'pending';
   const { projectId, id } = snapshot;
   const proposalGate = useMemo<CheckGate>(() => ({ flags: readFlags(proposal.checkFlags) }), [proposal.checkFlags]);
@@ -1405,7 +1412,7 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
     let alive = true;
     const read = () => {
       tasksApi.proposal(projectId, id)
-        .then((now) => { if (alive) setProposal(now); })
+        .then((now) => { if (alive) setProposal(remember(now)); })
         .catch(() => {});
     };
     read();
@@ -1439,7 +1446,7 @@ export function ProposalCard({ proposal: snapshot }: { proposal: TaskProposal })
       </PlanSection>
       <ProposalCells proposal={proposal} />
       {pending ? (
-        <ProposalActions projectId={projectId} id={id} onAnswered={setProposal} />
+        <ProposalActions projectId={projectId} id={id} onAnswered={(now) => setProposal(remember(now))} />
       ) : (
         <p data-testid="proposal-answer" className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{proposal.status === 'pending' ? '' : ANSWERED[proposal.status](proposal)}</p>
       )}
