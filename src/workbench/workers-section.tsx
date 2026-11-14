@@ -13,7 +13,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { addressWith } from '@/lib/address';
 import { request } from '@/lib/api';
@@ -97,11 +96,12 @@ function ChatLink({ id, onOpen, className, children }: { id: string; onOpen: (id
   );
 }
 
-export function WorkersList({ workers, onOpen }: { workers: RestoreRow[]; onOpen: (id: string) => void }) {
+/** Stopping every worker still in a turn, and what went wrong if one would not stop. */
+export function useStopWorkers(workers: RestoreRow[]) {
   const [stopping, setStopping] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const working = workers.filter((row) => MID_TURN.includes(row.state));
-  const stopAll = useCallback(async () => {
+  const stop = useCallback(async () => {
     setStopping(true);
     setFailed(null);
     try {
@@ -114,6 +114,10 @@ export function WorkersList({ workers, onOpen }: { workers: RestoreRow[]; onOpen
       setStopping(false);
     }
   }, [working]);
+  return { stop, canStop: working.length > 0 && !stopping, failed };
+}
+
+export function WorkersList({ workers, onOpen }: { workers: RestoreRow[]; onOpen: (id: string) => void }) {
   return (
     <div className="flex flex-col gap-1" data-testid="workers-list">
       {workers.map((row) => (
@@ -131,16 +135,6 @@ export function WorkersList({ workers, onOpen }: { workers: RestoreRow[]; onOpen
           </span>
         </ChatLink>
       ))}
-      <Button
-        variant="outline"
-        size="sm"
-        className="mt-1 self-start"
-        disabled={working.length === 0 || stopping}
-        onClick={() => void stopAll()}
-      >
-        Stop workers
-      </Button>
-      {failed && <p className="text-xs text-danger">{failed}</p>}
     </div>
   );
 }

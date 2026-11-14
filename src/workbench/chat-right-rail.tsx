@@ -29,6 +29,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { NOT_PHONE_SCREEN, usePhoneScreen } from '@/lib/screen-width';
@@ -37,7 +38,7 @@ import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import { GitView } from '@/workbench/git-view';
 import type { AgentControl, RestoreRow } from '@/workbench/protocol';
 import { SentAwayPanel } from '@/workbench/sent-away';
-import { OrchestratorLink, WorkersList } from '@/workbench/workers-section';
+import { OrchestratorLink, useStopWorkers, WorkersList } from '@/workbench/workers-section';
 
 /** Where the rail's open-or-shut is remembered between visits. */
 const RIGHT_RAIL = 'workbench.right-rail';
@@ -308,6 +309,7 @@ export function ChatRightRail({
   // What git has to say belongs to this chat's own folder, which is the
   // project's checkout only for a chat started there.
   const gitPath = workingIn ?? projectPath;
+  const stopWorkers = useStopWorkers(workers);
   return (
     // The library's sheet held inside the work area: on a phone a sheet down
     // the right edge with its own dimming beside it, and on a wide screen
@@ -430,6 +432,16 @@ export function ChatRightRail({
           {workers.length > 0 && onOpenChat && (
             <Section title="Workers" region>
               <WorkersList workers={workers} onOpen={onOpenChat} />
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-1 self-start"
+                disabled={!stopWorkers.canStop}
+                onClick={() => void stopWorkers.stop()}
+              >
+                Stop workers
+              </Button>
+              {stopWorkers.failed && <p className="text-xs text-danger">{stopWorkers.failed}</p>}
             </Section>
           )}
           {(agents.length > 0 || (finishedAgentCount ?? 0) > 0) && (
