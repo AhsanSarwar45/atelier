@@ -8,8 +8,8 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
  * (docs/designs/orchestrator-workers.md, How it looks).
  *
  * The owner turns on Workers when starting a chat and picks the provider the
- * workers run on. Worker chats then sit under their orchestrator in the list,
- * the orchestrator's details list them, and each worker links back.
+ * workers run on. The orchestrator's details list its workers, like subagents,
+ * rather than the chat list, and each worker links back.
  *
  * Run: scripts/workbench-e2e.sh tests/e2e/worker-chats.spec.ts
  */
@@ -83,7 +83,7 @@ test('the new chat dialog starts a chat with workers on the chosen provider', as
   }
 });
 
-test('workers sit under their orchestrator and link back to it', async ({ page, request }) => {
+test('workers show in their orchestrator details, not the chat list, and link back to it', async ({ page, request }) => {
   const made = await project(request, 'workers-nesting');
   const started: string[] = [];
   try {
@@ -103,15 +103,10 @@ test('workers sit under their orchestrator and link back to it', async ({ page, 
     started.push(worker.id as string);
 
     await page.goto(`/project?id=${made.id}&tab=chat&chat=${orchestrator.id}`);
+    // Like a subagent, a worker is not a row of the chat list.
     const list = page.getByTestId('chat-sidebar');
-    await expect(list.getByText('Login form')).toBeVisible();
-    await page.screenshot({ path: `${SHOTS}/sidebar-after.png` });
-
-    // Folded away under the orchestrator, and back.
-    await list.getByRole('button', { name: 'Hide workers' }).click();
+    await expect(list.getByText('Plan the login work')).toBeVisible();
     await expect(list.getByText('Login form')).toHaveCount(0);
-    await list.getByRole('button', { name: 'Show workers' }).click();
-    await expect(list.getByText('Login form')).toBeVisible();
 
     // The orchestrator's details list its workers.
     // Open unless it already is: a wide screen starts with the details open.

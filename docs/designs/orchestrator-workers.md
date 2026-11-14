@@ -165,12 +165,11 @@ right moment for the owner to see it.
 
 ### How it looks
 
-- **Sidebar:** workers sit under their orchestrator, indented and
-  collapsible, instead of as separate rows in the day groups.
+- **Sidebar:** workers are not rows of the chat list, like subagents. A
+  worker whose orchestrator is not in the list stays a row of its own.
 - **Orchestrator's right rail:** a Workers section next to Subagents,
   listing each worker with its state and a link to open it.
-- **Worker chat header:** a small "Worker of …" link back to the
-  orchestrator.
+- **Worker's right rail:** a "Worker of …" link back to the orchestrator.
 - **Stopping:** stopping the orchestrator stops only its own turn. Workers
   keep running and their reports are held. A "Stop workers" action in the
   Workers section stops them all.
@@ -224,4 +223,4 @@ right moment for the owner to see it.
 | feature | Post each worker's turn-end report into its orchestrator chat as a short label with the report attached | Lets the orchestrator work unattended |
 | feature | Orchestrator and worker role sections in the system prompt, with a built-in reference skill for the orchestrator | Tells each chat its job and how to do it |
 | ui_feature | Workers option in the new-chat dialog (provider, account, model), remembered like the other defaults, and changeable in chat settings | Where the owner makes the choice |
-| ui_feature | Workers nested under their orchestrator in the sidebar, a Workers section in the right rail, and a link back from each worker | Lets the owner see and steer the workers |
+| ui_feature | Workers kept out of the chat list, a Workers section in the right rail, and a link back from each worker | Lets the owner see and steer the workers |

@@ -2510,9 +2510,10 @@ atelier tool worker stop ID
   (`session_policy::role_section`): the orchestrator learns the commands and to
   end its turn while workers run; a worker learns to finish with Done, Left,
   Blocked, Files changed and Checks run.
-- In the chat list, workers sit under their orchestrator and fold away with
-  **Hide workers**. The orchestrator's details list its workers with a **Stop
-  workers** button; a worker's details link back with **Worker of …**.
+- Like subagents, workers are not rows of the chat list (unless their
+  orchestrator is not in it). The orchestrator's details list its workers
+  with a **Stop workers** button; a worker's details link back with
+  **Worker of …**.
 
 The design is docs/designs/orchestrator-workers.md.
 
