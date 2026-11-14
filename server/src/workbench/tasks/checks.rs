@@ -267,9 +267,10 @@ pub fn is_checked(plan: &Value) -> bool {
 }
 
 /// The raw `checks` of each plan item, `(item id, checks)`, in plan order:
-/// the type's item list, or the plan's own checks under `PLAN_ITEM`.
+/// the type's item list, or the plan's own checks under `PLAN_ITEM`, then
+/// each `requirements` entry that has checks (its type's default items).
 pub fn plan_items(kind: &str, plan: &Value) -> Vec<(String, Value)> {
-    match super::types::item_lists(kind) {
+    let mut items: Vec<(String, Value)> = match super::types::item_lists(kind) {
         Some((key, _)) => plan[key]
             .as_array()
             .into_iter()
@@ -277,7 +278,15 @@ pub fn plan_items(kind: &str, plan: &Value) -> Vec<(String, Value)> {
             .filter_map(|item| Some((item["id"].as_str()?.to_string(), item.get("checks").cloned().unwrap_or(Value::Null))))
             .collect(),
         None => vec![(PLAN_ITEM.to_string(), plan.get("checks").cloned().unwrap_or(Value::Null))],
-    }
+    };
+    items.extend(
+        plan["requirements"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| Some((item["id"].as_str()?.to_string(), item.get("checks")?.clone()))),
+    );
+    items
 }
 
 /// Every item's checks, parsed.

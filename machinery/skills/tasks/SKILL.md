@@ -43,8 +43,8 @@ plan and result shape and its check recipe, and copy them.
 atelier task list [--all]
 atelier task show N
 atelier task types [TYPE]
-atelier task create            <<< '{"type":…,"title":…,"why":…,"plan":{…}}'
-atelier task propose           <<< '{"type":…,"title":…,"why":…,"plan":{…}}'
+atelier task create            <<< '{"type":…,"title":…,"why":…,"decisions":{…},"plan":{…}}'
+atelier task propose           <<< '{"type":…,"title":…,"why":…,"decisions":{…},"plan":{…}}'
 atelier task start N
 atelier task check N ITEM
 atelier task block N --cause TEXT --needs TEXT
@@ -67,8 +67,38 @@ alone. It prints the task card the owner sees in the chat. Never send it to
 
 Types: `bug`, `feature`, `ui_change`, `ui_feature`, `visual_bug`,
 `render_change`, `render_feature`, `optimization`, `plan`, `investigation`,
-`refactor`, `tests`, `review`, `qa`, `docs`, `chore`, `general`. Use
-`general` only when no other type fits.
+`refactor`, `tests`, `review`, `qa`, `docs`, `chore`, `general`, plus any
+the install or project adds. `atelier task types` lists the ones on for
+this project, with their default items. Use `general` only when no other
+type fits.
+
+Every `create` and `propose` gives `decisions`: one line for every type
+that is on, `{"bug": "…", "feature": "…", …}`. For the chosen type, say why
+it fits; for each other type, say why the work is not that kind. A type
+left out or a blank reason is refused.
+
+A type may have default items: things every task of that type must do.
+Answer each one in `plan.requirements` with its id and text, and either
+`checks` that prove it or `declined` with a one-line reason it does not
+apply: `"requirements": [{"id": "phone", "text": "…", "checks": [ … ]}]`.
+`create` is refused while one is missing. A task keeps the items it was
+created with; later type changes never touch it.
+
+Types are guidance, like skills. Change them with the CLI, not by editing
+files. Each takes `--scope install|project` (project by default); the owner
+sees every change and can undo it:
+
+```
+atelier task types create       <<< '{"name":…,"description":…,"code":true,"review":false,"items":[{"id":…,"text":…,"checks":[…]}]}'
+atelier task types edit TYPE    <<< '{"items":[…]}'
+atelier task types disable TYPE [--item ID]
+atelier task types enable TYPE [--item ID]
+atelier task types undo
+```
+
+A type you create is planned like `general`. Built-in types keep their
+shape; only their default items change. Add a type or an item only when the
+owner asks or the project clearly repeats the same work.
 
 Anything you can see on screen or in a render takes a visual type:
 `ui_feature` for new work you can see on screen, `render_feature` for new

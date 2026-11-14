@@ -7,6 +7,7 @@
 //! commits exist in the session's repository, which evidence files were
 //! uploaded — and hand it in.
 
+pub mod catalog;
 pub mod checks;
 pub mod cli;
 pub mod gate;
@@ -17,6 +18,25 @@ pub mod visual;
 mod lock_scope_tests;
 #[cfg(test)]
 mod unlocked_tests;
+
+/// A draft with a reason for every built-in type, for tests about something
+/// else (tests/task_types.rs tests the reasons themselves).
+#[cfg(test)]
+pub(crate) fn decided(mut payload: Value) -> Value {
+    if let (Some(kind), Some(row)) = (payload["type"].as_str().map(str::to_string), payload.as_object_mut()) {
+        if !row.contains_key("decisions") {
+            let reasons: serde_json::Map<String, Value> = types::TYPES
+                .iter()
+                .map(|other| {
+                    let reason = if other.name == kind { "the work is this kind" } else { "the work is not this kind" };
+                    (other.name.to_string(), json!(reason))
+                })
+                .collect();
+            row.insert("decisions".into(), Value::Object(reasons));
+        }
+    }
+    payload
+}
 
 use super::store::Store;
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -93,7 +113,12 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
         connection.execute_batch("ALTER TABLE task ADD COLUMN checks TEXT;")?;
     }
     // Test-first checks (checks.rs): what approval locked, the runs, the flags.
-    for (table, column) in [("task", "gate"), ("task_proposal", "flags")] {
+    // Editable types (catalog.rs): the reason given for each type, and a
+    // custom type's {description, code, review} as it was at create.
+    for (table, column) in [
+        ("task", "gate"), ("task_proposal", "flags"),
+        ("task", "decisions"), ("task", "type_def"), ("task_proposal", "decisions"), ("task_proposal", "type_def"),
+    ] {
         let has = connection
             .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'"))?
             .exists([])?;
@@ -160,6 +185,18 @@ impl TaskError {
     }
 }
 
+/// A task's type's `code` or `review`: the built-in table's, or a custom
+/// type's as it was when the task was made.
+fn type_flag(task: &TaskRow, flag: &str) -> Result<bool, TaskError> {
+    if let Some(kind) = types::find(&task.kind) {
+        return Ok(if flag == "code" { kind.code } else { kind.review });
+    }
+    task.type_def
+        .as_ref()
+        .and_then(|def| def[flag].as_bool())
+        .ok_or_else(|| TaskError::Refused(format!("unknown type {}", task.kind)))
+}
+
 fn refuse<T>(message: impl Into<String>) -> Result<T, TaskError> {
     Err(TaskError::Refused(message.into()))
 }
@@ -193,10 +230,17 @@ pub struct TaskRow {
     /// runs: {ITEM: {CHECK: run}}, flags: [flag], startCommit, baseline:
     /// {ITEM: {CHECK: {p50, samples}}}}`. None for a task made before checks.
     pub gate: Option<Value>,
+    /// `{TYPE: reason}`: why the agent chose the task's type and declined
+    /// each other one (Null for a task made before, or by the owner).
+    pub decisions: Value,
+    /// A custom type's `{name, description, code, review}` as it was when
+    /// the task was made; None for a built-in type.
+    pub type_def: Option<Value>,
 }
 
 const COLUMNS: &str = "project_id, number, type, title, why, status, session_id, created_by, plan, result,
-    shortfalls, blocked, cancel_reason, pending_amend, created_at, updated_at, started_at, finished_at, checks, gate";
+    shortfalls, blocked, cancel_reason, pending_amend, created_at, updated_at, started_at, finished_at, checks, gate,
+    decisions, type_def";
 
 fn json_column(row: &Row, index: usize) -> rusqlite::Result<Option<Value>> {
     Ok(row
@@ -226,6 +270,8 @@ fn task_row(row: &Row) -> rusqlite::Result<TaskRow> {
         finished_at: row.get(17)?,
         checks: json_column(row, 18)?,
         gate: json_column(row, 19)?,
+        decisions: json_column(row, 20)?.unwrap_or(Value::Null),
+        type_def: json_column(row, 21)?,
     })
 }
 
@@ -296,14 +342,14 @@ fn save(connection: &Connection, task: &TaskRow) -> rusqlite::Result<()> {
     connection.execute(
         &format!(
             "INSERT OR REPLACE INTO task ({COLUMNS})
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)"
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)"
         ),
         params![
             task.project_id, task.number, task.kind, task.title, task.why, task.status,
             task.session_id, task.created_by, task.plan.to_string(), text(&task.result),
             task.shortfalls as i64, text(&task.blocked), task.cancel_reason, text(&task.pending_amend),
             task.created_at, task.updated_at, task.started_at, task.finished_at, text(&task.checks),
-            text(&task.gate),
+            text(&task.gate), (!task.decisions.is_null()).then(|| task.decisions.to_string()), text(&task.type_def),
         ],
     )?;
     Ok(())
@@ -345,6 +391,7 @@ pub fn to_json(store: &Store, task: &TaskRow) -> Value {
         "title": task.title, "why": task.why, "status": task.status,
         "sessionId": task.session_id, "sessionTitle": session_title, "createdBy": task.created_by,
         "plan": task.plan, "result": task.result, "shortfalls": task.shortfalls,
+        "decisions": task.decisions, "typeDef": task.type_def,
         "blocked": task.blocked, "cancelReason": task.cancel_reason, "pendingAmend": task.pending_amend,
         "createdAt": task.created_at, "updatedAt": task.updated_at,
         "startedAt": task.started_at, "finishedAt": task.finished_at,
@@ -388,6 +435,8 @@ pub struct Request {
     /// For a task under the check rules: what the route ran and hashed
     /// before the write (checks.rs, `Gate`).
     pub gate: Option<checks::Gate>,
+    /// The types the project offers (catalog.rs), read by the route.
+    pub types: catalog::Catalog,
     pub now: i64,
 }
 
@@ -465,7 +514,7 @@ fn check_done(task: &TaskRow, request: &Request) -> Result<(Value, Vec<String>),
         return refuse(format!("{unknown} is not a done field (allowed: summary, commits, followups, result, cells)"));
     }
     let summary = payload_text(&request.payload, "summary", "say in a sentence or two what was done")?;
-    let kind = types::find(&task.kind).ok_or_else(|| TaskError::Refused(format!("unknown type {}", task.kind)))?;
+    let code = type_flag(task, "code")?;
     let commits: Vec<String> = match payload.get("commits") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(items)) => items
@@ -479,7 +528,7 @@ fn check_done(task: &TaskRow, request: &Request) -> Result<(Value, Vec<String>),
             .collect::<Result<_, _>>()?,
         Some(_) => return refuse("commits must be a list of commit SHAs"),
     };
-    if kind.code && commits.is_empty() {
+    if code && commits.is_empty() {
         return refuse(format!(
             "commits is required for a {} task: list the SHAs of the commits that make this change (git log --format=%H)",
             task.kind
@@ -515,7 +564,7 @@ fn check_done(task: &TaskRow, request: &Request) -> Result<(Value, Vec<String>),
     let result = merged.as_ref().ok_or_else(|| {
         TaskError::Refused(format!(
             "result is required: the {} result is {} (see `atelier task types {}`)",
-            task.kind, kind.result, task.kind
+            task.kind, types::find(types::shape(&task.kind)).map_or("", |kind| kind.result), task.kind
         ))
     })?;
     let unmet = types::check_result(&task.kind, &task.plan, result).map_err(|error| {
@@ -627,19 +676,37 @@ pub struct Draft {
     pub plan: Value,
     /// Grid cells the task works on, claimed when it is created.
     pub cells: Vec<super::grids::CellRef>,
+    /// `{TYPE: reason}` (Null when the owner made the task).
+    pub decisions: Value,
+    /// A custom type's definition (Task.type_def).
+    pub type_def: Option<Value>,
 }
 
-fn check_draft(payload: &Value, action: &str) -> Result<Draft, TaskError> {
+/// Who wrote a draft: an agent gives a reason for every type and answers
+/// every default item of its type; the server, building the owner's task
+/// from grid cells, adds the default items for the agent to answer at start.
+#[derive(Clone, Copy, PartialEq)]
+enum Author {
+    Agent,
+    Owner,
+}
+
+fn check_draft(payload: &Value, action: &str, catalog: &catalog::Catalog, author: Author) -> Result<Draft, TaskError> {
     let object = payload.as_object().ok_or_else(|| {
-        TaskError::Refused(format!("the {action} payload must be an object: {{type, title, why, plan}}"))
+        TaskError::Refused(format!("the {action} payload must be an object: {{type, title, why, plan, decisions}}"))
     })?;
-    if let Some(unknown) = object.keys().find(|key| !["type", "title", "why", "plan", "cells"].contains(&key.as_str())) {
-        return refuse(format!("{unknown} is not a {action} field (allowed: type, title, why, plan, cells)"));
+    if let Some(unknown) = object.keys().find(|key| !["type", "title", "why", "plan", "cells", "decisions"].contains(&key.as_str())) {
+        return refuse(format!("{unknown} is not a {action} field (allowed: type, title, why, plan, decisions, cells)"));
     }
-    let kind = payload_text(payload, "type", &format!("one of {}", types::names()))?;
-    if types::find(kind).is_none() {
-        return refuse(format!("type \"{kind}\" is not a task type (types: {})", types::names()));
-    }
+    let names = catalog.names().join(", ");
+    let kind = payload_text(payload, "type", &format!("one of {names}"))?;
+    let Some(entry) = catalog.find(kind) else {
+        return refuse(format!("type \"{kind}\" is not a task type here (types: {names})"));
+    };
+    let decisions = match author {
+        Author::Agent => check_decisions(object.get("decisions"), kind, catalog)?,
+        Author::Owner => Value::Null,
+    };
     let title = payload_text(payload, "title", "a short title, up to 120 characters")?;
     types::check_title(title, "title")?;
     let why = payload_text(payload, "why", "one line, up to 300 characters")?;
@@ -647,13 +714,80 @@ fn check_draft(payload: &Value, action: &str) -> Result<Draft, TaskError> {
     let plan = object.get("plan").filter(|v| !v.is_null()).ok_or_else(|| {
         TaskError::Refused(format!(
             "plan is required: the {kind} plan is {} (see `atelier task types {kind}`)",
-            types::find(kind).unwrap().plan
+            types::find(types::shape(kind)).unwrap().plan
         ))
     })?;
-    types::check_plan(kind, plan)?;
+    types::check_plan(types::shape(kind), plan)?;
+    answers_defaults(kind, plan, entry, author)?;
     checks::require_checks(kind, plan)?;
     let cells = super::grids::parse_cells(object.get("cells"), false)?;
-    Ok(Draft { kind: kind.to_string(), title: title.trim().to_string(), why: why.trim().to_string(), plan: plan.clone(), cells })
+    let type_def = entry
+        .custom
+        .then(|| json!({"name": entry.name, "description": entry.description, "code": entry.code, "review": entry.review}));
+    Ok(Draft {
+        kind: kind.to_string(), title: title.trim().to_string(), why: why.trim().to_string(), plan: plan.clone(), cells,
+        decisions, type_def,
+    })
+}
+
+/// `decisions`: a reason, one line, for every type that is on, the chosen
+/// one's saying why it fits. Only completeness is checked.
+fn check_decisions(given: Option<&Value>, kind: &str, catalog: &catalog::Catalog) -> Result<Value, TaskError> {
+    let names = catalog.names();
+    let shape = || format!(
+        "decisions is required: {{TYPE: reason}} with a one-line reason for each type ({}): why \"{kind}\" fits, and why each other type does not",
+        names.join(", ")
+    );
+    let row = match given {
+        Some(Value::Object(row)) => row,
+        _ => return Err(TaskError::Refused(shape())),
+    };
+    let missing: Vec<&str> = names.iter().map(String::as_str).filter(|name| !row.contains_key(*name)).collect();
+    if !missing.is_empty() {
+        return refuse(format!("decisions has no reason for {}: give a one-line reason for every type", missing.join(", ")));
+    }
+    let mut kept = serde_json::Map::new();
+    for (name, reason) in row {
+        if catalog.find(name).is_none() {
+            return refuse(format!("decisions names \"{name}\", which is not a task type here (types: {})", names.join(", ")));
+        }
+        let reason = reason.as_str().map(str::trim).unwrap_or_default();
+        if reason.is_empty() {
+            return refuse(format!("decisions.{name} is blank: say in a line why {name} fits or does not"));
+        }
+        types::check_why(reason, &format!("decisions.{name}"))?;
+        kept.insert(name.clone(), json!(reason));
+    }
+    Ok(Value::Object(kept))
+}
+
+/// Every default item of the type that is on must be in `plan.requirements`;
+/// an agent's must each have checks or a declined reason.
+fn answers_defaults(kind: &str, plan: &Value, entry: &catalog::Entry, author: Author) -> Result<(), TaskError> {
+    let given: Vec<&str> = plan["requirements"].as_array().into_iter().flatten().filter_map(|item| item["id"].as_str()).collect();
+    let missing: Vec<String> = entry
+        .items
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .filter(|id| !given.contains(id))
+        .map(|id| format!("\"{id}\""))
+        .collect();
+    if !missing.is_empty() {
+        return refuse(format!(
+            "plan.requirements has no entry for {}: every default item of {kind} needs {{id, text, checks}} or {{id, text, declined: reason}} (see `atelier task types {kind}`)",
+            missing.join(", ")
+        ));
+    }
+    if author == Author::Agent {
+        let open = types::unanswered(plan);
+        if !open.is_empty() {
+            return refuse(format!(
+                "plan.requirements {} needs checks, or declined with a reason it does not apply",
+                open.iter().map(|id| format!("\"{id}\"")).collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// A new task's gate (checks.rs): for a plan with checks, what approval
@@ -717,6 +851,8 @@ fn insert_task(
         finished_at: None,
         checks: None,
         gate,
+        decisions: draft.decisions.clone(),
+        type_def: draft.type_def.clone(),
     };
     save(connection, &task)?;
     payload["type"] = json!(task.kind);
@@ -789,13 +925,18 @@ pub struct ProposalRow {
     pub cells: Value,
     /// The weak-check lint's flags, for the card (checks.rs, `lint`).
     pub flags: Value,
+    /// `{TYPE: reason}` (Task.decisions).
+    pub decisions: Value,
+    /// A custom type's definition (Task.type_def).
+    pub type_def: Option<Value>,
 }
 
 const PROPOSAL_COLUMNS: &str =
     "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at";
 /// The columns read: the stored ones plus the cells.
 const PROPOSAL_READ: &str =
-    "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at, cells, flags";
+    "project_id, id, session_id, type, title, why, plan, status, task_number, created_at, decided_at, cells, flags,
+     decisions, type_def";
 
 fn proposal_row(row: &Row) -> rusqlite::Result<ProposalRow> {
     Ok(ProposalRow {
@@ -812,6 +953,8 @@ fn proposal_row(row: &Row) -> rusqlite::Result<ProposalRow> {
         decided_at: row.get(10)?,
         cells: json_column(row, 11)?.unwrap_or_else(|| json!([])),
         flags: json_column(row, 12)?.unwrap_or_else(|| json!([])),
+        decisions: json_column(row, 13)?.unwrap_or(Value::Null),
+        type_def: json_column(row, 14)?,
     })
 }
 
@@ -841,6 +984,7 @@ pub fn proposal_json(proposal: &ProposalRow) -> Value {
         "type": proposal.kind, "title": proposal.title, "why": proposal.why, "plan": proposal.plan,
         "status": proposal.status, "taskNumber": proposal.task_number,
         "createdAt": proposal.created_at, "decidedAt": proposal.decided_at,
+        "decisions": proposal.decisions, "typeDef": proposal.type_def,
     })
 }
 
@@ -858,8 +1002,9 @@ pub fn propose(
     prints: &super::grids::Prints,
     gate: Option<&checks::Gate>,
     now: i64,
+    types: &catalog::Catalog,
 ) -> Result<(ProposalRow, String), TaskError> {
-    let draft = check_draft(payload, "propose")?;
+    let draft = check_draft(payload, "propose", types, Author::Agent)?;
     let flags = gate.map(|gate| gate.flags.clone()).unwrap_or_default();
     if let Some(gate) = gate {
         missing_check_files(gate)?;
@@ -887,6 +1032,8 @@ pub fn propose(
         decided_at: None,
         cells: json!(draft.cells.iter().map(super::grids::CellRef::to_json).collect::<Vec<_>>()),
         flags: json!(flags),
+        decisions: draft.decisions,
+        type_def: draft.type_def,
     };
     connection.execute(
         &format!("INSERT INTO task_proposal ({PROPOSAL_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
@@ -897,8 +1044,11 @@ pub fn propose(
         ],
     )?;
     connection.execute(
-        "UPDATE task_proposal SET cells = ?3, flags = ?4 WHERE project_id = ?1 AND id = ?2",
-        params![proposal.project_id, proposal.id, cells, proposal.flags.to_string()],
+        "UPDATE task_proposal SET cells = ?3, flags = ?4, decisions = ?5, type_def = ?6 WHERE project_id = ?1 AND id = ?2",
+        params![
+            proposal.project_id, proposal.id, cells, proposal.flags.to_string(), proposal.decisions.to_string(),
+            proposal.type_def.as_ref().map(Value::to_string),
+        ],
     )?;
     let summary = "Proposed a task; the owner answers on the card with Create task, Just do it or Cancel. \
         Stop here and end your turn without starting the work. The owner's answer arrives as your next message."
@@ -935,6 +1085,8 @@ pub fn answer_proposal(
             why: proposal.why.clone(),
             plan: proposal.plan.clone(),
             cells: super::grids::parse_cells(Some(&proposal.cells), false)?,
+            decisions: proposal.decisions.clone(),
+            type_def: proposal.type_def.clone(),
         };
         // A cell may have been taken since the proposal was made.
         super::grids::check_claimable(&transaction, project, &draft.cells, prints).map_err(|error| match error {
@@ -991,11 +1143,19 @@ pub fn create_from_pick(
     prints: &super::grids::Prints,
     gate: Option<&checks::Gate>,
     now: i64,
+    types: &catalog::Catalog,
 ) -> Result<(TaskRow, Vec<String>, String), TaskError> {
     let connection = store.connection();
     let transaction = connection.unchecked_transaction()?;
-    let (payload, label) = super::grids::picked_task(&transaction, project, pick, prints)?;
-    let draft = check_draft(&payload, "create")?;
+    let (mut payload, label) = super::grids::picked_task(&transaction, project, pick, prints)?;
+    // The type's default items, for the agent to answer before it starts:
+    // those that come with checks carry them already.
+    let kind = payload["type"].as_str().unwrap_or_default().to_string();
+    let defaults: Vec<Value> = types.find(&kind).map(|entry| entry.items.clone()).unwrap_or_default();
+    if !defaults.is_empty() {
+        payload["plan"]["requirements"] = json!(defaults);
+    }
+    let draft = check_draft(&payload, "create", types, Author::Owner)?;
     let locked = approved_gate(&draft.plan, gate, Vec::new())?;
     let task = insert_task(&transaction, project, Some(session), &draft, now, "owner", json!({"grid": pick.slug}), locked)?;
     let grids = super::grids::claim(&transaction, project, task.number, &draft.cells, prints, Some(session), "owner", now)?;
@@ -1123,7 +1283,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         if owner {
             return refuse("the owner creates a task from grid cells with {grid, chat}, on its own route");
         }
-        let draft = check_draft(&request.payload, "create")?;
+        let draft = check_draft(&request.payload, "create", &request.types, Author::Agent)?;
         // Cells of approved grids are work the owner already agreed to: a
         // task for them needs no @task.
         let agreed = super::grids::all_in_approved(connection, &request.project, &draft.cells)?;
@@ -1196,6 +1356,16 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                 return refuse(format!("#{number} is blocked; run `atelier task unblock {number}` once the cause is resolved"));
             }
             status_is(&task, &["todo"], "start")?;
+            let open = types::unanswered(&task.plan);
+            if !open.is_empty() {
+                return refuse(format!(
+                    "#{number} cannot start: its type's default item{} {} need{} checks, or declined with a reason it does not apply. \
+                     Add them to plan.requirements with `atelier task amend {number}`",
+                    if open.len() == 1 { "" } else { "s" },
+                    open.iter().map(|id| format!("\"{id}\"")).collect::<Vec<_>>().join(", "),
+                    if open.len() == 1 { "s" } else { "" },
+                ));
+            }
             one_in_progress(connection, session, &task)?;
             // A task with checks starts only when every check is red.
             let payload = if gate::gated(&task) { gate::start(&mut task, request.gate.as_ref())? } else { json!({}) };
@@ -1314,7 +1484,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             let plan = request.payload.get("plan").filter(|v| !v.is_null()).ok_or_else(|| {
                 TaskError::Refused("plan is required: amend takes {plan} with the whole new plan".into())
             })?;
-            types::check_plan(&task.kind, plan)?;
+            types::check_plan(types::shape(&task.kind), plan)?;
             if *plan == task.plan {
                 return refuse(format!("the proposed plan is the same as #{number}'s current plan"));
             }
@@ -1359,7 +1529,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             if !cells.is_empty() {
                 result["cells"] = json!(cells.iter().map(super::grids::CellRef::to_json).collect::<Vec<_>>());
             }
-            let review = types::find(&task.kind).is_some_and(|kind| kind.review);
+            let review = type_flag(&task, "review")?;
             let dropped = task.pending_amend.take();
             task.result = Some(result);
             task.checks = None;
@@ -1538,14 +1708,14 @@ mod tests {
 
     fn ask(store: &Store, actor: &str, session: Option<&str>, action: &str, number: Option<i64>, payload: Value) -> Result<Outcome, TaskError> {
         let task = number.and_then(|number| get(store.connection(), "p", number).ok().flatten());
-        apply(store, &Request {
+        apply(store, &Request { types: Default::default(),
             gate: gate::tests::simulated(task.as_ref(), action),
             action: action.into(),
             actor: actor.into(),
             session: session.map(str::to_string),
             project: "p".into(),
             number,
-            payload,
+            payload: decided(payload),
             missing_commits: HashSet::new(),
             visual_files: Vec::new(),
             cwd: Some("/repo".into()),
@@ -1692,7 +1862,7 @@ mod tests {
         assert!(refused(agent(&store, "s1", "done", Some(one), done.clone())).starts_with("commits is required for a feature task"));
         done["commits"] = json!(["xyz"]);
         assert!(refused(agent(&store, "s1", "done", Some(one), done.clone())).contains("is not a commit SHA"));
-        let mut request = Request {
+        let mut request = Request { types: Default::default(),
             gate: None,
             action: "done".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(),
             number: Some(one), payload: done_payload("feature"), missing_commits: HashSet::from(["abcdef1".to_string()]),
@@ -1714,7 +1884,7 @@ mod tests {
             let session = format!("n{index}");
             let one = create(&store, &session, kind);
             agent(&store, &session, "start", Some(one), json!({})).unwrap();
-            let mut request = Request {
+            let mut request = Request { types: Default::default(),
                 gate: None,
                 action: "done".into(), actor: "agent".into(), session: Some(session.clone()), project: "p".into(),
                 number: Some(one), payload: done_payload(kind), missing_commits: HashSet::new(),
@@ -1892,7 +2062,7 @@ mod tests {
     #[test]
     fn a_proposal_made_before_checks_still_becomes_a_task_under_the_old_rules() {
         let (_d, store) = store();
-        propose(&store, "p", "s1", &draft("chore"), &Default::default(), None, 1).unwrap();
+        propose(&store, "p", "s1", &decided(draft("chore")), &Default::default(), None, 1, &Default::default()).unwrap();
         // As stored before checks: the plan has none.
         let old = without_checks(&draft("chore")["plan"]);
         assert!(!checks::is_checked(&old));
@@ -1911,8 +2081,8 @@ mod tests {
     #[test]
     fn a_proposal_waits_for_the_owner_and_create_makes_it_a_task_in_that_chat() {
         let (_d, store) = store();
-        assert!(refused_proposal(propose(&store, "p", "s1", &json!({"type": "epic"}), &Default::default(), None, 1)).contains("not a task type"));
-        let (proposal, summary) = propose(&store, "p", "s1", &draft("feature"), &Default::default(), None, 1).unwrap();
+        assert!(refused_proposal(propose(&store, "p", "s1", &decided(json!({"type": "epic"})), &Default::default(), None, 1, &Default::default())).contains("not a task type"));
+        let (proposal, summary) = propose(&store, "p", "s1", &decided(draft("feature")), &Default::default(), None, 1, &Default::default()).unwrap();
         assert_eq!((proposal.id, proposal.status.as_str()), (1, "pending"));
         assert!(summary.contains("Stop here"), "{summary}");
         assert!(list(store.connection(), Some("p"), None).unwrap().is_empty(), "a proposal is not a task");
@@ -1947,8 +2117,8 @@ mod tests {
         assert!(message.starts_with("plan.checks has no checks"), "{message}");
 
         let folder = tempfile::tempdir().unwrap();
-        let payload = draft("feature");
-        let mut request = Request {
+        let payload = decided(draft("feature"));
+        let mut request = Request { types: Default::default(),
             action: "create".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(),
             payload: payload.clone(), gate: Some(gate_in(folder.path(), &payload)), now: 1, ..Default::default()
         };
@@ -1981,7 +2151,7 @@ mod tests {
         payload["plan"]["criteria"][1]["checks"][0]["files"] = json!([]);
         payload["plan"]["criteria"][0]["checks"][0]["files"] = json!([]);
         let gate = gate_in(folder.path(), &payload);
-        let (proposal, _) = propose(&store, "p", "s1", &payload, &Default::default(), Some(&gate), 1).unwrap();
+        let (proposal, _) = propose(&store, "p", "s1", &decided(payload.clone()), &Default::default(), Some(&gate), 1, &Default::default()).unwrap();
         let flags = proposal_json(&proposal)["checkFlags"].clone();
         assert_eq!(flags[0]["kind"], "weak");
         assert_eq!((flags[0]["item"].clone(), flags[0]["check"].clone()), (json!("export"), json!("export-works")));
@@ -1989,7 +2159,7 @@ mod tests {
         // Missing check files are refused at propose too.
         let mut missing = draft("feature");
         missing["plan"]["criteria"][1]["checks"][0]["files"] = json!([]);
-        let message = refused_proposal(propose(&store, "p", "s1", &missing, &Default::default(), Some(&gate_in(folder.path(), &missing)), 1));
+        let message = refused_proposal(propose(&store, "p", "s1", &decided(missing.clone()), &Default::default(), Some(&gate_in(folder.path(), &missing)), 1, &Default::default()));
         assert!(message.contains("tests/export.rs"), "{message}");
         let (_, task, _) = answer_proposal(&store, "p", 1, "create", &Default::default(), Some(&gate_in(folder.path(), &payload)), 2).unwrap();
         let task = task.unwrap();
@@ -1999,8 +2169,8 @@ mod tests {
     #[test]
     fn just_do_it_and_cancel_discard_a_proposal() {
         let (_d, store) = store();
-        propose(&store, "p", "s1", &draft("chore"), &Default::default(), None, 1).unwrap();
-        propose(&store, "p", "s1", &draft("chore"), &Default::default(), None, 1).unwrap();
+        propose(&store, "p", "s1", &decided(draft("chore")), &Default::default(), None, 1, &Default::default()).unwrap();
+        propose(&store, "p", "s1", &decided(draft("chore")), &Default::default(), None, 1, &Default::default()).unwrap();
         assert!(refused_proposal(answer_proposal(&store, "p", 1, "maybe", &Default::default(), None, 2)).contains("choice must be one of"));
         let (one, task, _) = answer_proposal(&store, "p", 1, "just_do_it", &Default::default(), None, 2).unwrap();
         assert!(task.is_none());
@@ -2023,7 +2193,7 @@ mod tests {
         create(&store, "s2", "chore");
         agent(&store, "s1", "start", Some(two), json!({})).unwrap();
         agent(&store, "s1", "cancel", Some(three), json!({"reason": "r"})).unwrap();
-        propose(&store, "p", "s1", &draft("docs"), &Default::default(), None, 1).unwrap();
+        propose(&store, "p", "s1", &decided(draft("docs")), &Default::default(), None, 1, &Default::default()).unwrap();
         let section = open_section(store.connection(), "s1").unwrap();
         assert_eq!(
             section,

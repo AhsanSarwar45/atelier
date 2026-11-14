@@ -13,9 +13,15 @@ use std::collections::BTreeMap;
 
 pub const USAGE: &str = "\
 usage: atelier task <command>
-  types [TYPE]                 list types, or print one type's create and done payloads
-  propose                      {type, title, why, plan, cells?} on stdin or --input FILE: ask the owner first
-  create                       {type, title, why, plan, cells?}; only when the owner's message says @task,
+  types [TYPE]                 list this project's types and their default items, or print one type's payloads
+  types create                 {name, description, code, review, items?} on stdin: a new type for the project
+  types edit TYPE              {items?, description?, code?, review?} on stdin: items replace the scope's own
+  types disable|enable TYPE [--item ID]
+                               turn a type, or one of its default items, off or back on
+  types undo                   put back the types as they were before the last change
+                               (every types change takes --scope install|project; project is the default)
+  propose                      {type, title, why, decisions, plan, cells?} on stdin or --input FILE: ask the owner first
+  create                       {type, title, why, decisions, plan, cells?}; only when the owner's message says @task,
                                or when every cell is in an approved grid (`atelier grid next` prints one)
   start N
   check N ITEM                 the server runs the item's checks and ticks it when every one passes (no input);
@@ -204,21 +210,55 @@ fn line(task: &Value) -> String {
     )
 }
 
-fn print_types(rest: &[String]) -> Result<i32, String> {
+/// The types this chat's project offers, from the app; outside a chat, the
+/// install's.
+async fn listing() -> Result<Value, String> {
+    let query: Vec<(&str, String)> = session().ok().map(|id| ("session", id)).into_iter().collect();
+    get("/api/workbench/task-types", &query).await
+}
+
+async fn print_types(rest: &[String]) -> Result<i32, String> {
+    match rest.first().map(String::as_str) {
+        Some("create" | "edit" | "disable" | "enable" | "undo") => return change_types(rest).await,
+        Some(word) if word.starts_with("--") => return Err(format!("unknown option {word}\n{USAGE}")),
+        _ => {}
+    }
+    let listed = listing().await?;
+    let entries = listed["types"].as_array().cloned().unwrap_or_default();
+    let names: Vec<&str> = entries.iter().filter_map(|entry| entry["name"].as_str()).collect();
     match rest.first() {
         None => {
             println!("Task types (code = done needs commits; review = the owner approves):");
-            for kind in types::TYPES {
-                let marks = [kind.code.then_some("code"), kind.review.then_some("review")]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                println!("\n{}{}", kind.name, if marks.is_empty() { String::new() } else { format!(" ({marks})") });
-                println!("  plan:   {}", kind.plan);
-                println!("  result: {}", kind.result);
+            for entry in &entries {
+                let marks = [
+                    entry["code"].as_bool().unwrap_or(false).then_some("code"),
+                    entry["review"].as_bool().unwrap_or(false).then_some("review"),
+                    entry["custom"].as_bool().unwrap_or(false).then_some("custom, planned like general"),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(", ");
+                let name = entry["name"].as_str().unwrap_or_default();
+                println!("\n{name}{}", if marks.is_empty() { String::new() } else { format!(" ({marks})") });
+                if entry["custom"] == true {
+                    println!("  about:  {}", entry["description"].as_str().unwrap_or_default());
+                }
+                println!("  plan:   {}", entry["plan"].as_str().unwrap_or_default());
+                println!("  result: {}", entry["result"].as_str().unwrap_or_default());
+                for item in entry["items"].as_array().into_iter().flatten() {
+                    println!(
+                        "  default item {}: {}{}",
+                        item["id"].as_str().unwrap_or_default(),
+                        item["text"].as_str().unwrap_or_default(),
+                        if item.get("checks").is_some() { " (has checks)" } else { "" }
+                    );
+                }
             }
             println!("\n`atelier task types TYPE` prints a create and a done payload to copy.");
+            println!(
+                "Every create and propose gives `decisions`: one line for every type above, why the chosen type fits and why each other one does not. A type's default items go in plan.requirements, each with checks or a declined reason."
+            );
             println!(
                 "\nAnything visible on screen or in a render uses a visual type: {}. Pick ui_feature or render_feature for new work you can see (not feature), visual_bug for a bug you can see (not bug). Every item needs real images: an after, and a before (different from it) where the screen or scene already existed.",
                 types::VISUAL_TYPES.join(", ")
@@ -229,9 +269,42 @@ fn print_types(rest: &[String]) -> Result<i32, String> {
             Ok(0)
         }
         Some(name) => {
-            let mut example = types::example(name)
-                .ok_or_else(|| format!("{name} is not a task type (types: {})", types::names()))?;
+            let entry = entries
+                .iter()
+                .find(|entry| entry["name"] == name.as_str())
+                .ok_or_else(|| format!("{name} is not a task type here (types: {})", names.join(", ")))?;
+            let mut example = types::example(types::shape(name)).ok_or_else(|| format!("{name} has no example"))?;
             let recipe = example.as_object_mut().and_then(|row| row.remove("recipe"));
+            example["type"] = json!(name);
+            example["code"] = entry["code"].clone();
+            example["review"] = entry["review"].clone();
+            let create = &mut example["create"];
+            create["type"] = json!(name);
+            create["decisions"] = Value::Object(
+                names
+                    .iter()
+                    .map(|other| {
+                        let reason = if *other == name.as_str() { "<one line: why this type fits the work>" } else { "<one line: why the work is not this type>" };
+                        (other.to_string(), json!(reason))
+                    })
+                    .collect(),
+            );
+            let items = entry["items"].as_array().cloned().unwrap_or_default();
+            if !items.is_empty() {
+                create["plan"]["requirements"] = Value::Array(
+                    items
+                        .iter()
+                        .map(|item| {
+                            let mut answered = json!({"id": item["id"], "text": item["text"]});
+                            match item.get("checks") {
+                                Some(checks) => answered["checks"] = checks.clone(),
+                                None => answered["checks"] = json!(["<checks that prove it, or drop checks and give declined: one line on why it does not apply>"]),
+                            }
+                            answered
+                        })
+                        .collect(),
+                );
+            }
             println!("{}", serde_json::to_string_pretty(&example).map_err(|e| e.to_string())?);
             if let Some(recipe) = recipe.as_ref().and_then(Value::as_str) {
                 println!("\nChecks for {name}:\n\n{recipe}");
@@ -239,6 +312,59 @@ fn print_types(rest: &[String]) -> Result<i32, String> {
             Ok(0)
         }
     }
+}
+
+/// `atelier task types create|edit|disable|enable|undo`: change the
+/// project's task types (or the install's, with `--scope install`).
+async fn change_types(rest: &[String]) -> Result<i32, String> {
+    let action = rest[0].as_str();
+    let scope = flag(rest, "--scope")?.unwrap_or_else(|| "project".into());
+    let mut change = match action {
+        "create" => {
+            only_flags(&rest[1..], &["--input", "--scope"])?;
+            json!({"type": payload(rest, "{name, description, code, review, items?}")?})
+        }
+        "edit" => {
+            let name = rest.get(1).filter(|word| !word.starts_with("--")).ok_or("usage: atelier task types edit TYPE: {items?, description?, code?, review?} on stdin")?;
+            only_flags(&rest[2..], &["--input", "--scope"])?;
+            let mut change = payload(rest, "{items?, description?, code?, review?}")?;
+            if !change.is_object() {
+                return Err("the payload must be an object {items?, description?, code?, review?}".into());
+            }
+            change["name"] = json!(name);
+            change
+        }
+        "disable" | "enable" => {
+            let name = rest.get(1).filter(|word| !word.starts_with("--")).ok_or_else(|| format!("usage: atelier task types {action} TYPE [--item ID]"))?;
+            only_flags(&rest[2..], &["--item", "--scope"])?;
+            json!({"name": name, "item": flag(rest, "--item")?})
+        }
+        _ => {
+            only_flags(&rest[1..], &["--scope"])?;
+            json!({})
+        }
+    };
+    change["action"] = json!(action);
+    change["scope"] = json!(scope);
+    let mut body = json!({"change": change});
+    if let Ok(session) = session() {
+        body["session"] = json!(session);
+    } else if scope == "project" {
+        return Err("ATELIER_CHAT_SESSION_ID is not set: run this in an Atelier chat to change the project's types, or pass --scope install".into());
+    }
+    let response = reqwest::Client::new()
+        .post(server_url("/api/workbench/task-types"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| format!("could not reach Atelier: {error}"))?;
+    let status = response.status();
+    let value: Value = response.json().await.map_err(|error| format!("invalid response from Atelier: {error}"))?;
+    if !status.is_success() {
+        return Err(value["error"].as_str().unwrap_or("Atelier refused the type change").to_string());
+    }
+    println!("{} The owner sees the change and can undo it.", value["summary"].as_str().unwrap_or_default());
+    Ok(0)
 }
 
 pub async fn run(rest: &[String]) -> Result<i32, String> {
@@ -251,7 +377,7 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             println!("{USAGE}");
             Ok(0)
         }
-        "types" => print_types(rest),
+        "types" => print_types(rest).await,
         "create" | "propose" => {
             only_flags(rest, &["--input"])?;
             let session = session()?;

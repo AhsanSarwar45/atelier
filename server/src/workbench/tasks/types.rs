@@ -561,15 +561,74 @@ pub fn check_why(why: &str, at: &str) -> Result<(), String> {
 /// Check a plan for its type. A `mutants` key from older plans is accepted
 /// and ignored.
 pub fn check_plan(kind: &str, plan: &Value) -> Result<(), String> {
+    let mut rest = plan.clone();
     if let Some(mutants) = plan.get("mutants") {
         if !mutants.is_boolean() {
             return Err("plan.mutants must be true or false".into());
         }
-        let mut rest = plan.clone();
         rest.as_object_mut().map(|row| row.remove("mutants"));
-        return check_plan_fields(kind, &rest);
     }
-    check_plan_fields(kind, plan)
+    let requirements = rest.as_object_mut().and_then(|row| row.remove("requirements"));
+    check_plan_fields(kind, &rest)?;
+    if let Some(requirements) = requirements {
+        check_requirements(kind, plan, &requirements)?;
+    }
+    Ok(())
+}
+
+/// The type a kind is planned and checked as: itself when built in, and
+/// `general` for a type the install or project made (catalog.rs). Only a
+/// kind the catalog accepted reaches a task.
+pub fn shape(kind: &str) -> &str {
+    if find(kind).is_some() { kind } else { "general" }
+}
+
+/// `plan.requirements[] {id, text, checks?, declined?}`: the answers to the
+/// type's default items (catalog.rs). Each has checks, or a reason it does
+/// not apply in `declined`, or (in a task the owner made from grid cells)
+/// neither yet, which `start` refuses.
+fn check_requirements(kind: &str, plan: &Value, requirements: &Value) -> Result<(), String> {
+    let at = "plan.requirements";
+    let list = requirements.as_array().ok_or_else(|| format!("{at} must be a list of {{id, text, checks}} or {{id, text, declined}}"))?;
+    let items = item_ids(kind, plan);
+    let mut seen: Vec<&str> = Vec::new();
+    for (index, item) in list.iter().enumerate() {
+        let path = format!("{at}[{index}]");
+        let entry = object(item, &path)?;
+        only(entry, &["id", "text", "checks", "declined"], &path)?;
+        let id = text(entry, "id", &path)?;
+        text(entry, "text", &path)?;
+        if seen.contains(&id) {
+            return Err(format!("{path}: id \"{id}\" is used twice in requirements"));
+        }
+        if items.iter().any(|item| item == id) {
+            return Err(format!("{path}: id \"{id}\" is also a plan item; give the requirement another id"));
+        }
+        seen.push(id);
+        match (present(entry, "checks"), present(entry, "declined")) {
+            (Some(_), Some(_)) => return Err(format!("{path} (id \"{id}\"): give checks or declined, not both")),
+            (Some(checks), None) => {
+                super::checks::parse_checks(checks, &format!("{path}.checks"))?;
+            }
+            (None, Some(Value::String(reason))) if !reason.trim().is_empty() => {}
+            (None, Some(_)) => {
+                return Err(format!("{path} (id \"{id}\"): declined is blank; say in a line why the item does not apply"))
+            }
+            (None, None) => {}
+        }
+    }
+    Ok(())
+}
+
+/// The requirements of a plan that have neither checks nor a declined reason.
+pub fn unanswered(plan: &Value) -> Vec<String> {
+    plan["requirements"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("checks").is_none() && item.get("declined").is_none())
+        .filter_map(|item| item["id"].as_str().map(str::to_string))
+        .collect()
 }
 
 fn check_plan_fields(kind: &str, plan: &Value) -> Result<(), String> {
@@ -746,7 +805,7 @@ pub fn target_met(plan_target: &Value, after: f64) -> (bool, String) {
 /// `(plan key, result key)`: what `atelier task check` ticks. Types without
 /// one (bug, plan, review) have nothing to tick.
 pub fn item_lists(kind: &str) -> Option<(&'static str, &'static str)> {
-    Some(match kind {
+    Some(match shape(kind) {
         "feature" => ("criteria", "criteria"),
         "general" => ("done_when", "done_when"),
         "ui_change" | "ui_feature" | "visual_bug" => ("screens", "screens"),
@@ -764,7 +823,7 @@ pub fn item_lists(kind: &str) -> Option<(&'static str, &'static str)> {
 
 /// The fields one result entry may carry, by type.
 fn entry_fields(kind: &str) -> &'static [&'static str] {
-    match kind {
+    match shape(kind) {
         "feature" | "general" => &["id", "met", "evidence", "reason"],
         "ui_change" | "ui_feature" | "visual_bug" => &["id", "before", "after", "notes"],
         "render_change" | "render_feature" => &["id", "before", "after", "reference", "notes"],
@@ -789,7 +848,7 @@ fn check_item(kind: &str, plan_item: &Value, entry: &Row, path: &str) -> Result<
         why.map(|why| Some(why.to_string()))
             .ok_or_else(|| format!("{path}: {key} is required because {because}"))
     };
-    match kind {
+    match shape(kind) {
         "feature" | "general" => {
             let met = boolean(entry, "met", path)?;
             text(entry, "evidence", path)?;
@@ -993,6 +1052,7 @@ pub fn check_result(kind: &str, plan: &Value, result: &Value) -> Result<Vec<Stri
     let at = "result";
     let row = object(result, at)?;
     let mut unmet = Vec::new();
+    let kind = shape(kind);
     match kind {
         "visual_bug" => {
             only(row, &["root_cause", "fix", "screens"], at)?;

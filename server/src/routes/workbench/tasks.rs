@@ -140,9 +140,78 @@ async fn with_merged(task: &mut Value, folder: Option<&str>) {
     task["merged"] = json!(merged);
 }
 
-/// GET /api/workbench/task-types
-pub(super) async fn kinds() -> Json<Value> {
-    Json(types::listing())
+#[derive(Deserialize)]
+pub(super) struct KindsQuery {
+    session: Option<String>,
+    project: Option<String>,
+}
+
+/// The project a types call is about: the chat's, the one named, or none
+/// (the install's types alone).
+async fn kinds_project(state: &WorkbenchState, session: Option<&str>, project: Option<&str>) -> Result<Option<String>, ApiError> {
+    if let Some(id) = session.filter(|id| !id.is_empty()) {
+        let found = state
+            .database()
+            .get_session(id.to_string())
+            .await
+            .map_err(failed)?
+            .ok_or_else(|| format!("no chat session {id}: ATELIER_CHAT_SESSION_ID must name a chat in this app"))?;
+        return Ok(Some(found.project_id));
+    }
+    Ok(project.filter(|id| !id.is_empty()).map(str::to_string))
+}
+
+/// The data folder, and the project's folder for its task types.
+fn kinds_folders(state: &WorkbenchState, project: Option<&str>) -> Result<(std::path::PathBuf, Option<std::path::PathBuf>), ApiError> {
+    let data = crate::workbench::library::data_dir()?;
+    let dir = match project {
+        None => None,
+        Some(project) => {
+            let folder = project_folder(state, project).ok_or_else(|| format!("there is no project {project}"))?;
+            Some(
+                tasks::catalog::project_dir(&data, std::path::Path::new(&folder))
+                    .ok_or_else(|| "Register this project before changing its task types".to_string())?,
+            )
+        }
+    };
+    Ok((data, dir))
+}
+
+/// GET /api/workbench/task-types: the types a chat's (or a project's) tasks
+/// may use, with their default items.
+pub(super) async fn kinds(State(state): State<WorkbenchState>, Query(query): Query<KindsQuery>) -> Result<Json<Value>, ApiError> {
+    let project = kinds_project(&state, query.session.as_deref(), query.project.as_deref()).await?;
+    let folder = project.as_deref().and_then(|project| project_folder(&state, project));
+    let catalog = tasks::catalog::for_folder(folder.as_deref().map(std::path::Path::new))?;
+    Ok(Json(catalog.listing()))
+}
+
+#[derive(Deserialize)]
+pub(super) struct KindsChange {
+    session: Option<String>,
+    project: Option<String>,
+    /// `atelier task types create|edit|disable|enable`'s change
+    /// (catalog.rs `change`), or `{action: undo, scope}` from the owner.
+    change: Value,
+}
+
+/// POST /api/workbench/task-types: change a scope's task types, or undo the
+/// last change. Every change is told to the app, which shows it to the owner.
+pub(super) async fn change_kinds(State(state): State<WorkbenchState>, Json(request): Json<KindsChange>) -> Result<Json<Value>, ApiError> {
+    let project = kinds_project(&state, request.session.as_deref(), request.project.as_deref()).await?;
+    let (data, dir) = kinds_folders(&state, project.as_deref())?;
+    let summary = if request.change["action"] == "undo" {
+        let scope = request.change["scope"].as_str().unwrap_or("project");
+        tasks::catalog::undo(&data, dir.as_deref(), scope)?
+    } else {
+        tasks::catalog::change(&data, dir.as_deref(), &request.change)?
+    };
+    if let Some(project) = &project {
+        let _ = state.watch_polls.send(json!({
+            "type": "taskTypes.changed", "kind": "taskTypes.changed", "projectId": project, "summary": summary,
+        }));
+    }
+    Ok(Json(json!({"summary": summary})))
 }
 
 #[derive(Deserialize)]
@@ -180,6 +249,12 @@ fn task_settings(state: &WorkbenchState, project: &str, fallback: Option<&str>) 
         Some(folder) => checks::project_settings(std::path::Path::new(&folder)),
         None => Default::default(),
     }
+}
+
+/// The task types the project offers: built-ins, the install's and its own.
+fn type_catalog(state: &WorkbenchState, project: &str) -> Result<tasks::catalog::Catalog, ApiError> {
+    let folder = project_folder(state, project);
+    tasks::catalog::for_folder(folder.as_deref().map(std::path::Path::new)).map_err(|error| ApiError::from(error))
 }
 
 /// For a draft with checks, in the folder its checks run in: the locked
@@ -329,10 +404,11 @@ pub(super) async fn act(
         let asked_project = project.clone();
         let prints = prints_for(&state, &project, cell_grids(&payload)).await;
         let gate = draft_gate(&state, &project, cwd.as_deref(), &payload["type"], &payload["plan"]).await;
+        let types = type_catalog(&state, &project)?;
         let outcome = state
             .database()
             .write_tasks(move |store| {
-                tasks::propose(store, &asked_project, &session, &payload, &prints, gate.as_ref(), now)
+                tasks::propose(store, &asked_project, &session, &payload, &prints, gate.as_ref(), now, &types)
                     .map(|(proposal, summary)| (tasks::proposal_json(&proposal), summary))
             })
             .await
@@ -433,6 +509,7 @@ pub(super) async fn act(
         task_gate(&state, &project, request.number, &request.action, &request.actor, cwd.as_deref(), &payload).await
     };
     let announced = project.clone();
+    let types = type_catalog(&state, &project)?;
     let asked = Request {
         action: request.action,
         actor: request.actor,
@@ -445,6 +522,7 @@ pub(super) async fn act(
         visual_files: visual,
         prints,
         gate,
+        types,
         now: chrono::Utc::now().timestamp_millis(),
     };
     let outcome = state
@@ -546,10 +624,11 @@ async fn owner_create(
     let folder = session_folder(state, &session).await.or_else(|| project_folder(state, &project));
     let gate = draft_gate(state, &project, folder.as_deref(), &picked["type"], &picked["plan"]).await;
     let now = chrono::Utc::now().timestamp_millis();
+    let types = type_catalog(state, &project)?;
     let outcome = state
         .database()
         .write_tasks(move |store| {
-            tasks::create_from_pick(store, &asked, &held, &pick, &prints, gate.as_ref(), now)
+            tasks::create_from_pick(store, &asked, &held, &pick, &prints, gate.as_ref(), now, &types)
                 .map(|(task, grids, prompt)| (tasks::to_json(store, &task), grids, prompt))
         })
         .await

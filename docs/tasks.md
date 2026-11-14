@@ -362,6 +362,39 @@ takes the item entries, nothing is locked or run. Tasks already started or
 in review, and cells already proved, are untouched. New tasks and open cells
 use checks.
 
+## Task types
+
+The built-in types are below. The install and each project can add their
+own and give any type default items, in `task-types.json`: in the data
+folder for the install, and next to the project's manifest for a project.
+A project inherits the install's types and items, adds its own, and can turn
+a type or an item off (`disabled`, `disabled_items`). The file:
+
+```json
+{"types": [{"name": "api_change", "description": "…", "code": true, "review": false}],
+ "items": {"ui_change": [{"id": "phone", "text": "Works on a phone screen", "checks": []}]},
+ "disabled": ["render_change"], "disabled_items": {"ui_change": ["long-text"]}}
+```
+
+Agents change it with `atelier task types create|edit|disable|enable`; each
+change keeps the file as it was in `task-types.history.json`, and
+`atelier task types undo` (or the owner) puts it back. Built-in types keep
+their shape; only their items change. A custom type is planned and checked
+like `general`; its `code` and `review` are kept on each task (`typeDef`)
+as they were at create.
+
+Every create and propose by an agent gives `decisions`: `{TYPE: reason}`
+with a non-blank line for every type that is on. The server checks only that
+every type is there; the reasons are kept on the task for the owner.
+
+A type's default items are answered in `plan.requirements`, each
+`{id, text, checks}` or `{id, text, declined}` (a reason it does not apply).
+Agents' creates are refused while one is missing or unanswered. Items with
+checks are gate items like the plan's own. A task the owner makes from grid
+cells gets the type's items, with their checks copied in; `start` waits
+until every other item has checks or a declined reason (`amend`). A task
+keeps the items it was created with.
+
 ## CLI
 
 All subcommands read the session from `ATELIER_CHAT_SESSION_ID` and the server
@@ -370,9 +403,14 @@ mutating call prints an `atelier-widget` block of type `task` (the card) and a
 one-line summary. Errors exit non-zero and say exactly which field is wrong.
 
 ```
-atelier task types [TYPE]          list types, or print one type's plan and result shape and its check recipe
-atelier task create                {type, title, why, plan}   only after the owner's @task
-atelier task propose               {type, title, why, plan}   ask the owner instead
+atelier task types [TYPE]          list the project's types and default items, or print one type's payloads and check recipe
+atelier task types create          {name, description, code, review, items?}   a new type (planned like general)
+atelier task types edit TYPE       {items?, description?, code?, review?}       items replace the scope's own
+atelier task types disable|enable TYPE [--item ID]
+atelier task types undo            put the scope's types back as they were before its last change
+                                   (every types change takes --scope install|project; project is the default)
+atelier task create                {type, title, why, decisions, plan}   only after the owner's @task
+atelier task propose               {type, title, why, decisions, plan}   ask the owner instead
 atelier task start N
 atelier task check N ITEM          run the item's checks and tick it when all pass (old tasks: its result entry)
 atelier task block N --cause TEXT --needs TEXT
@@ -430,8 +468,12 @@ are no commits or git could not tell (see Merging).
   its whole project's (the CLI's `list` and `list --all`).
 - `GET /api/workbench/tasks/:project/:number` → `{task, events: TaskEvent[]}`
   (`TaskEvent = {seq, at, kind, sessionId, actor, payload}`)
-- `GET /api/workbench/task-types` → `{types: [{name, code, review, plan, result}]}`
-  where `plan` and `result` are short field descriptions for `atelier task types`.
+- `GET /api/workbench/task-types[?session=ID|project=ID]` → `{types: [{name, code, review, custom,
+  description, plan, result, items}]}`: the types on for the chat's (or the project's)
+  project, or the install's alone. `plan` and `result` are short field descriptions.
+- `POST /api/workbench/task-types` with `{session?|project?, change}` → `{summary}`: a
+  types change (`change.action` `create edit disable enable`, or `undo` with `scope`).
+  It sends `taskTypes.changed {projectId, summary}` to the app.
 - `POST /api/workbench/task` with `{action, actor, session?, project?, number?, payload?}`
   → `{task, widget, summary}` or `400 {error}`. `actor` is `agent` (the CLI; `session`
   required, project comes from the session) or `owner` (the UI; `project`

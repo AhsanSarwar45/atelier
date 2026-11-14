@@ -1188,7 +1188,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/attachment", post(attachment))
         .route("/tasks", get(tasks::list))
         .route("/tasks/:project/:number", get(tasks::detail))
-        .route("/task-types", get(tasks::kinds))
+        .route("/task-types", get(tasks::kinds).post(tasks::change_kinds))
         .route("/task", post(tasks::act))
         .route("/task-proposals/:project/:id", get(tasks::proposal))
         .route("/grids", get(grids::list))

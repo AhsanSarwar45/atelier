@@ -143,11 +143,26 @@ pub fn ask(store: &Db, action: &str, number: Option<i64>, payload: Value, gate: 
         session: Some("s1".into()),
         project: "p".into(),
         number,
-        payload,
+        payload: decided(payload),
         gate,
         now: 1,
         ..Default::default()
     })
+}
+
+/// A draft with a reason for every built-in type, for tests about something
+/// else (task_types.rs tests the reasons themselves).
+pub fn decided(mut payload: Value) -> Value {
+    if let (Some(kind), Some(row)) = (payload["type"].as_str().map(str::to_string), payload.as_object_mut()) {
+        if !row.contains_key("decisions") {
+            let reasons: serde_json::Map<String, Value> = tasks::types::TYPES
+                .iter()
+                .map(|other| (other.name.to_string(), json!(if other.name == kind { "the work is this kind" } else { "the work is not this kind" })))
+                .collect();
+            row.insert("decisions".into(), Value::Object(reasons));
+        }
+    }
+    payload
 }
 
 pub fn shell_check(name: &str, command: &str, red: &str, files: &[&str]) -> Value {

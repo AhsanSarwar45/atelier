@@ -164,7 +164,9 @@ pub fn check(task: &mut TaskRow, item: &str, gate: Option<&Gate>) -> Result<Chec
     let edited = checks::changed_for(&stored["hashes"], &checks, &owned, &found.hashes);
     stored["met"][item] = json!(met);
     task.gate = Some(stored);
-    if super::types::item_lists(&task.kind).is_some() {
+    // A requirement (a type's default item) is ticked in the gate only; the
+    // result lists answer the type's own items.
+    if super::types::item_ids(&task.kind, &task.plan).iter().any(|id| id == item) {
         if met {
             record_check(task, json!({"id": item, "met": true, "checks": passing}));
         } else {
@@ -352,7 +354,7 @@ pub(crate) mod tests {
             session: (!owner).then(|| "s1".to_string()),
             project: "p".into(),
             number,
-            payload,
+            payload: crate::workbench::tasks::decided(payload),
             gate,
             now: 1,
             ..Default::default()

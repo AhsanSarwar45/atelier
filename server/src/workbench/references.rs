@@ -532,7 +532,7 @@ with what is missing. Finish with `atelier grid audit {slug} --done`. You may no
 }
 
 /// What a bare `@task` asks of the agent.
-const NEW_TASK: &str = "@task — The owner asks you to create a task from this message. Pick the type, draft the plan and run `atelier task create` (`atelier task types TYPE` prints the payload); do not ask for confirmation first. A task for cells of an approved grid needs no @task: `atelier grid next SLUG` prints its payload.";
+const NEW_TASK: &str = "@task — The owner asks you to create a task from this message. Pick the type, give a reason for each type in `decisions`, draft the plan and run `atelier task create` (`atelier task types TYPE` prints the payload); do not ask for confirmation first. A task for cells of an approved grid needs no @task: `atelier grid next SLUG` prints its payload.";
 
 fn task_entry(id: &str, task: Option<&serde_json::Value>) -> String {
     if id.is_empty() {

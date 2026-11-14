@@ -119,12 +119,12 @@ fn a_task_takes_notes_from_the_owner_and_any_agent_and_shows_them() {
     store.grow_message("s1", "m0", " @task do it").unwrap();
     let check = json!({"name": "works", "command": "true", "kind": "structure", "given": "g", "when": "w", "then": "t", "red": "x", "files": []});
     let plan = json!({"outcome": "o", "done_when": [{"id": "works", "text": "it works", "checks": [check]}]});
-    let created = tasks::apply(&store, &tasks::Request {
+    let created = tasks::apply(&store, &tasks::Request { types: Default::default(),
         action: "create".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(),
-        payload: json!({"type": "general", "title": "T", "why": "W", "plan": plan}), gate: Some(tasks::checks::Gate::default()), now: 1, ..Default::default()
+        payload: tasks::decided(json!({"type": "general", "title": "T", "why": "W", "plan": plan})), gate: Some(tasks::checks::Gate::default()), now: 1, ..Default::default()
     }).unwrap();
     let number = created.task.number;
-    let note = |actor: &str, session: Option<&str>, text: &str| tasks::apply(&store, &tasks::Request {
+    let note = |actor: &str, session: Option<&str>, text: &str| tasks::apply(&store, &tasks::Request { types: Default::default(),
         action: "note".into(), actor: actor.into(), session: session.map(str::to_string), project: "p".into(),
         number: Some(number), payload: json!({"text": text}), now: 2, ..Default::default()
     });

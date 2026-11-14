@@ -26,7 +26,7 @@ fn ask(store: &Store, action: &str, number: Option<i64>, payload: Value, gate: O
         session: Some("s1".into()),
         project: "p".into(),
         number,
-        payload,
+        payload: super::decided(payload),
         gate,
         now: 1,
         ..Default::default()
