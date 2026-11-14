@@ -2482,9 +2482,11 @@ No price, ever: tokens are never converted into money anywhere in this app
 
 ### 8.8 Orchestrator chats and their workers
 
-A chat can hand its coding to worker chats. The owner turns on **Workers** in
-the New chat dialog and picks the agent and account the workers run on. That
-chat is the orchestrator: it turns requests into plans, starts workers, reads
+A chat can hand its coding to worker chats. The owner picks the agent and
+account the workers run on with **Workers** in the chat bar, or **None** to turn
+them off. It is saved on the chat and can be changed at any time; an idle agent
+reconnects on its next message so it learns its new role (`session.workers`).
+That chat is the orchestrator: it turns requests into plans, starts workers, reads
 their reports and checks their work. It may still edit files itself.
 
 The orchestrator drives its workers with one command, run from inside its own

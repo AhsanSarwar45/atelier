@@ -98,6 +98,7 @@ wire_kinds!(CommandKind {
     AgentSay => "agent.say",
     SessionMode => "session.mode",
     SessionAutoApprove => "session.auto-approve",
+    SessionWorkers => "session.workers",
     SessionModel => "session.model",
     SessionEffort => "session.effort",
     SessionProfile => "session.profile",

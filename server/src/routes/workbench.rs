@@ -3162,6 +3162,7 @@ pub(crate) async fn snapshot(state: &WorkbenchState, session_id: &str) -> Result
     // the app answers its cards (bw-q8ehk.1).
     if let Some(session) = database.get_session(session_id.to_string()).await? {
         view["autoApprove"] = json!(session.auto_approve);
+        view["workers"] = json!(session.workers);
         if view["permissionMode"] == crate::workbench::answering::ATELIER_AUTO {
             view["permissionMode"] = json!(session.permission_mode);
         }

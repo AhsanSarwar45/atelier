@@ -847,6 +847,10 @@ fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlit
             {
                 patch.auto_approve = Some(on);
             }
+            // Set from the chat bar: the choice, or null for None.
+            if let Some(choice) = event.fields.get("workers") {
+                patch.workers = Some((!choice.is_null()).then(|| choice.to_string()));
+            }
             if let Some(effort) = string(event, "effort") {
                 patch.effort = Some(Some(effort));
             }

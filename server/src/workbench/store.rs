@@ -403,6 +403,8 @@ pub struct SessionPatch {
     pub profile: Option<Option<String>>,
     pub named_by_owner: Option<bool>,
     pub auto_approve: Option<bool>,
+    /// The workers choice as saved JSON; `Some(None)` turns workers off.
+    pub workers: Option<Option<String>>,
 }
 
 /// One match, as the panel draws it: the sentence it fell in, the words that
@@ -799,6 +801,7 @@ impl Store {
         nullable("effort", patch.effort);
         nullable("collaboration_mode", patch.collaboration_mode);
         nullable("profile", patch.profile);
+        nullable("workers", patch.workers);
         if let Some(brand) = patch.brand {
             sets.push("brand = ?".to_string());
             values.push(SqlValue::Text(brand));

@@ -12,9 +12,9 @@ owner choosing that provider and account.
 
 ## How it works
 
-1. In the new-chat dialog, the owner turns on **Workers** and picks the
-   worker provider, account and (optionally) model. That chat becomes an
-   orchestrator.
+1. In the chat bar, the owner sets **Workers** to a provider and account
+   (or **None**). That chat becomes an orchestrator, and can be changed back
+   at any time.
 2. The owner gives the orchestrator a goal. It plans the goal, then starts
    worker chats with `atelier tool worker start`. Each worker gets a written
    brief.

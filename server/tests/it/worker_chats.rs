@@ -393,3 +393,71 @@ async fn a_report_goes_only_to_the_workers_own_orchestrator() {
     let theirs = told(&fixture, "orch-b", 200).await;
     assert!(theirs.is_empty(), "another orchestrator was told about the worker: {theirs:?}");
 }
+
+/// POST a chat command, as the chat bar does; the status and the JSON answer.
+async fn command(fixture: &Fixture, body: Value) -> (u16, Value) {
+    let request = axum::http::Request::post("/command")
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let answer = router(fixture.state.clone()).oneshot(request).await.unwrap();
+    let status = answer.status().as_u16();
+    let bytes = answer.into_body().collect().await.unwrap().to_bytes();
+    let json = serde_json::from_slice(&bytes).unwrap_or_else(|_| json!({"raw": String::from_utf8_lossy(&bytes)}));
+    (status, json)
+}
+
+/// The chat's workers choice as the database keeps it.
+async fn workers_of(fixture: &Fixture, id: &str) -> Value {
+    let session = fixture.state.database().get_session(id.to_string()).await.unwrap().unwrap();
+    serde_json::to_value(&session.workers).unwrap()
+}
+
+#[tokio::test]
+async fn workers_can_be_turned_on_in_a_chat_already_going() {
+    let fixture = fixture().await;
+    let (status, answer) = command(
+        &fixture,
+        json!({"type": "session.workers", "sessionId": "plain", "workers": {"brand": "codex", "profileId": "work-account"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "the workers choice was not saved: the command answered {status}: {answer}");
+    let workers = workers_of(&fixture, "plain").await;
+    assert_eq!(workers["brand"], "codex", "the workers choice was not saved: {workers}");
+    assert_eq!(workers["profileId"], "work-account", "the workers choice was not saved: {workers}");
+    // And the chat can now start workers on that choice.
+    let worker = started(&fixture, "plain", "login form").await;
+    let starts = sent(&fixture, "SessionStart", &worker).await;
+    let start = starts.first().unwrap_or_else(|| panic!("no chat was started for worker {worker}"));
+    assert_eq!(start["profileId"], "work-account", "the worker did not start on the account chosen in the chat: {start}");
+}
+
+#[tokio::test]
+async fn workers_can_be_turned_off_with_none() {
+    let fixture = fixture().await;
+    let (status, answer) = command(&fixture, json!({"type": "session.workers", "sessionId": "orch-a", "workers": null})).await;
+    assert_eq!(status, 200, "workers were not turned off: the command answered {status}: {answer}");
+    let workers = workers_of(&fixture, "orch-a").await;
+    assert!(workers.is_null(), "workers were not turned off: {workers}");
+    let (status, answer) = start(&fixture, "orch-a", "login form", "Fix it.").await;
+    assert!(
+        (400..500).contains(&status) && error_of(&answer).contains("workers"),
+        "a chat with workers turned off could still start one: {status} {answer}"
+    );
+}
+
+#[tokio::test]
+async fn workers_on_an_unknown_provider_are_refused() {
+    let fixture = fixture().await;
+    let (status, answer) = command(
+        &fixture,
+        json!({"type": "session.workers", "sessionId": "plain", "workers": {"brand": "nobody", "profileId": "system"}}),
+    )
+    .await;
+    assert!(
+        (400..500).contains(&status) && error_of(&answer).contains("nobody"),
+        "workers on an unknown provider were not refused for that reason: {status} {answer}"
+    );
+    let workers = workers_of(&fixture, "plain").await;
+    assert!(workers.is_null(), "workers on an unknown provider were saved anyway: {workers}");
+}

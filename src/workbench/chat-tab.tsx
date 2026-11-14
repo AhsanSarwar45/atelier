@@ -12,7 +12,7 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { AlertTriangle, ArrowDown, Ban, ArrowUp, Check, CheckCheck, Circle, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Workflow, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, Ban, ArrowUp, Check, CheckCheck, Circle, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Users, Workflow, X } from 'lucide-react';
 
 import { ReferenceBadge } from '@/components/reference-badge';
 import { type Mentions } from '@/components/markdown-body';
@@ -69,8 +69,7 @@ import { currentProviderMessages } from '@/workbench/provider-messages';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { openableAsks, openableIn } from '@/workbench/mentions';
-import { loadNewChatDefaults, NO_DEFAULTS, saveNewChatProfile, saveNewChatProvider, saveNewChatWorkers, type NewChatDefaults } from '@/workbench/new-chat-defaults';
-import { WorkersChoicePicker } from '@/workbench/workers-choice';
+import { loadNewChatDefaults, NO_DEFAULTS, saveNewChatProfile, saveNewChatProvider, type NewChatDefaults } from '@/workbench/new-chat-defaults';
 import { useWorkerLinks } from '@/workbench/workers-section';
 import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
@@ -82,6 +81,7 @@ import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { Brand, HeldMessage, ImagePayload, LookableImage, OnLook, ProfileChoice, SessionConfigOption, WorkersChoice } from '@/workbench/protocol';
+import { SYSTEM_PROFILE } from '@/workbench/protocol';
 import { opens } from '@/workbench/attachment-look';
 
 /** The brands a chat can run on somebody's account. `local` has none. */
@@ -119,7 +119,7 @@ import { startTaskIn, takeComposerFocus, takeNewChatLine } from '@/workbench/tas
 import { byNumber, LiveTasksContext, useTasks } from '@/workbench/tasks/use-tasks';
 import { WaitingBar } from '@/workbench/waiting-bar';
 import { useWaiting, waitingInChat } from '@/workbench/waiting';
-import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable } from '@/workbench/providers';
+import { firstAvailableProvider, providerIsAvailable, useProviders, whyUnavailable, type ProviderAvailability } from '@/workbench/providers';
 import { ModelIcon } from '@/workbench/model-icon';
 import { useSteadyCallback } from '@/hooks/use-steady-callback';
 import { MemoryBadge } from '@/workbench/memory-badge';
@@ -383,6 +383,7 @@ export function Picker({
   label,
   current,
   currentLabel,
+  buttonLabel,
   options,
   testid,
   asleep,
@@ -400,6 +401,8 @@ export function Picker({
    * the wire id straight at the reader — `claude-opus-5[1m]` (bw-ja9l.11).
    */
   currentLabel?: string | null;
+  /** What the button says in place of the picked row's label, when that would not make sense on its own. */
+  buttonLabel?: string;
   /**
    * `group` names the band a row belongs to; the menu rules a line wherever it
    * changes. `unavailable` says why a row cannot be picked, and is shown in
@@ -415,7 +418,7 @@ export function Picker({
   cannotDefault?: (value: string) => string | null;
 }) {
   if (!options.length) return null;
-  const shown = options.find((o) => o.value === current)?.label ?? currentLabel ?? current ?? label;
+  const shown = buttonLabel ?? options.find((o) => o.value === current)?.label ?? currentLabel ?? current ?? label;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -523,6 +526,64 @@ export function AutoApprovePicker({
       onPick={(value) => {
         onError(null);
         void sendCommand({ type: 'session.auto-approve', sessionId, on: value === 'on' }).catch((error: unknown) =>
+          onError(error instanceof Error ? error.message : String(error)),
+        );
+      }}
+    />
+  );
+}
+
+/**
+ * Where this chat's workers run, or None (docs/designs/orchestrator-workers.md).
+ * Saved on the chat by the app, so it can be changed at any time; an idle
+ * agent reconnects on its next message to learn its new role.
+ */
+export function WorkersPicker({
+  sessionId,
+  choice,
+  accounts,
+  providers,
+  asleep,
+  mobile = false,
+  onError,
+}: {
+  sessionId: string;
+  choice: WorkersChoice | null | undefined;
+  accounts: Partial<Record<Brand, ProfileChoice[]>>;
+  providers: ProviderAvailability[];
+  asleep: boolean;
+  mobile?: boolean;
+  onError: (message: string | null) => void;
+}) {
+  const iconSize = mobile ? 'h-4 w-4' : 'h-3.5 w-3.5';
+  const options: { value: string; label: string; group?: string; icon?: ReactNode }[] = [{ value: 'none', label: 'None', group: 'none' }];
+  for (const brand of ACCOUNTED_BRANDS) {
+    if (!providerIsAvailable(providers, brand)) continue;
+    const listed = accounts[brand]?.length ? accounts[brand]! : [{ id: SYSTEM_PROFILE, brand, name: brandName(brand), system: true }];
+    for (const profile of listed) {
+      options.push({
+        value: `${brand}:${profile.id}`,
+        label: listed.length > 1 ? `${brandName(brand)} · ${profile.name}` : brandName(brand),
+        group: brand,
+        icon: <BrandIcon brand={brand} className={iconSize} />,
+      });
+    }
+  }
+  const current = choice ? `${choice.brand}:${choice.profileId ?? SYSTEM_PROFILE}` : 'none';
+  return (
+    <Picker
+      icon={choice ? <BrandIcon brand={choice.brand} className={iconSize} /> : <Users className={iconSize} />}
+      label="Workers"
+      testid={`${mobile ? 'mobile-' : ''}workers-picker`}
+      current={current}
+      buttonLabel={choice ? `${brandName(choice.brand)} workers` : 'No workers'}
+      asleep={asleep}
+      options={options}
+      onPick={(value) => {
+        onError(null);
+        const [brand, profileId] = value === 'none' ? [] : value.split(':');
+        const workers = brand ? { brand: brand as Brand, profileId } : null;
+        void sendCommand({ type: 'session.workers', sessionId, workers }).catch((error: unknown) =>
           onError(error instanceof Error ? error.message : String(error)),
         );
       }}
@@ -1200,13 +1261,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       .then(setNewChatDefaults)
       .catch((e: unknown) => setStartError(e instanceof Error ? e.message : String(e)));
   }, []);
-  /**
-   * Where the next chat's workers run, as picked in this dialog; `undefined`
-   * until something is picked, which leaves the dialog on the choice last
-   * used (docs/designs/orchestrator-workers.md).
-   */
-  const [newWorkers, setNewWorkers] = useState<WorkersChoice | null | undefined>(undefined);
-  const workersChoice = newWorkers === undefined ? newChatDefaults.workers ?? null : newWorkers;
   /** What went wrong the last time he changed the mode or the model. */
   const [steerError, setSteerError] = useState<string | null>(null);
   /** Why the last thing he wrote did not go, if it did not go. */
@@ -1891,10 +1945,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // row from which somebody switches to a named one. Names belong to the
   // account and move when it is renamed, so they are looked up rather than
   // remembered on the chat.
+  // The Workers setting lists every agent's accounts, so all are read.
   useEffect(() => {
-    const brand = sessionBrand;
-    if (!ACCOUNTED_BRANDS.includes(brand)) return;
-    if (accounts[brand]) return;
+    const brand = ACCOUNTED_BRANDS.includes(sessionBrand) && !accounts[sessionBrand]
+      ? sessionBrand
+      : ACCOUNTED_BRANDS.find((one) => !accounts[one]);
+    if (!brand) return;
     let gone = false;
     void sendCommand<{ profiles?: ProfileChoice[] }>({ type: 'profiles.list', brand })
       .then(({ profiles }) => {
@@ -2594,16 +2650,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               )}
             </div>
           )}
-          {!moving && (
-            <WorkersChoicePicker
-              choice={workersChoice}
-              onChange={setNewWorkers}
-              providers={providers}
-              accounts={accounts}
-              starred={newChatDefaults.profiles}
-              chatBrand={newBrand}
-            />
-          )}
           {projectPath && !moving && (
             <WhereToWork
               projectPath={projectPath}
@@ -2634,13 +2680,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               onClick={() => {
                 setShowing(null);
                 setRailOpen(false);
-                void start(newBrand, newWhere, newBrand === 'local' ? undefined : newAccount, workersChoice);
-                // Remembered like the stars are: the next chat opens on it.
-                setNewChatDefaults((was) => ({ ...was, workers: workersChoice }));
-                setNewWorkers(undefined);
-                void saveNewChatWorkers(workersChoice)
-                  .then(setNewChatDefaults)
-                  .catch((e: unknown) => setStartError(e instanceof Error ? e.message : String(e)));
+                void start(newBrand, newWhere, newBrand === 'local' ? undefined : newAccount);
               }}
             >
               {starting ? 'Starting…' : 'Start chat'}
@@ -2650,7 +2690,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </DialogContent>
       </Dialog>
     </>
-  ), [accounts, confirmSwitch, moving, newAccount, newAccounts, newAccountsUnread, newBrand, newStanding, newBrandAvailable, newChatDefault, newChatDefaults.profiles, newWhere, projectId, projectPath, providers, sessionBrand, sessionId, setNewChatDefault, setNewChatProfile, showing, start, starting, switchError, view.profile, whereMissing, workersChoice]);
+  ), [accounts, confirmSwitch, moving, newAccount, newAccounts, newAccountsUnread, newBrand, newStanding, newBrandAvailable, newChatDefault, newChatDefaults.profiles, newWhere, projectId, projectPath, providers, sessionBrand, sessionId, setNewChatDefault, setNewChatProfile, showing, start, starting, switchError, view.profile, whereMissing]);
 
   const chatList = useMemo(() => (
     <>
@@ -2933,6 +2973,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               onDefault={sessionBrand === 'local' ? undefined : (on) => makeProviderDefault('autoApprove', on ? 'on' : 'off')}
               onError={setSteerError}
             />
+            <WorkersPicker sessionId={chatId} choice={view.workers} accounts={accounts} providers={providers} asleep={asleep} onError={setSteerError} />
             {composer.collaborationModes.length > 0 && (
               <Picker
                 icon={<Workflow className="h-3.5 w-3.5" />}
@@ -3103,7 +3144,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             />
           </div>
     </>
-  ), [asleep, busy, cannotSend, chatId, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, effortDefaults, holdSteady, autoApproveDefaults, makeProviderDefault, midTurn, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, sessionStanding, submitSteady, switchAccount, view.collaborationMode, view.effort, view.menu.agentDefinitions, view.menu.configOptions, view.autoApprove, view.model, view.permissionMode]);
+  ), [asleep, busy, cannotSend, chatId, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, effortDefaults, holdSteady, autoApproveDefaults, makeProviderDefault, midTurn, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, sessionStanding, submitSteady, switchAccount, view.collaborationMode, view.effort, view.menu.agentDefinitions, view.menu.configOptions, view.autoApprove, view.model, view.permissionMode, view.workers, accounts, providers]);
 
   const mobileSettings = useMemo(() => (
     <>
@@ -3142,6 +3183,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 onDefault={sessionBrand === 'local' ? undefined : (on) => makeProviderDefault('autoApprove', on ? 'on' : 'off')}
                 onError={setSteerError}
               />
+              <WorkersPicker sessionId={chatId} choice={view.workers} accounts={accounts} providers={providers} asleep={asleep} mobile onError={setSteerError} />
               {composer.collaborationModes.length > 0 && (
                 <Picker
                   icon={<Workflow className="h-4 w-4" />}
@@ -3241,7 +3283,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           </DialogContent>
         </Dialog>
     </>
-  ), [asleep, busy, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, composerSettingsOpen, effortDefaults, autoApproveDefaults, makeProviderDefault, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, chatId, sessionProfile, sessionProfileLabel, sessionStanding, switchAccount, view.collaborationMode, view.effort, view.menu.configOptions, view.autoApprove, view.model, view.permissionMode]);
+  ), [asleep, busy, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, composerSettingsOpen, effortDefaults, autoApproveDefaults, makeProviderDefault, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, chatId, sessionProfile, sessionProfileLabel, sessionStanding, switchAccount, view.collaborationMode, view.effort, view.menu.configOptions, view.autoApprove, view.model, view.permissionMode, view.workers, accounts, providers]);
 
   if (!projectId || !projectPath) {
     return <div className="p-8 text-muted-foreground">Select a project</div>;

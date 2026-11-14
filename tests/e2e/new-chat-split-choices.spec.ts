@@ -57,7 +57,7 @@ test('every provider and account is one split control with its star', async ({ p
     // One heading over each of the three questions, in one style: the dialog
     // used to title them three different ways (bw-ospn.3).
     const headings = dialog.locator('h3');
-    await expect(headings).toHaveText(['Agent', 'Account', 'Workers', 'Worktree']);
+    await expect(headings).toHaveText(['Agent', 'Account', 'Worktree']);
     const faces = await headings.evaluateAll((all) =>
       all.map((one) => {
         const style = getComputedStyle(one);

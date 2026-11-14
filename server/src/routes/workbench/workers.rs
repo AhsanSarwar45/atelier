@@ -89,7 +89,7 @@ fn words<'a>(value: &'a Option<String>, what: &str) -> Result<&'a str, ApiError>
 
 async fn start(state: &WorkbenchState, orchestrator: &Session, ask: &Ask) -> Result<Json<Value>, ApiError> {
     let choice = orchestrator.workers.clone().ok_or_else(|| {
-        ApiError::from("this chat has no workers; the owner turns on workers when starting a chat".to_string())
+        ApiError::from("this chat has no workers; the owner turns them on with Workers in the chat bar".to_string())
     })?;
     let title = words(&ask.title, "title")?;
     let brief = words(&ask.text, "brief")?;

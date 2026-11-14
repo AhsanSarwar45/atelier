@@ -493,7 +493,7 @@ export type WbpEvent = EventBase &
      * ends plan mode). A field that is `null` is one this message says nothing
      * about, and the reader keeps what it had (bw-1u1.43).
      */
-    | { type: 'session.pinned'; permissionMode: string | null; autoApprove?: boolean; model: string | null; effort?: string | null; collaborationMode?: string | null; title?: string | null; titleSource?: 'user'; configOptions?: Array<{ id: string; currentValue: boolean | string }> }
+    | { type: 'session.pinned'; permissionMode: string | null; autoApprove?: boolean; workers?: WorkersChoice | null; model: string | null; effort?: string | null; collaborationMode?: string | null; title?: string | null; titleSource?: 'user'; configOptions?: Array<{ id: string; currentValue: boolean | string }> }
     | { type: 'session.ended'; reason: string }
     /**
      * `parentToolCallId` is set when a SENT-OFF agent said this, and names the
@@ -1272,6 +1272,7 @@ export type WbpCommand =
    * so it holds in any permission mode, plan mode included (bw-q8ehk.1).
    */
   | { type: 'session.auto-approve'; sessionId: string; on: boolean }
+  | { type: 'session.workers'; sessionId: string; workers: WorkersChoice | null }
   | { type: 'session.model'; sessionId: string; model: string }
   | { type: 'session.effort'; sessionId: string; effort: string }
   /** A `brand` other than the chat's own moves the chat to that provider. */

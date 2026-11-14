@@ -46,7 +46,7 @@ describe('new-chat provider default', () => {
   it('offers each brand its accounts, and the local brand none', () => {
     expect(source).toContain("newBrand !== 'local' && (newAccounts.length > 1 || newAccountsUnread)");
     expect(source).toContain('testid: `new-chat-profile-default-${profile.id}`,');
-    expect(source).toContain("start(newBrand, newWhere, newBrand === 'local' ? undefined : newAccount, workersChoice)");
+    expect(source).toContain("start(newBrand, newWhere, newBrand === 'local' ? undefined : newAccount)");
   });
 
   it('attaches each star to the choice it belongs to, as one split control', () => {

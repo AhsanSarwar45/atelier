@@ -1490,6 +1490,52 @@ impl WorkbenchRegistry {
         })
     }
 
+    /// Set where a chat's workers run, or turn them off with null. An idle
+    /// agent is let go so its next message reconnects with the orchestrator
+    /// role (or without it); the conversation is kept. A busy one picks it up
+    /// on its next connection.
+    async fn set_workers(&self, command: &Command) -> Result<Value, String> {
+        let session_id = Self::field(command, "sessionId")?;
+        let session = self
+            .database
+            .get_session(session_id.to_string())
+            .await?
+            .ok_or_else(|| format!("session {session_id} does not exist"))?;
+        let choice = match command.at("workers") {
+            Value::Null => Value::Null,
+            value => {
+                let choice: crate::workbench::store::WorkersChoice = serde_json::from_value(value.clone())
+                    .map_err(|error| format!("workers must be a provider and account: {error}"))?;
+                if !matches!(choice.brand.as_str(), "claude" | "codex") {
+                    return Err(format!("workers cannot run on {}: no such provider", choice.brand));
+                }
+                serde_json::to_value(choice).map_err(|error| error.to_string())?
+            }
+        };
+        let event: crate::workbench::protocol::Event = serde_json::from_value(json!({
+            "type":"session.pinned", "sessionId":session.id, "seq":0,
+            "at":chrono::Utc::now().to_rfc3339(), "workers":choice,
+            "permissionMode":Value::Null, "model":Value::Null,
+            "effort":Value::Null, "collaborationMode":Value::Null
+        }))
+        .map_err(|error| error.to_string())?;
+        self.database.append(event).await?;
+        let mid_turn = matches!(
+            session.state.as_str(),
+            "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
+        );
+        if !mid_turn {
+            let driver = self.drivers.write().await.remove(session_id);
+            if let Some(driver) = driver {
+                let (reply, receive) = oneshot::channel();
+                if driver.send(DriverRequest::Retire(reply)).is_ok() {
+                    let _ = receive.await;
+                }
+            }
+        }
+        Ok(json!({"ok":true}))
+    }
+
     async fn pin_saved_session(&self, command: &Command) -> Result<Value, String> {
         let session_id = Self::field(command, "sessionId")?;
         let mut session = self
@@ -2716,6 +2762,9 @@ impl WorkbenchRegistry {
                 self.launch(command).await?;
                 self.driver_command(command).await
             }
+            // Saved by the app whether or not the agent is running; it is not
+            // the agent's setting (docs/designs/orchestrator-workers.md).
+            CommandKind::SessionWorkers => self.set_workers(command).await,
             // A window opened before auto-approve became its own setting can
             // still offer the old mode. Pinning it would leave the chat in a
             // mode no provider has and nothing answering (bw-q8ehk.1).

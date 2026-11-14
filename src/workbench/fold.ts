@@ -53,6 +53,7 @@ import type {
 import type { ChatWidget } from './chat-widgets';
 import type { EditChange } from './line-diff';
 import type { ProviderMessageSignal } from './provider-messages';
+import type { WorkersChoice } from './protocol';
 // With its extension, which is not a style: this file is read two ways. The
 // browser's build resolves it either way; the sidecar is Node running the
 // TypeScript as it stands, and Node resolves the exact filename or nothing —
@@ -430,6 +431,8 @@ export interface SessionView {
    * the permission mode, so it can be on in plan mode (bw-q8ehk.1).
    */
   autoApprove: boolean;
+  /** Where this chat's workers run; set, the chat is an orchestrator. */
+  workers?: WorkersChoice | null;
   model: string | null;
   effort?: string | null;
   collaborationMode: string | null;
@@ -1043,6 +1046,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       // not blank the model on its way past (bw-1u1.43).
       if (e.permissionMode !== null) next.permissionMode = e.permissionMode;
       if (typeof e.autoApprove === 'boolean') next.autoApprove = e.autoApprove;
+      if (e.workers !== undefined) next.workers = e.workers;
       if (e.model !== null) next.model = e.model;
       if (e.effort != null) next.effort = e.effort;
       if (e.collaborationMode != null) next.collaborationMode = e.collaborationMode;
@@ -1570,6 +1574,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
       case 'session.pinned':
         if (e.permissionMode !== null) view.permissionMode = e.permissionMode;
         if (typeof e.autoApprove === 'boolean') view.autoApprove = e.autoApprove;
+        if (e.workers !== undefined) view.workers = e.workers;
         if (e.model !== null) view.model = e.model;
         if (e.effort != null) view.effort = e.effort;
         if (e.collaborationMode != null) view.collaborationMode = e.collaborationMode;
