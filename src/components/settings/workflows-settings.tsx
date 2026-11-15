@@ -53,7 +53,8 @@ export function stageCount(n: number): string {
   return n === 1 ? '1 stage' : `${n} stages`;
 }
 
-export function WorkflowsSettings({ projectPath, item, onItem }: {
+export function WorkflowsSettings({ projectId, projectPath, item, onItem }: {
+  projectId: string;
   projectPath: string;
   item?: string | null;
   onItem?: (item: string | null) => void;
@@ -113,6 +114,7 @@ export function WorkflowsSettings({ projectPath, item, onItem }: {
         id={open}
         workflows={answer.workflows}
         commands={answer.commands}
+        projectId={projectId}
         projectPath={projectPath}
         onSave={persist}
         justSaved={justSaved === open}

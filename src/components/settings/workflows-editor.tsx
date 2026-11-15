@@ -13,7 +13,7 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type D
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { EditorView } from '@codemirror/view';
-import { ArrowDown, ArrowLeft, ArrowRight, Bot, ChevronRight, GripVertical, Hourglass, Plus, Save, SquareTerminal, Trash2, UserCheck, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, Bot, ChevronRight, GripVertical, Hourglass, Play, Plus, Save, SquareTerminal, Trash2, UserCheck, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
@@ -39,6 +39,7 @@ import { useDescribeReference } from '@/workbench/reference-names';
 
 import { DetailHeader, Label, MoreMenu, StateDot } from './library-list';
 import { SettingRow, SettingsGroup } from './section';
+import { RunDialog, RunsList, useWorkflowRuns } from './workflow-runs';
 import { NEW_WORKFLOW, slugOf, stageCount, triggerSummary, type Stage, type StageAuto, type StageKind, type Workflow } from './workflows-settings';
 
 const KINDS: { value: StageKind; label: string; icon: typeof Bot; prompt: string; placeholder: string }[] = [
@@ -59,12 +60,13 @@ const NO_AUTO: StageAuto = { plan: false, done: false, questions: false };
 
 const BLANK: Workflow = { id: '', name: '', enabled: false, trigger: { kind: 'manual' }, setup: {}, stages: [] };
 
-export function WorkflowEditor({ id, workflows, commands, projectPath, justSaved, onSave, onSaved, onBack }: {
+export function WorkflowEditor({ id, workflows, commands, projectId, projectPath, justSaved, onSave, onSaved, onBack }: {
   id: string;
   /** Opened by its own first save, so it starts out saying so. */
   justSaved?: boolean;
   workflows: Workflow[];
   commands: CommandInfo[];
+  projectId: string;
   projectPath: string;
   onSave: (workflows: Workflow[]) => Promise<void>;
   onSaved: (id: string) => void;
@@ -78,6 +80,8 @@ export function WorkflowEditor({ id, workflows, commands, projectPath, justSaved
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState(justSaved ? 'Saved' : '');
+  const [running, setRunning] = useState(false);
+  const { runs, reload } = useWorkflowRuns(projectPath, id);
   const [askingDelete, setAskingDelete] = useState(false);
   const dirty = isNew || JSON.stringify(draft) !== JSON.stringify(saved);
 
@@ -213,6 +217,12 @@ export function WorkflowEditor({ id, workflows, commands, projectPath, justSaved
               Save
             </Button>
             {!isNew && (
+              <Button size="sm" variant="outline" disabled={dirty} title={dirty ? 'Save before running' : undefined} onClick={() => setRunning(true)}>
+                <Play className="size-3.5" />
+                Run
+              </Button>
+            )}
+            {!isNew && (
               <MoreMenu disabled={saving}>
                 <DropdownMenuItem variant="destructive" onSelect={() => setAskingDelete(true)}>
                   <Trash2 />
@@ -226,6 +236,10 @@ export function WorkflowEditor({ id, workflows, commands, projectPath, justSaved
       {draft.stages.length > 0 && <FlowStrip stages={draft.stages} />}
       {error && (
         <Panel tone="danger" role="alert" className="mt-4 text-sm text-danger">{error}</Panel>
+      )}
+      {!isNew && <RunsList runs={runs} workflow={saved} projectId={projectId} onChanged={() => void reload()} />}
+      {!isNew && (
+        <RunDialog open={running} onOpenChange={setRunning} workflow={saved} projectId={projectId} projectPath={projectPath} onStarted={() => void reload()} />
       )}
 
       <SettingsGroup title="General" className="mt-6">

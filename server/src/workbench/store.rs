@@ -4178,6 +4178,8 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     // What the owner has read and a device been told of what waits on him
     // besides a chat's own question (`waiting.rs`).
     super::waiting::ensure_schema(transaction)?;
+    // Each item's way through a workflow (`workflows.rs`).
+    super::workflows::ensure_schema(transaction)?;
 
     one_row_per_external_chat(transaction)
 }

@@ -435,7 +435,7 @@ export function ProjectSettingsScreen({
       {open === 'library' && (manifest ? <SharedLibrary projectPath={folder} projectInstructions={<section aria-label="Project instructions" className="min-w-0"><DetailHeader title="Project instructions" meta={<><span className="inline-flex items-center gap-1.5"><StateDot tone="good" />Always active</span><span>Shared by all chats in this project</span></>} actions={<Button size="sm" disabled={!dirty || saving} onClick={() => void save()}><Save className="size-3.5" /><span aria-hidden="true" className="max-sm:hidden">Save</span><span className="sr-only">Save project instructions</span></Button>} /><label className="mt-4 block"><span className="sr-only">Project instructions</span><Textarea id="settings-instructions" className="min-h-[max(24rem,calc(100dvh-22rem))] font-mono text-sm leading-relaxed" value={instructions} onChange={e => setInstructions(e.target.value)} /></label></section>} /> : <p className="text-sm">Loading project settings…</p>)}
       {open === 'codex' && provider('codex')}
       {open === 'task-types' && <><TasksSwitch projectId={projectId} /><TaskTypesSettings projectId={projectId} /></>}
-      {open === 'workflows' && <WorkflowsSettings projectPath={folder} item={item} onItem={onItem} />}
+      {open === 'workflows' && <WorkflowsSettings projectId={projectId} projectPath={folder} item={item} onItem={onItem} />}
       {open === 'files' && (
         <div className="flex h-full flex-col">
           <AgentFilesBrowser projectPath={folder} />

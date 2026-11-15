@@ -1,6 +1,7 @@
 //! A project's workflows: the automated flows a ticket moves through, kept in
 //! `workflows.json` beside the project's `library.json`. This module only
-//! stores and checks them; nothing here runs a workflow yet.
+//! stores and checks them, and keeps the table of their runs; the runs
+//! themselves are driven from `routes/workbench/workflow_runs.rs`.
 use super::library::{bounded_read, digest, library_path, valid_id};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, path::{Path, PathBuf}, sync::Mutex};
@@ -174,4 +175,32 @@ pub fn write(data: &Path, root: &Path, file: &WorkflowsFile, expected: &str) -> 
         &workflows_path(data, root)?,
         &serde_json::to_vec_pretty(file).map_err(|e| e.to_string())?,
     )
+}
+
+/// One item's way through a workflow (`routes/workbench/workflow_runs.rs`).
+/// `CREATE`d from `store.rs`, beside the tables it is about.
+pub const RUNS_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS workflow_run (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  project_path TEXT NOT NULL,
+  workflow_id TEXT NOT NULL,
+  item TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  status TEXT NOT NULL,
+  session_id TEXT,
+  cwd TEXT,
+  attempts TEXT NOT NULL DEFAULT '{}',
+  seen_message INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS workflow_run_by_session ON workflow_run(session_id);
+CREATE INDEX IF NOT EXISTS workflow_run_by_project ON workflow_run(project_path, workflow_id);
+"#;
+
+pub fn ensure_schema(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
+    connection.execute_batch(RUNS_SCHEMA)
 }

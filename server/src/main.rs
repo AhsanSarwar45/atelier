@@ -578,6 +578,10 @@ async fn serve(open_browser: bool) {
     // across what it watches (docs/grids.md, "Row search").
     routes::workbench::watch_grids(workbench_state.clone());
 
+    // What reruns workflow runs' Wait checks and starts scheduled workflows
+    // on new items (docs/designs/workflows.md).
+    routes::workbench::workflow_runs::watch(workbench_state.clone());
+
     // What stops a chat that has grown past the limit set for it, and tells it
     // what it spent. Does nothing at all while no limit is set
     // (workbench/memory_limit.rs).

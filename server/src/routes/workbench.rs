@@ -30,6 +30,7 @@ mod grids;
 mod tasks;
 mod tell;
 mod workers;
+pub mod workflow_runs;
 
 use crate::workbench::{
     actor::ChatDb,
@@ -193,6 +194,7 @@ impl WorkbenchState {
             projects: None,
         };
         workers::watch(state.clone());
+        workflow_runs::follow_turns(state.clone());
         state
     }
 
@@ -1201,6 +1203,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/grids/:project/:slug/cells/:row/:col", get(grids::cell))
         .route("/grid", post(grids::act))
         .route("/workers", post(workers::act))
+        .route("/workflow-runs", get(workflow_runs::list).post(workflow_runs::act))
         // A prompt carries its pictures inline, as base64 inside the JSON, and
         // there is no ceiling on how many a person may attach to one message.
         // Axum otherwise buffers every body under a 2 MiB default nobody here

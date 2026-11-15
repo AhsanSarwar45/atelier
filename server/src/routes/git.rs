@@ -173,6 +173,11 @@ pub struct Refused {
 }
 
 impl Refused {
+    /// What was said, for a caller that reports it in its own words.
+    pub(crate) fn said(&self) -> &str {
+        &self.said
+    }
+
     /// The ordinary refusal: a code and git's own words.
     pub(crate) fn new(code: StatusCode, said: impl Into<String>) -> Self {
         Refused {
@@ -2785,6 +2790,15 @@ fn read_worktree_list(said: &str) -> Vec<ListedTree> {
     trees
 }
 
+/// The worktree that has `branch` checked out, if one does.
+pub(crate) async fn tree_on_branch(repo: &Path, branch: &str) -> Option<String> {
+    let listed = run_git(repo, &["worktree", "list", "--porcelain"]).await.ok()?;
+    read_worktree_list(&String::from_utf8_lossy(&listed.stdout))
+        .into_iter()
+        .find(|tree| tree.branch.as_deref() == Some(branch))
+        .map(|tree| tree.path)
+}
+
 /// The checkout a directory is inside of, as git sees it from in there.
 ///
 /// A chat works in a folder, and the folder's own name is not the answer: a
@@ -3061,6 +3075,14 @@ async fn ignore_the_place(repo: &Path, place: &Path) {
 /// [`TreeEntry`]
 pub async fn new_tree(GitJson(body): GitJson<NewTreeRequest>) -> Answer {
     let repo = checked_repo(&body.path)?;
+    let entry = add_tree(&repo, &body).await?;
+    Ok(Json(entry).into_response())
+}
+
+/// Make the checkout [`new_tree`] makes, in a repository already checked.
+/// Workflow runs call it for each item's branch.
+pub(crate) async fn add_tree(repo: &Path, body: &NewTreeRequest) -> Result<TreeEntry, Refused> {
+    let repo = repo.to_path_buf();
     let name = folder_name(&body.name)?;
     let name = name.as_str();
     let branch = body.branch.trim();
@@ -3125,7 +3147,7 @@ pub async fn new_tree(GitJson(body): GitJson<NewTreeRequest>) -> Answer {
         landing,
     )
     .await;
-    Ok(Json(entry).into_response())
+    Ok(entry)
 }
 
 /// Request body for taking a checkout away.
