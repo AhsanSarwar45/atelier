@@ -24,8 +24,11 @@ usage: atelier grid <command>
   template set NAME               {columns:[{id,name,proof_rule,checks?}]} on stdin or --input FILE
   draft                           {slug,title,area,template?,row_search,columns,rows,cells?}; the owner approves or discards it
                                   columns[].checks: check templates ({row} = the row id); cells: [{row,col,checks,override?}]
-                                  an approved grid's slug drafts an edit: send every row and column you want kept;
-                                  new ones are added, left-out ones removed, and proofs of kept cells stay
+                                  an approved grid's slug redrafts it whole; to add or remove a few rows or columns, use change
+  change SLUG                     {addColumns?:[{id,name,proof_rule?,checks?,after?}],removeColumns?:[id],
+                                  addRows?:[{id,name,paths?}],removeRows?:[id]}: add or remove rows and columns of an
+                                  approved grid by naming only the change; after puts a column right after another;
+                                  the owner approves it, and kept cells keep their proofs
   checks SLUG                    {columns:[{id,checks}]}: check templates for columns of an approved grid; the owner
                                   approves only those, and rows, cells and proofs stay as they are
   discover SLUG                   rerun the grid's row search now
@@ -645,6 +648,12 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             let session = session()?;
             let payload = payload(rest, "{columns: [{id, checks}]}")?;
             post(json!({"action": "checks", "actor": "agent", "session": session, "slug": found[0], "payload": payload})).await
+        }
+        "change" => {
+            let found = exactly(rest, &["--input"], &["SLUG"], "change")?;
+            let session = session()?;
+            let payload = payload(rest, "{addColumns?, removeColumns?, addRows?, removeRows?}")?;
+            post(json!({"action": "change", "actor": "agent", "session": session, "slug": found[0], "payload": payload})).await
         }
         "order" => {
             let found = exactly(rest, &["--input"], &["SLUG"], "order")?;

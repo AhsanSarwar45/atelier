@@ -146,7 +146,7 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-pub const AGENT_ACTIONS: &[&str] = &["draft", "checks", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set", "note", "order"];
+pub const AGENT_ACTIONS: &[&str] = &["draft", "checks", "change", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set", "note", "order"];
 pub const OWNER_ACTIONS: &[&str] = &[
     "approve", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template", "note", "order",
 ];
@@ -955,6 +955,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
     match action {
         "draft" => draft(connection, request),
         "checks" => add_checks(connection, request),
+        "change" => change(connection, request),
         "approve" => approve(connection, request),
         "discard" => discard(connection, request),
         "discover" => discover(connection, request),
@@ -1455,11 +1456,15 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
                 &json!({"row": id}))?;
         }
     }
+    // `grid change` names the rows it removes, search rows too: those are
+    // removed for good, not left to come back as missing.
+    let removed_by_name = strings(&pending["removeRows"]);
+    let removed_by_name: Vec<&str> = removed_by_name.iter().map(String::as_str).collect();
     for row in loaded.rows.iter().filter(|r| r.removed_at.is_none()) {
         if rows_wanted.iter().any(|wanted| wanted["id"] == row.id.as_str()) {
             continue;
         }
-        if row.source == "manual" {
+        if row.source == "manual" || removed_by_name.contains(&row.id.as_str()) {
             connection.execute(
                 "UPDATE grid_row SET removed_at = ?4 WHERE project_id = ?1 AND slug = ?2 AND id = ?3",
                 params![project, slug, row.id, now],
@@ -1588,6 +1593,134 @@ fn add_checks(connection: &Connection, request: &Request) -> Result<Outcome, Tas
              Stop here and end your turn; the owner's answer arrives as your next message.",
             ids.len(),
             ids.join(", ")
+        ),
+        widget: Some("draft"),
+        grids: vec![slug.into()],
+        ..Default::default()
+    })
+}
+
+/// `grid change`: add or remove a few rows and columns of an approved grid
+/// by naming only the change. Stored as an edit draft built from the grid as
+/// it stands, so the owner approves it like any edit and kept cells keep
+/// their proofs.
+fn change(connection: &Connection, request: &Request) -> Result<Outcome, TaskError> {
+    const SHAPE: &str = "{addColumns?: [{id, name, proof_rule?, checks?, after?}], removeColumns?: [id], addRows?: [{id, name, paths?}], removeRows?: [id]}";
+    let slug = need(&request.slug, "slug", "change")?;
+    let project = request.project.as_str();
+    let session = request.session.as_deref().unwrap_or_default();
+    let mut grid = get_existing(connection, project, slug)?;
+    if grid.status != "approved" {
+        return refuse(format!("grid \"{slug}\" is not approved yet; change its draft with `atelier grid draft`"));
+    }
+    if grid.pending.is_some() {
+        return refuse(format!("grid \"{slug}\" already has a change waiting for the owner; wait for their answer"));
+    }
+    let object = request.payload.as_object().ok_or_else(|| TaskError::Refused(format!("the payload must be an object: {SHAPE}")))?;
+    const FIELDS: &[&str] = &["addColumns", "removeColumns", "addRows", "removeRows"];
+    if let Some(other) = object.keys().find(|key| !FIELDS.contains(&key.as_str())) {
+        return refuse(format!("{other} is not allowed (allowed: {}): {SHAPE}", FIELDS.join(", ")));
+    }
+    let list = |key: &str| -> Result<Vec<Value>, TaskError> {
+        match object.get(key) {
+            None | Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::Array(items)) => Ok(items.clone()),
+            Some(_) => refuse(format!("{key} must be a list: {SHAPE}")),
+        }
+    };
+    let (add_columns, remove_columns, add_rows, remove_rows) = (list("addColumns")?, list("removeColumns")?, list("addRows")?, list("removeRows")?);
+    if add_columns.is_empty() && remove_columns.is_empty() && add_rows.is_empty() && remove_rows.is_empty() {
+        return refuse(format!("nothing to change: give addColumns, removeColumns, addRows or removeRows: {SHAPE}"));
+    }
+    let loaded = load(connection, project, slug)?.expect("the grid was just read");
+
+    let mut live: Vec<&Column> = loaded.columns.iter().filter(|c| c.retired_at.is_none()).collect();
+    live.sort_by_key(|c| c.position);
+    let mut columns: Vec<Value> = live
+        .iter()
+        .map(|c| json!({"id": c.id, "name": c.name, "proofRule": c.proof_rule, "fromTemplate": c.from_template, "checks": c.checks}))
+        .collect();
+    for (index, id) in remove_columns.iter().enumerate() {
+        let id = id.as_str().unwrap_or("");
+        let Some(at) = columns.iter().position(|c| c["id"] == id) else {
+            return refuse(format!("removeColumns[{index}]: \"{id}\" is not a column of grid \"{slug}\""));
+        };
+        columns.remove(at);
+    }
+    for (index, item) in add_columns.iter().enumerate() {
+        let here = format!("addColumns[{index}]");
+        let mut item = item.clone();
+        let after = match item.as_object_mut().and_then(|o| o.remove("after")) {
+            None | Some(Value::Null) => None,
+            Some(Value::String(after)) => Some(after),
+            Some(_) => return refuse(format!("{here}.after must be a column id")),
+        };
+        if item.is_object() && item.get("proof_rule").is_none() {
+            item["proof_rule"] = json!("its checks pass");
+        }
+        let checked = check_columns(Some(&json!([item])), &here)?.remove(0);
+        let id = checked["id"].as_str().unwrap_or("");
+        if columns.iter().any(|c| c["id"] == id) {
+            return refuse(format!("{here}: \"{id}\" is already a column of grid \"{slug}\""));
+        }
+        let at = match &after {
+            None => columns.len(),
+            Some(after) => columns.iter().position(|c| c["id"] == after.as_str()).map(|at| at + 1).ok_or_else(|| {
+                TaskError::Refused(format!("{here}.after: \"{after}\" is not a column of grid \"{slug}\""))
+            })?,
+        };
+        columns.insert(at, json!({"id": id, "name": checked["name"], "proofRule": checked["proof_rule"], "fromTemplate": false,
+            "checks": checked.get("checks").cloned().unwrap_or_else(|| json!([]))}));
+    }
+    if columns.is_empty() {
+        return refuse(format!("the change leaves grid \"{slug}\" with no columns"));
+    }
+    if columns.len() > MAX_COLUMNS {
+        return refuse(format!("the change gives grid \"{slug}\" {} columns; a grid has at most {MAX_COLUMNS}", columns.len()));
+    }
+
+    let mut rows: Vec<Value> = loaded
+        .rows
+        .iter()
+        .filter(|row| row.removed_at.is_none())
+        .map(|row| json!({"id": row.id, "name": row.name, "kind": row.kind, "paths": row.paths, "of": row.of,
+            "ref": row.reference.clone().unwrap_or(Value::Null), "source": row.source}))
+        .collect();
+    let mut removed = Vec::new();
+    for (index, id) in remove_rows.iter().enumerate() {
+        let id = id.as_str().unwrap_or("");
+        let Some(at) = rows.iter().position(|r| r["id"] == id) else {
+            return refuse(format!("removeRows[{index}]: \"{id}\" is not a row of grid \"{slug}\""));
+        };
+        rows.remove(at);
+        removed.push(id.to_string());
+    }
+    for (index, item) in add_rows.iter().enumerate() {
+        let row = check_manual_row(item, index).map_err(|e| at_field(e, "addRows"))?;
+        let id = row["id"].as_str().unwrap_or("");
+        if rows.iter().any(|r| r["id"] == id) {
+            return refuse(format!("addRows[{index}]: \"{id}\" is already a row of grid \"{slug}\""));
+        }
+        rows.push(row);
+    }
+    check_rows(connection, project, slug, &rows)?;
+
+    let now = request.now;
+    let diff = edit_diff(&loaded, &rows, &columns);
+    let (rows_n, cols_n) = (rows.len(), columns.len());
+    grid.pending = Some(json!({
+        "title": grid.title, "area": grid.area, "template": grid.template, "rowSearch": grid.row_search,
+        "columns": columns, "rows": rows, "removeRows": removed, "draftedBy": session, "draftedAt": now, "edit": true, "diff": diff,
+    }));
+    grid.drafted_by = Some(session.to_string());
+    grid.updated_at = now;
+    save_grid(connection, &grid)?;
+    append_event(connection, project, slug, now, "edit_drafted", None, Some(session), "agent", &json!({"rows": rows_n, "columns": cols_n}))?;
+    Ok(Outcome {
+        slug: Some(slug.into()),
+        summary: format!(
+            "Asked the owner to approve a change to grid \"{slug}\" (now {rows_n} rows × {cols_n} columns); kept cells keep their proofs. \
+             Stop here and end your turn; the owner's answer arrives as your next message."
         ),
         widget: Some("draft"),
         grids: vec![slug.into()],

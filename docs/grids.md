@@ -264,6 +264,18 @@ by the row id, so one template covers every row:
   approves or discards just those checks on the grid card. Rows, columns,
   cells, proofs and history are kept, and the new check files' hashes are
   recorded with the grid's.
+- To add or remove a few rows or columns of an approved grid, run
+  `atelier grid change SLUG` with only the change:
+  `{"addColumns": [{"id": "scenes", "name": "Saved scenes", "after": "first-col",
+  "checks": [ … ]}], "removeColumns": ["old"], "addRows": [{"id": "bloom",
+  "name": "Bloom", "paths": ["src/bloom.rs"]}], "removeRows": ["gone"]}`.
+  Every field is optional, but at least one is needed. `after` puts a new
+  column right after the one it names; without it the column goes last.
+  `proof_rule` defaults to "its checks pass". The grid stays approved while
+  the change waits, and the owner approves or discards it on the edit card.
+  Kept cells keep their proofs. A removed row stays removed, even one the
+  row search finds. To make other columns wait for a new one, run
+  `atelier grid order SLUG` after the owner approves.
 - `atelier grid next` never calls a grid finished while cells need a check.
   It says how many need one and names `atelier grid checks`. Its JSON has
   `finished: false`, and the command exits non-zero when it hands out
@@ -603,6 +615,7 @@ atelier grid order SLUG                      {rows?:[{id,after}],columns?:[{id,a
 atelier grid template list
 atelier grid template set NAME               {columns:[{id,name,proof_rule}]}
 atelier grid draft                           {slug,title,area,template?,row_search,columns,rows}
+atelier grid change SLUG                     {addColumns?,removeColumns?,addRows?,removeRows?}  add or remove rows and columns of an approved grid
 atelier grid discover SLUG
 atelier grid prove SLUG ROW COL              {summary,tests?,commits?,benchmarks?,evidence?}  runs the approved checks (old cells: checks in the payload)
 atelier grid verify SLUG [ROW COL]           re-run checks (whole grid: proved cells)
