@@ -1,8 +1,9 @@
 //! Workflow runs (docs/designs/workflows.md): a saved workflow takes an item,
 //! such as a ticket, through its stages. Each run gets a worktree on the
 //! item's branch and one chat. An agent stage's prompt goes to that chat, and
-//! the `Outcome:` line the agent ends its turn with picks the next stage by
-//! the workflow's routes. Wait stages rerun their check on each tick, and the
+//! the outcome the agent reports with `atelier workflow done` (or, failing
+//! that, an `Outcome:` line ending its turn) picks the next stage by the
+//! workflow's routes. Wait stages rerun their check on each tick, and the
 //! stage's Automatic switches answer what the owner would otherwise answer.
 
 use super::tell::tell_chat;
@@ -70,6 +71,9 @@ struct Run {
     seen_message: i64,
     note: Option<String>,
     agent: Option<Value>,
+    /// What the agent reported for the current stage with `atelier workflow`:
+    /// `{"outcome": …}` or `{"needs": …}`, acted on when its turn ends.
+    report: Option<Value>,
 }
 
 impl Run {
@@ -83,7 +87,7 @@ impl Run {
 }
 
 const COLUMNS: &str =
-    "id, project_id, project_path, workflow_id, item, stage, status, session_id, cwd, attempts, seen_message, note, agent";
+    "id, project_id, project_path, workflow_id, item, stage, status, session_id, cwd, attempts, seen_message, note, agent, report";
 
 fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Run> {
     let item: String = row.get(4)?;
@@ -102,6 +106,7 @@ fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Run> {
         seen_message: row.get(10)?,
         note: row.get(11)?,
         agent: row.get::<_, Option<String>>(12)?.and_then(|text| serde_json::from_str(&text).ok()),
+        report: row.get::<_, Option<String>>(13)?.and_then(|text| serde_json::from_str(&text).ok()),
     })
 }
 
@@ -133,10 +138,11 @@ async fn save(state: &WorkbenchState, run: &Run) -> Result<(), String> {
         .write_tasks(move |store| {
             store.connection().execute(
                 "UPDATE workflow_run SET stage = ?2, status = ?3, session_id = ?4, cwd = ?5, attempts = ?6,
-                   seen_message = ?7, note = ?8, updated_at = ?9 WHERE id = ?1",
+                   seen_message = ?7, note = ?8, updated_at = ?9, report = ?10 WHERE id = ?1",
                 params![
                     run.id, run.stage, run.status, run.session, run.cwd,
-                    Value::Object(run.attempts.clone()).to_string(), run.seen_message, run.note, now()
+                    Value::Object(run.attempts.clone()).to_string(), run.seen_message, run.note, now(),
+                    run.report.as_ref().map(Value::to_string)
                 ],
             )
         })
@@ -209,11 +215,23 @@ fn outcomes(stage: &Stage) -> Vec<String> {
     if listed.is_empty() { vec!["done".to_string()] } else { listed }
 }
 
+/// A word the shell passes through as one argument.
+fn quoted(word: &str) -> String {
+    if !word.is_empty() && word.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
+}
+
 fn how_to_report(workflow: &Workflow, stage: &Stage) -> String {
-    let lines: Vec<String> = outcomes(stage).iter().map(|outcome| format!("Outcome: {outcome}")).collect();
+    let at = workflow.stages.iter().position(|s| s.id == stage.id).map_or(0, |at| at + 1);
+    let lines: Vec<String> = outcomes(stage).iter().map(|outcome| format!("atelier workflow done {}", quoted(outcome))).collect();
     format!(
-        "This chat is running the workflow \"{}\", stage \"{}\". When this stage is finished, end your reply with one of these lines, exactly as written:\n{}",
-        workflow.name, stage.name, lines.join("\n")
+        "This chat is running the workflow \"{}\", stage \"{}\" ({at} of {}). Run `atelier workflow show` to see every stage and where each outcome leads.\n\
+         When this stage is finished, run one of these commands, then end your reply:\n{}\n\
+         If you cannot finish without the owner, run `atelier workflow block --needs \"what you need\"` and end your reply.",
+        workflow.name, stage.name, workflow.stages.len(), lines.join("\n")
     )
 }
 
@@ -327,9 +345,9 @@ async fn queue(state: &WorkbenchState, project_id: &str, project_path: &str, flo
 }
 
 /// Runs that hold one of the workflow's slots: they have a chat and are
-/// working or waiting for the owner. A run waiting on a check holds none.
+/// working. A run waiting for the owner or on a check holds none.
 fn holds_a_slot(run: &Run) -> bool {
-    run.session.is_some() && (run.status == "running" || run.status == "needs_owner")
+    run.session.is_some() && run.status == "running"
 }
 
 /// One `promote` at a time, so two never fill the same free slot.
@@ -346,8 +364,18 @@ async fn promote(state: &WorkbenchState, project_path: &str, workflow_id: &str) 
         if runs.iter().filter(|run| holds_a_slot(run)).count() >= limit {
             return;
         }
-        // Newest first from the table; the queue goes oldest first.
-        let Some(mut next) = runs.into_iter().rev().find(|run| run.status == "queued") else { return };
+        // Newest first from the table; the queue goes oldest first, and a run
+        // the owner continued (it has its chat already) goes before new items.
+        let queued: Vec<Run> = runs.into_iter().rev().filter(|run| run.status == "queued").collect();
+        let Some(mut next) = queued.iter().find(|run| run.session.is_some()).or_else(|| queued.first()).cloned() else { return };
+        if next.session.is_some() {
+            let at = next.stage.clone();
+            if let Err(error) = enter(state, &flow, &mut next, &at).await {
+                tracing::warn!(run = next.id, %error, "a continued workflow run could not resume");
+                let _ = hold(state, &mut next, error).await;
+            }
+            continue;
+        }
         if let Err(error) = begin(state, &flow, &mut next).await {
             tracing::warn!(run = next.id, %error, "a queued workflow run could not start");
             next.session = None;
@@ -423,6 +451,7 @@ fn enter<'a>(
         run.attempts.insert(id.to_string(), json!(tries));
         run.stage = id.to_string();
         run.note = None;
+        run.report = None;
         if let Some(limit) = stage.max_attempts.filter(|limit| *limit > 0) {
             if tries > u64::from(limit) {
                 return hold(state, run, format!("{} ran {limit} times without getting through", stage.name)).await;
@@ -573,7 +602,7 @@ async fn waiting_task_work(state: &WorkbenchState, project: &str, session: &str)
 
 /// Answer for the owner through the task route, as the owner's own click does.
 async fn as_owner(state: &WorkbenchState, project: &str, action: &str, number: i64, payload: Value) -> Result<(), String> {
-    let request = json!({"action": action, "actor": "owner", "project": project, "number": number, "payload": payload});
+    let request = json!({"action": action, "actor": "owner", "project": project, "number": number, "payload": payload, "by_workflow": true});
     let request = serde_json::from_value(request).map_err(|error| error.to_string())?;
     super::tasks::act(State(state.clone()), Json(request))
         .await
@@ -613,6 +642,11 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
     if ended_in == "stopped" {
         return hold(state, run, "The chat was stopped".into()).await;
     }
+    let report = run.report.take();
+    if let Some(needs) = report.as_ref().and_then(|report| report["needs"].as_str()) {
+        return hold(state, run, needs.to_string()).await;
+    }
+    let outcome = report.as_ref().and_then(|report| report["outcome"].as_str().map(str::to_string)).or_else(|| said.as_deref().and_then(reported));
     let (proposal, review) = waiting_task_work(state, &run.project_id, session).await;
     if let Some(id) = proposal {
         if !stage.auto.plan {
@@ -630,9 +664,12 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
         run.status = "running".into();
         run.note = None;
         save(state, run).await?;
-        return as_owner(state, &run.project_id, "approve", number, json!({})).await;
+        as_owner(state, &run.project_id, "approve", number, json!({})).await?;
+        // An outcome reported in the same turn still moves the run on.
+        let Some(outcome) = outcome else { return Ok(()) };
+        return follow(state, &flow, run, &outcome).await;
     }
-    if let Some(outcome) = said.as_deref().and_then(reported) {
+    if let Some(outcome) = outcome {
         return follow(state, &flow, run, &outcome).await;
     }
     if stage.auto.questions {
@@ -769,13 +806,26 @@ pub(super) async fn act(State(state): State<WorkbenchState>, Json(ask): Json<Ask
                 let stage = flow.stages.iter().find(|stage| stage.id == run.stage).cloned();
                 match stage.map(|stage| stage.kind) {
                     Some(StageKind::Approval) => follow(&state, &flow, &mut run, "done").await?,
-                    // Any other stage starts again from its prompt.
+                    // Any other stage starts again from its prompt, once a slot
+                    // is free: a run waiting for the owner gave its slot up.
                     _ => {
                         let at = run.stage.clone();
                         if let Some(tries) = run.attempts.get_mut(&at) {
                             *tries = json!(0);
                         }
-                        enter(&state, &flow, &mut run, &at).await?
+                        let limit = flow.max_concurrent.unwrap_or(1).max(1) as usize;
+                        let working = runs_where(&state, "project_path = ?1", run.project_path.clone())
+                            .await?
+                            .iter()
+                            .filter(|other| other.workflow == flow.id && other.id != run.id && holds_a_slot(other))
+                            .count();
+                        if working >= limit {
+                            run.status = "queued".into();
+                            run.note = None;
+                            save(&state, &run).await?;
+                        } else {
+                            enter(&state, &flow, &mut run, &at).await?
+                        }
                     }
                 }
             }
@@ -787,6 +837,101 @@ pub(super) async fn act(State(state): State<WorkbenchState>, Json(ask): Json<Ask
             let path = needs(&ask.project_path, "projectPath")?;
             tick(&state, ask.project_id.as_deref().unwrap_or_default(), path, true).await?;
             Ok(Json(json!({"ok": true})))
+        }
+        other => Err(format!("Unknown action {other}").into()),
+    }
+}
+
+#[derive(Deserialize)]
+pub(super) struct Report {
+    action: String,
+    session: String,
+    #[serde(default)]
+    outcome: Option<String>,
+    #[serde(default)]
+    needs: Option<String>,
+}
+
+fn refused(status: axum::http::StatusCode, message: String) -> ApiError {
+    ApiError { status, message }
+}
+
+/// The task chat `session` is still working on, if any.
+async fn task_in_progress(state: &WorkbenchState, project: &str, session: &str) -> Option<i64> {
+    let (project, session) = (project.to_string(), session.to_string());
+    state
+        .database()
+        .read_tasks(move |store| {
+            store
+                .connection()
+                .query_row(
+                    "SELECT number FROM task WHERE project_id = ?1 AND session_id = ?2 AND status = 'in_progress' ORDER BY number LIMIT 1",
+                    params![project, session],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+        })
+        .await
+        .ok()
+        .flatten()
+}
+
+/// POST /api/workbench/workflow-run — what `atelier workflow` sends from a
+/// run's chat: `show` the workflow, `done` with an outcome, or `block` for
+/// the owner. `done` and `block` are acted on when the chat's turn ends.
+pub(super) async fn report(State(state): State<WorkbenchState>, Json(ask): Json<Report>) -> Result<Json<Value>, ApiError> {
+    let runs = runs_where(&state, "session_id = ?1", ask.session.clone()).await.map_err(ApiError::from)?;
+    let mut run = runs
+        .into_iter()
+        .find(|run| run.status == "running" || run.status == "needs_owner")
+        .ok_or_else(|| ApiError::not_found("This chat is not running a workflow stage".to_string()))?;
+    let flow = workflow(&run.project_path, &run.workflow)?;
+    let stage = flow
+        .stages
+        .iter()
+        .find(|stage| stage.id == run.stage)
+        .cloned()
+        .ok_or_else(|| ApiError::from(format!("The workflow no longer has a stage {}", run.stage)))?;
+    match ask.action.as_str() {
+        "show" => Ok(Json(json!({
+            "workflow": flow.name,
+            "item": run.item,
+            "current": stage.id,
+            "outcomes": outcomes(&stage),
+            "status": run.status,
+            "stages": flow.stages.iter().map(|stage| json!({
+                "id": stage.id, "name": stage.name, "kind": stage.kind,
+                "routes": stage.routes.iter().map(|route| json!({"outcome": route.outcome, "to": route.to})).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        }))),
+        "done" => {
+            let typed = needs(&ask.outcome, "outcome")?;
+            let offered = outcomes(&stage);
+            let Some(outcome) = offered.iter().find(|outcome| outcome.trim().eq_ignore_ascii_case(typed.trim())).cloned() else {
+                let listed = offered.iter().map(|outcome| format!("\"{outcome}\"")).collect::<Vec<_>>().join(", ");
+                return Err(refused(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    format!("\"{typed}\" is not an outcome of stage {}. Use one of: {listed}", stage.name),
+                ));
+            };
+            if let Some(number) = task_in_progress(&state, &run.project_id, &ask.session).await {
+                return Err(refused(
+                    axum::http::StatusCode::CONFLICT,
+                    format!("Task #{number} is still in progress. Finish it with `atelier task done {number}` first."),
+                ));
+            }
+            run.report = Some(json!({"outcome": outcome}));
+            save(&state, &run).await?;
+            Ok(Json(json!({"summary": format!("Stage {} reported \"{outcome}\". End your reply; the workflow moves on when it ends.", stage.name)})))
+        }
+        "block" => {
+            let why = needs(&ask.needs, "--needs")?.trim().to_string();
+            run.report = Some(json!({"needs": why}));
+            run.status = "needs_owner".into();
+            run.note = Some(why);
+            save(&state, &run).await?;
+            promote(&state, &run.project_path, &run.workflow).await;
+            Ok(Json(json!({"summary": "The run waits for the owner. End your reply."})))
         }
         other => Err(format!("Unknown action {other}").into()),
     }

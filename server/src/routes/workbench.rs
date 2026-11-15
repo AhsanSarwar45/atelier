@@ -1204,6 +1204,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/grid", post(grids::act))
         .route("/workers", post(workers::act))
         .route("/workflow-runs", get(workflow_runs::list).post(workflow_runs::act))
+        .route("/workflow-run", post(workflow_runs::report))
         // A prompt carries its pictures inline, as base64 inside the JSON, and
         // there is no ceiling on how many a person may attach to one message.
         // Axum otherwise buffers every body under a 2 MiB default nobody here

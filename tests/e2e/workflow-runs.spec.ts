@@ -8,7 +8,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * Running a workflow: the owner picks items from the workflow's Items command,
  * each gets a run with a worktree chat, and the Runs list follows it from
  * stage to stage. The scripted ACP agent answers "say you read this" by
- * repeating the prompt, which carries the "Outcome: done" line back.
+ * repeating the prompt. It cannot run `atelier workflow done`, so the stage
+ * prompt carries an "Outcome: done" line, the reply fallback, for it to echo.
  *
  * Run: tests/e2e/workflow-runs.sh 'test name'
  */
@@ -30,7 +31,7 @@ function flow(items: string) {
     trigger: { kind: 'manual', items },
     agent: { brand: 'claude' },
     setup: { branch: '{{item.branchName}}', base: 'main' },
-    stages: [{ id: 'implement', name: 'Implement', kind: 'agent', prompt: 'say you read this {{item.identifier}}', routes: [],
+    stages: [{ id: 'implement', name: 'Implement', kind: 'agent', prompt: 'say you read this {{item.identifier}}\nOutcome: done', routes: [],
       auto: { plan: false, done: false, questions: false } }],
   };
 }
@@ -147,7 +148,8 @@ test('runs past the limit show as queued', async ({ page, request }) => {
   const queued = {
     ...flow(`printf '%s' '${items}'`),
     max_concurrent: 1,
-    stages: [{ id: 'check', name: 'Check', kind: 'approval', prompt: 'Look at {{item.identifier}}', routes: [],
+    // A working agent holds the only slot; a run waiting for the owner would not.
+    stages: [{ id: 'work', name: 'Work', kind: 'agent', prompt: 'run the long command for {{item.identifier}}', routes: [],
       auto: { plan: false, done: false, questions: false } }],
   };
   await seed(request, [queued]);
@@ -159,7 +161,7 @@ test('runs past the limit show as queued', async ({ page, request }) => {
   await dialog.getByRole('button', { name: 'Start', exact: true }).click();
   await expect(dialog).toBeHidden();
   const runs = page.getByTestId('workflow-runs');
-  await expect(runs.getByTestId('workflow-run').filter({ hasText: 'KEY-5' }).getByText('Needs you', { exact: true })).toBeVisible();
+  await expect(runs.getByTestId('workflow-run').filter({ hasText: 'KEY-5' }).getByText('Running', { exact: true })).toBeVisible();
   await expect(runs.getByTestId('workflow-run').filter({ hasText: 'KEY-6' }).getByText('Queued', { exact: true })).toBeVisible();
   await runs.screenshot({ path: join(results, 'runs-queued.png'), animations: 'disabled' });
 });

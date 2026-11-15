@@ -1,6 +1,6 @@
 # Workflows
 
-Tasks #35, #38 and #39. A workflow takes an item, such as a Linear ticket,
+Tasks #35, #38, #39 and #43. A workflow takes an item, such as a Linear ticket,
 through a fixed set of stages. Each item gets its own worktree and chat, and
 the server moves it from stage to stage. The owner steps in only where the
 workflow says so.
@@ -56,26 +56,32 @@ workflow says so.
    dialog starts from the workflow's agent and may pick another for these
    runs only. A schedule can also start runs on its own (see below). Every
    new run is **Queued** first. While fewer than **Runs at once** runs hold a
-   slot, the server starts the oldest queued run. A run holds a slot while
-   it has a chat and is **Running** or **Needs you**; a run on a Wait stage
-   does not, and a run that finishes or is stopped frees its slot. For each
+   slot, the server starts the oldest queued run. Only a working agent holds
+   a slot: a run that has a chat and is **Running**. A run that **Needs you**,
+   a run on a Wait stage, and a run that finishes or is stopped hold none.
+   When the owner continues a run and every slot is taken, the run is
+   **Queued** again and takes the next free slot before any new item. For each
    started item, the server finds the worktree already on the item's branch, or makes one. A
    branch that exists neither locally nor on `origin` is created from the
    base. The server then opens a chat on the run's agent in that worktree, named after
    the item, and enters the first stage.
 2. **Agent stages.** The prompt is sent with the item's details filled in,
-   and with a closing note that lists the outcomes the stage accepts:
+   and with a closing note on how to report the stage (see **Reporting a
+   stage**):
 
    ```
-   This chat is running the workflow "Linear work", stage "QA". When this stage
-   is finished, end your reply with one of these lines, exactly as written:
-   Outcome: pass
-   Outcome: fail
+   This chat is running the workflow "Linear work", stage "QA" (2 of 8). Run
+   `atelier workflow show` to see every stage and where each outcome leads.
+   When this stage is finished, run one of these commands, then end your reply:
+   atelier workflow done pass
+   atelier workflow done fail
+   If you cannot finish without the owner, run
+   `atelier workflow block --needs "what you need"` and end your reply.
    ```
 
-   When the chat's turn ends, the server reads the last `Outcome:` line in
-   the agent's newest reply and takes the matching route. Matching ignores
-   case. If the outcome matches no route, the run stops for the owner.
+   When the chat's turn ends, the server takes the route for the outcome the
+   agent reported. If the outcome matches no route, the run stops for the
+   owner.
 3. **Wait stages** rerun their check once a minute, on the same tick that
    polls schedules. A check usually asks an outside system about the item,
    for example a Linear query that prints the ticket's state. Routes such as
@@ -89,6 +95,24 @@ and **Stopped**. A run that needs the owner shows why. **Continue** passes
 an Approval stage, or sends any other stage's prompt again with its attempt
 count reset.
 
+## Reporting a stage
+
+A run's agent uses `atelier workflow` from its chat. Like `atelier task`, it
+names the chat with `ATELIER_CHAT_SESSION_ID` and talks to the running app.
+
+- `atelier workflow show` prints the whole workflow: every stage, where each
+  outcome leads, the current stage and the outcomes it accepts.
+- `atelier workflow done OUTCOME` finishes the current stage. An outcome the
+  stage has no route for is refused, with the stage's outcomes listed, and
+  so is `done` while a task the chat holds is still in progress. The server
+  keeps the outcome and acts on it when the turn ends.
+- `atelier workflow block --needs TEXT` stops the run for the owner at once.
+  The run shows **Needs you** with that text and gives up its slot.
+
+An agent that cannot run commands can still end its reply with an
+`Outcome: NAME` line. The server reads the last such line when no outcome
+was reported with the command. Matching ignores case either way.
+
 ## Automatic switches
 
 Each agent stage has three switches. All are off by default. With a switch
@@ -97,13 +121,17 @@ off, the run stops for the owner at that point.
 - **Approve plan:** when the agent proposes a task, the server answers
   **Create task** for the owner, exactly as the owner's own click would.
 - **Approve finished work:** when the stage's task is waiting for review,
-  the server approves it.
+  the server approves it. The chat is told only "The workflow approved task
+  #N", with nothing about merging: what happens next is up to the
+  workflow's stages.
 - **Answer questions:** when a turn ends with no outcome, which usually means
   the agent asked something, the server tells the agent to use its best
   judgment, say what it chose and carry on.
 
-These checks run in that order whenever a turn ends: a waiting proposal
-first, then a task in review, then the outcome.
+These checks run in that order whenever a turn ends: a `block` first, then a
+waiting proposal, then a task in review, then the outcome. An outcome
+reported in the same turn as a task in review still moves the run on after
+the server approves the task.
 
 ## Schedules
 
@@ -127,3 +155,12 @@ newest first.
 | `start` | `projectId`, `projectPath`, `workflow`, `items`, optional `agent` | `{runs}`; refused when neither the body nor the workflow has an agent |
 | `continue` / `stop` | `run` | `{run}` |
 | `tick` | `projectPath`, `projectId` | `{ok}`; runs the checks and schedules now |
+
+`POST /api/workbench/workflow-run` is what `atelier workflow` sends. Every
+body names the chat with `session`, and the chat must be running a stage.
+
+| Action | Body | Answer |
+|---|---|---|
+| `show` | | `{workflow, item, current, outcomes, status, stages}` |
+| `done` | `outcome` | `{summary}`; 400 for an outcome the stage has no route for, 409 while the chat's task is in progress |
+| `block` | `needs` | `{summary}`; the run is **Needs you** with `needs` as its note |

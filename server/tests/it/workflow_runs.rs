@@ -292,7 +292,7 @@ async fn a_run_opens_a_worktree_chat_on_the_items_branch() {
     let prompts = told_more(&fixture, &id, 0).await;
     let first = prompts.first().unwrap_or_else(|| panic!("the chat was never given the first stage's prompt"));
     assert!(first.contains("Work on KEY-1: Fix login"), "placeholders are not filled in: {first}");
-    assert!(first.contains("Outcome: done"), "the prompt does not say how to report the outcome: {first}");
+    assert!(first.contains("atelier workflow done done"), "the prompt does not say how to report the outcome: {first}");
     let listed = run_where(&fixture, &run["id"], |run| run["stage"] == "implement").await;
     assert_eq!(listed["status"], "running", "a started run is not running: {listed}");
 }
@@ -758,4 +758,222 @@ fn an_older_run_table_gains_the_agent_column() {
     assert!(columns.iter().any(|c| c == "agent"), "the run table from 0.25.9 did not gain the agent column: {columns:?}");
     let kept: i64 = connection.query_row("SELECT count(*) FROM workflow_run", [], |row| row.get(0)).unwrap();
     assert_eq!(kept, 1, "upgrading the run table lost a run");
+}
+
+// --- The agent reports its stage with `atelier workflow` ---
+
+/// A workflow request from the agent in chat `session`, as the CLI sends it.
+async fn report(fixture: &Fixture, session: &str, action: &str, fields: Value) -> (u16, Value) {
+    let mut body = fields;
+    body["action"] = json!(action);
+    body["session"] = json!(session);
+    post(fixture, "/workflow-run", body).await
+}
+
+#[tokio::test]
+async fn workflow_done_moves_the_run_by_the_outcome_it_names() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(40)).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "done", json!({"outcome": "done"})).await;
+    assert_eq!(code, 200, "workflow done was refused: {body}");
+    replies(&fixture, &id, "Finished the work.").await;
+    let moved = run_where(&fixture, &run["id"], |run| run["stage"] == "qa").await;
+    assert_eq!(moved["stage"], "qa", "workflow done did not move the run on: {moved}");
+}
+
+#[tokio::test]
+async fn workflow_done_refuses_an_outcome_the_stage_has_no_route_for() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(41)).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "done", json!({"outcome": "shipped"})).await;
+    assert_eq!(code, 400, "workflow done took an outcome the stage has no route for: {body}");
+    let said = body.to_string();
+    assert!(said.contains("\"done\"") || said.contains("done"), "the refusal does not list the stage's outcomes: {said}");
+    let still = run_where(&fixture, &run["id"], |run| run["stage"] == "implement").await;
+    assert_eq!(still["stage"], "implement", "a refused outcome moved the run: {still}");
+}
+
+#[tokio::test]
+async fn workflow_block_holds_the_run_for_the_owner_with_its_reason() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(42)).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "block", json!({"needs": "Which staging database should I use?"})).await;
+    assert_eq!(code, 200, "workflow block was refused: {body}");
+    replies(&fixture, &id, "I need the owner.").await;
+    let held = run_where(&fixture, &run["id"], |run| run["status"] == "needs_owner" && run["note"] == "Which staging database should I use?").await;
+    assert_eq!(held["status"], "needs_owner", "workflow block did not hold the run: {held}");
+    assert_eq!(held["note"], "Which staging database should I use?", "the run does not show what the agent needs: {held}");
+}
+
+#[tokio::test]
+async fn workflow_show_lists_every_stage_and_the_current_one() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(43)).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "show", json!({})).await;
+    assert_eq!(code, 200, "workflow show was refused: {body}");
+    let stages: Vec<&str> = body["stages"].as_array().map(|s| s.iter().filter_map(|s| s["id"].as_str()).collect()).unwrap_or_default();
+    assert_eq!(stages, ["implement", "qa", "ship"], "workflow show does not list the stages: {body}");
+    assert_eq!(body["current"], "implement", "workflow show does not name the current stage: {body}");
+    assert_eq!(body["outcomes"], json!(["done"]), "workflow show does not list the current stage's outcomes: {body}");
+}
+
+#[tokio::test]
+async fn the_stage_prompt_tells_the_agent_to_report_with_the_command() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(44)).await;
+    let prompts = told_more(&fixture, &session(&run), 0).await;
+    let first = prompts.first().cloned().unwrap_or_default();
+    assert!(first.contains("atelier workflow done done"), "the prompt does not say to run atelier workflow done: {first}");
+    assert!(first.contains("atelier workflow show"), "the prompt does not point at atelier workflow show: {first}");
+    assert!(first.contains("atelier workflow block"), "the prompt does not say how to ask for the owner: {first}");
+}
+
+#[tokio::test]
+async fn workflow_done_is_refused_while_the_stage_task_is_in_progress() {
+    let fixture = fixture().await;
+    let mut flow = ticket_flow();
+    flow["stages"][0]["auto"]["plan"] = json!(true);
+    save(&fixture, flow);
+    let run = start(&fixture, "ticket", item(45)).await;
+    let id = session(&run);
+    proposes(&fixture, &id).await;
+    until(|| shown(&fixture, &id, 1), |task| task["status"] == "todo").await;
+    let (code, body) = task(&fixture, &id, "start", Some(1), json!({})).await;
+    assert_eq!(code, 200, "start failed: {body}");
+    let (code, body) = report(&fixture, &id, "done", json!({"outcome": "done"})).await;
+    assert_eq!(code, 409, "workflow done was taken while task #1 is in progress: {body}");
+    assert!(body.to_string().contains("#1"), "the refusal does not name the unfinished task: {body}");
+}
+
+/// The run's agent finishes its plan task (which then waits for review) and
+/// reports `done` in the same turn, in its reply.
+async fn finishes_task_and_stage(fixture: &Fixture, run: &Value) {
+    let id = session(run);
+    proposes(fixture, &id).await;
+    until(|| shown(fixture, &id, 1), |task| task["status"] == "todo").await;
+    let (code, body) = task(fixture, &id, "start", Some(1), json!({})).await;
+    assert_eq!(code, 200, "start failed: {body}");
+    std::fs::write(format!("{}/made.txt", run["cwd"].as_str().unwrap()), "x").unwrap();
+    let (code, body) = task(fixture, &id, "done", Some(1), json!({"summary": "done", "commits": [], "followups": [],
+        "result": {"document": "# Plan", "decisions": [], "open_questions": [], "proposed_tasks": []}})).await;
+    assert_eq!(code, 200, "done failed: {body}");
+    replies(fixture, &id, "Finished; the task is in review.\n\nOutcome: done").await;
+}
+
+fn auto_plan_and_done() -> Value {
+    let mut flow = ticket_flow();
+    flow["stages"][0]["auto"]["plan"] = json!(true);
+    flow["stages"][0]["auto"]["done"] = json!(true);
+    flow
+}
+
+#[tokio::test]
+async fn an_auto_approved_task_still_lets_the_reported_outcome_move_the_run() {
+    let fixture = fixture().await;
+    save(&fixture, auto_plan_and_done());
+    let run = start(&fixture, "ticket", item(46)).await;
+    let id = session(&run);
+    finishes_task_and_stage(&fixture, &run).await;
+    let approved = until(|| shown(&fixture, &id, 1), |task| task["status"] == "done").await;
+    assert_eq!(approved["status"], "done", "the task was not approved: {approved}");
+    let moved = run_where(&fixture, &run["id"], |run| run["stage"] == "qa").await;
+    assert_eq!(moved["stage"], "qa", "the outcome reported with the task in review was dropped: {moved}");
+}
+
+#[tokio::test]
+async fn a_task_the_workflow_approves_does_not_ask_the_agent_about_merging() {
+    let fixture = fixture().await;
+    save(&fixture, auto_plan_and_done());
+    let run = start(&fixture, "ticket", item(47)).await;
+    let id = session(&run);
+    finishes_task_and_stage(&fixture, &run).await;
+    until(|| shown(&fixture, &id, 1), |task| task["status"] == "done").await;
+    let prompts = until(
+        || async { json!(told(&fixture, &id).await) },
+        |p| p.as_array().is_some_and(|p| p.iter().any(|p| p.as_str().is_some_and(|p| p.contains("approved")))),
+    ).await;
+    let approval = prompts.as_array().and_then(|p| p.iter().filter_map(Value::as_str).find(|p| p.contains("approved")).map(str::to_string));
+    let approval = approval.unwrap_or_else(|| panic!("the agent was not told its task was approved: {prompts}"));
+    assert!(!approval.to_lowercase().contains("merge"), "the approval asks the agent about merging: {approval}");
+}
+
+/// Serves the router on a free port, as the app does, for the real CLI.
+async fn serve(fixture: &Fixture) -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = axum::Router::new().nest("/api/workbench", router(fixture.state.clone()));
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    port
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_atelier_workflow_cli_reports_the_stage_from_the_chat() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(48)).await;
+    let id = session(&run);
+    let port = serve(&fixture).await;
+    let cli = |args: &[&str]| {
+        Shell::new(env!("CARGO_BIN_EXE_atelier"))
+            .args(args)
+            .current_dir(run["cwd"].as_str().unwrap())
+            .env("ATELIER_DATA_DIR", fixture._directory.path())
+            .env("ATELIER_CHAT_SESSION_ID", &id)
+            .env("ATELIER_PORT", port.to_string())
+            .output()
+            .unwrap()
+    };
+    let shown = cli(&["workflow", "show"]);
+    let said = format!("{}{}", String::from_utf8_lossy(&shown.stdout), String::from_utf8_lossy(&shown.stderr));
+    assert!(shown.status.success() && said.contains("implement") && said.contains("qa"), "atelier workflow show did not list the stages: {said}");
+    let wrong = cli(&["workflow", "done", "shipped"]);
+    assert!(!wrong.status.success(), "atelier workflow done took an unknown outcome");
+    let done = cli(&["workflow", "done", "done"]);
+    let said = format!("{}{}", String::from_utf8_lossy(&done.stdout), String::from_utf8_lossy(&done.stderr));
+    assert!(done.status.success(), "atelier workflow done failed: {said}");
+    replies(&fixture, &id, "Finished the work.").await;
+    let moved = run_where(&fixture, &run["id"], |run| run["stage"] == "qa").await;
+    assert_eq!(moved["stage"], "qa", "the CLI's outcome did not move the run: {moved}");
+}
+
+#[tokio::test]
+async fn a_run_waiting_for_the_owner_frees_its_slot() {
+    let fixture = fixture().await;
+    save(&fixture, single(1));
+    let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(49), item(50)]})).await;
+    assert_eq!(body["runs"][1]["status"], "queued", "the second run did not wait its turn: {body}");
+    replies(&fixture, &session(&body["runs"][0]), "Which login page do you mean?").await;
+    let held = run_where(&fixture, &body["runs"][0]["id"], |run| run["status"] == "needs_owner").await;
+    assert_eq!(held["status"], "needs_owner", "the first run did not wait for the owner: {held}");
+    let next = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
+    assert_eq!(next["status"], "running", "a run waiting for the owner still held the only slot: {next}");
+}
+
+#[tokio::test]
+async fn a_continued_run_waits_for_a_free_slot_ahead_of_new_items() {
+    let fixture = fixture().await;
+    save(&fixture, single(1));
+    let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(51), item(52), item(53)]})).await;
+    let first = body["runs"][0].clone();
+    replies(&fixture, &session(&first), "Which login page do you mean?").await;
+    let second = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
+    assert_eq!(second["status"], "running", "a run waiting for the owner still held the only slot: {second}");
+    let (code, answer) = act(&fixture, json!({"action": "continue", "run": first["id"]})).await;
+    assert_eq!(code, 200, "continue failed: {answer}");
+    let waiting = run_where(&fixture, &first["id"], |run| run["status"] == "queued").await;
+    assert_eq!(waiting["status"], "queued", "a continued run went past the limit instead of waiting for a slot: {waiting}");
+    replies(&fixture, &session(&second), "Outcome: done").await;
+    let resumed = run_where(&fixture, &first["id"], |run| run["status"] == "running").await;
+    assert_eq!(resumed["status"], "running", "the continued run did not take the freed slot first: {resumed}");
+    let third = run_where(&fixture, &body["runs"][2]["id"], |run| run["status"] == "queued").await;
+    assert_eq!(third["status"], "queued", "a new item went ahead of the continued run: {third}");
 }

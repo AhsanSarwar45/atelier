@@ -310,6 +310,10 @@ pub(super) struct ActionRequest {
     /// left off, the project's latest chat's.
     #[serde(default)]
     brand: Option<String>,
+    /// The owner's answer given by a workflow run's Automatic switch: the chat
+    /// is told only what happened, and the workflow decides what comes next.
+    #[serde(default)]
+    by_workflow: bool,
 }
 
 /// The project's `[tasks]` settings, from its manifest.
@@ -592,6 +596,7 @@ pub(super) async fn act(
     }
     let action = request.action.clone();
     let actor = request.actor.clone();
+    let by_workflow = request.by_workflow;
     let note = payload["note"].as_str().unwrap_or_default().to_string();
     let prints = if request.action == "create" { prints_for(&state, &project, cell_grids(&payload)).await } else { Default::default() };
     if request.action == "done" && request.actor == "agent" {
@@ -654,7 +659,7 @@ pub(super) async fn act(
     // The owner's approve, reopen and plan-change answers are told to the
     // chat holding the task, like a proposal's answer.
     if let Some(session) = tasks::told_chat(&actor, &action, &row).map(str::to_string) {
-        let merge = if action == "approve" {
+        let merge = if action == "approve" && !by_workflow {
             let commits: Vec<String> = task["result"]["commits"]
                 .as_array()
                 .into_iter()
@@ -667,7 +672,12 @@ pub(super) async fn act(
         } else {
             tasks::git::MergeState::Unknown
         };
-        if let Some(said) = tasks::owner_prompt(&action, &row, &note, &merge) {
+        let said = if by_workflow && action == "approve" {
+            Some(tasks::workflow_approval(&row))
+        } else {
+            tasks::owner_prompt(&action, &row, &note, &merge)
+        };
+        if let Some(said) = said {
             // Queued behind a turn still running, as a proposal's answer is.
             let telling = state.clone();
             tokio::spawn(async move { tell_chat(&telling, &session, said).await });
@@ -1142,6 +1152,7 @@ mod tests {
             grid: None,
             chat: None,
             brand: None,
+            by_workflow: false,
         };
         act(State(state.clone()), Json(request)).await
     }

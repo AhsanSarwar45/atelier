@@ -118,6 +118,11 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
             name: "task".to_string(),
             rest: args[1..].to_vec(),
         },
+        // A workflow run's agent reports its stage (docs/designs/workflows.md).
+        "workflow" => Ask::Tool {
+            name: "workflow".to_string(),
+            rest: args[1..].to_vec(),
+        },
         // The agent's coverage grid commands (docs/grids.md).
         "grid" => Ask::Tool {
             name: "grid".to_string(),

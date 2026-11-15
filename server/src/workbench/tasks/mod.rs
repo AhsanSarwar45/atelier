@@ -1251,6 +1251,13 @@ fn sentence(note: &str) -> String {
     if note.ends_with(['.', '!', '?']) { note.to_string() } else { format!("{note}.") }
 }
 
+/// What the holding chat's agent is told when a workflow run approves its
+/// task for the owner. Nothing about merging: whether and where the work is
+/// merged is the workflow's own business, in its stages.
+pub fn workflow_approval(task: &TaskRow) -> String {
+    format!("The workflow approved task #{} \"{}\".", task.number, task.title)
+}
+
 /// What the holding chat's agent is told when the owner approves or reopens
 /// its task, or answers its plan change. `task` is the task after the action;
 /// `note` is the owner's, if any; `merge` only matters to `approve`. None for

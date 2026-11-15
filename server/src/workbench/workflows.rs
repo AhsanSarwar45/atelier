@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS workflow_run (
   seen_message INTEGER NOT NULL DEFAULT 0,
   note TEXT,
   agent TEXT,
+  report TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -234,6 +235,15 @@ pub fn ensure_schema(connection: &rusqlite::Connection) -> rusqlite::Result<()> 
     )?;
     if !has_agent {
         connection.execute_batch("ALTER TABLE workflow_run ADD COLUMN agent TEXT")?;
+    }
+    // 0.25.10 added what the agent reported with `atelier workflow`.
+    let has_report: bool = connection.query_row(
+        "SELECT count(*) > 0 FROM pragma_table_info('workflow_run') WHERE name = 'report'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_report {
+        connection.execute_batch("ALTER TABLE workflow_run ADD COLUMN report TEXT")?;
     }
     Ok(())
 }
