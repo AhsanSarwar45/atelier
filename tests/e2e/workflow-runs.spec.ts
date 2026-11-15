@@ -181,3 +181,34 @@ test('the chat toolbar picks a workflow and starts it', async ({ page, request }
   await page.getByRole('button', { name: 'Run a workflow' }).click();
   await page.screenshot({ path: join(results, 'toolbar-workflows.png'), animations: 'disabled' });
 });
+
+test('on a phone the chat toolbar keeps its tools under one menu', async ({ page, request }) => {
+  await page.setViewportSize({ width: 412, height: 900 });
+  await seed(request, [flow(`printf '%s' '${ITEMS}'`)]);
+  await page.goto(`/project?id=${project.id}&tab=chat`, { waitUntil: 'networkidle' });
+  const more = page.getByRole('button', { name: 'More tools' });
+  await expect(more, 'no More tools button on a phone').toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run a workflow' })).toBeHidden();
+  await expect(page.getByTestId('open-kind-filter')).toBeHidden();
+  // One row: the tools sit beside the tabs, not on a row of their own.
+  const tabs = await page.getByTestId('project-tabs').boundingBox();
+  const tools = await more.boundingBox();
+  expect(Math.abs((tools?.y ?? 999) - (tabs?.y ?? 0)), 'the toolbar wrapped onto a second row').toBeLessThan(20);
+  await more.click();
+  await page.getByRole('menuitem', { name: 'Run a workflow' }).hover();
+  await page.getByRole('menuitem', { name: 'Ticket flow' }).click();
+  await expect(page.getByRole('dialog', { name: 'Run Ticket flow' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await more.click();
+  await page.getByRole('menuitem', { name: 'Message kinds' }).click();
+  await expect(page.getByTestId('kind-filter-panel')).toBeVisible();
+  await page.screenshot({ path: join(results, 'phone-toolbar-menu.png'), animations: 'disabled' });
+});
+
+test('on a wide screen the chat toolbar shows its tools as buttons', async ({ page, request }) => {
+  await seed(request, [flow(`printf '%s' '${ITEMS}'`)]);
+  await page.goto(`/project?id=${project.id}&tab=chat`, { waitUntil: 'networkidle' });
+  await expect(page.getByRole('button', { name: 'Run a workflow' })).toBeVisible();
+  await expect(page.getByTestId('open-kind-filter')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'More tools' })).toBeHidden();
+});

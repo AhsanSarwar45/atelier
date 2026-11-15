@@ -237,14 +237,15 @@ export function RunsList({ runs, workflow, projectId, onChanged }: {
   );
 }
 
-/** The chat toolbar's way to start a workflow: a menu of the project's
- *  workflows, each opening its Run dialog. */
-export function WorkflowsToolButton({ projectId, projectPath }: { projectId: string; projectPath: string }) {
+/** The project's workflows as menu items, each opening its Run dialog. The
+ *  chat toolbar shows them under its own button, or, on a phone, under the
+ *  More tools menu. Call `load` when the menu opens, so a workflow saved in
+ *  settings shows; render `dialog` outside the menu. */
+export function useWorkflowMenu(projectId: string, projectPath: string) {
   const [workflows, setWorkflows] = useState<Workflow[] | null>(null);
   const [error, setError] = useState('');
   const [chosen, setChosen] = useState<Workflow | null>(null);
   const [running, setRunning] = useState(false);
-  // Read each time the menu opens, so a workflow saved in settings shows.
   const load = useCallback(async () => {
     setError('');
     try {
@@ -255,6 +256,31 @@ export function WorkflowsToolButton({ projectId, projectPath }: { projectId: str
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [projectPath]);
+  const items = error ? (
+    <p className="px-2 py-1.5 text-sm text-danger">{error}</p>
+  ) : workflows === null ? (
+    <div className="flex justify-center py-2"><Spinner /></div>
+  ) : workflows.length === 0 ? (
+    <DropdownMenuItem asChild>
+      <Link href={`/project?id=${encodeURIComponent(projectId)}&settings=workflows`}>No workflows yet. Add one in settings</Link>
+    </DropdownMenuItem>
+  ) : (
+    workflows.map((w) => (
+      <DropdownMenuItem key={w.id} onSelect={() => { setChosen(w); setRunning(true); }}>
+        <Play className="size-3.5" />
+        <span className="truncate">{w.name}</span>
+      </DropdownMenuItem>
+    ))
+  );
+  const dialog = chosen && (
+    <RunDialog open={running} onOpenChange={setRunning} workflow={chosen} projectId={projectId} projectPath={projectPath} onStarted={() => {}} />
+  );
+  return { load, items, dialog };
+}
+
+/** The chat toolbar's way to start a workflow on a wide screen. */
+export function WorkflowsToolButton({ projectId, projectPath }: { projectId: string; projectPath: string }) {
+  const { load, items, dialog } = useWorkflowMenu(projectId, projectPath);
   return (
     <>
       <DropdownMenu onOpenChange={(open) => { if (open) void load(); }}>
@@ -263,27 +289,10 @@ export function WorkflowsToolButton({ projectId, projectPath }: { projectId: str
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64">
           <DropdownMenuLabel>Run a workflow</DropdownMenuLabel>
-          {error ? (
-            <p className="px-2 py-1.5 text-sm text-danger">{error}</p>
-          ) : workflows === null ? (
-            <div className="flex justify-center py-2"><Spinner /></div>
-          ) : workflows.length === 0 ? (
-            <DropdownMenuItem asChild>
-              <Link href={`/project?id=${encodeURIComponent(projectId)}&settings=workflows`}>No workflows yet. Add one in settings</Link>
-            </DropdownMenuItem>
-          ) : (
-            workflows.map((w) => (
-              <DropdownMenuItem key={w.id} onSelect={() => { setChosen(w); setRunning(true); }}>
-                <Play className="size-3.5" />
-                <span className="truncate">{w.name}</span>
-              </DropdownMenuItem>
-            ))
-          )}
+          {items}
         </DropdownMenuContent>
       </DropdownMenu>
-      {chosen && (
-        <RunDialog open={running} onOpenChange={setRunning} workflow={chosen} projectId={projectId} projectPath={projectPath} onStarted={() => {}} />
-      )}
+      {dialog}
     </>
   );
 }

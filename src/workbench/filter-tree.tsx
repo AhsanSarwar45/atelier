@@ -14,14 +14,14 @@
  * something off before he turns it off, and what tells him a group is empty
  * here without opening it.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
 import { ChevronRight, ListFilter } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Row } from '@/components/ui/row';
 import { cn } from '@/lib/utils';
 import {
@@ -163,8 +163,14 @@ function Line({
   );
 }
 
-/** The toolbar button, and the panel it opens. */
-export function KindFilter({ items, off, onChange }: TreeProps) {
+/** The toolbar button, and the panel it opens. On a phone the button is
+ *  another one (the More tools menu), so the panel can be opened from outside
+ *  and placed against `anchor` instead. */
+export function KindFilter({ items, off, onChange, open, onOpenChange, anchor }: TreeProps & {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  anchor?: ReactNode;
+}) {
   const filtered = off.size > 0;
   // The rows it counts change with every one added; the button does not, and
   // its tooltip is most of what a redraw of it costs (bw-j29w).
@@ -181,8 +187,8 @@ export function KindFilter({ items, off, onChange }: TreeProps) {
     </PopoverTrigger>
   ), [filtered]);
   return (
-    <Popover>
-      {button}
+    <Popover open={open} onOpenChange={onOpenChange}>
+      {anchor ? <PopoverAnchor asChild>{anchor}</PopoverAnchor> : button}
       <PopoverContent align="start" className="w-72 p-2" data-testid="kind-filter-panel">
         <KindTree items={items} off={off} onChange={onChange} />
         <Row

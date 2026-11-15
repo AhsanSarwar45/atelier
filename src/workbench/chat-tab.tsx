@@ -12,12 +12,12 @@ import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { AlertTriangle, ArrowDown, Ban, ArrowUp, Check, CheckCheck, Circle, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, MessageSquare, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Users, Workflow, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, Ban, ArrowUp, Check, CheckCheck, Circle, ChevronDown, ChevronRight, Clock3, FileDiff, Folder, FolderGit2, Gauge, GitBranch, GitCommitHorizontal, ListChecks, ListFilter, MessageSquare, MoreHorizontal, PanelLeft, PanelLeftClose, PanelRight, PanelRightClose, Paperclip, Plus, ShieldCheck, SlidersHorizontal, Square, Star, UserRound, Users, Workflow, X } from 'lucide-react';
 
 import { ReferenceBadge } from '@/components/reference-badge';
 import { type Mentions } from '@/components/markdown-body';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
-import { WorkflowsToolButton } from '@/components/settings/workflow-runs';
+import { WorkflowsToolButton, useWorkflowMenu } from '@/components/settings/workflow-runs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -1286,6 +1286,65 @@ function ChatKindFilter({ sessionId, off, onChange }: {
 }) {
   const { items } = useSessionView(sessionId, true);
   return <KindFilter items={items} off={off} onChange={onChange} />;
+}
+
+/**
+ * The chat toolbar's tools on a phone: one More tools button, so the bar keeps
+ * to one row. Message kinds opens the same panel as the wide screen's filter
+ * button, placed against this one.
+ */
+function PhoneChatTools({ sessionId, off, onChange, projectId, projectPath }: {
+  sessionId: string | null;
+  off: ReadonlySet<KindId>;
+  onChange: (off: ReadonlySet<KindId>) => void;
+  projectId: string | null;
+  projectPath: string | null;
+}) {
+  const { items } = useSessionView(sessionId, true);
+  const [kindsOpen, setKindsOpen] = useState(false);
+  const workflows = useWorkflowMenu(projectId ?? '', projectPath ?? '');
+  const canRun = !!projectId && !!projectPath;
+  return (
+    <>
+      <KindFilter
+        items={items}
+        off={off}
+        onChange={onChange}
+        open={kindsOpen}
+        onOpenChange={setKindsOpen}
+        anchor={
+          <span className="inline-flex">
+            <DropdownMenu onOpenChange={(open) => { if (open && canRun) void workflows.load(); }}>
+              <DropdownMenuTrigger asChild>
+                <ToolButton
+                  icon={<MoreHorizontal />}
+                  label="More tools"
+                  className={cn('h-10 w-10', off.size > 0 && 'text-primary')}
+                  data-testid="chat-more-tools"
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-60">
+                <DropdownMenuItem onSelect={() => setKindsOpen(true)}>
+                  <ListFilter className="size-4" />
+                  Message kinds
+                </DropdownMenuItem>
+                {canRun && (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <Workflow className="size-4" />
+                      Run a workflow
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-56">{workflows.items}</DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </span>
+        }
+      />
+      {workflows.dialog}
+    </>
+  );
 }
 
 /** A message as the writing box holds one: its words and its pictures. */
@@ -2641,11 +2700,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             which reaches into this transcript rather than the list beside it.
             The way into the column on the right is not here: it is a door, and
             a door belongs on the side it opens (bw-81wt.29). */}
-        <ChatKindFilter sessionId={reading} off={offKinds} onChange={changeKinds} />
-        {projectId && projectPath && <WorkflowsToolButton projectId={projectId} projectPath={projectPath} />}
+        {phone ? (
+          <PhoneChatTools sessionId={reading} off={offKinds} onChange={changeKinds} projectId={projectId} projectPath={projectPath} />
+        ) : (
+          <>
+            <ChatKindFilter sessionId={reading} off={offKinds} onChange={changeKinds} />
+            {projectId && projectPath && <WorkflowsToolButton projectId={projectId} projectPath={projectPath} />}
+          </>
+        )}
       </TabTools>
     </>
-  ), [changeKinds, offKinds, reading, projectId, projectPath]);
+  ), [changeKinds, offKinds, reading, projectId, projectPath, phone]);
 
   const barTrail = useMemo(() => (
     <>
