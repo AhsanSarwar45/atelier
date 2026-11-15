@@ -424,10 +424,14 @@ function noteMismatch(now: boolean): void {
 }
 
 function absorb(frame: WatchFrame): void {
-  // A task changed (docs/tasks.md). It is about no chat, so this store has
-  // nothing to do with it; the tasks hook reads it off the same feed.
+  // Tasks, task types and grids changing (docs/tasks.md) are about no chat, so
+  // this store has nothing to do with them; their hooks read them off the same
+  // feed. Read as an event they threw, and the throw was taken for an old
+  // helper: the list said "Chat status is unavailable" after every task or grid
+  // change until the next holds frame cleared it.
   const named = frame as { kind?: unknown; type?: unknown };
-  if (named.kind === 'tasks.changed' || named.type === 'tasks.changed') return;
+  if (typeof named.kind === 'string' && named.kind.endsWith('.changed')) return;
+  if (typeof named.type === 'string' && named.type.endsWith('.changed')) return;
   if (frame.kind === 'usage') {
     const key = usageKey(frame.brand ?? 'claude', frame.profile);
     usage.set(key, frame.usage);

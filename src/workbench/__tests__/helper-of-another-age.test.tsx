@@ -65,6 +65,13 @@ class FakeStream {
     );
   }
 
+  /** A word about tasks, task types or grids: about no chat at all. */
+  saysSomethingChanged(kind: string): void {
+    this.onmessage?.(
+      tagged('workbench', JSON.stringify({ type: kind, kind, projectId: PROJECT, slug: 'a-grid' })),
+    );
+  }
+
   /** Something no version of this app has ever sent. */
   saysSomethingUnreadable(): void {
     this.onmessage?.(tagged('workbench', 'not json at all'));
@@ -198,5 +205,24 @@ describe('when the helper behind the list is older than the page', () => {
     act(() => opened[0].saysWhoIsWorking([{ id: HELD, doing: 'working' }]));
     await waitFor(() => expect(line()).toBeNull());
     await waitFor(() => expect(mark()).not.toBeNull());
+  });
+
+  it('does not take a word about grids or task types for an old helper', async () => {
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    act(() => opened[0].saysWhoIsWorking([{ id: HELD, doing: 'working' }]));
+    await waitFor(() => expect(mark()).not.toBeNull());
+
+    // An agent proving a grid cell or changing a task type sends these on the
+    // same feed. They read as a broken event and lit the line until the next
+    // change in who holds a chat, which on a quiet machine was never.
+    act(() => opened[0].saysSomethingChanged('grids.changed'));
+    act(() => opened[0].saysSomethingChanged('taskTypes.changed'));
+    act(() => opened[0].saysSomethingChanged('tasks.changed'));
+
+    expect(line(), 'a word about grids or task types was taken for an old helper').toBeNull();
+    expect(mark(), 'the marks went with it').not.toBeNull();
   });
 });
