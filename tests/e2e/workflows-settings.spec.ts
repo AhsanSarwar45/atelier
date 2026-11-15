@@ -165,6 +165,32 @@ test('reorders stages with the keyboard', async ({ page, request }) => {
   expect((await stored(request)).workflows.find((w) => w.id === 'demo-flow')!.stages.map((s: any) => s.name)).toEqual(['QA', 'Implement']);
 });
 
+test('agent stages switch automatic approval on and off per stage', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await demo(request);
+  await openWorkflows(page);
+  await page.getByTestId('workflow-row-demo-flow').click();
+  const implement = page.getByTestId('workflow-stage').filter({ has: page.getByRole('button', { name: 'Reorder Implement', exact: true }) });
+  const plan = implement.getByRole('switch', { name: 'Approve plan', exact: true });
+  const done = implement.getByRole('switch', { name: 'Approve finished work', exact: true });
+  const questions = implement.getByRole('switch', { name: 'Answer questions', exact: true });
+  // Off until the owner turns each one on.
+  for (const control of [plan, done, questions]) await expect(control).not.toBeChecked();
+  await plan.click();
+  await questions.click();
+  await save(page);
+  const stage = (await stored(request)).workflows.find((w) => w.id === 'demo-flow')!.stages.find((s: any) => s.id === 'implement');
+  expect(stage.auto).toEqual({ plan: true, done: false, questions: true });
+  await page.reload();
+  await expect(plan).toBeChecked();
+  await expect(done).not.toBeChecked();
+  await expect(questions).toBeChecked();
+  await implement.screenshot({ path: join(results, 'stage-automatic.png') });
+  // An approval stage is the owner's own step, so it has no automatic switches.
+  await implement.getByRole('radio', { name: 'Approval', exact: true }).click();
+  await expect(implement.getByRole('switch', { name: 'Approve plan', exact: true })).toHaveCount(0);
+});
+
 test('every control has an accessible name', async ({ page, request }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await demo(request);

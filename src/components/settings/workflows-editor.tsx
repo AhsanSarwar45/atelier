@@ -39,7 +39,7 @@ import { useDescribeReference } from '@/workbench/reference-names';
 
 import { DetailHeader, Label, MoreMenu, StateDot } from './library-list';
 import { SettingRow, SettingsGroup } from './section';
-import { NEW_WORKFLOW, slugOf, stageCount, triggerSummary, type Stage, type StageKind, type Workflow } from './workflows-settings';
+import { NEW_WORKFLOW, slugOf, stageCount, triggerSummary, type Stage, type StageAuto, type StageKind, type Workflow } from './workflows-settings';
 
 const KINDS: { value: StageKind; label: string; icon: typeof Bot; prompt: string; placeholder: string }[] = [
   { value: 'agent', label: 'Agent', icon: Bot, prompt: 'Prompt', placeholder: 'Describe the work. Type / for skills, @ for files' },
@@ -48,6 +48,14 @@ const KINDS: { value: StageKind; label: string; icon: typeof Bot; prompt: string
   { value: 'approval', label: 'Approval', icon: UserCheck, prompt: 'Message', placeholder: 'What to ask before continuing' },
 ];
 const kindOf = (kind: StageKind) => KINDS.find((k) => k.value === kind)!;
+
+/** What an agent stage can do without waiting for the owner. */
+const AUTO: { key: keyof StageAuto; label: string }[] = [
+  { key: 'plan', label: 'Approve plan' },
+  { key: 'done', label: 'Approve finished work' },
+  { key: 'questions', label: 'Answer questions' },
+];
+const NO_AUTO: StageAuto = { plan: false, done: false, questions: false };
 
 const BLANK: Workflow = { id: '', name: '', enabled: false, trigger: { kind: 'manual' }, setup: {}, stages: [] };
 
@@ -262,7 +270,7 @@ export function WorkflowEditor({ id, workflows, commands, projectPath, justSaved
           <Input
             id="workflow-items"
             value={draft.trigger.items ?? ''}
-            placeholder="linear issue list --label agent-ready --json"
+            placeholder="./scripts/list-items.sh"
             onChange={(e) => edit((w) => ({ ...w, trigger: { ...w.trigger, items: e.target.value || undefined } }))}
             className="w-full font-mono text-xs"
           />
@@ -445,6 +453,24 @@ function StageCard({ stage, number, last, stages, completions, describe, picked,
             />
           </ComposerFrame>
         </div>
+
+        {stage.kind === 'agent' && (
+          <div className="mt-3">
+            <span className="mb-1.5 block text-xs font-medium text-t-muted">Automatic</span>
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
+              {AUTO.map(({ key, label }) => {
+                const auto = stage.auto ?? NO_AUTO;
+                const control = `stage-${stage.id}-auto-${key}`;
+                return (
+                  <div key={key} className="flex items-center gap-2">
+                    <Switch id={control} checked={auto[key]} onCheckedChange={(on) => onChange({ auto: { ...auto, [key]: on } })} />
+                    <label htmlFor={control} className="text-xs text-t-secondary">{label}</label>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="mt-3">
           <span className="mb-1.5 block text-xs font-medium text-t-muted">Routes</span>

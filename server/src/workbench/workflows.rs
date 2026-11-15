@@ -77,6 +77,23 @@ pub struct Stage {
     pub max_attempts: Option<u32>,
     #[serde(default)]
     pub routes: Vec<Route>,
+    /// What an agent stage does without asking the owner.
+    #[serde(default)]
+    pub auto: StageAuto,
+}
+
+/// The owner's gates an agent stage passes by itself. All off by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageAuto {
+    /// Approve the task the stage proposes.
+    #[serde(default)]
+    pub plan: bool,
+    /// Approve the finished task once its checks pass.
+    #[serde(default)]
+    pub done: bool,
+    /// Answer the agent's questions instead of waiting for the owner.
+    #[serde(default)]
+    pub questions: bool,
 }
 
 /// Where a stage goes when it reports an outcome.

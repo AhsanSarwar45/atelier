@@ -22,7 +22,9 @@ import { WorkflowEditor } from './workflows-editor';
 
 export type StageKind = 'agent' | 'command' | 'wait' | 'approval';
 export interface Route { outcome: string; to: string }
-export interface Stage { id: string; name: string; kind: StageKind; prompt: string; max_attempts?: number; routes: Route[] }
+/** The owner's gates an agent stage passes by itself. */
+export interface StageAuto { plan: boolean; done: boolean; questions: boolean }
+export interface Stage { id: string; name: string; kind: StageKind; prompt: string; max_attempts?: number; routes: Route[]; auto?: StageAuto }
 export interface Workflow {
   id: string;
   name: string;
