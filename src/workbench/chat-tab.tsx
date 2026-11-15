@@ -29,6 +29,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
@@ -391,6 +394,7 @@ export function Picker({
   defaultValue,
   onDefault,
   cannotDefault,
+  footer,
 }: {
   icon: ReactNode;
   label: string;
@@ -416,6 +420,8 @@ export function Picker({
   defaultValue?: string | null;
   onDefault?: (value: string) => void;
   cannotDefault?: (value: string) => string | null;
+  /** More menu rows under the options, such as submenus for settings that hang off the pick. */
+  footer?: ReactNode;
 }) {
   if (!options.length) return null;
   const shown = buttonLabel ?? options.find((o) => o.value === current)?.label ?? currentLabel ?? current ?? label;
@@ -434,7 +440,7 @@ export function Picker({
             className="gap-1.5 text-muted-foreground hover:text-foreground"
           >
             {icon}
-            <span className="max-w-[30ch] truncate">{shown}</span>
+            <span className="max-w-[18ch] truncate">{shown}</span>
           </Button>
         </Tooltip>
       </DropdownMenuTrigger>
@@ -479,6 +485,7 @@ export function Picker({
             </div>
           </Fragment>
         ))}
+        {footer}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -571,7 +578,6 @@ export function WorkersPicker({
   }
   const current = choice ? `${choice.brand}:${choice.profileId ?? SYSTEM_PROFILE}` : 'none';
   return (
-    <>
     <Picker
       icon={choice ? <BrandIcon brand={choice.brand} className={iconSize} /> : <Users className={iconSize} />}
       label="Workers"
@@ -588,9 +594,8 @@ export function WorkersPicker({
           onError(error instanceof Error ? error.message : String(error)),
         );
       }}
+      footer={choice && <WorkerModelMenus sessionId={sessionId} choice={choice} mobile={mobile} onError={onError} />}
     />
-    {choice && <WorkerModelPickers sessionId={sessionId} choice={choice} asleep={asleep} mobile={mobile} onError={onError} />}
-    </>
   );
 }
 
@@ -598,16 +603,14 @@ export function WorkersPicker({
  * The model and effort a chat's workers start on, from what that provider
  * account offered last. Default leaves it to the account's own default.
  */
-function WorkerModelPickers({
+function WorkerModelMenus({
   sessionId,
   choice,
-  asleep,
   mobile,
   onError,
 }: {
   sessionId: string;
   choice: WorkersChoice;
-  asleep: boolean;
   mobile: boolean;
   onError: (message: string | null) => void;
 }) {
@@ -626,7 +629,6 @@ function WorkerModelPickers({
       current = false;
     };
   }, [sessionId, brand, profileId]);
-  const iconSize = mobile ? 'h-4 w-4' : 'h-3.5 w-3.5';
   const prefix = mobile ? 'mobile-' : '';
   const save = (change: Partial<WorkersChoice>) => {
     onError(null);
@@ -642,31 +644,100 @@ function WorkerModelPickers({
     { value: 'default', label: 'Default' },
     ...offered.efforts.map((effort) => ({ value: effort.value, label: effort.displayName, hint: effort.description })),
   ];
-  const modelLabel = models.find((m) => m.value === (choice.model ?? 'default'))?.label ?? choice.model ?? 'Default';
-  const effortLabel = efforts.find((e) => e.value === (choice.effort ?? 'default'))?.label ?? choice.effort ?? 'Default';
   return (
     <>
-      <Picker
-        icon={<ModelIcon brand={brand} model={choice.model ?? null} className={iconSize} />}
+      <DropdownMenuSeparator />
+      <WorkerSubmenu
+        icon={<ModelIcon brand={brand} model={choice.model ?? null} />}
         label="Worker model"
+        name="Model"
         testid={`${prefix}workers-model-picker`}
         current={choice.model ?? 'default'}
-        buttonLabel={`Worker model: ${modelLabel}`}
-        asleep={asleep}
+        inline={mobile}
         options={models}
         onPick={(value) => save({ model: value === 'default' ? null : value })}
       />
-      <Picker
-        icon={<Gauge className={iconSize} />}
+      <WorkerSubmenu
+        icon={<Gauge />}
         label="Worker effort"
+        name="Effort"
         testid={`${prefix}workers-effort-picker`}
         current={choice.effort ?? 'default'}
-        buttonLabel={`Worker effort: ${effortLabel}`}
-        asleep={asleep}
+        inline={mobile}
         options={efforts}
         onPick={(value) => save({ effort: value === 'default' ? null : value })}
       />
     </>
+  );
+}
+
+/**
+ * One worker setting inside the Workers menu: its name and value, opening the
+ * list to choose from. `inline` lists the choices in the menu itself, for a
+ * phone, where a submenu beside the menu would run off the screen.
+ */
+function WorkerSubmenu({
+  icon,
+  label,
+  name,
+  testid,
+  current,
+  inline = false,
+  options,
+  onPick,
+}: {
+  icon: ReactNode;
+  /** The setting's full name, for screen readers. */
+  label: string;
+  /** What the row says, inside the Workers menu. */
+  name: string;
+  testid: string;
+  current: string;
+  inline?: boolean;
+  options: { value: string; label: string; hint?: string }[];
+  onPick: (value: string) => void;
+}) {
+  const shown = options.find((o) => o.value === current)?.label ?? current;
+  const choices = options.map((o) => (
+    <DropdownMenuItem
+      key={o.value}
+      data-testid={`${testid}-option`}
+      data-value={o.value}
+      data-picked={o.value === current}
+      onSelect={() => onPick(o.value)}
+      className="group flex-col items-start gap-0.5"
+    >
+      <span className={cn('flex max-w-full items-center gap-2 truncate text-sm', o.value === current && 'font-semibold text-foreground')}>
+        {o.label}
+        {o.value === current && <Check className="h-3.5 w-3.5" />}
+      </span>
+      {o.hint && <span className="text-pretty text-left text-xs text-muted-foreground group-focus:text-accent-foreground">{glued(o.hint)}</span>}
+    </DropdownMenuItem>
+  ));
+  if (inline) {
+    return (
+      <div className="px-1 py-0.5" role="group" aria-label={label}>
+        <DropdownMenuLabel data-testid={testid} data-current={current} className="flex items-center gap-2 text-muted-foreground [&>svg]:size-4">
+          {icon}
+          {name}
+        </DropdownMenuLabel>
+        {choices}
+      </div>
+    );
+  }
+  return (
+    <div className="px-1 py-0.5">
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger data-testid={testid} data-current={current} aria-label={`${label}: ${shown}`} className="text-muted-foreground">
+          {icon}
+          <span className="text-foreground">{name}</span>
+          <span className="ml-auto min-w-0 truncate pl-2 text-xs">{shown}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="max-h-80 w-64 overflow-y-auto" data-testid={`${testid}-menu`}>
+          {choices}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    </div>
   );
 }
 

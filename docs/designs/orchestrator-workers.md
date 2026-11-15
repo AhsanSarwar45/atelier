@@ -53,7 +53,8 @@ sequenceDiagram
   `{brand, profile_id, model?, effort?}`. A chat with this field set is an
   orchestrator. It is set by `session.start` and can be changed later from
   the chat's settings, in the same place as model and effort. While Workers is
-  on, the chat bar also shows Worker model and Worker effort. They list
+  on, the Workers menu also holds Model and Effort for the workers (submenus;
+  on a phone, listed in the menu itself), so the chat bar keeps one button. They list
   Default first, then what that provider account offered last
   (`workers.models`, read from the stored provider catalogue: this project
   first, else the account's latest anywhere). Picking another provider or

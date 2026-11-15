@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 /**
  * Orchestrator chats and the worker chats they start, as the owner sees them
@@ -18,6 +18,24 @@ const FIXTURE = join(__dirname, '..', '.workbench-run-worker-chats');
 const SHOTS = 'tests/results/worker-chats';
 
 test.describe.configure({ timeout: 120_000 });
+
+/** A screenshot frame around these elements, so an open menu shows with the bar it hangs from. */
+async function shotAround(page: Page, testids: string[]): Promise<{ x: number; y: number; width: number; height: number }> {
+  const boxes = [];
+  for (const testid of testids) {
+    const box = await page.getByTestId(testid).boundingBox();
+    if (box) boxes.push(box);
+  }
+  const pad = 12;
+  const x = Math.max(0, Math.min(...boxes.map((b) => b.x)) - pad);
+  const y = Math.max(0, Math.min(...boxes.map((b) => b.y)) - pad);
+  return {
+    x,
+    y,
+    width: Math.max(...boxes.map((b) => b.x + b.width)) + pad - x,
+    height: Math.max(...boxes.map((b) => b.y + b.height)) + pad - y,
+  };
+}
 
 async function project(request: APIRequestContext, name: string): Promise<{ id: string; path: string }> {
   const path = join(FIXTURE, name);
@@ -106,19 +124,34 @@ test('the worker model and effort are chosen in the chat bar before any worker s
     await page.getByTestId('workers-picker').click();
     await page.locator('[data-testid="workers-picker-option"][data-value^="codex:"]').first().click();
 
-    const model = page.getByTestId('workers-model-picker');
+    await expect(page.getByTestId('workers-picker')).toHaveAttribute('data-current', /^codex:/);
+    await expect(page.getByTestId('workers-picker-menu')).toHaveCount(0);
+    // The bar holds only the Workers button; model and effort live in its menu.
+    await expect(page.getByTestId('workers-model-picker'), 'the worker model sits on the chat bar').toHaveCount(0);
+    await expect(page.getByTestId('workers-effort-picker'), 'the worker effort sits on the chat bar').toHaveCount(0);
+    await page.getByTestId('workers-picker').click();
+    const menu = page.getByTestId('workers-picker-menu');
+    const model = menu.getByTestId('workers-model-picker');
     await expect(model).toHaveAttribute('data-current', 'default');
+    await expect(menu.getByTestId('workers-effort-picker')).toBeVisible();
     await model.click();
     const offered = page.locator('[data-testid="workers-model-picker-option"]:not([data-value="default"])');
     await expect(offered.first(), 'no Codex model is offered for workers').toBeVisible();
     const picked = await offered.first().getAttribute('data-value');
     await offered.first().click();
-    await expect(model).toHaveAttribute('data-current', picked!);
-    await expect(page.getByTestId('workers-effort-picker')).toBeVisible();
-    await page.getByTestId('desktop-composer-settings').screenshot({ path: `${SHOTS}/worker-model-after.png` });
+    await expect(page.getByTestId('workers-picker-menu')).toHaveCount(0);
+    await page.getByTestId('workers-picker').click();
+    await expect(menu.getByTestId('workers-model-picker')).toHaveAttribute('data-current', picked!);
+    await menu.getByTestId('workers-model-picker').click();
+    await expect(page.getByTestId('workers-model-picker-menu')).toBeVisible();
+    await page.getByTestId('workers-model-picker-menu').evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((one) => one.finished)));
+    await page.screenshot({ path: `${SHOTS}/worker-model-after.png`, clip: await shotAround(page, ['desktop-composer-settings', 'workers-picker-menu', 'workers-model-picker-menu']) });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
 
     // Kept on the chat with the provider and account.
     await page.reload();
+    await page.getByTestId('workers-picker').click();
     await expect(page.getByTestId('workers-model-picker')).toHaveAttribute('data-current', picked!);
   } finally {
     for (const sessionId of started) await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId } });
@@ -256,31 +289,50 @@ test('the worker model setting fits a phone screen and works from the keyboard',
     started.push(chat.id as string);
     await command(request, { type: 'session.workers', sessionId: chat.id, workers: { brand: 'codex', profileId: 'system' } });
 
-    // Keyboard: open the worker model menu and choose a model with Enter.
+    // Keyboard: open the Workers menu, step into Worker model and choose a model with Enter.
     await page.goto(`/project?id=${made.id}&tab=chat&chat=${chat.id}`);
-    const model = page.getByTestId('workers-model-picker');
-    await model.focus();
+    await page.getByTestId('workers-picker').focus();
     await page.keyboard.press('Enter');
+    const model = page.getByTestId('workers-model-picker');
+    await expect(model).toBeVisible();
+    await model.focus();
+    await page.keyboard.press('ArrowRight');
     const offered = page.locator('[data-testid="workers-model-picker-option"]:not([data-value="default"])').first();
     await expect(offered).toBeVisible();
     const picked = await offered.getAttribute('data-value');
     await offered.focus();
     await page.keyboard.press('Enter');
+    await expect(page.getByTestId('workers-picker-menu')).toHaveCount(0);
+    await page.getByTestId('workers-picker').focus();
+    await page.keyboard.press('Enter');
     await expect(model).toHaveAttribute('data-current', picked!);
+    await page.keyboard.press('Escape');
 
-    // Phone: the worker model and effort sit inside the screen.
+    // Phone: the Workers menu, with worker model and effort, sits inside the screen.
     // Opened afresh at phone width, as a phone opens it: the desktop's open
     // side panel would otherwise become a sheet over the chat.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`/project?id=${made.id}&tab=chat&chat=${chat.id}`);
     await page.getByTestId('mobile-composer-settings').click();
     const settings = page.getByTestId('mobile-composer-settings-dialog');
+    await expect(settings.getByTestId('mobile-workers-model-picker'), 'the worker model sits in the chat settings').toHaveCount(0);
+    expect(await settings.evaluate((el) => el.scrollWidth > el.clientWidth), 'the chat settings scroll sideways').toBe(false);
+    await settings.getByTestId('mobile-workers-picker').click();
+    const menu = page.getByTestId('mobile-workers-picker-menu');
+    // The list is read from the server when the menu opens, which is slow on a busy machine.
+    await expect(menu.locator('[data-testid="mobile-workers-model-picker-option"]').nth(1)).toBeVisible({ timeout: 15_000 });
+    await menu.evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((one) => one.finished)));
     for (const testid of ['mobile-workers-model-picker', 'mobile-workers-effort-picker']) {
-      const box = await settings.getByTestId(testid).boundingBox();
+      const box = await menu.getByTestId(testid).boundingBox();
       expect(box && box.x >= 0 && box.x + box.width <= 390, `${testid} runs off the screen: ${JSON.stringify(box)}`).toBe(true);
     }
-    expect(await settings.evaluate((el) => el.scrollWidth > el.clientWidth), 'the chat settings scroll sideways').toBe(false);
-    await settings.screenshot({ path: `${SHOTS}/worker-model-phone-after.png` });
+    await page.screenshot({ path: `${SHOTS}/worker-model-phone-after.png` });
+    // On a phone the choices are listed in the menu itself: a submenu beside it would run off the screen.
+    const choices = menu.locator('[data-testid="mobile-workers-model-picker-option"]');
+    await expect(choices.nth(1), 'the worker models are not listed in the phone menu').toBeVisible();
+    await expect(menu.locator('[data-testid="mobile-workers-model-picker-option"][data-picked="true"]')).toHaveAttribute('data-value', picked!);
+    await menu.locator('[data-testid="mobile-workers-model-picker-option"][data-value="default"]').click();
+    await expect(page.getByTestId('mobile-workers-picker-menu')).toHaveCount(0);
   } finally {
     for (const sessionId of started) await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId } });
     await request.delete(`/api/projects/${made.id}`);
