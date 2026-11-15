@@ -184,7 +184,7 @@ pub struct Snapshot {
     pub items: Vec<Resolved>,
 }
 
-fn digest(bytes: &[u8]) -> String {
+pub(super) fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 pub fn data_dir() -> Result<PathBuf, String> {
@@ -201,7 +201,7 @@ pub(super) fn safe_relative(path: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn bounded_read(path: &Path, max: usize) -> Result<String, String> {
+pub(super) fn bounded_read(path: &Path, max: usize) -> Result<String, String> {
     use std::io::Read;
     let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut text = String::new();

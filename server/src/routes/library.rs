@@ -1,6 +1,6 @@
 //! Shared library settings. Uses the same local-origin protection as other
 //! settings; imports are copies and never remove native provider files.
-use crate::workbench::{agent_memory, library, skill_folders};
+use crate::workbench::{agent_memory, library, skill_folders, workflows};
 use axum::{extract::Query, http::StatusCode, middleware, routing::get, Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -190,12 +190,41 @@ async fn delete_memory(Query(scope): Query<Scope>, Json(update): Json<MemoryDele
         agent_memory::listing(&data, root.as_deref())
     }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
 }
+fn workflows_root(scope: &Scope) -> Result<PathBuf, String> {
+    root(scope.path.as_deref())?.ok_or_else(|| "Choose a project folder".into())
+}
+fn workflows_answer(data: &Path, root: &Path) -> Result<Value, String> {
+    let held = workflows::read(data, root)?;
+    // The library's skills as the `/` menu lists them, for the stage prompts.
+    Ok(json!({"workflows": held.workflows, "revision": workflows::revision(&held), "commands": library::commands_for(root)}))
+}
+async fn read_workflows(Query(scope): Query<Scope>) -> Result<Json<Value>, Refusal> {
+    tokio::task::spawn_blocking(move || {
+        let data = library::data_dir()?;
+        workflows_answer(&data, &workflows_root(&scope)?)
+    }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowsUpdate {
+    workflows: Vec<workflows::Workflow>,
+    revision: String,
+}
+async fn write_workflows(Query(scope): Query<Scope>, Json(update): Json<WorkflowsUpdate>) -> Result<Json<Value>, Refusal> {
+    tokio::task::spawn_blocking(move || {
+        let data = library::data_dir()?;
+        let root = workflows_root(&scope)?;
+        workflows::write(&data, &root, &workflows::WorkflowsFile { workflows: update.workflows }, &update.revision)?;
+        workflows_answer(&data, &root)
+    }).await.map_err(|e| error(e.to_string()))?.map(Json).map_err(error)
+}
 pub fn routes() -> Router<crate::routes::projects::AppState> {
     Router::new()
         .route("/settings/library", get(read).put(write))
         .route("/settings/library/skill", get(read_skill).put(write_skill))
         .route("/settings/library/skill/delete", get(plan_delete_skill).delete(delete_skill))
         .route("/settings/library/memories", get(read_memories).put(write_memory).delete(delete_memory))
+        .route("/settings/workflows", get(read_workflows).put(write_workflows))
         .layer(middleware::from_fn(crate::local_host::require_local_host))
 }
 

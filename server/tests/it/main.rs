@@ -44,3 +44,4 @@ mod the_install_recipe_takes_over_nothing;
 mod the_presenter_and_the_reader_agree;
 mod worker_chats;
 mod worker_roles;
+mod workflows;
