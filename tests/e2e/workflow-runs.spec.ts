@@ -256,3 +256,109 @@ test('a run working when the app restarts carries on with its stage', async ({ p
   await expect(page.getByText('run the long command for KEY-8', { exact: false }), 'the chat was not sent its stage again').toHaveCount(2, { timeout: 30_000 });
   await page.screenshot({ path: join(results, 'resumed-after-restart.png'), animations: 'disabled' });
 });
+
+// A workflow chat says which stage its run is on, in the chat's badge bar and
+// on its sidebar row. The first stage is an Approval, so the run waits there.
+const LONG = 'Wait for the owner to review the pull request and merge it into staging before the release goes out';
+function stageFlow(first: string) {
+  return {
+    ...flow(`printf '[]'`), id: 'stage-flow', name: 'Stage flow',
+    stages: [
+      { id: 'plan-check', name: first, kind: 'approval', prompt: '', routes: [{ outcome: 'done', to: 'implement' }] },
+      { id: 'implement', name: 'Implement', kind: 'agent', prompt: 'say you read this {{item.identifier}}\nOutcome: done',
+        routes: [{ outcome: 'done', to: 'review' }], auto: { plan: false, done: false, questions: false } },
+      { id: 'review', name: 'Review', kind: 'approval', prompt: '', routes: [] },
+    ],
+  };
+}
+async function stageRun(request: APIRequestContext, first: string, identifier: string) {
+  await seed(request, [stageFlow(first)]);
+  const started = await request.post('/api/workbench/workflow-runs', {
+    data: { action: 'start', projectId: project.id, projectPath: project.path, workflow: 'stage-flow',
+      items: [{ identifier, title: 'Show the stage', branchName: `feature/${identifier.toLowerCase()}` }] },
+  });
+  expect(started.ok(), await started.text()).toBeTruthy();
+  const id = (await started.json()).runs[0].id;
+  const read = async () => {
+    const answer = await (await request.get(`/api/workbench/workflow-runs?projectPath=${encodeURIComponent(project.path)}`)).json();
+    return answer.runs.find((r: { id: string }) => r.id === id);
+  };
+  await expect.poll(async () => (await read())?.status, { timeout: 30_000 }).toBe('needs_owner');
+  return { id, read, session: (await read()).sessionId as string };
+}
+const act = (request: APIRequestContext, action: string, run: string) =>
+  request.post('/api/workbench/workflow-runs', { data: { action, run, projectId: project.id, projectPath: project.path } });
+
+test('a workflow chat shows its stage in the badge bar and on its sidebar row', async ({ page, request }) => {
+  const run = await stageRun(request, 'Check the plan', 'KEY-21');
+  await page.goto(`/project?id=${project.id}&tab=chat&chat=${run.session}`);
+  const header = page.getByTestId('chat-status-line').getByTestId('chat-workflow-stage');
+  const row = page.getByTestId('restore-row').filter({ hasText: 'KEY-21' });
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await page.screenshot({ path: join(results, 'workflow-chat.png'), animations: 'disabled' });
+
+  await expect(header, 'the badge bar does not name the stage').toHaveText('Check the plan', { timeout: 15_000 });
+  await expect(row.getByTestId('row-workflow-stage'), 'the sidebar row does not name the stage').toHaveText('Check the plan');
+  await header.hover();
+  await expect(page.getByRole('tooltip'), 'the badge does not say which workflow and how far along').toHaveText('Stage flow workflow, stage 1 of 3');
+  await page.mouse.move(0, 0);
+
+  // The owner continues: the agent stage runs and the run waits on Review.
+  // The badges follow without a reload.
+  expect((await act(request, 'continue', run.id)).ok()).toBeTruthy();
+  await expect(header, 'the badge bar kept the stage the run left').toHaveText('Review', { timeout: 30_000 });
+  await expect(row.getByTestId('row-workflow-stage'), 'the sidebar row kept the stage the run left').toHaveText('Review');
+  await page.screenshot({ path: join(results, 'workflow-chat.png'), animations: 'disabled' });
+
+  // A run that ends leaves an ordinary chat.
+  expect((await act(request, 'stop', run.id)).ok()).toBeTruthy();
+  await expect(header, 'a stopped run still shows its stage').toHaveCount(0, { timeout: 15_000 });
+  await expect(row.getByTestId('row-workflow-stage'), 'a stopped run still shows its stage on the row').toHaveCount(0);
+});
+
+test('a long stage name is cut short without moving the badge bar or the row', async ({ page, request }) => {
+  const run = await stageRun(request, LONG, 'KEY-22');
+  await page.goto(`/project?id=${project.id}&tab=chat&chat=${run.session}`);
+  const line = page.getByTestId('chat-status-line');
+  const row = page.getByTestId('restore-row').filter({ hasText: 'KEY-22' });
+  const chip = line.getByTestId('chat-workflow-stage');
+  const rowChip = row.getByTestId('row-workflow-stage');
+  await expect(chip, 'the badge bar does not name the stage').toHaveText(LONG, { timeout: 15_000 });
+  await expect(rowChip, 'the sidebar row does not name the stage').toHaveText(LONG);
+  const cut = (el: HTMLElement) => {
+    const text = el.querySelector('span') ?? el;
+    return text.scrollWidth > text.clientWidth;
+  };
+  expect(await chip.evaluate(cut), 'the long name was not cut short in the badge bar').toBe(true);
+  expect(await rowChip.evaluate(cut), 'the long name was not cut short on the row').toBe(true);
+  expect((await chip.boundingBox())!.width, 'the badge grew past its width').toBeLessThanOrEqual(260);
+  // The bar is 40px tall with its padding; a second line of chips would put
+  // the stage below the branch.
+  const branch = (await line.getByTestId('chat-branch-chip').boundingBox())!;
+  const stageBox = (await chip.boundingBox())!;
+  expect(Math.abs((stageBox.y + stageBox.height / 2) - (branch.y + branch.height / 2)), 'the badge bar wrapped onto a second line').toBeLessThanOrEqual(2);
+  expect((await line.boundingBox())!.height, 'the badge bar wrapped onto a second line').toBeLessThanOrEqual(44);
+  const rowBox = (await row.boundingBox())!;
+  const chipBox = (await rowChip.boundingBox())!;
+  expect(chipBox.x + chipBox.width, 'the stage runs past the row').toBeLessThanOrEqual(rowBox.x + rowBox.width);
+  const pill = (await row.getByTestId('row-pill').boundingBox())!;
+  expect(chipBox.x, 'the stage covers the chat state on the row').toBeGreaterThanOrEqual(pill.x + pill.width);
+  expect(await row.getByTestId('row-pill').evaluate((el) => el.scrollWidth <= el.clientWidth + 1), 'the chat state was squeezed past its word').toBe(true);
+  await expect(row.locator('[data-testid^="row-line"]'), 'the row drew more than two lines').toHaveCount(2);
+  await page.screenshot({ path: join(results, 'long-stage.png'), animations: 'disabled' });
+  await act(request, 'stop', run.id);
+});
+
+test('the stage badge fits a phone', async ({ page, request }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  const run = await stageRun(request, LONG, 'KEY-23');
+  await page.goto(`/project?id=${project.id}&tab=chat&chat=${run.session}`);
+  const chip = page.getByTestId('chat-status-line').getByTestId('chat-workflow-stage');
+  await expect(chip, 'the stage is not shown on a phone').toBeVisible({ timeout: 15_000 });
+  const box = (await chip.boundingBox())!;
+  expect(box.x + box.width, 'the stage runs past the screen edge').toBeLessThanOrEqual(375);
+  const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(over, 'nothing runs past the screen edge').toBeLessThanOrEqual(0);
+  await page.screenshot({ path: join(results, 'phone-stage.png'), animations: 'disabled' });
+  await act(request, 'stop', run.id);
+});

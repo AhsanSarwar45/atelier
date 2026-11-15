@@ -1102,3 +1102,32 @@ async fn after_a_restart_a_command_stage_that_was_running_runs_again() {
     let ran = std::fs::read_to_string(&log).unwrap_or_default().lines().count();
     assert_eq!(ran, 2, "after a restart the command stage that was running did not run again");
 }
+
+/// The stage each workflow chat is on, by chat: `GET /workflow-stages`.
+async fn stages(fixture: &Fixture) -> Value {
+    let (status, body) = send(fixture, axum::http::Request::get("/workflow-stages").body(Body::empty()).unwrap()).await;
+    assert_eq!(status, 200, "the chats' workflow stages could not be read: {body}");
+    body["chats"].clone()
+}
+
+#[tokio::test]
+async fn each_workflow_chat_names_the_stage_it_is_on() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(51)).await;
+    let id = session(&run);
+    let at = stages(&fixture).await;
+    assert_eq!(at[&id]["stage"], "implement", "the chat does not name its stage: {at}");
+    assert_eq!(at[&id]["workflow"], "Ticket", "the chat does not name its workflow: {at}");
+    assert_eq!((at[&id]["step"].clone(), at[&id]["steps"].clone()), (json!(1), json!(3)), "the chat does not say how far along it is: {at}");
+
+    replies(&fixture, &id, "Outcome: done").await;
+    run_where(&fixture, &run["id"], |r| r["stage"] == "qa").await;
+    let at = stages(&fixture).await;
+    assert_eq!(at[&id]["stage"], "QA", "the chat still names the stage it left: {at}");
+    assert_eq!(at[&id]["step"], json!(2), "the chat does not say how far along it is: {at}");
+
+    act(&fixture, json!({"action": "stop", "run": run["id"]})).await;
+    let at = stages(&fixture).await;
+    assert!(at.get(&id).is_none(), "a stopped run's chat still names a stage: {at}");
+}

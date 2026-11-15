@@ -129,6 +129,7 @@ import { ModelIcon } from '@/workbench/model-icon';
 import { useSteadyCallback } from '@/hooks/use-steady-callback';
 import { MemoryBadge } from '@/workbench/memory-badge';
 import { WorktreeBadge } from '@/workbench/worktree-badge';
+import { WorkflowStageChip, useWorkflowStage } from '@/workbench/workflow-stage-chip';
 import { ChipRow } from '@/workbench/status-chips';
 import { DEFAULT_PANEL_WIDTH, ResizeDivider, rememberedPanelWidth } from '@/workbench/resize-divider';
 import * as api from '@/lib/api';
@@ -1561,6 +1562,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [movedCount, setMovedCount] = useState(0);
   const factsRead = useSessionFactsRead(reading, movedCount);
   const facts = factsRead?.facts ?? null;
+  const workflowStage = useWorkflowStage(reading);
   // The chat's checklist is the tasks it holds; the project's whole list is
   // read so a task card in the transcript can show any task's status live.
   const projectTasks = useTasks(projectId, null, projectPath);
@@ -3109,6 +3111,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             </Badge>
           </Tooltip>
         )}
+        {/* The stage a workflow run has this chat on. Shown on a phone too:
+            it says what the chat is doing, which the folder does not. */}
+        {workflowStage && (
+          <WorkflowStageChip stage={workflowStage} testId="chat-workflow-stage" className="max-w-60 shrink" />
+        )}
         {/* Keep the header to the two glanceable controls: the context gauge
             opens the complete token picture (including total task usage), and
             plan usage opens the account allowance. The total does not need a
@@ -3131,7 +3138,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </div>
       )}
     </>
-  ), [checklist, facts, plan, projectPath, sessionBrand, sessionId, sessionProfileName, view.context, view.menu.sharedLibrary]);
+  ), [checklist, facts, plan, projectPath, sessionBrand, sessionId, sessionProfileName, view.context, view.menu.sharedLibrary, workflowStage]);
 
   const heldList = useMemo(() => (
     <>

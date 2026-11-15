@@ -840,6 +840,36 @@ pub(super) async fn list(State(state): State<WorkbenchState>, Query(listing): Qu
     Ok(Json(json!({"runs": runs.iter().map(Run::to_json).collect::<Vec<_>>()})))
 }
 
+/// GET /api/workbench/workflow-stages — the stage each workflow chat is on, by
+/// chat, for the badge a chat shows. Only runs still going: a chat whose run is
+/// done or stopped is an ordinary chat again.
+pub(super) async fn stages(State(state): State<WorkbenchState>) -> Result<Json<Value>, ApiError> {
+    let runs = runs_where(&state, "status NOT IN ('done', 'stopped') AND session_id IS NOT NULL AND ?1 = ?1", String::new())
+        .await
+        .map_err(ApiError::from)?;
+    let mut flows: HashMap<(String, String), Option<Workflow>> = HashMap::new();
+    let mut chats = serde_json::Map::new();
+    // Newest first, so a chat keeps its latest run's stage.
+    for run in runs {
+        let Some(session) = run.session.clone() else { continue };
+        if chats.contains_key(&session) {
+            continue;
+        }
+        let key = (run.project_path.clone(), run.workflow.clone());
+        let flow = flows.entry(key).or_insert_with(|| workflow(&run.project_path, &run.workflow).ok());
+        let (name, stage, step, steps) = match flow {
+            Some(flow) => {
+                let at = flow.stages.iter().position(|stage| stage.id == run.stage);
+                let stage = at.map(|i| flow.stages[i].name.clone()).filter(|name| !name.trim().is_empty()).unwrap_or_else(|| run.stage.clone());
+                (flow.name.clone(), stage, at.map(|i| i + 1), flow.stages.len())
+            }
+            None => (run.workflow.clone(), run.stage.clone(), None, 0),
+        };
+        chats.insert(session, json!({"run": run.id, "workflow": name, "stage": stage, "step": step, "steps": steps, "status": run.status}));
+    }
+    Ok(Json(json!({"chats": chats})))
+}
+
 /// POST /api/workbench/workflow-runs — `items`, `start`, `continue`, `stop`, `tick`.
 pub(super) async fn act(State(state): State<WorkbenchState>, Json(ask): Json<Ask>) -> Result<Json<Value>, ApiError> {
     match ask.action.as_str() {

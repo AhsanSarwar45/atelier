@@ -67,6 +67,7 @@ import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
 import { clockTime, dayHeading } from '@/workbench/when';
 import { badgeWord, useWaiting, waitingInChat } from '@/workbench/waiting';
+import { WorkflowStageChip, useWorkflowStage } from '@/workbench/workflow-stage-chip';
 
 /**
  * How many rows are drawn before the reader asks for more. A 288px rail shows
@@ -396,6 +397,7 @@ function sameRow(a: RestoreRow, b: RestoreRow): boolean {
 const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd, onMenu, waiting = null }: ChatRowProps) {
   const key = rowKey(row);
   const closable = canClose(row);
+  const stage = useWorkflowStage(row.sessionId);
   const ownership = sessionOwnership(row.state, row.externalId, row.runningElsewhere === true);
   const state = chatState({
     state: row.state,
@@ -665,7 +667,7 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
         data-testid="row-line-status"
         className={cn(
           'mt-1 flex min-w-0 items-center gap-1 overflow-hidden',
-          !says && !waiting && 'md:hidden',
+          !says && !waiting && !stage && 'md:hidden',
         )}
       >
         {busy || ending ? (
@@ -700,6 +702,8 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
           stopped, and the owner as needed, whatever the chat's own state
           says. A sleeping chat's chip draws nothing, so this can be alone.
         */}
+        {/* The stage this chat's workflow run is on. */}
+        {stage && <WorkflowStageChip stage={stage} testId="row-workflow-stage" className="max-w-[50%] shrink-0" />}
         {waiting && (
           <Badge
             variant="warning"

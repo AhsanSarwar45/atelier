@@ -1,6 +1,6 @@
 # Workflows
 
-Tasks #35, #38, #39 and #43. A workflow takes an item, such as a Linear ticket,
+Tasks #35, #38, #39, #43, #45 and #46. A workflow takes an item, such as a Linear ticket,
 through a fixed set of stages. Each item gets its own worktree and chat, and
 the server moves it from stage to stage. The owner steps in only where the
 workflow says so.
@@ -102,6 +102,12 @@ workflow says so.
    by hand, the run waits for them with "You stopped the chat" and is not
    started again.
 
+A run's chat shows the stage it is on as a badge, in the chat's badge bar
+and on its sidebar row (`src/workbench/workflow-stage-chip.tsx`). Pointing at
+it names the workflow and the step, such as "Ticket flow workflow, stage 2 of
+5". The badge follows the run every few seconds and goes away when the run is
+done or stopped.
+
 Statuses: **Queued**, **Running**, **Waiting** (a Wait stage), **Needs you**, **Done**
 and **Stopped**. A run that needs the owner shows why. **Continue** passes
 an Approval stage, or sends any other stage's prompt again with its attempt
@@ -158,6 +164,10 @@ its error and disables **Start**.
 
 `GET /api/workbench/workflow-runs?projectPath=` returns `{runs: [...]}`,
 newest first.
+
+`GET /api/workbench/workflow-stages` returns `{chats: {SESSION: {run,
+workflow, stage, step, steps, status}}}` for every run that is not done or
+stopped, with the workflow's and stage's names. The stage badges read it.
 
 `POST /api/workbench/workflow-runs` takes an `action`:
 
