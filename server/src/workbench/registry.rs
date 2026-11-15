@@ -1498,12 +1498,22 @@ impl WorkbenchRegistry {
     /// chosen provider account offered last, in this chat's project if it has
     /// run there. Empty lists when that account has never run.
     async fn worker_models(&self, command: &Command) -> Result<Value, String> {
-        let session_id = Self::field(command, "sessionId")?;
-        let session = self
-            .database
-            .get_session(session_id.to_string())
-            .await?
-            .ok_or_else(|| format!("session {session_id} does not exist"))?;
+        // A chat names its project through its session; a workflow, which has
+        // no chat yet, names the project itself.
+        let (project_id, project_path) = match Self::maybe(command, "sessionId") {
+            Some(session_id) => {
+                let session = self
+                    .database
+                    .get_session(session_id.to_string())
+                    .await?
+                    .ok_or_else(|| format!("session {session_id} does not exist"))?;
+                (session.project_id, session.project_path)
+            }
+            None => (
+                Self::field(command, "projectId")?.to_string(),
+                Self::field(command, "projectPath")?.to_string(),
+            ),
+        };
         let brand = Self::field(command, "brand")?.to_string();
         let profile = Self::maybe(command, "profileId")
             .filter(|id| *id != super::profiles::SYSTEM)
@@ -1511,7 +1521,7 @@ impl WorkbenchRegistry {
             .to_string();
         let catalogue = self
             .database
-            .account_catalogue(brand, profile, session.project_id, session.project_path)
+            .account_catalogue(brand, profile, project_id, project_path)
             .await?
             .unwrap_or(Value::Null);
         let list = |field: &str| match &catalogue[field] {

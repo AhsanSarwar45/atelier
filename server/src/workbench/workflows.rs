@@ -25,8 +25,27 @@ pub struct Workflow {
     pub trigger: Trigger,
     #[serde(default)]
     pub setup: Setup,
+    /// The provider, account, model and effort each run's chat starts with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<Agent>,
+    /// How many runs work at once; the rest wait as queued. 1 when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrent: Option<u32>,
     #[serde(default)]
     pub stages: Vec<Stage>,
+}
+
+/// Which agent a run's chat starts with. No account, model or effort means
+/// the provider's own default for that one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Agent {
+    pub brand: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,6 +155,9 @@ pub fn validate(file: &WorkflowsFile) -> Result<(), String> {
         if workflow.name.trim().is_empty() {
             return Err("Workflow name is required".into());
         }
+        if workflow.max_concurrent == Some(0) {
+            return Err(format!("{}: runs at once must be at least 1", workflow.name));
+        }
         if workflow.trigger.kind == TriggerKind::Schedule && workflow.trigger.every_minutes.unwrap_or(0) == 0 {
             return Err(format!("{}: a schedule needs a number of minutes", workflow.name));
         }
@@ -194,6 +216,7 @@ CREATE TABLE IF NOT EXISTS workflow_run (
   attempts TEXT NOT NULL DEFAULT '{}',
   seen_message INTEGER NOT NULL DEFAULT 0,
   note TEXT,
+  agent TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -202,5 +225,15 @@ CREATE INDEX IF NOT EXISTS workflow_run_by_project ON workflow_run(project_path,
 "#;
 
 pub fn ensure_schema(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(RUNS_SCHEMA)
+    connection.execute_batch(RUNS_SCHEMA)?;
+    // 0.25.9 made the table without the run's agent.
+    let has_agent: bool = connection.query_row(
+        "SELECT count(*) > 0 FROM pragma_table_info('workflow_run') WHERE name = 'agent'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_agent {
+        connection.execute_batch("ALTER TABLE workflow_run ADD COLUMN agent TEXT")?;
+    }
+    Ok(())
 }

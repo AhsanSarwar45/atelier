@@ -19,6 +19,7 @@ import type { CommandInfo } from '@/workbench/protocol';
 import { Label, ListEmpty, ListGroup, ListHeader, ListRow } from './library-list';
 import { useOpenItem } from './item-page';
 import { WorkflowEditor } from './workflows-editor';
+import type { WorkflowAgent } from './workflow-agent';
 
 export type StageKind = 'agent' | 'command' | 'wait' | 'approval';
 export interface Route { outcome: string; to: string }
@@ -32,6 +33,8 @@ export interface Workflow {
   trigger: { kind: 'manual' | 'schedule'; every_minutes?: number; items?: string };
   setup: { branch?: string; base?: string };
   stages: Stage[];
+  agent?: WorkflowAgent;
+  max_concurrent?: number;
 }
 export interface WorkflowsAnswer { workflows: Workflow[]; revision: string; commands: CommandInfo[] }
 

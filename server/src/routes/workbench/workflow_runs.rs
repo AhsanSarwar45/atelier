@@ -8,7 +8,7 @@
 use super::tell::tell_chat;
 use super::{ApiError, WorkbenchState};
 use crate::workbench::protocol::{Command, CommandKind};
-use crate::workbench::workflows::{self, Stage, StageKind, TriggerKind, Workflow};
+use crate::workbench::workflows::{self, Agent, Stage, StageKind, TriggerKind, Workflow};
 use axum::{
     extract::{Query, State},
     Json,
@@ -43,6 +43,9 @@ pub(super) struct Ask {
     items: Vec<Value>,
     #[serde(default)]
     run: Option<String>,
+    /// A manual run's own agent, instead of the workflow's.
+    #[serde(default)]
+    agent: Option<Agent>,
 }
 
 #[derive(Deserialize)]
@@ -66,6 +69,7 @@ struct Run {
     attempts: Map<String, Value>,
     seen_message: i64,
     note: Option<String>,
+    agent: Option<Value>,
 }
 
 impl Run {
@@ -73,13 +77,13 @@ impl Run {
         json!({
             "id": self.id, "projectId": self.project_id, "projectPath": self.project_path,
             "workflow": self.workflow, "item": self.item, "stage": self.stage, "status": self.status,
-            "sessionId": self.session, "cwd": self.cwd, "attempts": self.attempts, "note": self.note,
+            "sessionId": self.session, "cwd": self.cwd, "attempts": self.attempts, "note": self.note, "agent": self.agent,
         })
     }
 }
 
 const COLUMNS: &str =
-    "id, project_id, project_path, workflow_id, item, stage, status, session_id, cwd, attempts, seen_message, note";
+    "id, project_id, project_path, workflow_id, item, stage, status, session_id, cwd, attempts, seen_message, note, agent";
 
 fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Run> {
     let item: String = row.get(4)?;
@@ -97,6 +101,7 @@ fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Run> {
         attempts: serde_json::from_str(&attempts).unwrap_or_default(),
         seen_message: row.get(10)?,
         note: row.get(11)?,
+        agent: row.get::<_, Option<String>>(12)?.and_then(|text| serde_json::from_str(&text).ok()),
     })
 }
 
@@ -110,7 +115,7 @@ async fn runs_where(state: &WorkbenchState, filter: &'static str, value: String)
         .read_tasks(move |store| {
             let mut statement = store
                 .connection()
-                .prepare(&format!("SELECT {COLUMNS} FROM workflow_run WHERE {filter} ORDER BY created_at DESC"))?;
+                .prepare(&format!("SELECT {COLUMNS} FROM workflow_run WHERE {filter} ORDER BY created_at DESC, rowid DESC"))?;
             let rows = statement.query_map([value], from_row)?.collect::<rusqlite::Result<Vec<_>>>();
             rows
         })
@@ -289,8 +294,77 @@ async fn worktree(project_path: &str, branch: &str, base: Option<&str>) -> Resul
         .map_err(|refused| format!("Could not make the worktree for {branch}: {}", refused.said()))
 }
 
-async fn start_one(state: &WorkbenchState, project_id: &str, project_path: &str, flow: &Workflow, item: Value) -> Result<Run, String> {
+/// The agent a run uses: its own choice, else the workflow's.
+fn agent_for(flow: &Workflow, chosen: Option<&Agent>) -> Result<Agent, String> {
+    chosen
+        .or(flow.agent.as_ref())
+        .filter(|agent| !agent.brand.trim().is_empty())
+        .cloned()
+        .ok_or_else(|| format!("Choose an agent for {} before running it", flow.name))
+}
+
+/// Add a run for `item` to the workflow's queue; `promote` starts it when a
+/// slot is free.
+async fn queue(state: &WorkbenchState, project_id: &str, project_path: &str, flow: &Workflow, item: Value, agent: &Agent) -> Result<String, String> {
     let first = flow.stages.first().ok_or_else(|| format!("{} has no stages", flow.name))?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let row = (
+        id.clone(), project_id.to_string(), project_path.to_string(), flow.id.clone(), item.to_string(), item_key(&item),
+        first.id.clone(), serde_json::to_string(agent).map_err(|error| error.to_string())?,
+    );
+    state
+        .database()
+        .write_tasks(move |store| {
+            store.connection().execute(
+                "INSERT INTO workflow_run (id, project_id, project_path, workflow_id, item, item_key, stage, status, agent, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', ?8, ?9, ?9)",
+                params![row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, now()],
+            )
+        })
+        .await?
+        .map_err(|error| error.to_string())?;
+    Ok(id)
+}
+
+/// Runs that hold one of the workflow's slots: they have a chat and are
+/// working or waiting for the owner. A run waiting on a check holds none.
+fn holds_a_slot(run: &Run) -> bool {
+    run.session.is_some() && (run.status == "running" || run.status == "needs_owner")
+}
+
+/// One `promote` at a time, so two never fill the same free slot.
+static PROMOTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Start the workflow's queued runs, oldest first, while it has free slots.
+async fn promote(state: &WorkbenchState, project_path: &str, workflow_id: &str) {
+    let _one = PROMOTING.lock().await;
+    let Ok(flow) = workflow(project_path, workflow_id) else { return };
+    let limit = flow.max_concurrent.unwrap_or(1).max(1) as usize;
+    loop {
+        let Ok(mut runs) = runs_where(state, "project_path = ?1", project_path.to_string()).await else { return };
+        runs.retain(|run| run.workflow == flow.id);
+        if runs.iter().filter(|run| holds_a_slot(run)).count() >= limit {
+            return;
+        }
+        // Newest first from the table; the queue goes oldest first.
+        let Some(mut next) = runs.into_iter().rev().find(|run| run.status == "queued") else { return };
+        if let Err(error) = begin(state, &flow, &mut next).await {
+            tracing::warn!(run = next.id, %error, "a queued workflow run could not start");
+            next.session = None;
+            let _ = hold(state, &mut next, error).await;
+        }
+    }
+}
+
+/// Give a queued run its worktree and chat, and enter its first stage.
+async fn begin(state: &WorkbenchState, flow: &Workflow, run: &mut Run) -> Result<(), String> {
+    let first = flow.stages.first().ok_or_else(|| format!("{} has no stages", flow.name))?.id.clone();
+    let agent: Agent = run
+        .agent
+        .clone()
+        .and_then(|agent| serde_json::from_value(agent).ok())
+        .map_or_else(|| agent_for(flow, None), Ok)?;
+    let item = run.item.clone();
     let key = item_key(&item);
     let branch = fill(flow.setup.branch.as_deref().unwrap_or(""), &item);
     let branch = if branch.trim().is_empty() || branch.contains("{{") {
@@ -298,17 +372,22 @@ async fn start_one(state: &WorkbenchState, project_id: &str, project_path: &str,
     } else {
         branch.trim().to_string()
     };
-    let cwd = worktree(project_path, &branch, flow.setup.base.as_deref()).await?;
+    let cwd = worktree(&run.project_path, &branch, flow.setup.base.as_deref()).await?;
     let session = uuid::Uuid::new_v4().to_string();
     let title = item_label(&item);
-    let fields = Map::from_iter([
+    let mut fields = Map::from_iter([
         ("sessionId".into(), json!(session)),
-        ("projectId".into(), json!(project_id)),
-        ("projectPath".into(), json!(project_path)),
-        ("brand".into(), json!("claude")),
+        ("projectId".into(), json!(run.project_id)),
+        ("projectPath".into(), json!(run.project_path)),
+        ("brand".into(), json!(agent.brand)),
         ("title".into(), json!(title)),
         ("cwd".into(), json!(cwd)),
     ]);
+    for (key, value) in [("profileId", &agent.profile_id), ("model", &agent.model), ("effort", &agent.effort)] {
+        if let Some(value) = value.as_deref().filter(|value| !value.is_empty()) {
+            fields.insert(key.into(), json!(value));
+        }
+    }
     let reply = state
         .registry
         .execute(&Command { kind: CommandKind::SessionStart, fields })
@@ -322,38 +401,11 @@ async fn start_one(state: &WorkbenchState, project_id: &str, project_path: &str,
     if let Err(error) = state.registry.execute(&Command { kind: CommandKind::SessionRename, fields: rename }).await {
         tracing::warn!(chat = session, %error, "a workflow run's chat could not be named");
     }
-    let run = Run {
-        id: uuid::Uuid::new_v4().to_string(),
-        project_id: project_id.to_string(),
-        project_path: project_path.to_string(),
-        workflow: flow.id.clone(),
-        item: item.clone(),
-        stage: first.id.clone(),
-        status: "running".into(),
-        session: Some(session),
-        cwd: Some(cwd),
-        attempts: Map::new(),
-        seen_message: 0,
-        note: None,
-    };
-    let inserted = run.clone();
-    state
-        .database()
-        .write_tasks(move |store| {
-            store.connection().execute(
-                &format!("INSERT INTO workflow_run ({COLUMNS}, item_key, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'{{}}',0,NULL,?10,?11,?11)"),
-                params![
-                    inserted.id, inserted.project_id, inserted.project_path, inserted.workflow,
-                    inserted.item.to_string(), inserted.stage, inserted.status, inserted.session, inserted.cwd,
-                    key, now()
-                ],
-            )
-        })
-        .await?
-        .map_err(|error| error.to_string())?;
-    let mut run = run;
-    enter(state, flow, &mut run, &first.id.clone()).await?;
-    Ok(run)
+    run.session = Some(session);
+    run.cwd = Some(cwd);
+    run.attempts = Map::new();
+    run.status = "running".into();
+    enter(state, flow, run, &first).await
 }
 
 /// Move `run` into stage `id` and do what that kind of stage does first.
@@ -541,6 +593,7 @@ async fn turn_ended(state: &WorkbenchState, session: &str, ended_in: &str) {
             tracing::warn!(run = run.id, %error, "a workflow run could not move on");
             let _ = hold(state, &mut run, error).await;
         }
+        promote(state, &run.project_path, &run.workflow).await;
     }
 }
 
@@ -636,11 +689,22 @@ async fn tick(state: &WorkbenchState, project_id: &str, project_path: &str, forc
             .filter(|run| run.workflow == flow.id)
             .map(|run| item_key(&run.item))
             .collect();
+        let agent = match agent_for(flow, None) {
+            Ok(agent) => agent,
+            Err(error) => {
+                tracing::warn!(workflow = flow.id, %error, "a workflow schedule has no agent");
+                continue;
+            }
+        };
         for item in found.into_iter().filter(|item| !started.contains(&item_key(item))) {
-            if let Err(error) = start_one(state, project_id, project_path, flow, item).await {
-                tracing::warn!(workflow = flow.id, %error, "a scheduled workflow run could not start");
+            if let Err(error) = queue(state, project_id, project_path, flow, item, &agent).await {
+                tracing::warn!(workflow = flow.id, %error, "a scheduled workflow run could not be queued");
             }
         }
+    }
+    // Slots freed by checks above, or new runs from a schedule.
+    for flow in &file.workflows {
+        promote(state, project_path, &flow.id).await;
     }
     Ok(())
 }
@@ -671,17 +735,30 @@ pub(super) async fn act(State(state): State<WorkbenchState>, Json(ask): Json<Ask
             if ask.items.is_empty() {
                 return Err("Pick at least one item to run".to_string().into());
             }
-            let mut started = Vec::new();
+            let agent = agent_for(&flow, ask.agent.as_ref())?;
+            let mut ids = Vec::new();
             for item in ask.items {
-                started.push(start_one(&state, &project, &path, &flow, item).await?.to_json());
+                ids.push(queue(&state, &project, &path, &flow, item, &agent).await?);
             }
-            Ok(Json(json!({"runs": started})))
+            promote(&state, &path, &flow.id).await;
+            let mut runs = Vec::new();
+            for id in ids {
+                if let Some(run) = run_by_id(&state, &id).await? {
+                    runs.push(run.to_json());
+                }
+            }
+            Ok(Json(json!({"runs": runs})))
         }
         "continue" | "stop" => {
             let id = needs(&ask.run, "run")?;
             let mut run = run_by_id(&state, id).await?.ok_or_else(|| ApiError::not_found(format!("No run {id}")))?;
             if ask.action == "stop" {
                 run.status = "stopped".into();
+                run.note = None;
+                save(&state, &mut run).await?;
+            } else if run.status == "needs_owner" && run.session.is_none() {
+                // It never got its chat: back in the queue.
+                run.status = "queued".into();
                 run.note = None;
                 save(&state, &mut run).await?;
             } else {
@@ -702,6 +779,8 @@ pub(super) async fn act(State(state): State<WorkbenchState>, Json(ask): Json<Ask
                     }
                 }
             }
+            promote(&state, &run.project_path, &run.workflow).await;
+            let run = run_by_id(&state, &run.id).await?.unwrap_or(run);
             Ok(Json(json!({"run": run.to_json()})))
         }
         "tick" => {

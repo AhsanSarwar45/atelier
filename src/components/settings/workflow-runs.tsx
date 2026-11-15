@@ -7,16 +7,19 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Play } from 'lucide-react';
+import { Play, Workflow as WorkflowIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ToolButton } from '@/components/shell';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Panel } from '@/components/ui/panel';
 import { Spinner } from '@/components/ui/spinner';
 import { request } from '@/lib/api';
 
 import { StateDot } from './library-list';
+import { AgentFields, type WorkflowAgent } from './workflow-agent';
 import type { Workflow } from './workflows-settings';
 
 type Item = Record<string, unknown>;
@@ -25,13 +28,14 @@ export interface WorkflowRun {
   workflow: string;
   item: Item;
   stage: string;
-  status: 'running' | 'waiting' | 'needs_owner' | 'done' | 'stopped';
+  status: 'queued' | 'running' | 'waiting' | 'needs_owner' | 'done' | 'stopped';
   sessionId?: string | null;
   note?: string | null;
 }
 
 const API = '/api/workbench/workflow-runs';
 const STATUS: Record<WorkflowRun['status'], { label: string; tone: 'good' | 'quiet' | 'warn' }> = {
+  queued: { label: 'Queued', tone: 'quiet' },
   running: { label: 'Running', tone: 'good' },
   waiting: { label: 'Waiting', tone: 'quiet' },
   needs_owner: { label: 'Needs you', tone: 'warn' },
@@ -86,6 +90,7 @@ export function RunDialog({ open, onOpenChange, workflow, projectId, projectPath
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
+  const [agent, setAgent] = useState<WorkflowAgent | undefined>(workflow.agent);
 
   useEffect(() => {
     if (!open) return;
@@ -98,13 +103,18 @@ export function RunDialog({ open, onOpenChange, workflow, projectId, projectPath
       .catch((e: Error) => { if (live) { setItems([]); setError(e.message); } });
     return () => { live = false; };
   }, [open, projectPath, workflow.id]);
+  // Each time the dialog opens it starts from the workflow's own agent.
+  const savedAgent = JSON.stringify(workflow.agent ?? null);
+  useEffect(() => {
+    if (open) setAgent(JSON.parse(savedAgent) ?? undefined);
+  }, [open, savedAgent]);
 
   async function start() {
     setStarting(true);
     setError('');
     try {
       const chosen = (items ?? []).filter((item) => picked.has(itemKey(item)));
-      await act({ action: 'start', projectId, projectPath, workflow: workflow.id, items: chosen });
+      await act({ action: 'start', projectId, projectPath, workflow: workflow.id, items: chosen, agent });
       onStarted();
       onOpenChange(false);
     } catch (e) {
@@ -150,10 +160,13 @@ export function RunDialog({ open, onOpenChange, workflow, projectId, projectPath
             })}
           </ul>
         )}
+        <div className="min-w-0 border-t border-border pt-2">
+          <AgentFields agent={agent} onChange={setAgent} projectId={projectId} projectPath={projectPath} idPrefix="run" />
+        </div>
         {error && <Panel tone="danger" role="alert" className="break-words text-sm text-danger">{error}</Panel>}
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button disabled={starting || picked.size === 0 || !!error && !items?.length} onClick={() => void start()}>
+          <Button disabled={starting || picked.size === 0 || !agent || !!error && !items?.length} onClick={() => void start()}>
             <Play className="size-3.5" />
             Start
           </Button>
@@ -207,7 +220,7 @@ export function RunsList({ runs, workflow, projectId, onChanged }: {
                 {r.status === 'needs_owner' && (
                   <Button size="sm" variant="outline" onClick={() => void run('continue', r.id)}>Continue</Button>
                 )}
-                {(r.status === 'running' || r.status === 'waiting' || r.status === 'needs_owner') && (
+                {(r.status === 'queued' || r.status === 'running' || r.status === 'waiting' || r.status === 'needs_owner') && (
                   <Button size="sm" variant="ghost" onClick={() => void run('stop', r.id)}>Stop</Button>
                 )}
                 {r.sessionId && (
@@ -221,5 +234,56 @@ export function RunsList({ runs, workflow, projectId, onChanged }: {
         })}
       </ul>
     </section>
+  );
+}
+
+/** The chat toolbar's way to start a workflow: a menu of the project's
+ *  workflows, each opening its Run dialog. */
+export function WorkflowsToolButton({ projectId, projectPath }: { projectId: string; projectPath: string }) {
+  const [workflows, setWorkflows] = useState<Workflow[] | null>(null);
+  const [error, setError] = useState('');
+  const [chosen, setChosen] = useState<Workflow | null>(null);
+  const [running, setRunning] = useState(false);
+  // Read each time the menu opens, so a workflow saved in settings shows.
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const response = await request(`/api/settings/workflows?${new URLSearchParams({ path: projectPath })}`);
+      if (!response.ok) throw new Error(`Couldn’t load workflows (${response.status})`);
+      setWorkflows(((await response.json()) as { workflows: Workflow[] }).workflows);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [projectPath]);
+  return (
+    <>
+      <DropdownMenu onOpenChange={(open) => { if (open) void load(); }}>
+        <DropdownMenuTrigger asChild>
+          <ToolButton icon={<WorkflowIcon />} label="Run a workflow" className="h-10 w-10 sm:h-8 sm:w-8" data-testid="run-workflow" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64">
+          <DropdownMenuLabel>Run a workflow</DropdownMenuLabel>
+          {error ? (
+            <p className="px-2 py-1.5 text-sm text-danger">{error}</p>
+          ) : workflows === null ? (
+            <div className="flex justify-center py-2"><Spinner /></div>
+          ) : workflows.length === 0 ? (
+            <DropdownMenuItem asChild>
+              <Link href={`/project?id=${encodeURIComponent(projectId)}&settings=workflows`}>No workflows yet. Add one in settings</Link>
+            </DropdownMenuItem>
+          ) : (
+            workflows.map((w) => (
+              <DropdownMenuItem key={w.id} onSelect={() => { setChosen(w); setRunning(true); }}>
+                <Play className="size-3.5" />
+                <span className="truncate">{w.name}</span>
+              </DropdownMenuItem>
+            ))
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {chosen && (
+        <RunDialog open={running} onOpenChange={setRunning} workflow={chosen} projectId={projectId} projectPath={projectPath} onStarted={() => {}} />
+      )}
+    </>
   );
 }

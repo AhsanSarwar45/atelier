@@ -141,6 +141,7 @@ fn ticket_flow() -> Value {
     json!({
         "id": "ticket", "name": "Ticket", "enabled": true,
         "trigger": {"kind": "manual"},
+        "agent": {"brand": "claude"},
         "setup": {"branch": "{{item.branchName}}", "base": "staging"},
         "stages": [
             agent("implement", "Work on {{item.identifier}}: {{item.title}}", json!([{"outcome": "done", "to": "qa"}])),
@@ -315,7 +316,7 @@ async fn a_reported_outcome_moves_the_run_to_the_routed_stage() {
 async fn the_last_stage_finishes_the_run() {
     let fixture = fixture().await;
     save(&fixture, json!({
-        "id": "one", "name": "One", "enabled": true, "trigger": {"kind": "manual"},
+        "id": "one", "name": "One", "enabled": true, "trigger": {"kind": "manual"}, "agent": {"brand": "claude"},
         "setup": {"branch": "{{item.branchName}}", "base": "staging"},
         "stages": [agent("ship", "Ship {{item.identifier}}", json!([]))]
     }));
@@ -331,7 +332,7 @@ async fn a_wait_stage_routes_on_what_its_check_prints() {
     let status = fixture._directory.path().join("status");
     std::fs::write(&status, "In Tapforce QA\n").unwrap();
     save(&fixture, json!({
-        "id": "wait", "name": "Wait", "enabled": true, "trigger": {"kind": "manual"},
+        "id": "wait", "name": "Wait", "enabled": true, "trigger": {"kind": "manual"}, "agent": {"brand": "claude"},
         "setup": {"branch": "{{item.branchName}}", "base": "staging"},
         "stages": [
             {"id": "qa-result", "name": "Wait for QA", "kind": "wait", "prompt": format!("cat {}", status.display()),
@@ -407,7 +408,7 @@ async fn max_attempts_hands_a_looping_stage_to_the_owner() {
 async fn an_approval_stage_waits_until_the_owner_continues() {
     let fixture = fixture().await;
     save(&fixture, json!({
-        "id": "ask", "name": "Ask", "enabled": true, "trigger": {"kind": "manual"},
+        "id": "ask", "name": "Ask", "enabled": true, "trigger": {"kind": "manual"}, "agent": {"brand": "claude"},
         "setup": {"branch": "{{item.branchName}}", "base": "staging"},
         "stages": [
             agent("implement", "Work on {{item.identifier}}", json!([{"outcome": "done", "to": "check"}])),
@@ -604,4 +605,157 @@ async fn approve_finished_work_approves_a_task_waiting_for_review() {
     replies(&fixture, &id, "Finished; waiting for approval.").await;
     let approved = until(|| shown(&fixture, &id, 1), |task| task["status"] == "done").await;
     assert_eq!(approved["status"], "done", "with Approve finished work on, the task was not approved: {approved}");
+}
+
+// --- Each workflow's agent, and how many of its runs work at once ---
+
+/// What every `session.start` so far asked for, oldest first.
+fn chats_started(fixture: &Fixture) -> Vec<Value> {
+    fixture.seen.lock().unwrap().iter().filter(|(kind, _)| kind == "SessionStart").map(|(_, fields)| fields.clone()).collect()
+}
+
+/// One agent stage that finishes the run, at most `limit` runs at once.
+fn single(limit: u32) -> Value {
+    json!({
+        "id": "single", "name": "Single", "enabled": true, "trigger": {"kind": "manual"},
+        "agent": {"brand": "claude"}, "max_concurrent": limit,
+        "setup": {"branch": "{{item.branchName}}", "base": "main"},
+        "stages": [agent("work", "Work on {{item.identifier}}", json!([]))],
+    })
+}
+
+#[tokio::test]
+async fn a_run_starts_its_chat_with_the_workflows_agent() {
+    let fixture = fixture().await;
+    let mut flow = ticket_flow();
+    flow["agent"] = json!({"brand": "claude", "profile_id": "work", "model": "opus", "effort": "high"});
+    save(&fixture, flow);
+    start(&fixture, "ticket", item(30)).await;
+    let started = chats_started(&fixture);
+    let chat = started.last().unwrap_or_else(|| panic!("no chat was started"));
+    for (key, want) in [("brand", "claude"), ("profileId", "work"), ("model", "opus"), ("effort", "high")] {
+        assert_eq!(chat[key], want, "the chat did not start with the workflow's {key}: {chat}");
+    }
+}
+
+#[tokio::test]
+async fn a_manual_run_can_choose_another_agent() {
+    let fixture = fixture().await;
+    let mut flow = ticket_flow();
+    flow["agent"] = json!({"brand": "claude", "profile_id": "work", "model": "opus", "effort": "high"});
+    save(&fixture, flow);
+    let (code, body) = act(&fixture, json!({"action": "start", "workflow": "ticket", "items": [item(31)],
+        "agent": {"brand": "claude", "profile_id": "personal", "model": "sonnet", "effort": "low"}})).await;
+    assert_eq!(code, 200, "starting with another agent failed: {body}");
+    let started = chats_started(&fixture);
+    let chat = started.last().unwrap_or_else(|| panic!("no chat was started"));
+    for (key, want) in [("brand", "claude"), ("profileId", "personal"), ("model", "sonnet"), ("effort", "low")] {
+        assert_eq!(chat[key], want, "the run's own choice of {key} was not used: {chat}");
+    }
+}
+
+#[tokio::test]
+async fn a_workflow_without_an_agent_does_not_start() {
+    let fixture = fixture().await;
+    let mut flow = ticket_flow();
+    flow.as_object_mut().unwrap().remove("agent");
+    save(&fixture, flow);
+    let (code, body) = act(&fixture, json!({"action": "start", "workflow": "ticket", "items": [item(32)]})).await;
+    assert!(code >= 400, "a run started with no agent chosen: {code} {body}");
+    assert!(body.to_string().to_lowercase().contains("agent"), "the refusal does not say an agent is missing: {body}");
+    assert!(chats_started(&fixture).is_empty(), "a chat was started with no agent chosen");
+}
+
+#[tokio::test]
+async fn runs_past_the_limit_wait_in_a_queue() {
+    let fixture = fixture().await;
+    save(&fixture, single(1));
+    let (code, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(33), item(34)]})).await;
+    assert_eq!(code, 200, "starting two runs failed: {body}");
+    assert_eq!(body["runs"][0]["status"], "running", "the first run did not start: {body}");
+    assert_eq!(body["runs"][1]["status"], "queued", "the second run did not wait its turn: {body}");
+    assert!(body["runs"][1]["sessionId"].is_null(), "a queued run already has a chat: {body}");
+    assert_eq!(chats_started(&fixture).len(), 1, "more chats started than the limit allows");
+}
+
+#[tokio::test]
+async fn a_queued_run_starts_when_a_run_finishes() {
+    let fixture = fixture().await;
+    save(&fixture, single(1));
+    let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(35), item(36)]})).await;
+    assert_eq!(body["runs"][1]["status"], "queued", "the second run did not wait its turn: {body}");
+    let first = session(&body["runs"][0]);
+    replies(&fixture, &first, "Outcome: done").await;
+    let next = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
+    assert_eq!(next["status"], "running", "the queued run did not start after the first finished: {next}");
+    let prompts = told_more(&fixture, &session(&next), 0).await;
+    assert!(prompts.iter().any(|p| p.contains("Work on KEY-36")), "the queued run's chat got no prompt: {prompts:?}");
+}
+
+#[tokio::test]
+async fn a_run_waiting_on_a_check_frees_its_slot() {
+    let fixture = fixture().await;
+    let state = fixture._directory.path().join("state.txt");
+    std::fs::write(&state, "In QA\n").unwrap();
+    let mut flow = single(1);
+    flow["stages"] = json!([
+        agent("work", "Work on {{item.identifier}}", json!([{"outcome": "done", "to": "check"}])),
+        {"id": "check", "name": "Check", "kind": "wait", "prompt": format!("cat {}", state.display()),
+         "routes": [{"outcome": "Rejected", "to": "work"}], "auto": off()},
+    ]);
+    save(&fixture, flow);
+    let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(37), item(38)]})).await;
+    assert_eq!(body["runs"][1]["status"], "queued", "the second run did not wait its turn: {body}");
+    replies(&fixture, &session(&body["runs"][0]), "Outcome: done").await;
+    let next = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
+    assert_eq!(next["status"], "running", "a run waiting on its check still held the only slot: {next}");
+}
+
+#[tokio::test]
+async fn stopping_a_run_starts_the_next_queued_one() {
+    let fixture = fixture().await;
+    save(&fixture, single(1));
+    let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(39), item(40)]})).await;
+    assert_eq!(body["runs"][1]["status"], "queued", "the second run did not wait its turn: {body}");
+    act(&fixture, json!({"action": "stop", "run": body["runs"][0]["id"]})).await;
+    let next = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
+    assert_eq!(next["status"], "running", "stopping a run did not start the queued one: {next}");
+}
+
+#[tokio::test]
+async fn without_a_limit_runs_go_one_at_a_time() {
+    let fixture = fixture().await;
+    let mut flow = single(1);
+    flow.as_object_mut().unwrap().remove("max_concurrent");
+    save(&fixture, flow);
+    let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(41), item(42)]})).await;
+    assert_eq!(body["runs"][1]["status"], "queued", "with no limit set, two runs worked at once: {body}");
+}
+
+#[tokio::test]
+async fn a_higher_limit_runs_that_many_at_once() {
+    let fixture = fixture().await;
+    save(&fixture, single(2));
+    let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(43), item(44), item(45)]})).await;
+    let statuses: Vec<&str> = body["runs"].as_array().unwrap().iter().map(|r| r["status"].as_str().unwrap_or("")).collect();
+    assert_eq!(statuses, vec!["running", "running", "queued"], "a limit of 2 did not run exactly two: {body}");
+}
+
+#[test]
+fn an_older_run_table_gains_the_agent_column() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection.execute_batch(
+        "CREATE TABLE workflow_run (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, project_path TEXT NOT NULL,
+           workflow_id TEXT NOT NULL, item TEXT NOT NULL, item_key TEXT NOT NULL, stage TEXT NOT NULL, status TEXT NOT NULL,
+           session_id TEXT, cwd TEXT, attempts TEXT NOT NULL DEFAULT '{}', seen_message INTEGER NOT NULL DEFAULT 0,
+           note TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+         INSERT INTO workflow_run VALUES ('r', 'p', '/x', 'w', '{}', 'k', 's', 'done', NULL, NULL, '{}', 0, NULL, 1, 1);",
+    ).unwrap();
+    workflows::ensure_schema(&connection).unwrap();
+    workflows::ensure_schema(&connection).unwrap();
+    let columns: Vec<String> = connection.prepare("SELECT name FROM pragma_table_info('workflow_run')").unwrap()
+        .query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+    assert!(columns.iter().any(|c| c == "agent"), "the run table from 0.25.9 did not gain the agent column: {columns:?}");
+    let kept: i64 = connection.query_row("SELECT count(*) FROM workflow_run", [], |row| row.get(0)).unwrap();
+    assert_eq!(kept, 1, "upgrading the run table lost a run");
 }

@@ -39,6 +39,7 @@ import { useDescribeReference } from '@/workbench/reference-names';
 
 import { DetailHeader, Label, MoreMenu, StateDot } from './library-list';
 import { SettingRow, SettingsGroup } from './section';
+import { AgentFields } from './workflow-agent';
 import { RunDialog, RunsList, useWorkflowRuns } from './workflow-runs';
 import { NEW_WORKFLOW, slugOf, stageCount, triggerSummary, type Stage, type StageAuto, type StageKind, type Workflow } from './workflows-settings';
 
@@ -57,6 +58,15 @@ const AUTO: { key: keyof StageAuto; label: string }[] = [
   { key: 'questions', label: 'Answer questions' },
 ];
 const NO_AUTO: StageAuto = { plan: false, done: false, questions: false };
+
+/** A workflow as text with its keys sorted: the server's copy lists fields in
+ *  its own order, and a field added in the editor comes last. */
+function sameShape(value: unknown): string {
+  return JSON.stringify(value, (_key, field: unknown) =>
+    field && typeof field === 'object' && !Array.isArray(field)
+      ? Object.fromEntries(Object.entries(field).sort(([a], [b]) => a.localeCompare(b)))
+      : field);
+}
 
 const BLANK: Workflow = { id: '', name: '', enabled: false, trigger: { kind: 'manual' }, setup: {}, stages: [] };
 
@@ -83,7 +93,7 @@ export function WorkflowEditor({ id, workflows, commands, projectId, projectPath
   const [running, setRunning] = useState(false);
   const { runs, reload } = useWorkflowRuns(projectPath, id);
   const [askingDelete, setAskingDelete] = useState(false);
-  const dirty = isNew || JSON.stringify(draft) !== JSON.stringify(saved);
+  const dirty = isNew || sameShape(draft) !== sameShape(saved);
 
   const edit = (change: (w: Workflow) => Workflow) => {
     setDraft((w) => change(w));
@@ -248,6 +258,22 @@ export function WorkflowEditor({ id, workflows, commands, projectId, projectPath
         </SettingRow>
         <SettingRow label="Enabled" htmlFor="workflow-enabled">
           <Switch id="workflow-enabled" checked={draft.enabled} onCheckedChange={(enabled) => edit((w) => ({ ...w, enabled }))} />
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Agent">
+        <AgentFields agent={draft.agent} onChange={(agent) => edit((w) => ({ ...w, agent }))} projectId={projectId} projectPath={projectPath} idPrefix="workflow" />
+        <SettingRow label="Runs at once" description="More runs wait in a queue" htmlFor="workflow-max-concurrent">
+          <Input
+            id="workflow-max-concurrent"
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={draft.max_concurrent ?? ''}
+            placeholder="1"
+            onChange={(e) => edit((w) => ({ ...w, max_concurrent: e.target.value ? Number(e.target.value) : undefined }))}
+            className="w-24"
+          />
         </SettingRow>
       </SettingsGroup>
 

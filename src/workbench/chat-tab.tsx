@@ -17,6 +17,7 @@ import { AlertTriangle, ArrowDown, Ban, ArrowUp, Check, CheckCheck, Circle, Chev
 import { ReferenceBadge } from '@/components/reference-badge';
 import { type Mentions } from '@/components/markdown-body';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
+import { WorkflowsToolButton } from '@/components/settings/workflow-runs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -2641,9 +2642,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             The way into the column on the right is not here: it is a door, and
             a door belongs on the side it opens (bw-81wt.29). */}
         <ChatKindFilter sessionId={reading} off={offKinds} onChange={changeKinds} />
+        {projectId && projectPath && <WorkflowsToolButton projectId={projectId} projectPath={projectPath} />}
       </TabTools>
     </>
-  ), [changeKinds, offKinds, reading]);
+  ), [changeKinds, offKinds, reading, projectId, projectPath]);
 
   const barTrail = useMemo(() => (
     <>

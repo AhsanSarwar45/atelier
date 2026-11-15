@@ -28,6 +28,7 @@ function flow(items: string) {
   return {
     id: 'ticket-flow', name: 'Ticket flow', enabled: true,
     trigger: { kind: 'manual', items },
+    agent: { brand: 'claude' },
     setup: { branch: '{{item.branchName}}', base: 'main' },
     stages: [{ id: 'implement', name: 'Implement', kind: 'agent', prompt: 'say you read this {{item.identifier}}', routes: [],
       auto: { plan: false, done: false, questions: false } }],
@@ -110,4 +111,73 @@ test('the runs list and run dialog fit a phone', async ({ page, request }) => {
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(over, 'nothing runs past the screen edge').toBeLessThanOrEqual(0);
   await page.screenshot({ path: join(results, 'phone-run-dialog.png'), animations: 'disabled' });
+});
+
+test('the editor sets the agent and how many runs work at once', async ({ page, request }) => {
+  await seed(request, [flow(`printf '%s' '${ITEMS}'`)]);
+  await openFlow(page);
+  await expect(page.getByRole('combobox', { name: 'Agent' })).toHaveText(/Claude/);
+  await expect(page.getByRole('combobox', { name: 'Model' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Effort' })).toBeVisible();
+  await page.getByRole('spinbutton', { name: 'Runs at once' }).fill('2');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
+  const saved = await (await request.get(`${api}?path=${encodeURIComponent(project.path)}`)).json();
+  expect(saved.workflows[0].agent.brand).toBe('claude');
+  expect(saved.workflows[0].max_concurrent).toBe(2);
+  await page.getByTestId('workflows-settings').screenshot({ path: join(results, 'agent-and-limit.png'), animations: 'disabled' });
+});
+
+test('the run dialog starts with the workflow agent and can change it', async ({ page, request }) => {
+  await seed(request, [flow(`printf '%s' '${ITEMS}'`)]);
+  await openFlow(page);
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Run Ticket flow' });
+  await expect(dialog.getByRole('combobox', { name: 'Agent' })).toHaveText(/Claude/);
+  await expect(dialog.getByRole('combobox', { name: 'Model' })).toBeVisible();
+  await expect(dialog.getByRole('combobox', { name: 'Effort' })).toBeVisible();
+  await dialog.screenshot({ path: join(results, 'run-dialog-agent.png'), animations: 'disabled' });
+});
+
+test('runs past the limit show as queued', async ({ page, request }) => {
+  const items = JSON.stringify([
+    { identifier: 'KEY-5', title: 'Queue one', branchName: 'feature/key-5' },
+    { identifier: 'KEY-6', title: 'Queue two', branchName: 'feature/key-6' },
+  ]);
+  const queued = {
+    ...flow(`printf '%s' '${items}'`),
+    max_concurrent: 1,
+    stages: [{ id: 'check', name: 'Check', kind: 'approval', prompt: 'Look at {{item.identifier}}', routes: [],
+      auto: { plan: false, done: false, questions: false } }],
+  };
+  await seed(request, [queued]);
+  await openFlow(page);
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Run Ticket flow' });
+  await dialog.getByRole('checkbox', { name: /KEY-5/ }).check();
+  await dialog.getByRole('checkbox', { name: /KEY-6/ }).check();
+  await dialog.getByRole('button', { name: 'Start', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const runs = page.getByTestId('workflow-runs');
+  await expect(runs.getByTestId('workflow-run').filter({ hasText: 'KEY-5' }).getByText('Needs you', { exact: true })).toBeVisible();
+  await expect(runs.getByTestId('workflow-run').filter({ hasText: 'KEY-6' }).getByText('Queued', { exact: true })).toBeVisible();
+  await runs.screenshot({ path: join(results, 'runs-queued.png'), animations: 'disabled' });
+});
+
+test('the chat toolbar picks a workflow and starts it', async ({ page, request }) => {
+  await seed(request, [{ ...flow(`echo '${JSON.stringify([{ identifier: 'KEY-7', title: 'From the toolbar', branchName: 'feature/key-7' }])}'`) }]);
+  await page.goto(`/project?id=${project.id}&tab=chat`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Run a workflow' }).click();
+  await page.getByRole('menuitem', { name: 'Ticket flow' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Run Ticket flow' });
+  await dialog.getByRole('checkbox').first().check();
+  await expect(dialog.getByRole('combobox', { name: 'Agent' })).toContainText(/Claude/);
+  await dialog.getByRole('button', { name: 'Start' }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(async () => {
+    const answer = await (await request.get(`/api/workbench/workflow-runs?projectPath=${encodeURIComponent(project.path)}`)).json();
+    return answer.runs.some((r: { item: { identifier?: string } }) => r.item.identifier === 'KEY-7');
+  }).toBe(true);
+  await page.getByRole('button', { name: 'Run a workflow' }).click();
+  await page.screenshot({ path: join(results, 'toolbar-workflows.png'), animations: 'disabled' });
 });

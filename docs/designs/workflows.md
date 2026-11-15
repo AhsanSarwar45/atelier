@@ -1,6 +1,6 @@
 # Workflows
 
-Tasks #35 and #38. A workflow takes an item, such as a Linear ticket,
+Tasks #35, #38 and #39. A workflow takes an item, such as a Linear ticket,
 through a fixed set of stages. Each item gets its own worktree and chat, and
 the server moves it from stage to stage. The owner steps in only where the
 workflow says so.
@@ -25,6 +25,13 @@ workflow says so.
   `{"identifier": "KEY-1", "title": "Fix login", "branchName": "feature/key-1"}`.
   An item's key is its `identifier`, `id`, `key`, `branchName` or `url`, in
   that order.
+- **Agent:** the provider and account each run's chat starts on, with a
+  model and an effort (**Default** leaves either to the account). It is kept
+  as `agent: {brand, profile_id, model, effort}`; `profile_id` is left out
+  for the provider's own sign-in. A workflow without an agent refuses to
+  start, and its schedule skips it.
+- **Runs at once** (`max_concurrent`, 1 when unset): how many runs may work
+  at the same time. More runs wait with status **Queued**.
 - **Worktree:** the branch, with `{{item.…}}` placeholders, and the base
   branch that a new branch starts from.
 - **Stages:** run in order of their routes, starting with the first. Each
@@ -45,11 +52,16 @@ workflow says so.
 
 ## How a run goes
 
-1. **Start.** The owner clicks **Run**, picks items and clicks **Start**. A
-   schedule can also start runs on its own (see below). For each item, the
-   server finds the worktree already on the item's branch, or makes one. A
+1. **Start.** The owner clicks **Run**, picks items and clicks **Start**. The
+   dialog starts from the workflow's agent and may pick another for these
+   runs only. A schedule can also start runs on its own (see below). Every
+   new run is **Queued** first. While fewer than **Runs at once** runs hold a
+   slot, the server starts the oldest queued run. A run holds a slot while
+   it has a chat and is **Running** or **Needs you**; a run on a Wait stage
+   does not, and a run that finishes or is stopped frees its slot. For each
+   started item, the server finds the worktree already on the item's branch, or makes one. A
    branch that exists neither locally nor on `origin` is created from the
-   base. The server then opens a Claude chat in that worktree, named after
+   base. The server then opens a chat on the run's agent in that worktree, named after
    the item, and enters the first stage.
 2. **Agent stages.** The prompt is sent with the item's details filled in,
    and with a closing note that lists the outcomes the stage accepts:
@@ -72,7 +84,7 @@ workflow says so.
    **Stop** ends it with status **Stopped**, and the server ignores that
    chat from then on.
 
-Statuses: **Running**, **Waiting** (a Wait stage), **Needs you**, **Done**
+Statuses: **Queued**, **Running**, **Waiting** (a Wait stage), **Needs you**, **Done**
 and **Stopped**. A run that needs the owner shows why. **Continue** passes
 an Approval stage, or sends any other stage's prompt again with its attempt
 count reset.
@@ -112,6 +124,6 @@ newest first.
 | Action | Body | Answer |
 |---|---|---|
 | `items` | `projectPath`, `workflow` | `{items}`, or 422 with the command's error |
-| `start` | `projectId`, `projectPath`, `workflow`, `items` | `{runs}` |
+| `start` | `projectId`, `projectPath`, `workflow`, `items`, optional `agent` | `{runs}`; refused when neither the body nor the workflow has an agent |
 | `continue` / `stop` | `run` | `{run}` |
 | `tick` | `projectPath`, `projectId` | `{ok}`; runs the checks and schedules now |
