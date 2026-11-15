@@ -124,9 +124,9 @@ describe('the screen with no chat on it', () => {
     expect(empty).not.toContain('void start(');
   });
 
-  it('still says why the button is grey, which is the one thing the dialog cannot say', () => {
+  it('lists no adapter reasons under the button', () => {
     const empty = source.slice(source.indexOf('if (!sessionId) {'), source.indexOf('data-testid="chat-tab"'));
-    expect(empty).toContain('{!availableBrand && (');
-    expect(empty).toContain('data-testid="provider-unavailable-reasons"');
+    expect(empty).not.toContain('provider-unavailable-reasons');
+    expect(empty).not.toContain('whyUnavailable');
   });
 });

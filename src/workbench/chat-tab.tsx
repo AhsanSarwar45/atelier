@@ -3584,19 +3584,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />
           New Chat
         </Button>
-        {/* The one thing the dialog cannot say from behind a button that
-            will not open it. */}
-        {!availableBrand && (
-          <ul data-testid="provider-unavailable-reasons" className="flex max-w-md flex-col gap-0.5 text-center text-[11px] text-muted-foreground">
-            {providers
-              .filter((provider) => !provider.available)
-              .map((provider) => (
-                <li key={provider.brand} data-testid={`provider-why-${provider.brand}`}>
-                  <span className="font-medium text-foreground/80">{brandName(provider.brand)}</span>: {whyUnavailable(provider)}
-                </li>
-              ))}
-          </ul>
-        )}
         {startError && <Panel asChild tone="danger" className="max-w-lg text-center text-sm text-danger"><p>{startError}</p></Panel>}
       </div>,
     );
