@@ -24,7 +24,9 @@ usage: atelier grid <command>
   template set NAME               {columns:[{id,name,proof_rule,checks?}]} on stdin or --input FILE
   draft                           {slug,title,area,template?,row_search,columns,rows,cells?}; the owner approves or discards it
                                   columns[].checks: check templates ({row} = the row id); cells: [{row,col,checks,override?}]
-  checks SLUG                     {columns:[{id,checks}]}: check templates for columns of an approved grid; the owner
+                                  an approved grid's slug drafts an edit: send every row and column you want kept;
+                                  new ones are added, left-out ones removed, and proofs of kept cells stay
+  checks SLUG                    {columns:[{id,checks}]}: check templates for columns of an approved grid; the owner
                                   approves only those, and rows, cells and proofs stay as they are
   discover SLUG                   rerun the grid's row search now
   prove SLUG ROW COL              {summary,commits?,evidence?}: runs the cell's approved checks
