@@ -354,8 +354,10 @@ async fn reconcile_from(
     // A chat not at work wears the condition its transcript says still
     // stands, read by the same rule the chat draws its notices by. So the
     // sidebar cannot say "Sign-in required" while the chat shows nothing, nor
-    // "Stopped" while the chat asks the reader to sign in.
-    if !status["state"].as_str().is_some_and(is_active) {
+    // "Stopped" while the chat asks the reader to sign in. A chat put to sleep
+    // (closed, moved, switched account) stays asleep: its notice is still in
+    // the transcript, but wearing it again would undo the close.
+    if session.state != "dormant" && !status["state"].as_str().is_some_and(is_active) {
         let current = database.current_notices(session_id.to_string()).await?;
         if let Some((state, label)) = current
             .iter()
@@ -661,6 +663,40 @@ mod tests {
         db.update_session("chat".into(), super::super::store::SessionPatch { state: Some("dormant".into()), ..Default::default() }, None).await.unwrap();
         assert_eq!(db.get_session("chat".into()).await.unwrap().unwrap().state, "dormant");
         assert_eq!(db.active_session_ids().await.unwrap(), vec!["chat".to_string()]);
+    }
+
+    fn sign_in_required() -> Event {
+        event(json!({"type":"provider.message","signal":{
+            "id":"condition:authentication","kind":"authentication","phase":"active",
+            "severity":"blocking","scope":"session"
+        }}))
+    }
+
+    /// The owner closed a chat that is waiting for a sign-in. Closing puts it
+    /// to sleep, and the open sign-in notice must not wake the row back up as
+    /// "Sign-in required", or the chat can never be closed.
+    #[tokio::test]
+    async fn a_closed_chat_stays_asleep_under_a_standing_sign_in_notice() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        db.create_session(saved("dormant")).await.unwrap();
+        db.append(sign_in_required()).await.unwrap();
+        let status = reconcile(&db, "chat", None).await.unwrap();
+        println!("closed chat status: {status}");
+        assert_eq!(status["state"], "dormant", "closed chat woke up as {status}");
+    }
+
+    /// A chat that stopped on a sign-in failure, and was not closed, still
+    /// says why it stopped.
+    #[tokio::test]
+    async fn a_stopped_chat_still_wears_its_sign_in_notice() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        db.create_session(saved("stopped")).await.unwrap();
+        db.append(sign_in_required()).await.unwrap();
+        let status = reconcile(&db, "chat", None).await.unwrap();
+        assert_eq!(status["state"], "stopped");
+        assert_eq!(status["label"], "Sign-in required");
     }
 
     /// Settles a real chat in a copy of a real database:
