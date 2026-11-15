@@ -740,6 +740,8 @@ export function rankCommands(commands: readonly CommandInfo[], typed: string): C
 
 /** Which command a line of the menu is, kept for drawing it. */
 const drawnCommands = new WeakMap<Completion, CommandInfo | 'pending'>();
+/** A line that writes something other than `/name`: what it writes. */
+const drawnNames = new WeakMap<Completion, string>();
 
 function commandOffer(command: CommandInfo): Completion {
   const written = '/' + command.name + ' ';
@@ -766,6 +768,44 @@ function pendingLine(): Completion {
   return line;
 }
 
+/** A slash word that starts at the beginning or after a space, up to the cursor. */
+const SLASH_AT_CURSOR = /(?:^|\s)\/(\S*)$/;
+
+/**
+ * A skill written as a reference: `@skill:id`, where the slash was. A `/skill:`
+ * command only runs at the start of a message, and a reference works anywhere
+ * in it, so a box whose text is read as a whole (a workflow stage's prompt)
+ * writes skills this way.
+ */
+function skillMention(command: CommandInfo, from: number): Completion {
+  const written = formatAtelierReference('skill', command.name.slice('skill:'.length)) + ' ';
+  const line: Completion = {
+    label: written.trim(),
+    type: 'command',
+    apply: (view: EditorView, _completion: Completion, _from: number, to: number) => {
+      view.dispatch({ changes: { from, to, insert: written }, selection: { anchor: from + written.length } });
+    },
+  };
+  drawnCommands.set(line, command);
+  drawnNames.set(line, written.trim());
+  return line;
+}
+
+/** The `/` menu of a box that writes skills as references: a slash anywhere. */
+function skillsAsMentions(feed: CommandFeed): CompletionSource {
+  return (context: CompletionContext): CompletionResult | null => {
+    const line = context.state.doc.lineAt(context.pos);
+    const typed = SLASH_AT_CURSOR.exec(line.text.slice(0, context.pos - line.from));
+    if (!typed) return null;
+    const from = context.pos - typed[1]!.length - 1;
+    const { commands } = feed.now();
+    const skills = commands.filter((command) => command.name.startsWith('skill:'));
+    const options = rankCommands(skills, typed[1]!).map((command) => skillMention(command, from));
+    if (!options.length) return null;
+    return { from, options, filter: false };
+  };
+}
+
 function commandsOffering(feed: CommandFeed): CompletionSource {
   return (context: CompletionContext): CompletionResult | null => {
     const typed = SLASH_WORD.exec(context.state.doc.toString());
@@ -779,7 +819,7 @@ function commandsOffering(feed: CommandFeed): CompletionSource {
 }
 
 /** One command as the menu draws it: the name, its argument, what it does. */
-function drawCommand(command: CommandInfo | 'pending'): HTMLElement {
+function drawCommand(command: CommandInfo | 'pending', shown?: string): HTMLElement {
   const row = document.createElement('span');
   if (command === 'pending') {
     row.setAttribute('data-testid', 'commands-pending');
@@ -793,7 +833,7 @@ function drawCommand(command: CommandInfo | 'pending'): HTMLElement {
   row.className = 'cm-commandRow';
   const name = row.appendChild(document.createElement('span'));
   name.className = 'cm-commandName';
-  name.textContent = '/' + command.name;
+  name.textContent = shown ?? '/' + command.name;
   if (command.argumentHint) {
     const hint = row.appendChild(document.createElement('span'));
     hint.className = 'cm-commandHint';
@@ -1146,11 +1186,13 @@ const followTheKeyboard = ViewPlugin.fromClass(
 export function mentionCompletions(
   placeOf: () => MentionPlace,
   commands: CommandFeed = commandFeed(),
+  { skillsAsReferences = false }: { skillsAsReferences?: boolean } = {},
 ): Extension {
   setReferenceAsker(askAboutNames(placeOf));
+  const slash = skillsAsReferences ? skillsAsMentions(commands) : commandsOffering(commands);
   return [
     autocompletion({
-      override: [commandsOffering(commands), offering(placeOf), auditedGrids(placeOf)],
+      override: [slash, offering(placeOf), auditedGrids(placeOf)],
       // The provider's own list can run past a hundred on its own (bw-zldt.1).
       maxRenderedOptions: 400,
       optionClass: (completion: Completion) => 'cm-completion-' + (completion.type ?? 'file'),
@@ -1173,7 +1215,7 @@ export function mentionCompletions(
           render: (completion: Completion) => {
             const command = drawnCommands.get(completion);
             if (command) {
-              const drawn = drawCommand(command);
+              const drawn = drawCommand(command, drawnNames.get(completion));
               nameTheMenu(drawn, 'command-menu');
               return drawn;
             }

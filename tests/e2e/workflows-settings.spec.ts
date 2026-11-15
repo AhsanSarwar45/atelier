@@ -134,8 +134,9 @@ test('stage prompts autocomplete skills and files like the chat box', async ({ p
   const menu = page.locator('.cm-tooltip-autocomplete');
   await writing.click();
   await page.keyboard.type('/ticket');
-  // The / menu draws a skill as the chat's does: its command and description.
-  await expect(menu).toContainText(`/skill:${SKILL_ID}`);
+  // The / menu draws a skill with its description, as the chat's does, and
+  // names the reference it writes.
+  await expect(menu).toContainText(`@skill:${SKILL_ID}`);
   await expect(menu).toContainText('Test a ticket in the browser.');
   await page.screenshot({ path: join(results, 'slash-menu.png') });
   // Past CodeMirror's pause before a fresh menu takes Enter.
@@ -147,8 +148,39 @@ test('stage prompts autocomplete skills and files like the chat box', async ({ p
   await page.keyboard.press('Enter');
   await save(page);
   const prompt: string = (await stored(request)).workflows.find((w) => w.id === 'demo-flow')!.stages[1].prompt;
-  expect(prompt).toContain(`/skill:${SKILL_ID}`);
+  expect(prompt).toContain(`@skill:${SKILL_ID}`);
   expect(prompt).toContain('README.md');
+});
+
+test('a skill picked anywhere in a stage prompt is written as @skill:', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await demo(request);
+  await openWorkflows(page);
+  await page.getByTestId('workflow-row-demo-flow').click();
+  const box = page.getByTestId('workflow-stage').nth(1).getByTestId('stage-prompt');
+  const writing = box.locator('.cm-content');
+  const menu = page.locator('.cm-tooltip-autocomplete');
+  await writing.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('Check the ticket with /ticket');
+  await expect(menu, 'no skill menu for a / in the middle of the prompt').toContainText(`@skill:${SKILL_ID}`);
+  await page.waitForTimeout(250);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('then report');
+  await save(page);
+  const prompt: string = (await stored(request)).workflows.find((w) => w.id === 'demo-flow')!.stages[1].prompt;
+  expect(prompt, 'the skill was not written as @skill:').toBe(`Check the ticket with @skill:${SKILL_ID} then report`);
+});
+
+test('an empty agent stage hints @ for skills', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await demo(request);
+  await openWorkflows(page);
+  await page.getByTestId('workflow-row-demo-flow').click();
+  await page.getByRole('button', { name: 'Add stage' }).click();
+  const placeholder = page.getByTestId('workflow-stage').last().getByTestId('stage-prompt').locator('.cm-placeholder');
+  await expect(placeholder, 'the hint still says / for skills').toHaveText('Describe the work. Type @ for skills and files');
 });
 
 test('reorders stages with the keyboard', async ({ page, request }) => {

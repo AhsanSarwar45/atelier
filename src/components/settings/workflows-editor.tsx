@@ -2,9 +2,10 @@
  * One workflow, edited: its trigger, the worktree each item gets, and the
  * stages an item moves through, drawn top to bottom as the flow they are.
  *
- * A stage's prompt is written in the chat's own box, so `/` offers the
- * library's skills and `@` the project's files, skills, tasks and chats,
- * exactly as they do in a chat.
+ * A stage's prompt is written in the chat's own box, so `@` offers the
+ * project's files, skills, tasks and chats as it does in a chat. `/` offers
+ * the library's skills too, but writes each as `@skill:id`: a prompt is read
+ * as a whole, and a `/skill:` command only runs at the start of a message.
  */
 'use client';
 
@@ -44,7 +45,7 @@ import { RunDialog, RunsList, useWorkflowRuns } from './workflow-runs';
 import { NEW_WORKFLOW, slugOf, stageCount, triggerSummary, type Stage, type StageAuto, type StageKind, type Workflow } from './workflows-settings';
 
 const KINDS: { value: StageKind; label: string; icon: typeof Bot; prompt: string; placeholder: string }[] = [
-  { value: 'agent', label: 'Agent', icon: Bot, prompt: 'Prompt', placeholder: 'Describe the work. Type / for skills, @ for files' },
+  { value: 'agent', label: 'Agent', icon: Bot, prompt: 'Prompt', placeholder: 'Describe the work. Type @ for skills and files' },
   { value: 'command', label: 'Command', icon: SquareTerminal, prompt: 'Command', placeholder: 'Shell command to run' },
   { value: 'wait', label: 'Wait', icon: Hourglass, prompt: 'Check', placeholder: 'Command that prints the current status' },
   { value: 'approval', label: 'Approval', icon: UserCheck, prompt: 'Message', placeholder: 'What to ask before continuing' },
@@ -103,11 +104,12 @@ export function WorkflowEditor({ id, workflows, commands, projectId, projectPath
   const editStage = (stageId: string, change: Partial<Stage>) =>
     edit((w) => ({ ...w, stages: w.stages.map((s) => (s.id === stageId ? { ...s, ...change } : s)) }));
 
-  // One `/` and `@` menu for every stage's box, fed the library's skills.
+  // One `/` and `@` menu for every stage's box, fed the library's skills;
+  // `/` writes a skill as a reference, which works anywhere in the prompt.
   const feed = useMemo(() => commandFeed(), []);
   useEffect(() => feed.set({ commands, pending: false }), [feed, commands]);
   const completions = useMemo(
-    () => mentionCompletions(() => ({ cwd: projectPath, project: projectPath, projectId: null, session: null }), feed),
+    () => mentionCompletions(() => ({ cwd: projectPath, project: projectPath, projectId: null, session: null }), feed, { skillsAsReferences: true }),
     [feed, projectPath],
   );
   const describe = useDescribeReference(commands);
