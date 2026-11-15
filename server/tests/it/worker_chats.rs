@@ -461,3 +461,89 @@ async fn workers_on_an_unknown_provider_are_refused() {
     let workers = workers_of(&fixture, "plain").await;
     assert!(workers.is_null(), "workers on an unknown provider were saved anyway: {workers}");
 }
+
+/// Mark chat `id` as in the middle of a turn, as a running reply does.
+async fn mid_turn(fixture: &Fixture, id: &str) {
+    let patch = SessionPatch { state: Some("streaming".into()), ..Default::default() };
+    fixture.state.database().update_session(id.to_string(), patch, None).await.unwrap();
+}
+
+#[tokio::test]
+async fn send_now_interrupts_a_worker_mid_turn() {
+    let fixture = fixture().await;
+    let worker = started(&fixture, "orch-a", "login form").await;
+    mid_turn(&fixture, &worker).await;
+    let (status, answer) = ask(&fixture, json!({"action": "send", "session": "orch-a", "worker": worker, "text": "Stop, use the other form.", "now": true})).await;
+    assert_eq!(status, 200, "send --now answered {status}: {answer}");
+    assert_eq!(answer["delivery"], "interrupted", "send --now did not say it interrupted the worker: {answer}");
+    let interrupts = sent(&fixture, "SessionInterrupt", &worker).await;
+    assert!(!interrupts.is_empty(), "send --now did not interrupt the worker's turn");
+}
+
+#[tokio::test]
+async fn a_message_to_a_worker_mid_turn_is_queued_and_says_so() {
+    let fixture = fixture().await;
+    let worker = started(&fixture, "orch-a", "login form").await;
+    mid_turn(&fixture, &worker).await;
+    let (status, answer) = ask(&fixture, json!({"action": "send", "session": "orch-a", "worker": worker, "text": "Also add a test."})).await;
+    assert_eq!(status, 200, "send answered {status}: {answer}");
+    assert_eq!(answer["delivery"], "queued", "send did not say the message was queued: {answer}");
+    assert!(
+        answer["note"].as_str().unwrap_or_default().contains("--now"),
+        "send did not say how to interrupt instead: {answer}"
+    );
+    assert!(sent(&fixture, "SessionInterrupt", &worker).await.is_empty(), "a queued message interrupted the worker");
+}
+
+#[tokio::test]
+async fn worker_models_are_what_that_account_offered_last() {
+    let fixture = fixture().await;
+    let database = fixture.state.database();
+    database
+        .create_session(chat("codex-chat", &fixture.folder, json!({"brand": "codex", "profile": "work-account"})))
+        .await
+        .unwrap();
+    let menu = serde_json::from_value(json!({
+        "type": "session.menu", "sessionId": "codex-chat", "at": "2026-11-14T00:00:00.000Z",
+        "models": [{"value": "gpt-a", "label": "GPT A"}, {"value": "gpt-b", "label": "GPT B"}],
+        "efforts": [{"value": "low", "label": "Low"}, {"value": "high", "label": "High"}],
+    }))
+    .unwrap();
+    database.append(menu).await.unwrap();
+    let (status, answer) = command(
+        &fixture,
+        json!({"type": "workers.models", "sessionId": "orch-a", "brand": "codex", "profileId": "work-account"}),
+    )
+    .await;
+    assert_eq!(status, 200, "the worker models were not offered: the command answered {status}: {answer}");
+    let models: Vec<&str> = answer["models"].as_array().into_iter().flatten().filter_map(|m| m["value"].as_str()).collect();
+    assert_eq!(models, ["gpt-a", "gpt-b"], "the worker models were not offered: {answer}");
+    let efforts: Vec<&str> = answer["efforts"].as_array().into_iter().flatten().filter_map(|m| m["value"].as_str()).collect();
+    assert_eq!(efforts, ["low", "high"], "the worker efforts were not offered: {answer}");
+}
+
+#[tokio::test]
+async fn a_worker_starts_on_the_model_and_effort_chosen_in_the_chat_bar() {
+    let fixture = fixture().await;
+    let (status, answer) = command(
+        &fixture,
+        json!({"type": "session.workers", "sessionId": "plain", "workers": {"brand": "codex", "profileId": "work-account", "model": "gpt-b", "effort": "high"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "the workers choice was not saved: {status} {answer}");
+    let worker = started(&fixture, "plain", "login form").await;
+    let starts = sent(&fixture, "SessionStart", &worker).await;
+    let start = starts.first().unwrap_or_else(|| panic!("no chat was started for worker {worker}"));
+    assert_eq!(start["model"], "gpt-b", "the worker did not start on the chosen model: {start}");
+    assert_eq!(start["effort"], "high", "the worker did not start at the chosen effort: {start}");
+}
+
+#[tokio::test]
+async fn send_now_to_an_idle_worker_just_sends() {
+    let fixture = fixture().await;
+    let worker = started(&fixture, "orch-a", "login form").await;
+    let (status, answer) = ask(&fixture, json!({"action": "send", "session": "orch-a", "worker": worker, "text": "Next, the signup form.", "now": true})).await;
+    assert_eq!(status, 200, "send --now answered {status}: {answer}");
+    assert_eq!(answer["delivery"], "sent", "send --now to an idle worker did not say it was sent: {answer}");
+    assert!(sent(&fixture, "SessionInterrupt", &worker).await.is_empty(), "an idle worker was interrupted");
+}

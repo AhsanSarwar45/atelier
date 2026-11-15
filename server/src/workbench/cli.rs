@@ -203,12 +203,14 @@ pub async fn chat(rest: &[String]) -> Result<i32, String> {
 
 const WORKER_USAGE: &str = "usage:
   atelier tool worker start --title TITLE [--brief FILE | --text TEXT]   brief from stdin when neither is given
-  atelier tool worker send ID [--message FILE | --text TEXT]             message from stdin when neither is given
+  atelier tool worker send ID [--now] [--message FILE | --text TEXT]     message from stdin when neither is given
   atelier tool worker list
   atelier tool worker read ID [--all]
   atelier tool worker stop ID
 
 Workers run on the provider and account the owner chose for this chat.
+A message to a worker mid-turn waits until that turn ends; --now interrupts the
+turn and the message goes next. stop ends the worker's turn without a message.
 After start or send, end your turn: Atelier tells you when the worker's turn ends.
 ";
 
@@ -240,14 +242,25 @@ pub async fn worker(rest: &[String]) -> Result<i32, String> {
     }
     let session = std::env::var("ATELIER_CHAT_SESSION_ID")
         .map_err(|_| "atelier tool worker runs inside an Atelier chat (ATELIER_CHAT_SESSION_ID is not set)".to_string())?;
-    let id = || rest.get(1).filter(|word| !word.starts_with("--")).cloned().ok_or_else(|| WORKER_USAGE.to_string());
+    // The chat ID follows the action; a switch such as --now may come first.
+    let id = || {
+        rest.iter()
+            .skip(1)
+            .find(|word| !matches!(word.as_str(), "--now" | "--all"))
+            .filter(|word| !word.starts_with("--"))
+            .cloned()
+            .ok_or_else(|| WORKER_USAGE.to_string())
+    };
     let body = match action {
         "start" => serde_json::json!({
             "action": "start", "session": session,
             "title": flag(rest, "--title").ok_or_else(|| WORKER_USAGE.to_string())?,
             "text": worker_text(rest, "--brief")?,
         }),
-        "send" => serde_json::json!({"action": "send", "session": session, "worker": id()?, "text": worker_text(rest, "--message")?}),
+        "send" => serde_json::json!({
+            "action": "send", "session": session, "worker": id()?,
+            "text": worker_text(rest, "--message")?, "now": rest.iter().any(|w| w == "--now"),
+        }),
         "list" => serde_json::json!({"action": "list", "session": session}),
         "read" => serde_json::json!({"action": "read", "session": session, "worker": id()?, "all": rest.iter().any(|w| w == "--all")}),
         "stop" => serde_json::json!({"action": "stop", "session": session, "worker": id()?}),
@@ -269,7 +282,17 @@ pub async fn worker(rest: &[String]) -> Result<i32, String> {
             "Started worker {}. End your turn; Atelier tells you when its turn ends.",
             value["workerId"].as_str().unwrap_or_default()
         ),
-        "send" => println!("Sent. End your turn; Atelier tells you when the worker's turn ends."),
+        "send" => {
+            let said = match value["delivery"].as_str() {
+                Some("queued") => "Queued",
+                Some("interrupted") => "Interrupted",
+                _ => "Sent",
+            };
+            println!("{said}. End your turn; Atelier tells you when the worker's turn ends.");
+            if let Some(note) = value["note"].as_str() {
+                println!("{note}");
+            }
+        }
         "list" => {
             let workers = value["workers"].as_array().cloned().unwrap_or_default();
             if workers.is_empty() {

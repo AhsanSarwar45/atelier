@@ -84,6 +84,49 @@ test('the chat bar Workers setting chooses none or a provider and account', asyn
   }
 });
 
+test('the worker model and effort are chosen in the chat bar before any worker starts', async ({ page, request }) => {
+  const made = await project(request, 'workers-model');
+  const started: string[] = [];
+  try {
+    // A Codex chat in the project, so Atelier knows what Codex offers.
+    const codex = await command(request, {
+      type: 'session.start', brand: 'codex', projectId: made.id, projectPath: made.path, title: 'A Codex chat',
+    });
+    started.push(codex.id as string);
+    await page.goto(`/project?id=${made.id}&tab=chat&chat=${codex.id}`);
+    await expect(page.getByTestId('model-picker')).toBeVisible({ timeout: 60_000 });
+
+    const chat = await command(request, {
+      type: 'session.start', brand: 'claude', projectId: made.id, projectPath: made.path, title: 'Plan the login work',
+    });
+    started.push(chat.id as string);
+    await page.goto(`/project?id=${made.id}&tab=chat&chat=${chat.id}`);
+    // With no workers there is no worker model to choose.
+    await expect(page.getByTestId('workers-model-picker'), 'a worker model is offered with workers off').toHaveCount(0);
+    await page.getByTestId('workers-picker').click();
+    await page.locator('[data-testid="workers-picker-option"][data-value^="codex:"]').first().click();
+
+    const model = page.getByTestId('workers-model-picker');
+    await expect(model).toHaveAttribute('data-current', 'default');
+    await model.click();
+    const offered = page.locator('[data-testid="workers-model-picker-option"]:not([data-value="default"])');
+    await expect(offered.first(), 'no Codex model is offered for workers').toBeVisible();
+    const picked = await offered.first().getAttribute('data-value');
+    await offered.first().click();
+    await expect(model).toHaveAttribute('data-current', picked!);
+    await expect(page.getByTestId('workers-effort-picker')).toBeVisible();
+    await page.getByTestId('desktop-composer-settings').screenshot({ path: `${SHOTS}/worker-model-after.png` });
+
+    // Kept on the chat with the provider and account.
+    await page.reload();
+    await expect(page.getByTestId('workers-model-picker')).toHaveAttribute('data-current', picked!);
+  } finally {
+    for (const sessionId of started) await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId } });
+    await request.delete(`/api/projects/${made.id}`);
+    rmSync(made.path, { recursive: true, force: true });
+  }
+});
+
 test('the Workers setting works from the keyboard', async ({ page, request }) => {
   const made = await project(request, 'workers-keyboard');
   const started: string[] = [];
@@ -190,6 +233,54 @@ test('the Workers setting fits a phone screen', async ({ page, request }) => {
     expect(box && box.x >= 0 && box.x + box.width <= 390, `the Workers setting runs off the screen: ${JSON.stringify(box)}`).toBe(true);
     const spills = await settings.evaluate((el) => el.scrollWidth > el.clientWidth);
     expect(spills, 'the chat settings scroll sideways').toBe(false);
+  } finally {
+    for (const sessionId of started) await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId } });
+    await request.delete(`/api/projects/${made.id}`);
+    rmSync(made.path, { recursive: true, force: true });
+  }
+});
+
+test('the worker model setting fits a phone screen and works from the keyboard', async ({ page, request }) => {
+  const made = await project(request, 'workers-model-phone');
+  const started: string[] = [];
+  try {
+    const codex = await command(request, {
+      type: 'session.start', brand: 'codex', projectId: made.id, projectPath: made.path, title: 'A Codex chat',
+    });
+    started.push(codex.id as string);
+    await page.goto(`/project?id=${made.id}&tab=chat&chat=${codex.id}`);
+    await expect(page.getByTestId('model-picker')).toBeVisible({ timeout: 60_000 });
+    const chat = await command(request, {
+      type: 'session.start', brand: 'claude', projectId: made.id, projectPath: made.path, title: 'Phone chat',
+    });
+    started.push(chat.id as string);
+    await command(request, { type: 'session.workers', sessionId: chat.id, workers: { brand: 'codex', profileId: 'system' } });
+
+    // Keyboard: open the worker model menu and choose a model with Enter.
+    await page.goto(`/project?id=${made.id}&tab=chat&chat=${chat.id}`);
+    const model = page.getByTestId('workers-model-picker');
+    await model.focus();
+    await page.keyboard.press('Enter');
+    const offered = page.locator('[data-testid="workers-model-picker-option"]:not([data-value="default"])').first();
+    await expect(offered).toBeVisible();
+    const picked = await offered.getAttribute('data-value');
+    await offered.focus();
+    await page.keyboard.press('Enter');
+    await expect(model).toHaveAttribute('data-current', picked!);
+
+    // Phone: the worker model and effort sit inside the screen.
+    // Opened afresh at phone width, as a phone opens it: the desktop's open
+    // side panel would otherwise become a sheet over the chat.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/project?id=${made.id}&tab=chat&chat=${chat.id}`);
+    await page.getByTestId('mobile-composer-settings').click();
+    const settings = page.getByTestId('mobile-composer-settings-dialog');
+    for (const testid of ['mobile-workers-model-picker', 'mobile-workers-effort-picker']) {
+      const box = await settings.getByTestId(testid).boundingBox();
+      expect(box && box.x >= 0 && box.x + box.width <= 390, `${testid} runs off the screen: ${JSON.stringify(box)}`).toBe(true);
+    }
+    expect(await settings.evaluate((el) => el.scrollWidth > el.clientWidth), 'the chat settings scroll sideways').toBe(false);
+    await settings.screenshot({ path: `${SHOTS}/worker-model-phone-after.png` });
   } finally {
     for (const sessionId of started) await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId } });
     await request.delete(`/api/projects/${made.id}`);

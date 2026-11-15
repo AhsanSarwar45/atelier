@@ -2070,6 +2070,25 @@ fn held_in_its_project(
         }))
     }
 
+    /// The models and efforts a provider account last offered, for a chat
+    /// choosing what its workers start on: what it offered in this project
+    /// if it has run here, else what it offered most recently anywhere.
+    pub fn account_catalogue(&self, brand: &str, profile: &str, project_id: &str, project_path: &str) -> rusqlite::Result<Option<Value>> {
+        self.connection
+            .query_row(
+                "SELECT json FROM provider_catalogue WHERE brand = ?1 AND profile = ?2
+                 ORDER BY (project_id = ?3 AND project_path = ?4) DESC, at DESC LIMIT 1",
+                params![brand, profile, project_id, project_path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|json| serde_json::from_str::<Value>(&json).map_err(json_error))
+            .transpose()
+            .map(|catalogue| {
+                catalogue.map(|catalogue| json!({"models": catalogue["models"], "efforts": catalogue["efforts"]}))
+            })
+    }
+
     fn stored_catalogue(&self, session: &Session) -> rusqlite::Result<Option<Value>> {
         self.connection
             .query_row(

@@ -80,7 +80,7 @@ import { usePathsOnDisk, type Disk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessionWhere, usePlanUsage, useRunningElsewhere, useRunningSaidAt } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, sentAway, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, HeldMessage, ImagePayload, LookableImage, OnLook, ProfileChoice, SessionConfigOption, WorkersChoice } from '@/workbench/protocol';
+import type { Brand, EffortChoice, HeldMessage, ImagePayload, LookableImage, ModelChoice, OnLook, ProfileChoice, SessionConfigOption, WorkersChoice } from '@/workbench/protocol';
 import { SYSTEM_PROFILE } from '@/workbench/protocol';
 import { opens } from '@/workbench/attachment-look';
 
@@ -434,7 +434,7 @@ export function Picker({
             className="gap-1.5 text-muted-foreground hover:text-foreground"
           >
             {icon}
-            <span className="max-w-[18ch] truncate">{shown}</span>
+            <span className="max-w-[30ch] truncate">{shown}</span>
           </Button>
         </Tooltip>
       </DropdownMenuTrigger>
@@ -571,6 +571,7 @@ export function WorkersPicker({
   }
   const current = choice ? `${choice.brand}:${choice.profileId ?? SYSTEM_PROFILE}` : 'none';
   return (
+    <>
     <Picker
       icon={choice ? <BrandIcon brand={choice.brand} className={iconSize} /> : <Users className={iconSize} />}
       label="Workers"
@@ -588,6 +589,84 @@ export function WorkersPicker({
         );
       }}
     />
+    {choice && <WorkerModelPickers sessionId={sessionId} choice={choice} asleep={asleep} mobile={mobile} onError={onError} />}
+    </>
+  );
+}
+
+/**
+ * The model and effort a chat's workers start on, from what that provider
+ * account offered last. Default leaves it to the account's own default.
+ */
+function WorkerModelPickers({
+  sessionId,
+  choice,
+  asleep,
+  mobile,
+  onError,
+}: {
+  sessionId: string;
+  choice: WorkersChoice;
+  asleep: boolean;
+  mobile: boolean;
+  onError: (message: string | null) => void;
+}) {
+  const [offered, setOffered] = useState<{ models: ModelChoice[]; efforts: EffortChoice[] }>({ models: [], efforts: [] });
+  const { brand, profileId } = choice;
+  useEffect(() => {
+    let current = true;
+    sendCommand<{ models?: ModelChoice[]; efforts?: EffortChoice[] }>({ type: 'workers.models', sessionId, brand, profileId })
+      .then((answer) => {
+        if (current) setOffered({ models: answer.models ?? [], efforts: answer.efforts ?? [] });
+      })
+      .catch(() => {
+        if (current) setOffered({ models: [], efforts: [] });
+      });
+    return () => {
+      current = false;
+    };
+  }, [sessionId, brand, profileId]);
+  const iconSize = mobile ? 'h-4 w-4' : 'h-3.5 w-3.5';
+  const prefix = mobile ? 'mobile-' : '';
+  const save = (change: Partial<WorkersChoice>) => {
+    onError(null);
+    void sendCommand({ type: 'session.workers', sessionId, workers: { ...choice, ...change } }).catch((error: unknown) =>
+      onError(error instanceof Error ? error.message : String(error)),
+    );
+  };
+  const models = [
+    { value: 'default', label: 'Default' },
+    ...offered.models.map((m) => ({ value: m.value, label: modelName(m.value, m.displayName) ?? m.displayName, hint: m.description })),
+  ];
+  const efforts = [
+    { value: 'default', label: 'Default' },
+    ...offered.efforts.map((effort) => ({ value: effort.value, label: effort.displayName, hint: effort.description })),
+  ];
+  const modelLabel = models.find((m) => m.value === (choice.model ?? 'default'))?.label ?? choice.model ?? 'Default';
+  const effortLabel = efforts.find((e) => e.value === (choice.effort ?? 'default'))?.label ?? choice.effort ?? 'Default';
+  return (
+    <>
+      <Picker
+        icon={<ModelIcon brand={brand} model={choice.model ?? null} className={iconSize} />}
+        label="Worker model"
+        testid={`${prefix}workers-model-picker`}
+        current={choice.model ?? 'default'}
+        buttonLabel={`Worker model: ${modelLabel}`}
+        asleep={asleep}
+        options={models}
+        onPick={(value) => save({ model: value === 'default' ? null : value })}
+      />
+      <Picker
+        icon={<Gauge className={iconSize} />}
+        label="Worker effort"
+        testid={`${prefix}workers-effort-picker`}
+        current={choice.effort ?? 'default'}
+        buttonLabel={`Worker effort: ${effortLabel}`}
+        asleep={asleep}
+        options={efforts}
+        onPick={(value) => save({ effort: value === 'default' ? null : value })}
+      />
+    </>
   );
 }
 
@@ -614,14 +693,20 @@ export function SessionConfigPickers({
     const current = String(option.currentValue);
     const choices = configOptionChoices(option);
     const testName = option.id.replace(/[^a-zA-Z0-9_-]+/g, '-');
+    const name = option.name || inWords(option.id);
+    // A value alone ("Disabled", "Default") does not say what it is the value
+    // of, so the button names the setting too, as "Auto-approve off" does.
+    const value = option.type === 'boolean'
+      ? (option.currentValue ? 'on' : 'off')
+      : choices.find((choice) => choice.value === current)?.label ?? current;
     return (
       <Picker
         key={option.id}
         icon={<SlidersHorizontal className={mobile ? 'h-4 w-4' : 'h-3.5 w-3.5'} />}
-        label={option.name || inWords(option.id)}
+        label={name}
         testid={`${mobile ? 'mobile-' : ''}config-${testName}-picker`}
         current={current}
-        currentLabel={option.type === 'boolean' ? (option.currentValue ? 'Enabled' : 'Disabled') : current}
+        buttonLabel={option.type === 'boolean' ? `${name} ${value}` : `${name}: ${value}`}
         asleep={asleep}
         options={choices}
         onPick={(selected) => {

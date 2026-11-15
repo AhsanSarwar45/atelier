@@ -1273,6 +1273,8 @@ export type WbpCommand =
    */
   | { type: 'session.auto-approve'; sessionId: string; on: boolean }
   | { type: 'session.workers'; sessionId: string; workers: WorkersChoice | null }
+  /** What an account offered last, for the models a chat's workers start on. */
+  | { type: 'workers.models'; sessionId: string; brand: Brand; profileId?: string | null }
   | { type: 'session.model'; sessionId: string; model: string }
   | { type: 'session.effort'; sessionId: string; effort: string }
   /** A `brand` other than the chat's own moves the chat to that provider. */

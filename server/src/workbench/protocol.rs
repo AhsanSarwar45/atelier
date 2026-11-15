@@ -99,6 +99,7 @@ wire_kinds!(CommandKind {
     SessionMode => "session.mode",
     SessionAutoApprove => "session.auto-approve",
     SessionWorkers => "session.workers",
+    WorkersModels => "workers.models",
     SessionModel => "session.model",
     SessionEffort => "session.effort",
     SessionProfile => "session.profile",

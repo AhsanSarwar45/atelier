@@ -412,6 +412,9 @@ impl ChatDb {
     pub async fn account_handoff(&self, id: String) -> Result<String, String> {
         self.read(move |store, _| store.account_handoff(&id)).await
     }
+    pub async fn account_catalogue(&self, brand: String, profile: String, project_id: String, project_path: String) -> Result<Option<serde_json::Value>, String> {
+        self.read(move |store, _| store.account_catalogue(&brand, &profile, &project_id, &project_path)).await
+    }
     pub async fn chat_text(&self, id: String) -> Result<String, String> {
         self.read(move |store, _| store.chat_text(&id)).await
     }

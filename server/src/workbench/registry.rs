@@ -1494,6 +1494,33 @@ impl WorkbenchRegistry {
     /// agent is let go so its next message reconnects with the orchestrator
     /// role (or without it); the conversation is kept. A busy one picks it up
     /// on its next connection.
+    /// What a chat's workers could start on: the models and efforts the
+    /// chosen provider account offered last, in this chat's project if it has
+    /// run there. Empty lists when that account has never run.
+    async fn worker_models(&self, command: &Command) -> Result<Value, String> {
+        let session_id = Self::field(command, "sessionId")?;
+        let session = self
+            .database
+            .get_session(session_id.to_string())
+            .await?
+            .ok_or_else(|| format!("session {session_id} does not exist"))?;
+        let brand = Self::field(command, "brand")?.to_string();
+        let profile = Self::maybe(command, "profileId")
+            .filter(|id| *id != super::profiles::SYSTEM)
+            .unwrap_or_default()
+            .to_string();
+        let catalogue = self
+            .database
+            .account_catalogue(brand, profile, session.project_id, session.project_path)
+            .await?
+            .unwrap_or(Value::Null);
+        let list = |field: &str| match &catalogue[field] {
+            Value::Array(items) => Value::Array(items.clone()),
+            _ => json!([]),
+        };
+        Ok(json!({"models": list("models"), "efforts": list("efforts")}))
+    }
+
     async fn set_workers(&self, command: &Command) -> Result<Value, String> {
         let session_id = Self::field(command, "sessionId")?;
         let session = self
@@ -2765,6 +2792,7 @@ impl WorkbenchRegistry {
             // Saved by the app whether or not the agent is running; it is not
             // the agent's setting (docs/designs/orchestrator-workers.md).
             CommandKind::SessionWorkers => self.set_workers(command).await,
+            CommandKind::WorkersModels => self.worker_models(command).await,
             // A window opened before auto-approve became its own setting can
             // still offer the old mode. Pinning it would leave the chat in a
             // mode no provider has and nothing answering (bw-q8ehk.1).

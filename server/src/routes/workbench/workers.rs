@@ -3,7 +3,7 @@
 //! (docs/designs/orchestrator-workers.md). `atelier tool worker` is the
 //! agent's way in; the calling chat is named in every request.
 
-use super::tell::tell_chat;
+use super::tell::{tell_chat, Delivery};
 use super::{ApiError, WorkbenchState};
 use crate::workbench::protocol::{Command, CommandKind};
 use crate::workbench::status::is_mid_turn;
@@ -25,6 +25,9 @@ pub(super) struct Ask {
     text: Option<String>,
     #[serde(default)]
     all: bool,
+    /// Interrupt the worker's turn so the message goes in now.
+    #[serde(default)]
+    now: bool,
 }
 
 pub(super) async fn act(State(state): State<WorkbenchState>, Json(ask): Json<Ask>) -> Result<Json<Value>, ApiError> {
@@ -134,8 +137,38 @@ async fn send(state: &WorkbenchState, orchestrator: &Session, ask: &Ask) -> Resu
     let worker = own_worker(state, orchestrator, ask.worker.as_deref()).await?;
     let text = words(&ask.text, "message")?;
     folder_is_free(state, orchestrator, Some(&worker.id)).await?;
-    tell_chat(state, &worker.id, text.to_string()).await;
-    Ok(Json(json!({"ok": true, "workerId": worker.id})))
+    let busy = state.registry.mid_turn(&worker.id).await.unwrap_or(false);
+    if ask.now && busy {
+        // A send into a turn is held and pushed through at once, as the
+        // owner's Send now is: the turn is interrupted and the message goes next.
+        let fields = serde_json::Map::from_iter([
+            ("sessionId".into(), json!(worker.id)),
+            ("text".into(), json!(text)),
+            ("images".into(), json!([])),
+        ]);
+        match state.registry.execute(&Command { kind: CommandKind::PromptSend, fields }).await {
+            Ok(_) => {
+                state.publish_holds().await;
+                return Ok(Json(json!({
+                    "ok": true, "workerId": worker.id, "delivery": "interrupted",
+                    "note": "The worker's turn was interrupted; it reads your message next.",
+                })));
+            }
+            Err(error) => tracing::warn!(chat = worker.id, %error, "a worker could not be interrupted"),
+        }
+    }
+    let delivery = tell_chat(state, &worker.id, text.to_string()).await;
+    state.publish_holds().await;
+    Ok(Json(match delivery {
+        Delivery::Sent => json!({"ok": true, "workerId": worker.id, "delivery": "sent"}),
+        Delivery::Queued => json!({
+            "ok": true, "workerId": worker.id, "delivery": "queued",
+            "note": format!(
+                "The worker is mid-turn, so the message waits until its turn ends. To interrupt it instead: atelier tool worker send {} --now",
+                worker.id
+            ),
+        }),
+    }))
 }
 
 async fn list(state: &WorkbenchState, orchestrator: &Session) -> Result<Json<Value>, ApiError> {

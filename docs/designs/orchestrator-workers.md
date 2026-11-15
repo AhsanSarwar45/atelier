@@ -52,7 +52,12 @@ sequenceDiagram
   `workers` on `Session` (`server/src/workbench/store.rs`) holds
   `{brand, profile_id, model?, effort?}`. A chat with this field set is an
   orchestrator. It is set by `session.start` and can be changed later from
-  the chat's settings, in the same place as model and effort.
+  the chat's settings, in the same place as model and effort. While Workers is
+  on, the chat bar also shows Worker model and Worker effort. They list
+  Default first, then what that provider account offered last
+  (`workers.models`, read from the stored provider catalogue: this project
+  first, else the account's latest anywhere). Picking another provider or
+  account clears them.
 - **Worker chats link to their orchestrator.** A new optional field
   `parent_session_id` on `Session`. A worker keeps `begun_by = "person"` so it
   stays visible; `"agent"` chats are hidden from the sidebar
@@ -73,7 +78,7 @@ A new `atelier tool worker` command, added beside `chat` and `present` in
 | Command | What it does |
 |---|---|
 | `worker start --title T [--brief FILE]` | Starts a worker chat in the orchestrator's folder; the brief is read from the file or standard input and sent as the first message. Prints the worker's chat ID. |
-| `worker send ID [--message FILE]` | Sends the next instruction. If the worker is mid-turn, the message is held and sent when the turn ends. |
+| `worker send ID [--now] [--message FILE]` | Sends the next instruction. If the worker is mid-turn, the message is held and sent when the turn ends, and the reply says Queued with a hint to use `--now`. With `--now`, a worker mid-turn is interrupted and the message goes next, the same as the owner's Send now; the reply says Interrupted. |
 | `worker list` | This orchestrator's workers: title, state, turn count, last activity. |
 | `worker read ID [--all]` | The worker's last reply, or its whole transcript, as text (reuses the `@chat:` text export). |
 | `worker stop ID` | Stops the worker's turn. |
