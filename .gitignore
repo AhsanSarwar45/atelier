@@ -118,3 +118,4 @@ worktrees/
 # scripts/build-file-icons.mjs on every install. Generated, so not kept here;
 # the pruned manifest beside them (src/components/file-icons.ts) IS kept.
 /public/file-icons/
+/.e2e-build.lock

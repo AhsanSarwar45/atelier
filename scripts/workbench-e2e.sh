@@ -115,8 +115,13 @@ if [ -z "${ATELIER_BINARY:-}" ]; then
   # Build both halves, in their actual packaging order, every time this harness
   # owns the executable. An explicit ATELIER_BINARY remains an explicit choice
   # to test exactly that already-packaged artifact.
-  npm run build
-  cargo build --manifest-path "$ROOT/server/Cargo.toml"
+  # Runs started side by side share `.next/`, `out/` and the Cargo target, so
+  # one build deleting files another is reading fails both. Build one at a time.
+  (
+    flock 9
+    npm run build
+    cargo build --manifest-path "$ROOT/server/Cargo.toml"
+  ) 9>"$ROOT/.e2e-build.lock"
 fi
 SERVER_BINARY="${ATELIER_BINARY:-${CARGO_TARGET_DIR:-$ROOT/server/target}/debug/atelier}"
 [ -x "$SERVER_BINARY" ] || { echo "no Atelier binary at $SERVER_BINARY"; exit 1; }
