@@ -3482,6 +3482,11 @@ async fn command(
         _ => false,
     };
     let reply = state.registry.execute(&command).await?;
+    if command.kind == CommandKind::SessionStop {
+        if let Some(session) = command.fields.get("sessionId").and_then(Value::as_str) {
+            workflow_runs::stopped_by_owner(&state, session).await;
+        }
+    }
     // The one moment a login changes under the app's feet. Whatever was read
     // on the old one is now wrong, and the chats that failed on it are waiting.
     if matches!(

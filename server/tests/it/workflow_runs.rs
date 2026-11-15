@@ -85,7 +85,7 @@ impl SessionFactory for Provider {
 }
 
 struct Fixture {
-    _directory: tempfile::TempDir,
+    _directory: Arc<tempfile::TempDir>,
     state: WorkbenchState,
     seen: Seen,
     repo: String,
@@ -114,6 +114,12 @@ async fn fixture() -> Fixture {
     git(&repo, &["branch", "staging"]);
     project_manifest::create(std::path::Path::new(&repo), directory.path(), ManifestStorage::Repository,
         &project_manifest::named("Run test")).unwrap();
+    boot(Arc::new(directory), repo)
+}
+
+/// The app started on `directory`'s data: a fresh registry with no agent
+/// running, over the database a run left behind.
+fn boot(directory: Arc<tempfile::TempDir>, repo: String) -> Fixture {
     let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
     let paths = RegistryPaths {
         home: directory.path().to_path_buf(),
@@ -126,6 +132,12 @@ async fn fixture() -> Fixture {
     let registry = WorkbenchRegistry::new(database, paths, Arc::new(Provider { seen: seen.clone() }));
     let state = WorkbenchState::new(registry);
     Fixture { _directory: directory, state, seen, repo }
+}
+
+/// The computer shut down and came back: every agent process is gone, and
+/// the app starts again on the same data.
+fn restart(fixture: &Fixture) -> Fixture {
+    boot(fixture._directory.clone(), fixture.repo.clone())
 }
 
 fn off() -> Value {
@@ -976,4 +988,117 @@ async fn a_continued_run_waits_for_a_free_slot_ahead_of_new_items() {
     assert_eq!(resumed["status"], "running", "the continued run did not take the freed slot first: {resumed}");
     let third = run_where(&fixture, &body["runs"][2]["id"], |run| run["status"] == "queued").await;
     assert_eq!(third["status"], "queued", "a new item went ahead of the continued run: {third}");
+}
+
+// --- A run whose chat stopped while it worked ---
+
+/// The run `id` as the app lists it now.
+async fn run_now(fixture: &Fixture, id: &Value) -> Value {
+    runs(fixture).await.into_iter().find(|run| &run["id"] == id).unwrap_or(Value::Null)
+}
+
+#[tokio::test]
+async fn after_a_restart_a_working_agent_stage_is_sent_again() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(40)).await;
+    let id = session(&run);
+    told_more(&fixture, &id, 0).await;
+    let after = restart(&fixture);
+    act(&after, json!({"action": "tick"})).await;
+    let prompts = told_more(&after, &id, 0).await;
+    assert!(
+        prompts.iter().any(|prompt| prompt.contains("Work on KEY-40")),
+        "after a restart the stopped chat was not sent its stage again: {prompts:?}"
+    );
+    let now = run_now(&after, &run["id"]).await;
+    assert_eq!((now["status"].as_str(), now["stage"].as_str()), (Some("running"), Some("implement")), "the run moved: {now}");
+    assert_eq!(now["attempts"]["implement"], 2, "the stage sent again is not counted as an attempt: {now}");
+}
+
+#[tokio::test]
+async fn after_a_restart_an_outcome_reported_before_it_is_followed() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(41)).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "done", json!({"outcome": "done"})).await;
+    assert_eq!(code, 200, "workflow done failed: {body}");
+    let after = restart(&fixture);
+    act(&after, json!({"action": "tick"})).await;
+    let moved = run_where(&after, &run["id"], |run| run["stage"] == "qa").await;
+    assert_eq!(moved["stage"], "qa", "after a restart the reported outcome was not followed: {moved}");
+    let prompts = told_more(&after, &id, 0).await;
+    assert!(prompts.iter().any(|prompt| prompt.contains("Test KEY-41")), "QA's prompt was not sent: {prompts:?}");
+}
+
+#[tokio::test]
+async fn a_stage_whose_chat_keeps_stopping_goes_to_the_owner() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(42)).await;
+    let id = session(&run);
+    replies(&fixture, &id, "Outcome: done").await;
+    run_where(&fixture, &run["id"], |run| run["stage"] == "qa").await;
+    // QA allows 2 attempts: the first was its own, the restart is the second,
+    // and a second restart would be a third.
+    let once = restart(&fixture);
+    act(&once, json!({"action": "tick"})).await;
+    let twice = restart(&once);
+    act(&twice, json!({"action": "tick"})).await;
+    let held = run_where(&twice, &run["id"], |run| run["status"] == "needs_owner").await;
+    assert_eq!(held["status"], "needs_owner", "a stage whose chat keeps stopping ran past its attempts: {held}");
+}
+
+#[tokio::test]
+async fn a_chat_still_working_is_left_alone() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(43)).await;
+    let id = session(&run);
+    let before = told_more(&fixture, &id, 0).await.len();
+    act(&fixture, json!({"action": "tick"})).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(told(&fixture, &id).await.len(), before, "a tick sent the stage again to a chat that is working");
+    let now = run_now(&fixture, &run["id"]).await;
+    assert_eq!(now["attempts"]["implement"], 1, "a tick counted an attempt on a working chat: {now}");
+}
+
+#[tokio::test]
+async fn the_owner_stopping_a_runs_chat_hands_the_run_to_them() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(44)).await;
+    let id = session(&run);
+    told_more(&fixture, &id, 0).await;
+    let (code, body) = post(&fixture, "/command", json!({"type": "session.stop", "sessionId": id})).await;
+    assert_eq!(code, 200, "stopping the chat failed: {body}");
+    let held = run_where(&fixture, &run["id"], |run| run["status"] == "needs_owner").await;
+    assert_eq!(held["status"], "needs_owner", "the owner stopped the chat and the run did not wait for them: {held}");
+    assert_eq!(held["note"], "You stopped the chat", "the run does not say why it waits: {held}");
+    let after = restart(&fixture);
+    act(&after, json!({"action": "tick"})).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(told(&after, &id).await.is_empty(), "a chat the owner stopped was started again");
+}
+
+#[tokio::test]
+async fn after_a_restart_a_command_stage_that_was_running_runs_again() {
+    let fixture = fixture().await;
+    let log = format!("{}/ran.log", fixture._directory.path().display());
+    save(&fixture, json!({
+        "id": "build", "name": "Build", "enabled": true, "trigger": {"kind": "manual"}, "agent": {"brand": "claude"},
+        "setup": {"branch": "{{item.branchName}}", "base": "staging"},
+        "stages": [{"id": "make", "name": "Make", "kind": "command", "prompt": format!("echo ran >> {log}; exit 1"), "routes": []}]
+    }));
+    let run = start(&fixture, "build", item(45)).await;
+    run_where(&fixture, &run["id"], |run| run["status"] == "needs_owner").await;
+    // The app died while the command ran: the row still says Running.
+    let db = rusqlite::Connection::open(fixture._directory.path().join("workbench.db")).unwrap();
+    db.execute("UPDATE workflow_run SET status = 'running', note = NULL WHERE id = ?1", [run["id"].as_str().unwrap()]).unwrap();
+    let after = restart(&fixture);
+    act(&after, json!({"action": "tick"})).await;
+    run_where(&after, &run["id"], |run| run["status"] == "needs_owner").await;
+    let ran = std::fs::read_to_string(&log).unwrap_or_default().lines().count();
+    assert_eq!(ran, 2, "after a restart the command stage that was running did not run again");
 }

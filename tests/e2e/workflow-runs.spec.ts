@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
+import { restartInstance } from './restart';
+
 /**
  * Running a workflow: the owner picks items from the workflow's Items command,
  * each gets a run with a worktree chat, and the Runs list follows it from
@@ -213,4 +215,44 @@ test('on a wide screen the chat toolbar shows its tools as buttons', async ({ pa
   await expect(page.getByRole('button', { name: 'Run a workflow' })).toBeVisible();
   await expect(page.getByTestId('open-kind-filter')).toBeVisible();
   await expect(page.getByRole('button', { name: 'More tools' })).toBeHidden();
+});
+
+test('a run working when the app restarts carries on with its stage', async ({ page, request }) => {
+  const items = JSON.stringify([{ identifier: 'KEY-8', title: 'Survive a restart', branchName: 'feature/key-8' }]);
+  await seed(request, [{
+    ...flow(`printf '%s' '${items}'`),
+    // Its own workflow: a run left working by an earlier test holds Ticket flow's slot.
+    id: 'restart-flow', name: 'Restart flow',
+    stages: [{ id: 'work', name: 'Work', kind: 'agent', prompt: 'run the long command for {{item.identifier}}', routes: [],
+      auto: { plan: false, done: false, questions: false } }],
+  }]);
+  const listed = async () => {
+    const answer = await (await request.get(`/api/workbench/workflow-runs?projectPath=${encodeURIComponent(project.path)}`)).json();
+    return answer.runs.find((r: { item: { identifier?: string } }) => r.item.identifier === 'KEY-8');
+  };
+  const started = await request.post('/api/workbench/workflow-runs', {
+    data: { action: 'start', projectId: project.id, projectPath: project.path, workflow: 'restart-flow', items: [JSON.parse(items)[0]] },
+  });
+  expect(started.ok(), await started.text()).toBeTruthy();
+  await expect.poll(async () => (await listed())?.status).toBe('running');
+
+  // The computer shuts down mid-stage: the app and its agent are gone.
+  await restartInstance({
+    binary: process.env.ATELIER_BINARY ?? join(__dirname, '..', '..', 'server', 'target', 'debug', 'atelier'),
+    serverPort: Number(process.env.BEADS_WEB_PORT),
+    sidecarPort: Number(process.env.BEADS_WORKBENCH_PORT),
+    env: process.env,
+    healthUrl: `${process.env.BEADS_E2E_URL}/api/workbench/health`,
+    logFile: join(run, 'server.log'),
+  });
+  // The minute tick, now rather than in a minute.
+  const ticked = await request.post('/api/workbench/workflow-runs', { data: { action: 'tick', projectId: project.id, projectPath: project.path } });
+  expect(ticked.ok(), await ticked.text()).toBeTruthy();
+  await expect.poll(async () => (await listed())?.attempts?.work, { message: 'the stage was not sent again after the restart' }).toBe(2);
+  const resumed = await listed();
+  expect(resumed.status, 'the run did not carry on').toBe('running');
+
+  await page.goto(`/project?id=${project.id}&tab=chat&chat=${resumed.sessionId}`);
+  await expect(page.getByText('run the long command for KEY-8', { exact: false }), 'the chat was not sent its stage again').toHaveCount(2, { timeout: 30_000 });
+  await page.screenshot({ path: join(results, 'resumed-after-restart.png'), animations: 'disabled' });
 });

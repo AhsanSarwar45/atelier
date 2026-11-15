@@ -90,6 +90,18 @@ workflow says so.
    **Stop** ends it with status **Stopped**, and the server ignores that
    chat from then on.
 
+5. **A stage cut off.** When the app shuts down (with the computer, say) or
+   an agent dies, a run on an agent or command stage loses its work. Every
+   tick looks at each **Running** run. If its chat has no agent running, or
+   its command is not running in this app, the run follows an outcome the
+   agent reported before it stopped. Otherwise it enters the stage again:
+   the prompt is sent to the chat, which starts its agent, or the command
+   runs again. That counts as an attempt, so a stage that keeps dying stops
+   for the owner. A chat whose agent is still there but whose turn ended on
+   an error or a stop waits for the owner. When the owner stops a run's chat
+   by hand, the run waits for them with "You stopped the chat" and is not
+   started again.
+
 Statuses: **Queued**, **Running**, **Waiting** (a Wait stage), **Needs you**, **Done**
 and **Stopped**. A run that needs the owner shows why. **Continue** passes
 an Approval stage, or sends any other stage's prompt again with its attempt

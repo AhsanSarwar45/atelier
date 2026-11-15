@@ -17,7 +17,7 @@ use axum::{
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -29,6 +29,19 @@ const TICK: Duration = Duration::from_secs(60);
 
 /// When each schedule last asked for items, by project folder and workflow.
 static POLLED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+/// The runs whose Command stage is running in this process. A run that says
+/// it is running a command but is not here lost it when the app stopped.
+static COMMANDS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn command_running(run: &str, running: Option<bool>) -> bool {
+    let mut held = COMMANDS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let held = held.get_or_insert_with(HashSet::new);
+    match running {
+        Some(true) => held.insert(run.to_string()),
+        Some(false) => held.remove(run),
+        None => held.contains(run),
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -350,6 +363,9 @@ fn holds_a_slot(run: &Run) -> bool {
     run.session.is_some() && run.status == "running"
 }
 
+/// One `resume` at a time.
+static RESUMING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// One `promote` at a time, so two never fill the same free slot.
 static PROMOTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -476,10 +492,18 @@ fn enter<'a>(
                 check(state, flow, run).await
             }
             StageKind::Command => {
+                // Marked before the row says Running, so a tick in between
+                // does not take the command for lost.
+                command_running(&run.id, Some(true));
                 run.status = "running".into();
-                save(state, run).await?;
+                if let Err(error) = save(state, run).await {
+                    command_running(&run.id, Some(false));
+                    return Err(error);
+                }
                 let cwd = run.cwd.clone().unwrap_or_else(|| run.project_path.clone());
-                match shell(&cwd, &fill(&stage.prompt, &run.item)).await {
+                let ran = shell(&cwd, &fill(&stage.prompt, &run.item)).await;
+                command_running(&run.id, Some(false));
+                match ran {
                     Ok((true, _, _)) => follow(state, flow, run, "done").await,
                     Ok((false, out, err)) => {
                         let said = if err.trim().is_empty() { out } else { err };
@@ -636,11 +660,12 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
     }
     let (said, newest) = said_since(state, session, run.seen_message).await;
     run.seen_message = newest;
-    if ended_in == "errored" {
-        return hold(state, run, "The chat stopped with an error".into()).await;
-    }
-    if ended_in == "stopped" {
-        return hold(state, run, "The chat was stopped".into()).await;
+    // A turn cut off, as when the app shuts down and stops its agents, is
+    // left to the next tick: it starts a stage whose agent is gone again and
+    // hands one whose agent is still there to the owner. The owner's own Stop
+    // has already handed the run to them.
+    if ended_in == "errored" || ended_in == "stopped" {
+        return Ok(());
     }
     let report = run.report.take();
     if let Some(needs) = report.as_ref().and_then(|report| report["needs"].as_str()) {
@@ -686,10 +711,69 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
     hold(state, run, "The agent stopped without an outcome; it may be asking you something".into()).await
 }
 
+/// A run that says it is working on a stage whose agent or command is gone,
+/// as after the app or the computer restarts. It follows an outcome the agent
+/// reported before it stopped, or enters the stage again, which counts as an
+/// attempt, so a stage that keeps dying goes to the owner.
+async fn resume(state: &WorkbenchState, run: &mut Run) -> Result<(), String> {
+    // One at a time, reading the run afresh: two ticks at once would both
+    // find the agent gone while the first one's chat is still starting.
+    let _one = RESUMING.lock().await;
+    match run_by_id(state, &run.id).await? {
+        Some(now) if now.status == "running" => *run = now,
+        _ => return Ok(()),
+    }
+    let flow = workflow(&run.project_path, &run.workflow)?;
+    let Some(stage) = flow.stages.iter().find(|stage| stage.id == run.stage).cloned() else { return Ok(()) };
+    let gone = match stage.kind {
+        StageKind::Agent => {
+            let Some(session) = run.session.clone() else { return Ok(()) };
+            if state.registry.has_driver(&session).await {
+                // The agent is there; a turn it ended on an error or a stop
+                // waits for the owner.
+                let ended = state.database().get_session(session).await?.map(|chat| chat.state).unwrap_or_default();
+                return match ended.as_str() {
+                    "errored" => hold(state, run, "The chat stopped with an error".into()).await,
+                    "stopped" => hold(state, run, "The chat was stopped".into()).await,
+                    _ => Ok(()),
+                };
+            }
+            true
+        }
+        StageKind::Command => !command_running(&run.id, None),
+        StageKind::Wait | StageKind::Approval => false,
+    };
+    if !gone {
+        return Ok(());
+    }
+    if let Some(outcome) = run.report.as_ref().and_then(|report| report["outcome"].as_str()).map(str::to_string) {
+        return follow(state, &flow, run, &outcome).await;
+    }
+    let at = run.stage.clone();
+    enter(state, &flow, run, &at).await
+}
+
+/// The owner stopped chat `session` by hand: a run working in it waits for
+/// them instead of being started again.
+pub(super) async fn stopped_by_owner(state: &WorkbenchState, session: &str) {
+    let Ok(runs) = runs_where(state, "session_id = ?1", session.to_string()).await else { return };
+    for mut run in runs.into_iter().filter(|run| run.status == "running") {
+        let _ = hold(state, &mut run, "You stopped the chat".into()).await;
+        promote(state, &run.project_path, &run.workflow).await;
+    }
+}
+
 /// Rerun every waiting run's check, and start runs for new items of every
 /// enabled schedule that is due, in one project.
 async fn tick(state: &WorkbenchState, project_id: &str, project_path: &str, force: bool) -> Result<(), String> {
     for mut run in runs_where(state, "project_path = ?1", project_path.to_string()).await? {
+        if run.status == "running" {
+            if let Err(error) = resume(state, &mut run).await {
+                tracing::warn!(run = run.id, %error, "a workflow run could not resume");
+                let _ = hold(state, &mut run, error).await;
+            }
+            continue;
+        }
         if run.status != "waiting" {
             continue;
         }
