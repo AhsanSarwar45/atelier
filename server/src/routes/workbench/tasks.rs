@@ -199,6 +199,52 @@ pub(super) async fn kinds(State(state): State<WorkbenchState>, Query(query): Que
 }
 
 #[derive(Deserialize)]
+pub(super) struct SwitchQuery {
+    project: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct SwitchChange {
+    /// `install` or `project`.
+    scope: String,
+    /// `null` forgets a project's own choice, so it follows the app's.
+    enabled: Option<bool>,
+}
+
+/// The install's choice, the project's own (or null) and what applies.
+fn switch_state(state: &WorkbenchState, project: Option<&str>) -> Result<Value, ApiError> {
+    let (data, dir) = kinds_folders(state, project)?;
+    let install = tasks::switch::read(&data).unwrap_or(true);
+    let own = dir.as_deref().and_then(tasks::switch::read);
+    Ok(json!({"install": install, "project": own, "enabled": own.unwrap_or(install)}))
+}
+
+/// GET /api/workbench/tasks-switch: whether tasks are on for the app, and
+/// for `project` when it is given (docs/tasks.md, "Turning tasks off").
+pub(super) async fn tasks_switch(State(state): State<WorkbenchState>, Query(query): Query<SwitchQuery>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(switch_state(&state, query.project.as_deref().filter(|id| !id.is_empty()))?))
+}
+
+/// PUT /api/workbench/tasks-switch: the owner turns tasks on or off for the
+/// app, or for `project`. Chats pick it up when they next connect.
+pub(super) async fn set_tasks_switch(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<SwitchQuery>,
+    Json(change): Json<SwitchChange>,
+) -> Result<Json<Value>, ApiError> {
+    let project = query.project.as_deref().filter(|id| !id.is_empty());
+    let (data, dir) = kinds_folders(&state, project)?;
+    match change.scope.as_str() {
+        "install" => tasks::switch::write(&data, Some(change.enabled.unwrap_or(true)))?,
+        "project" => tasks::switch::write(dir.as_deref().ok_or_else(|| "name the project to change".to_string())?, change.enabled)?,
+        other => return Err(format!("unknown scope {other}: use install or project").into()),
+    }
+    let answer = switch_state(&state, project)?;
+    let _ = state.watch_polls.send(json!({"type": "tasksSwitch.changed", "kind": "tasksSwitch.changed", "projectId": project}));
+    Ok(Json(answer))
+}
+
+#[derive(Deserialize)]
 pub(super) struct KindsChange {
     session: Option<String>,
     project: Option<String>,

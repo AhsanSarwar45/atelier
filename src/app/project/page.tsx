@@ -35,6 +35,7 @@ const SearchPanel = dynamic(() => import('@/workbench/search-panel').then((m) =>
 const FileSearchPanel = dynamic(() => import('@/workbench/file-search').then((m) => m.FileSearchPanel), { ssr: false });
 import { WorkbenchStatus } from '@/workbench/globals';
 import { TasksTabCount } from '@/workbench/waiting-count';
+import { useTasksOn } from '@/hooks/use-tasks-on';
 import { PathsOpenProvider } from '@/workbench/open-path';
 import { useShowingFolder } from '@/workbench/terminal-shells';
 
@@ -70,8 +71,12 @@ function ProjectTabs() {
   // The address decides which tab is showing and which chat is drawn in it, so
   // both survive a link, a fresh tab and the Back button
   // (docs/designs/app-shell.md §1.7).
-  const { id: projectId, tab: shownTab, chat: openChat, file: openFile, line: openLine, task: openTask, view: tasksView, grid: openGrid, cell: openCell, settings: openSettings, ptab, pitem, retired } = whereFrom(params);
+  const { id: projectId, tab: addressTab, chat: openChat, file: openFile, line: openLine, task: openTask, view: tasksView, grid: openGrid, cell: openCell, settings: openSettings, ptab, pitem, retired } = whereFrom(params);
   const { project, error: projectError, refetch } = useProject(projectId);
+  // Where the owner turned tasks off there is no Tasks tab, and an address
+  // that names it opens the chat.
+  const tasksOn = useTasksOn(projectId);
+  const shownTab = addressTab === 'tasks' && !tasksOn ? 'chat' : addressTab;
   // The folder this screen is showing, which is where a shell opened from
   // its bar starts.
   useShowingFolder(projectDir(project));
@@ -229,12 +234,15 @@ function ProjectTabs() {
               <MessageSquare className={GLYPH} aria-hidden="true" />
               <span className={WORD}>Chat</span>
             </TabsTrigger>
-            {/* Tasks belong to the app, so every project has them (docs/tasks.md). */}
-            <TabsTrigger value="tasks" data-testid="tab-tasks" aria-label="Tasks" className={TAB}>
-              <ListTodo className={GLYPH} aria-hidden="true" />
-              <span className={WORD}>Tasks</span>
-              {projectId && <TasksTabCount projectId={projectId} />}
-            </TabsTrigger>
+            {/* Tasks belong to the app, so every project has them unless the
+                owner turned them off (docs/tasks.md). */}
+            {tasksOn && (
+              <TabsTrigger value="tasks" data-testid="tab-tasks" aria-label="Tasks" className={TAB}>
+                <ListTodo className={GLYPH} aria-hidden="true" />
+                <span className={WORD}>Tasks</span>
+                {projectId && <TasksTabCount projectId={projectId} />}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="files" data-testid="tab-files" aria-label="Files" className={TAB}>
               <Folder className={GLYPH} aria-hidden="true" />
               <span className={WORD}>Files</span>

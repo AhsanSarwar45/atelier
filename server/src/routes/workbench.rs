@@ -1192,6 +1192,7 @@ pub fn router(state: WorkbenchState) -> Router {
         .route("/tasks", get(tasks::list))
         .route("/tasks/:project/:number", get(tasks::detail))
         .route("/task-types", get(tasks::kinds).post(tasks::change_kinds))
+        .route("/tasks-switch", get(tasks::tasks_switch).put(tasks::set_tasks_switch))
         .route("/task", post(tasks::act))
         .route("/task-proposals/:project/:id", get(tasks::proposal))
         .route("/grids", get(grids::list))
@@ -1607,6 +1608,18 @@ async fn waiting(
         .database()
         .read_tasks(move |store| crate::workbench::waiting::list(store.connection(), query.project.as_deref()))
         .await?;
+    // A project with tasks turned off has nothing waiting on the owner here.
+    let data = crate::workbench::library::data_dir()?;
+    let mut on = HashMap::new();
+    let items = items
+        .into_iter()
+        .filter(|item| {
+            *on.entry(item.project_id.clone()).or_insert_with(|| {
+                let folder = tasks::project_folder(&state, &item.project_id);
+                crate::workbench::tasks::switch::enabled(&data, folder.as_deref().map(std::path::Path::new))
+            })
+        })
+        .collect();
     Ok(Json(items))
 }
 

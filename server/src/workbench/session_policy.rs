@@ -79,7 +79,7 @@ const ORCHESTRATOR: &str = "# Orchestrator
 
 You own the owner's goal. Worker chats do most of the coding, on the provider and account the owner chose for this chat.
 
-- Turn the owner's request into a plan, record it as a task with checks, and see it through to done.
+- Turn the owner's request into a plan, {TASK}and see it through to done.
 - Hand the bulk of the implementation to workers. Edit files yourself only when that is quicker than writing a brief: plans, tests, a small fix, a finishing touch.
 - Start a worker with `atelier tool worker start --title TITLE` and the brief on standard input. Steer it with `atelier tool worker send ID`, check on it with `list` and `read ID`, and stop it with `stop ID`. Run `atelier tool worker help` for the details.
 - A message to a worker that is mid-turn waits until that turn ends, and the reply says Queued. To change course now, run `atelier tool worker send ID --now`: it interrupts the worker's turn and your message goes next. To end the work without a new instruction, use `stop ID`.
@@ -97,19 +97,20 @@ An orchestrator chat started you and is waiting for your report. Do the brief, a
 
 - Run the brief's checks before you finish.
 - End every turn with a short report under these headings: Done, Left, Blocked, Files changed, Checks run.
-- Do not create or propose tasks; the orchestrator owns them. Put questions for the owner under Blocked instead of asking.";
+- {TASK}Put questions for the owner under Blocked instead of asking.";
 
 /// The section a chat's role adds to its guidance: an orchestrator's when it
 /// has a workers choice, a worker's when an orchestrator started it, and
-/// nothing for any other chat.
-pub fn role_section(session: &super::store::Session) -> String {
-    if session.workers.is_some() {
-        ORCHESTRATOR.to_string()
+/// nothing for any other chat. Where tasks are off it says nothing of them.
+pub fn role_section(session: &super::store::Session, tasks_off: bool) -> String {
+    let (text, task) = if session.workers.is_some() {
+        (ORCHESTRATOR, "record it as a task with checks, ")
     } else if session.parent_session_id.is_some() {
-        WORKER.to_string()
+        (WORKER, "Do not create or propose tasks; the orchestrator owns them. ")
     } else {
-        String::new()
-    }
+        return String::new();
+    };
+    text.replace("{TASK}", if tasks_off { "" } else { task })
 }
 
 #[cfg(test)]
@@ -187,5 +188,54 @@ mod tests {
         for word in ["board", "landing", "completed work branch", "external review", "reviewer"] {
             assert!(!policy.contains(word), "the session policy says {word:?}:\n{policy}");
         }
+    }
+
+    /// Turns tasks on or off in a scope's folder (the data folder for the
+    /// install, `catalog::project_dir` for a project), as the owner's switch does.
+    fn switch_tasks(folder: &Path, on: bool) {
+        fs::create_dir_all(folder).unwrap();
+        fs::write(folder.join("tasks.json"), serde_json::json!({"enabled": on}).to_string()).unwrap();
+    }
+
+    /// Everything a chat could learn tasks or grids from: its guidance, and
+    /// what a bare `@task`, `@merge`, `@matrix` or `@audit` in a message adds.
+    fn told_of_tasks(data: &Path, root: &Path) -> Vec<String> {
+        let snapshot = super::super::library::resolve(data, Some(root)).unwrap();
+        let mut said = vec![build_with_library(root, &snapshot)];
+        let references = super::super::references::find("@task tidy the export, then @merge, @matrix and @audit camera");
+        said.extend(super::super::references::block(&references, &Default::default(), &snapshot));
+        let words = ["instructions — Tasks", "atelier task", "atelier grid", "@task", "@merge", "@matrix", "@audit", "coverage grid"];
+        words
+            .iter()
+            .filter(|word| said.iter().any(|text| text.contains(**word)))
+            .map(|word| word.to_string())
+            .collect()
+    }
+
+    /// With tasks turned off for the install, a chat is told nothing of
+    /// tasks or grids: not the rules, not the commands, not what `@task` means.
+    #[test]
+    fn a_chat_hears_nothing_of_tasks_when_the_install_turns_them_off() {
+        let data = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        switch_tasks(data.path(), false);
+        let told = told_of_tasks(data.path(), root.path());
+        assert!(told.is_empty(), "the chat is told about tasks while they are off: {told:?}");
+    }
+
+    /// A project's switch wins over the install's, either way.
+    #[test]
+    fn a_projects_tasks_switch_wins_over_the_installs() {
+        let data = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let project = super::super::tasks::catalog::project_dir(data.path(), root.path()).unwrap();
+        switch_tasks(&project, false);
+        let told = told_of_tasks(data.path(), root.path());
+        assert!(told.is_empty(), "the chat is told about tasks while they are off: {told:?}");
+
+        switch_tasks(data.path(), false);
+        switch_tasks(&project, true);
+        let told = told_of_tasks(data.path(), root.path());
+        assert!(told.contains(&"instructions — Tasks".to_string()), "a project that turns tasks on gets the rules: {told:?}");
     }
 }

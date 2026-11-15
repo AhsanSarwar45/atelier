@@ -134,6 +134,11 @@ const HEADINGS: Record<MentionOffer['kind'], string> = {
  */
 type Scope = 'all' | MentionOffer['kind'];
 const SCOPES: readonly Scope[] = ['all', 'file', 'diff', 'task', 'chat', 'skill'];
+
+/** The menu's tabs where the chat is: no Tasks tab where tasks are off. */
+function scopesAt(place: MentionPlace): readonly Scope[] {
+  return place.tasksOff ? SCOPES.filter((scope) => scope !== 'task') : SCOPES;
+}
 const SCOPE_NAMES: Record<Scope, string> = { all: 'All', ...HEADINGS };
 const TYPED_KIND = /^@(task|chat|skill|diff|grid):/;
 
@@ -183,12 +188,13 @@ function pickScope(view: EditorView, scope: Scope): void {
  * Tab and Shift-Tab: the next or the last tab of the `@` menu. In the `/` menu
  * Tab picks, as it always did. With no menu open the key is not ours.
  */
-function tabKey(step: 1 | -1) {
+function tabKey(step: 1 | -1, placeOf: () => MentionPlace) {
   return (view: EditorView): boolean => {
     if (completionStatus(view.state) !== 'active') return false;
     if (!typedAt(view.state)) return step === 1 ? acceptCompletion(view) : false;
-    const at = SCOPES.indexOf(scopeOf(view.state));
-    pickScope(view, SCOPES[(at + step + SCOPES.length) % SCOPES.length]!);
+    const scopes = scopesAt(placeOf());
+    const at = scopes.indexOf(scopeOf(view.state));
+    pickScope(view, scopes[(at + step + scopes.length) % scopes.length]!);
     return true;
   };
 }
@@ -236,7 +242,7 @@ function hint(keys: string[], says: string): HTMLElement {
  * The menu is marked with the lit tab, so the list's own heading, which only
  * repeats it, is shown only under All.
  */
-const scopeTabs = ViewPlugin.fromClass(
+const scopeTabs = (placeOf: () => MentionPlace) => ViewPlugin.fromClass(
   class {
     constructor(private readonly view: EditorView) {}
 
@@ -280,7 +286,7 @@ const scopeTabs = ViewPlugin.fromClass(
       row.setAttribute('role', 'tablist');
       row.setAttribute('aria-label', 'What to look for');
       row.setAttribute('data-testid', 'mention-tabs');
-      for (const scope of SCOPES) {
+      for (const scope of scopesAt(placeOf())) {
         const tab = row.appendChild(document.createElement('button'));
         tab.type = 'button';
         tab.tabIndex = -1;
@@ -481,13 +487,13 @@ function auditGrid(): Completion {
 }
 
 /** Whether the word after the `@` could still be `matrix`, on the menu's first tab. */
-export function offersMatrix(typed: string, scope: Scope): boolean {
-  return scope === 'all' && typed.length > 0 && 'matrix'.startsWith(typed.toLowerCase());
+export function offersMatrix(typed: string, scope: Scope, tasksOn = true): boolean {
+  return tasksOn && scope === 'all' && typed.length > 0 && 'matrix'.startsWith(typed.toLowerCase());
 }
 
 /** Whether the word after the `@` could still be `audit`, on the menu's first tab or the Grids one. */
-export function offersAudit(typed: string, scope: Scope): boolean {
-  return (scope === 'all' || scope === 'grid') && typed.length > 0 && 'audit'.startsWith(typed.toLowerCase());
+export function offersAudit(typed: string, scope: Scope, tasksOn = true): boolean {
+  return tasksOn && (scope === 'all' || scope === 'grid') && typed.length > 0 && 'audit'.startsWith(typed.toLowerCase());
 }
 
 /** A bare `@audit` and the slug being typed after it. */
@@ -503,7 +509,7 @@ function auditedGrids(placeOf: () => MentionPlace): CompletionSource {
     const typed = AUDIT_TYPING.exec(line.text.slice(0, context.pos - line.from));
     if (!typed) return null;
     const place = placeOf();
-    if (!place.cwd || !place.projectId) return null;
+    if (!place.cwd || !place.projectId || place.tasksOff) return null;
     const from = context.pos - typed[1]!.length;
     const stale = new AbortController();
     context.addEventListener('abort', () => stale.abort(), { onDocChange: true });
@@ -531,13 +537,13 @@ function auditedGrids(placeOf: () => MentionPlace): CompletionSource {
 }
 
 /** Whether the word after the `@` could still be `merge`, on the menu's first tab. */
-export function offersMerge(typed: string, scope: Scope): boolean {
-  return scope === 'all' && typed.length > 0 && 'merge'.startsWith(typed.toLowerCase());
+export function offersMerge(typed: string, scope: Scope, tasksOn = true): boolean {
+  return tasksOn && scope === 'all' && typed.length > 0 && 'merge'.startsWith(typed.toLowerCase());
 }
 
 /** Whether the word after the `@` could still be `task`, and the tab lets a task in. */
-export function offersNewTask(typed: string, scope: Scope): boolean {
-  return (scope === 'all' || scope === 'task') && 'task'.startsWith(typed.toLowerCase());
+export function offersNewTask(typed: string, scope: Scope, tasksOn = true): boolean {
+  return tasksOn && (scope === 'all' || scope === 'task') && 'task'.startsWith(typed.toLowerCase());
 }
 
 /** The one line of a menu that found nothing; picking it changes nothing. */
@@ -589,13 +595,14 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
     const stale = new AbortController();
     context.addEventListener('abort', () => stale.abort(), { onDocChange: true });
     const picked = TYPED_KIND.test(token.text) ? 'all' : context.state.field(pickedScope, false) ?? 'all';
-    const fresh = offersNewTask(token.text.slice(1), picked) ? newTask() : null;
+    const tasksOn = !place.tasksOff;
+    const fresh = offersNewTask(token.text.slice(1), picked, tasksOn) ? newTask() : null;
     if (fresh) drawnBadges.set(fresh, { kind: 'task', id: '' });
-    const merge = offersMerge(token.text.slice(1), picked) ? mergeBranch() : null;
+    const merge = offersMerge(token.text.slice(1), picked, tasksOn) ? mergeBranch() : null;
     if (merge) drawnBadges.set(merge, { kind: 'merge', id: '' });
-    const matrix = offersMatrix(token.text.slice(1), picked) ? draftGrid() : null;
+    const matrix = offersMatrix(token.text.slice(1), picked, tasksOn) ? draftGrid() : null;
     if (matrix) drawnBadges.set(matrix, { kind: 'matrix', id: '' });
-    const audit = offersAudit(token.text.slice(1), picked) ? auditGrid() : null;
+    const audit = offersAudit(token.text.slice(1), picked, tasksOn) ? auditGrid() : null;
     if (audit) drawnBadges.set(audit, { kind: 'audit', id: '' });
     const asked = [fresh, merge, matrix, audit].filter((line): line is Completion => line !== null);
     let found;
@@ -608,6 +615,8 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
       return asked.length && !context.aborted ? { from: token.from, options: asked, filter: false } : null;
     }
     if (context.aborted) return null;
+    // Where tasks are off, no task or grid is offered.
+    if (!tasksOn) found = { ...found, items: found.items.filter((one) => one.kind !== 'task' && one.kind !== 'grid') };
 
     const options = lines(found.items, place.cwd);
     found.items.forEach((one, at) => {
@@ -1189,12 +1198,12 @@ export function mentionCompletions(
     Prec.highest(
       keymap.of([
         ...completionKeymap,
-        { key: 'Tab', run: tabKey(1) },
-        { key: 'Shift-Tab', run: tabKey(-1) },
+        { key: 'Tab', run: tabKey(1, placeOf) },
+        { key: 'Shift-Tab', run: tabKey(-1, placeOf) },
       ]),
     ),
     pickedScope,
-    scopeTabs,
+    scopeTabs(placeOf),
     tooltips({ tooltipSpace: roomToDrawIn }),
     followTheKeyboard,
     slashOpens(commands),

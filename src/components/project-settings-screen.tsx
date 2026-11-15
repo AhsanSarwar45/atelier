@@ -19,6 +19,7 @@ import { SharedLibrary } from '@/components/settings/shared-library';
 import { DetailHeader, StateDot } from '@/components/settings/library-list';
 import { FolderBrowser } from '@/components/folder-browser';
 import { ChatNameEditor } from '@/components/settings/chat-name-editor';
+import { TasksSwitch } from '@/components/settings/tasks-switch';
 import { TaskTypesSettings } from '@/components/settings/task-types-settings';
 import { WorkflowsSettings } from '@/components/settings/workflows-settings';
 import { ExtensionsPanel } from '@/components/settings/extensions-panel';
@@ -55,7 +56,7 @@ export const PROJECT_SETTINGS_SECTIONS: SettingsSectionDef[] = [
   { id: 'project', label: 'Project', hint: 'Name, folder', icon: <Settings2 /> },
   { id: 'library', label: 'Agent guidance', hint: 'Instructions, skills, commands', icon: <NotebookPen /> },
   { id: 'chat-names', label: 'Chat names', hint: 'Template', icon: <Tag /> },
-  { id: 'task-types', label: 'Task types', hint: 'Types, default items', icon: <ListChecks /> },
+  { id: 'task-types', label: 'Tasks', hint: 'Use tasks, types', icon: <ListChecks /> },
   { id: 'workflows', label: 'Workflows', hint: 'Triggers, stages', icon: <Workflow /> },
   { id: 'claude', label: 'Claude Code', hint: 'Project settings', icon: <BrandIcon brand="claude" /> },
   { id: 'codex', label: 'Codex', hint: 'Project settings', icon: <BrandIcon brand="codex" /> },
@@ -433,7 +434,7 @@ export function ProjectSettingsScreen({
       {open === 'claude' && provider('claude')}
       {open === 'library' && (manifest ? <SharedLibrary projectPath={folder} projectInstructions={<section aria-label="Project instructions" className="min-w-0"><DetailHeader title="Project instructions" meta={<><span className="inline-flex items-center gap-1.5"><StateDot tone="good" />Always active</span><span>Shared by all chats in this project</span></>} actions={<Button size="sm" disabled={!dirty || saving} onClick={() => void save()}><Save className="size-3.5" /><span aria-hidden="true" className="max-sm:hidden">Save</span><span className="sr-only">Save project instructions</span></Button>} /><label className="mt-4 block"><span className="sr-only">Project instructions</span><Textarea id="settings-instructions" className="min-h-[max(24rem,calc(100dvh-22rem))] font-mono text-sm leading-relaxed" value={instructions} onChange={e => setInstructions(e.target.value)} /></label></section>} /> : <p className="text-sm">Loading project settings…</p>)}
       {open === 'codex' && provider('codex')}
-      {open === 'task-types' && <TaskTypesSettings projectId={projectId} />}
+      {open === 'task-types' && <><TasksSwitch projectId={projectId} /><TaskTypesSettings projectId={projectId} /></>}
       {open === 'workflows' && <WorkflowsSettings projectPath={folder} item={item} onItem={onItem} />}
       {open === 'files' && (
         <div className="flex h-full flex-col">

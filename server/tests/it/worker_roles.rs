@@ -27,7 +27,7 @@ fn choice() -> Value {
 fn an_orchestrator_is_told_how_to_orchestrate() {
     let folder = "/tmp/project";
     let orchestrator = chat("orch-a", folder, choice());
-    let section = atelier::workbench::session_policy::role_section(&orchestrator);
+    let section = atelier::workbench::session_policy::role_section(&orchestrator, false);
     for needed in ["atelier tool worker start", "end your turn", "Never just say \"continue\""] {
         assert!(section.contains(needed), "the orchestrator section misses {needed:?}: {section}");
     }
@@ -37,10 +37,21 @@ fn an_orchestrator_is_told_how_to_orchestrate() {
 fn a_worker_is_told_it_works_for_an_orchestrator() {
     let folder = "/tmp/project";
     let worker = chat("worker-1", folder, json!({"parentSessionId": "orch-a"}));
-    let section = atelier::workbench::session_policy::role_section(&worker);
+    let section = atelier::workbench::session_policy::role_section(&worker, false);
     for needed in ["orchestrator", "Done", "Left", "Blocked", "Files changed", "Checks run"] {
         assert!(section.contains(needed), "the worker section misses {needed:?}: {section}");
     }
-    let plain = atelier::workbench::session_policy::role_section(&chat("plain", folder, json!({})));
+    let plain = atelier::workbench::session_policy::role_section(&chat("plain", folder, json!({})), false);
     assert!(plain.is_empty(), "a plain chat was given a role: {plain}");
+}
+
+#[test]
+fn where_tasks_are_off_a_role_says_nothing_of_tasks() {
+    let folder = "/tmp/project";
+    for chat in [chat("orch-a", folder, choice()), chat("worker-1", folder, json!({"parentSessionId": "orch-a"}))] {
+        let on = atelier::workbench::session_policy::role_section(&chat, false);
+        let off = atelier::workbench::session_policy::role_section(&chat, true);
+        assert!(on.contains("task"), "{on}");
+        assert!(!off.contains("task"), "a role mentions tasks while they are off: {off}");
+    }
 }

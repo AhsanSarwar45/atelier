@@ -11,6 +11,7 @@ pub mod catalog;
 pub mod checks;
 pub mod cli;
 pub mod gate;
+pub mod switch;
 pub mod git;
 pub mod types;
 pub mod visual;

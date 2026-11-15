@@ -36,6 +36,7 @@ mod skill_folders;
 mod skill_locations;
 mod task_type_skills;
 mod task_types;
+mod tasks_switch;
 mod task_types_card;
 mod task_types_defaults;
 mod shared_memory_tool;

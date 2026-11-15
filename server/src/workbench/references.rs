@@ -581,6 +581,11 @@ pub fn block(found: &[Found], looked: &Looked, library: &Snapshot) -> Option<Str
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
     for reference in found.iter().filter(|r| !r.run) {
+        // Where tasks are off, @task, @merge, @matrix, @audit and @grid are
+        // plain words: the chat is told nothing of tasks or grids.
+        if library.tasks_off && matches!(reference.kind, Kind::Task | Kind::Merge | Kind::Matrix | Kind::Audit | Kind::Grid) {
+            continue;
+        }
         if !seen.insert((reference.kind, reference.id.clone())) {
             continue;
         }

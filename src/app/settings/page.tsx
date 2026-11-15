@@ -27,6 +27,7 @@ import { SettingsScreen, type SettingsSectionDef } from '@/components/settings/s
 import { TagsSettings } from '@/components/settings/tags-settings';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { stepsOut } from '@/lib/address';
+import { TasksSwitch } from '@/components/settings/tasks-switch';
 import { TaskTypesSettings } from '@/components/settings/task-types-settings';
 import { SignedOutMark, useStanding } from '@/workbench/account-standing';
 import { AccountsSettings } from '@/workbench/accounts-settings';
@@ -50,7 +51,7 @@ const SECTIONS: SettingsSectionDef[] = [
   { id: 'files', label: 'Agent files', hint: 'Per account', icon: <FileCode2 /> },
   { id: 'search', label: 'Search', hint: 'AI search', icon: <Search /> },
   { id: 'git', label: 'Git', hint: 'Commit messages', icon: <GitBranch /> },
-  { id: 'task-types', label: 'Task types', hint: 'Types, default items', icon: <ListChecks /> },
+  { id: 'task-types', label: 'Tasks', hint: 'Use tasks, types', icon: <ListChecks /> },
   { id: 'limits', label: 'Usage limits', hint: 'Resume', icon: <Gauge /> },
   { id: 'memory', label: 'Memory', hint: 'Chat limit', icon: <MemoryStick /> },
   { id: 'storage', label: 'Storage', hint: 'Usage, cleanup', icon: <HardDrive /> },
@@ -129,7 +130,7 @@ function Settings() {
       {(known ?? 'appearance') === 'appearance' && <AppearanceSettings />}
       {known === 'notifications' && <NotificationSettings />}
       {known === 'library' && <SharedLibrary />}
-      {known === 'task-types' && <TaskTypesSettings />}
+      {known === 'task-types' && <><TasksSwitch /><TaskTypesSettings /></>}
       {known === 'accounts' && (
         <SettingsGroup>
           <div className="p-3">

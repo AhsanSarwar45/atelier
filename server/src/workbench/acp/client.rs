@@ -2521,10 +2521,11 @@ impl AcpDriver {
         let shared_library = super::super::library::snapshot(Path::new(&session.cwd))?;
         // The chat's open tasks, read now: each connection is told them
         // afresh, so a chat picked up again knows what it still holds.
-        let open_tasks = open_tasks_section(&database, &session.id).await;
+        // Where the owner turned tasks off, the chat hears nothing of them.
+        let open_tasks = if shared_library.tasks_off { String::new() } else { open_tasks_section(&database, &session.id).await };
         // An orchestrator or worker chat is also told its role, beside its
         // tasks (docs/designs/orchestrator-workers.md).
-        let open_tasks = [session_policy::role_section(&session), open_tasks]
+        let open_tasks = [session_policy::role_section(&session, shared_library.tasks_off), open_tasks]
             .into_iter()
             .filter(|section| !section.trim().is_empty())
             .collect::<Vec<_>>()

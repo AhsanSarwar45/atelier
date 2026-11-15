@@ -400,6 +400,13 @@ export interface MentionOffer {
 }
 
 /** Where the `@` is being typed, which decides what it offers. */
+/** The owner's Use tasks switch: the app's choice, a project's own, and what applies. */
+export interface TasksSwitchState {
+  install: boolean;
+  project: boolean | null;
+  enabled: boolean;
+}
+
 export interface MentionPlace {
   /** The folder the chat works in: its files and its skills. */
   cwd: string;
@@ -408,6 +415,8 @@ export interface MentionPlace {
   projectId: string | null;
   /** The chat asking, which is not offered to itself. */
   session: string | null;
+  /** The owner turned tasks off here: the menu offers no tasks or grids. */
+  tasksOff?: boolean;
 }
 
 function mentionAddress(place: MentionPlace, more: Record<string, string>): string {
@@ -1638,6 +1647,19 @@ export const tasks = {
   },
   types: async () => (await fetchApi<{ types: TaskTypeInfo[] }>('/api/workbench/task-types')).types,
   /** The types a project's tasks may use (or the install's, without one), with those turned off. */
+  /** Whether tasks are on for the app, and for a project when one is named. */
+  switchState: async (projectId?: string | null) => {
+    const query = projectId ? `?${new URLSearchParams({ project: projectId })}` : '';
+    return fetchApi<TasksSwitchState>(`/api/workbench/tasks-switch${query}`);
+  },
+  /** Turn tasks on or off for the app, or for a project (`null` follows the app). */
+  setSwitch: async (projectId: string | null | undefined, enabled: boolean | null) => {
+    const query = projectId ? `?${new URLSearchParams({ project: projectId })}` : '';
+    return fetchApi<TasksSwitchState>(`/api/workbench/tasks-switch${query}`, {
+      method: 'PUT',
+      body: JSON.stringify({ scope: projectId ? 'project' : 'install', enabled }),
+    });
+  },
   typesListing: async (projectId?: string | null) => {
     const query = projectId ? `?${new URLSearchParams({ project: projectId })}` : '';
     return fetchApi<TaskTypesListing>(`/api/workbench/task-types${query}`);

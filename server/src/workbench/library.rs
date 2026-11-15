@@ -182,6 +182,10 @@ pub struct Resolved {
 pub struct Snapshot {
     pub revision: String,
     pub items: Vec<Resolved>,
+    /// The owner turned tasks off here (tasks::switch): the chat is told
+    /// nothing of tasks or grids.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tasks_off: bool,
 }
 
 pub(super) fn digest(bytes: &[u8]) -> String {
@@ -1212,8 +1216,10 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
         .or(global.output_style.as_ref())
         .cloned()
         .unwrap_or_default();
+    let tasks_off = !super::tasks::switch::enabled(data, root);
     let mut items: BTreeMap<String, (Item, &str)> = builtins()
         .into_iter()
+        .filter(|i| !(tasks_off && i.id == "atelier-tasks"))
         .map(|i| (i.id.clone(), (i, "built-in")))
         .collect();
     if !global.general_instructions.trim().is_empty() {
@@ -1330,6 +1336,7 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
     Ok(Snapshot {
         revision,
         items: resolved,
+        tasks_off,
     })
 }
 impl Snapshot {

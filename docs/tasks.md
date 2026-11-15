@@ -27,6 +27,31 @@ the task and what it must prove when it finishes.
   card shows whether the commits reached the base branch, and the owner asks
   for a merge with `@merge` (see Merging).
 
+## Turning tasks off
+
+Settings → Tasks has a **Use tasks** switch for the whole app, and each
+project's settings choose **Same as app**, **On** or **Off**. A project's own
+choice wins. Tasks are on until the owner turns them off.
+
+The choice is saved as `{"enabled": true|false}` in `tasks.json`: in the data
+folder for the app, and beside the project's `task-types.json` for a project
+(`tasks::switch`). `GET` and `PUT /api/workbench/tasks-switch[?project=ID]`
+read and change it.
+
+Where tasks are off, the whole system is hidden, so a chat cannot learn it
+exists:
+
+- A chat's guidance leaves out the Tasks rules, its open tasks and the task
+  lines of the orchestrator and worker roles.
+- `@task`, `@merge`, `@matrix`, `@audit` and `@grid:` add nothing to a
+  message, and the `@` menu offers no tasks, grids or task lines.
+- `atelier task` and `atelier grid` refuse with "Tasks are turned off" before
+  they reach the app.
+- The project has no Tasks tab and nothing task-related waits on the owner.
+
+Open chats pick up a change when they next connect. Existing tasks are kept,
+and come back when tasks are turned on again.
+
 ## Data
 
 Stored in `workbench.db`.

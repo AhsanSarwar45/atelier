@@ -42,6 +42,7 @@ import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { useShutOnNavigation } from '@/hooks/use-shut-on-navigation';
+import { useTasksOn } from '@/hooks/use-tasks-on';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/hue';
 import { cn } from '@/lib/utils';
@@ -1539,8 +1540,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // The same menu offers the project's tasks, every chat and the library's
   // skills beside the files (bw-mi3s.4), so it is told the project and the chat
   // asking as well.
-  const searchIn = useRef<MentionPlace>({ cwd: where.cwd, project: projectPath, projectId, session: sessionId });
-  searchIn.current = { cwd: where.cwd, project: projectPath, projectId, session: sessionId };
+  // Where the owner turned tasks off, the @ menu offers no tasks or grids.
+  const tasksOn = useTasksOn(projectId);
+  const searchIn = useRef<MentionPlace>({ cwd: where.cwd, project: projectPath, projectId, session: sessionId, tasksOff: !tasksOn });
+  searchIn.current = { cwd: where.cwd, project: projectPath, projectId, session: sessionId, tasksOff: !tasksOn };
   // And a slash opens the chat's own commands and skills in the same menu
   // (bw-mi3s.5), as this session announced them (§7).
   const commandsNow = useMemo(() => commandFeed(), []);
