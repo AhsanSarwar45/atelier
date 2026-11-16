@@ -25,7 +25,8 @@ const SHAPES: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
   [new RegExp(String.raw`^Owner approved the plan change for ${TASK}:`), (m) => `You approved the plan change for #${m[1]}`],
   [new RegExp(String.raw`^Owner rejected the plan change for ${TASK}: continue with the old plan\.$`), (m) => `You rejected the plan change for #${m[1]}`],
   [new RegExp(String.raw`^Owner rejected the plan change for ${TASK}: ([\s\S]*?) Continue with the old plan\.$`), (m) => `You rejected the plan change for #${m[1]}: ${m[3]}`],
-  [new RegExp(String.raw`^Owner approved ${TASK}\. `), (m) => `You approved #${m[1]}`],
+  [new RegExp(String.raw`^Owner approved ${TASK}\.(?: |$)`), (m) => `You approved #${m[1]}`],
+  [new RegExp(String.raw`^The workflow approved ${TASK}\.(?: |$)`), (m) => `Workflow approved #${m[1]}`],
   [new RegExp(String.raw`^Owner reopened ${TASK}(?:\.|: ([\s\S]*?)) (?:Start it again with |Continue the work and run done again\.)`),
     (m) => (m[3] ? `You reopened #${m[1]}: ${m[3]}` : `You reopened #${m[1]}`)],
   [/^Owner chose Create task for proposal "([\s\S]*?)": task #(\d+) created\./, (m) => `You created task #${m[2]} from the proposal`],
@@ -44,7 +45,7 @@ const SHAPES: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
 /** One answer's line, or null when the words are not one the server writes. */
 export function ownerAnswer(text: string): OwnerAnswer | null {
   const full = text.trim();
-  if (!full.startsWith('Owner ')) return null;
+  if (!full.startsWith('Owner ') && !full.startsWith('The workflow ')) return null;
   for (const [shape, line] of SHAPES) {
     const m = full.match(shape);
     if (m) return { line: line(m), full };

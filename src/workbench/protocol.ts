@@ -515,6 +515,8 @@ export type WbpEvent = EventBase &
          * knows it is his words without having to guess from how they read.
          */
         composedHere?: boolean;
+        /** Set when Atelier itself sent the message: what kind of sender, and a short label. */
+        from?: { kind: string; label: string };
       }
     | { type: 'text.delta'; messageId: string; text: string }
     /**

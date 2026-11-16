@@ -80,9 +80,21 @@ export interface TranscriptMessage {
    * drawn as his (bw-oamr.1).
    */
   composedHere?: boolean;
+  /**
+   * Set when Atelier itself sent the message (a workflow stage, an answer to a
+   * task or proposal, a worker's report): what kind of sender, and a short
+   * label for it. Drawn as one automated-message row, not as his message.
+   */
+  from?: MessageFrom;
   /** Set on the row that draws a presenter call's widgets: that call's id (bw-yh4nu). */
   presentedBy?: string;
   execution?: ExecutionContext;
+}
+
+/** Who sent a message Atelier wrote on its own: a kind and a short label. */
+export interface MessageFrom {
+  kind: string;
+  label: string;
 }
 
 /** What the agent worked out on its way to an answer, as it arrived. */
@@ -650,6 +662,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           done: false,
           parentId: e.parentToolCallId ?? null,
           ...(e.composedHere ? { composedHere: true } : {}),
+          ...(e.from ? { from: e.from } : {}),
           ...(e.execution ? { execution: e.execution } : {}),
         },
       ];
@@ -1198,6 +1211,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           done: false,
           parentId: e.parentToolCallId ?? null,
           ...(e.composedHere ? { composedHere: true } : {}),
+          ...(e.from ? { from: e.from } : {}),
           ...(e.execution ? { execution: e.execution } : {}),
         });
         break;

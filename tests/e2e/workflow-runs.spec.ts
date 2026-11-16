@@ -95,6 +95,43 @@ test('runs a workflow on a picked item and follows it to its chat', async ({ pag
   await expect(page.getByText(/read: say you read this KEY-1/).first()).toBeVisible({ timeout: 15_000 });
 });
 
+test('the stage prompt is drawn as an automated message, on a phone too', async ({ page, request }) => {
+  await seed(request, [flow(`printf '%s' '${ITEMS}'`)]);
+  await openFlow(page);
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Run Ticket flow' });
+  await dialog.getByRole('checkbox', { name: /KEY-2/ }).check();
+  await dialog.getByRole('button', { name: 'Start', exact: true }).click();
+  const row = page.getByTestId('workflow-runs').getByTestId('workflow-run').filter({ hasText: 'KEY-2' });
+  await expect(row.getByText('Done', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await row.getByRole('link', { name: 'Open chat' }).click();
+
+  const automated = page.locator('[data-testid="automated-message"][data-from="workflow"]').first();
+  await expect(automated).toBeVisible({ timeout: 15_000 });
+  await expect(automated.getByTestId('automated-message-line')).toContainText('Implement');
+  await expect(page.getByTestId('user-message').filter({ hasText: 'say you read this KEY-2' })).toHaveCount(0);
+  await automated.getByTestId('automated-message-toggle').click();
+  await expect(automated.getByTestId('automated-message-full')).toContainText('say you read this KEY-2');
+  // Unfolded, the full text pushes the agent's reply down instead of drawing over it.
+  const reply = page.getByTestId('assistant-message').filter({ hasText: 'read: say you read this KEY-2' }).first();
+  await expect.poll(async () => {
+    const [mine, theirs] = await Promise.all([automated.boundingBox(), reply.boundingBox()]);
+    return mine && theirs ? theirs.y - (mine.y + mine.height) : -1;
+  }, { message: 'the unfolded message draws over the reply below it' }).toBeGreaterThanOrEqual(0);
+  await page.screenshot({ path: join(results, 'automated-desktop.png'), animations: 'disabled' });
+
+  await page.setViewportSize({ width: 375, height: 800 });
+  const details = page.getByTestId('chat-right-rail-toggle');
+  if (await details.getAttribute('data-open') === 'true') await details.click();
+  await expect(automated).toBeVisible();
+  const box = await automated.boundingBox();
+  expect(box, 'the automated message has no box').not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await page.screenshot({ path: join(results, 'automated-phone.png'), animations: 'disabled' });
+});
+
 test('the run dialog says why the items command failed', async ({ page, request }) => {
   await seed(request, [flow(`echo 'linear: not logged in' >&2; exit 1`)]);
   await openFlow(page);

@@ -58,15 +58,15 @@ describe('the owner answer lines', () => {
     const text = 'Owner approved task #3 "Plan ghosts". It names no commits, so nothing is left to merge.';
     render(<TranscriptRow item={said('user', text)} sessionId="s" mentions={MENTIONS} onLook={LOOK} />);
     expect(screen.queryByTestId('user-message')).toBeNull();
-    expect(screen.getByTestId('owner-answer-line')).toHaveTextContent('You approved #3');
-    expect(screen.queryByTestId('owner-answer-full')).toBeNull();
-    fireEvent.click(screen.getByTestId('owner-answer-toggle'));
-    expect(screen.getByTestId('owner-answer-full')).toHaveTextContent(text);
+    expect(screen.getByTestId('automated-message-line')).toHaveTextContent('You approved #3');
+    expect(screen.queryByTestId('automated-message-full')).toBeNull();
+    fireEvent.click(screen.getByTestId('automated-message-toggle'));
+    expect(screen.getByTestId('automated-message-full')).toHaveTextContent(text);
   });
 
   it('draws the agent saying the same words as the agent', () => {
     render(<TranscriptRow item={said('assistant', 'Owner approved task #3 "T". It names no commits.')} sessionId="s" mentions={MENTIONS} onLook={LOOK} />);
     expect(screen.getByTestId('assistant-message')).toBeVisible();
-    expect(screen.queryByTestId('owner-answer')).toBeNull();
+    expect(screen.queryByTestId('automated-message')).toBeNull();
   });
 });
