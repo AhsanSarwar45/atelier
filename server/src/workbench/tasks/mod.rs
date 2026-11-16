@@ -1251,11 +1251,15 @@ fn sentence(note: &str) -> String {
     if note.ends_with(['.', '!', '?']) { note.to_string() } else { format!("{note}.") }
 }
 
-/// What the holding chat's agent is told when a workflow run approves its
-/// task for the owner. Nothing about merging: whether and where the work is
-/// merged is the workflow's own business, in its stages.
-pub fn workflow_approval(task: &TaskRow) -> String {
-    format!("The workflow approved task #{} \"{}\".", task.number, task.title)
+/// What a workflow run's chat is told when its task is approved, by the
+/// workflow (`by_workflow`) or by the owner. Nothing about merging: whether
+/// and where the work is merged is the workflow's own business, in its stages.
+pub fn workflow_approval(task: &TaskRow, by_workflow: bool) -> String {
+    let who = if by_workflow { "The workflow" } else { "Owner" };
+    format!(
+        "{who} approved task #{} \"{}\". This chat runs a workflow, and its stages decide what happens to the branch, so leave the branch as it is.",
+        task.number, task.title
+    )
 }
 
 /// What the holding chat's agent is told when the owner approves or reopens

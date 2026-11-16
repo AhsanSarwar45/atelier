@@ -1007,6 +1007,38 @@ async fn a_task_the_workflow_approves_does_not_ask_the_agent_about_merging() {
     assert!(!approval.to_lowercase().contains("merge"), "the approval asks the agent about merging: {approval}");
 }
 
+#[tokio::test]
+async fn a_task_the_owner_approves_in_a_workflow_chat_does_not_ask_the_agent_about_merging() {
+    let fixture = fixture().await;
+    let mut flow = ticket_flow();
+    flow["stages"][0]["auto"]["plan"] = json!(true);
+    save(&fixture, flow);
+    let run = start(&fixture, "ticket", item(48)).await;
+    let id = session(&run);
+    let cwd = run["cwd"].as_str().unwrap().to_string();
+    proposes(&fixture, &id).await;
+    until(|| shown(&fixture, &id, 1), |task| task["status"] == "todo").await;
+    let (code, body) = task(&fixture, &id, "start", Some(1), json!({})).await;
+    assert_eq!(code, 200, "start failed: {body}");
+    std::fs::write(format!("{cwd}/made.txt"), "x").unwrap();
+    git(&cwd, &["add", "made.txt"]);
+    git(&cwd, &["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "made"]);
+    let commit = git(&cwd, &["rev-parse", "HEAD"]);
+    let (code, body) = task(&fixture, &id, "done", Some(1), json!({"summary": "done", "commits": [commit], "followups": [],
+        "result": {"document": "# Plan", "decisions": [], "open_questions": [], "proposed_tasks": []}})).await;
+    assert_eq!(code, 200, "done failed: {body}");
+    finishes(&fixture, &id, "done").await;
+    let (code, body) = post(&fixture, "/task", json!({"action": "approve", "actor": "owner", "project": "project-1", "number": 1})).await;
+    assert_eq!(code, 200, "the owner's approve failed: {body}");
+    let prompts = until(
+        || async { json!(told(&fixture, &id).await) },
+        |p| p.as_array().is_some_and(|p| p.iter().any(|p| p.as_str().is_some_and(|p| p.contains("approved")))),
+    ).await;
+    let approval = prompts.as_array().and_then(|p| p.iter().filter_map(Value::as_str).find(|p| p.contains("approved")).map(str::to_string));
+    let approval = approval.unwrap_or_else(|| panic!("the agent was not told the owner approved its task: {prompts:?}"));
+    assert!(!approval.to_lowercase().contains("merge"), "the owner's approval asks the agent about merging: {approval}");
+}
+
 /// Serves the router on a free port, as the app does, for the real CLI.
 async fn serve(fixture: &Fixture) -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

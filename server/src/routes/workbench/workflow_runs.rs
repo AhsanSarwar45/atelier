@@ -150,6 +150,12 @@ async fn runs_where(state: &WorkbenchState, filter: &'static str, value: String)
         .await
 }
 
+/// Whether chat `session` is, or was, a workflow run's chat. Its branch is
+/// then the workflow's business, so task answers say nothing about merging.
+pub(super) async fn is_run_chat(state: &WorkbenchState, session: &str) -> bool {
+    runs_where(state, "session_id = ?1", session.to_string()).await.is_ok_and(|runs| !runs.is_empty())
+}
+
 async fn run_by_id(state: &WorkbenchState, id: &str) -> Result<Option<Run>, String> {
     Ok(runs_where(state, "id = ?1", id.to_string()).await?.into_iter().next())
 }

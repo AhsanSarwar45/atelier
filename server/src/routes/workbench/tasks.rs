@@ -659,7 +659,8 @@ pub(super) async fn act(
     // The owner's approve, reopen and plan-change answers are told to the
     // chat holding the task, like a proposal's answer.
     if let Some(session) = tasks::told_chat(&actor, &action, &row).map(str::to_string) {
-        let merge = if action == "approve" && !by_workflow {
+        let workflow_chat = action == "approve" && (by_workflow || super::workflow_runs::is_run_chat(&state, &session).await);
+        let merge = if action == "approve" && !workflow_chat {
             let commits: Vec<String> = task["result"]["commits"]
                 .as_array()
                 .into_iter()
@@ -672,8 +673,8 @@ pub(super) async fn act(
         } else {
             tasks::git::MergeState::Unknown
         };
-        let said = if by_workflow && action == "approve" {
-            Some(tasks::workflow_approval(&row))
+        let said = if workflow_chat {
+            Some(tasks::workflow_approval(&row, by_workflow))
         } else {
             tasks::owner_prompt(&action, &row, &note, &merge)
         };
