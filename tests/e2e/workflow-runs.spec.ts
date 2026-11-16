@@ -342,7 +342,9 @@ test('a long stage name is cut short without moving the badge bar or the row', a
   const chipBox = (await rowChip.boundingBox())!;
   expect(chipBox.x + chipBox.width, 'the stage runs past the row').toBeLessThanOrEqual(rowBox.x + rowBox.width);
   const pill = (await row.getByTestId('row-pill').boundingBox())!;
-  expect(chipBox.x, 'the stage covers the chat state on the row').toBeGreaterThanOrEqual(pill.x + pill.width);
+  // Beside the chat state, or wrapped under it; never on top of it.
+  const besideOrUnder = chipBox.x >= pill.x + pill.width || chipBox.y >= pill.y + pill.height;
+  expect(besideOrUnder, 'the stage covers the chat state on the row').toBe(true);
   expect(await row.getByTestId('row-pill').evaluate((el) => el.scrollWidth <= el.clientWidth + 1), 'the chat state was squeezed past its word').toBe(true);
   await expect(row.locator('[data-testid^="row-line"]'), 'the row drew more than two lines').toHaveCount(2);
   await page.screenshot({ path: join(results, 'long-stage.png'), animations: 'disabled' });
@@ -360,6 +362,40 @@ test('the stage badge fits a phone', async ({ page, request }) => {
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(over, 'nothing runs past the screen edge').toBeLessThanOrEqual(0);
   await page.screenshot({ path: join(results, 'phone-stage.png'), animations: 'disabled' });
+  await act(request, 'stop', run.id);
+});
+
+// On a phone the rail is narrow: the badges on a row's status line wrap onto a
+// second line rather than sit on top of each other, and never take a third.
+test('on a phone the row badges wrap onto two lines without overlapping', async ({ page, request }) => {
+  await page.setViewportSize({ width: 412, height: 900 });
+  const run = await stageRun(request, LONG, 'KEY-24');
+  await page.goto(`/project?id=${project.id}&tab=chat`);
+  await page.getByTestId('chat-rail-toggle').click();
+  const row = page.getByTestId('restore-row').filter({ hasText: 'KEY-24' });
+  const line = row.getByTestId('row-line-status');
+  await expect(line.getByTestId('row-workflow-stage'), 'the row does not name the stage').toHaveText(LONG, { timeout: 15_000 });
+  // Taken before anything is asserted, so a failing run still leaves the picture.
+  await row.screenshot({ path: join(results, process.env.ROW_SHOT ?? 'phone-row-wrap.png'), animations: 'disabled' });
+  const chips = await line.locator('[data-testid^="row-"]').evaluateAll((els) =>
+    els.map((el) => { const b = el.getBoundingClientRect(); return { id: el.getAttribute('data-testid'), x: b.x, y: b.y, r: b.right, bottom: b.bottom }; }));
+  const rowBox = (await row.boundingBox())!;
+  for (const c of chips) expect(c.r, `${c.id} runs past the row`).toBeLessThanOrEqual(rowBox.x + rowBox.width + 0.5);
+  for (let i = 0; i < chips.length; i++) for (let j = i + 1; j < chips.length; j++) {
+    const a = chips[i], b = chips[j];
+    const overlap = a.x < b.r - 0.5 && b.x < a.r - 0.5 && a.y < b.bottom - 0.5 && b.y < a.bottom - 0.5;
+    expect(overlap, `${a.id} and ${b.id} overlap on the row`).toBe(false);
+  }
+  for (const c of chips) expect(Math.round(c.bottom - c.y), `${c.id} is not one chip tall`).toBe(20);
+  await expect(line.getByTestId('row-clock'), 'the wrap pushed the clock off the row').toBeInViewport({ ratio: 1 });
+  const clock = (await line.getByTestId('row-clock').boundingBox())!;
+  expect(clock.y + clock.height, 'the wrap pushed the clock off the row').toBeLessThanOrEqual(rowBox.y + rowBox.height);
+  const tops = [...new Set(chips.map((c) => Math.round(c.y)))];
+  expect(tops.length, 'the badges did not wrap onto a second line').toBeGreaterThanOrEqual(2);
+  const box = (await line.boundingBox())!;
+  expect(box.height, 'the badges took more than two lines').toBeLessThanOrEqual(48);
+  const cut = await line.getByTestId('row-workflow-stage').evaluate((el) => { const t = el.querySelector('span') ?? el; return t.scrollWidth > t.clientWidth; });
+  expect(cut, 'the long stage was not cut short on its line').toBe(true);
   await act(request, 'stop', run.id);
 });
 

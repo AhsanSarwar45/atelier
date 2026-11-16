@@ -666,66 +666,77 @@ const ChatRow = memo(function ChatRow({ row, open, busy, ending, onEnter, onEnd,
       <div
         data-testid="row-line-status"
         className={cn(
-          'mt-1 flex min-w-0 items-center gap-1 overflow-hidden',
+          'mt-1 flex min-w-0 items-start gap-1',
           !says && !waiting && !stage && 'md:hidden',
         )}
       >
-        {busy || ending ? (
-          <Badge
-            variant="warning"
-            appearance="light"
-            size="sm"
-            shape="circle"
-            data-testid="row-pill"
-            data-pill={busy ? 'opening' : 'ending'}
-            className="shrink-0"
-          >
-            {busy ? 'opening' : 'ending'}
-          </Badge>
-        ) : (
-          // The chip refuses to shrink everywhere else, which is
-          // right where it stands beside body text. Here it has
-          // the line to itself and what it is on cuts short only
-          // when the rail is genuinely too narrow for it
-          // (bw-jaoz.14.14).
-          //
-          // The word without its clause is not a rich status:
-          // "Helping", "Retrying" or "Summarising" only becomes
-          // actionable when the helper, reset time, or current
-          // work remains visible. ChatStateChip middle-ellipsizes
-          // that clause rather than dropping it.
-          says && <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
-        )}
         {/*
-          A review, proposal, plan change, grid draft or N/A request in this
-          chat, drawn the way a permission question is: the agent is as
-          stopped, and the owner as needed, whatever the chat's own state
-          says. A sleeping chat's chip draws nothing, so this can be alone.
+          The chips wrap rather than draw over each other when the rail is
+          narrow (a phone), and stop at two lines: two chip heights and the
+          gap between them. The clock stays outside, so a wrap can never
+          push it onto a line that is cut off. A sleeping row has no chips,
+          so it draws no group and its line is the clock alone.
         */}
-        {/* The stage this chat's workflow run is on. */}
-        {stage && <WorkflowStageChip stage={stage} testId="row-workflow-stage" className="max-w-[50%] shrink-0" />}
-        {waiting && (
-          <Badge
-            variant="warning"
-            appearance="light"
-            size="sm"
-            shape="circle"
-            data-testid="row-waiting"
-            className="shrink-0 gap-1.5"
-          >
-            <Hand className="size-3 shrink-0 animate-pulse" aria-hidden="true" />
-            <span>{waiting}</span>
-          </Badge>
+        {(busy || ending || says || stage || waiting) && (
+          <div className="flex max-h-11 min-w-0 flex-1 flex-wrap items-center gap-1 overflow-hidden">
+            {busy || ending ? (
+              <Badge
+                variant="warning"
+                appearance="light"
+                size="sm"
+                shape="circle"
+                data-testid="row-pill"
+                data-pill={busy ? 'opening' : 'ending'}
+                className="h-5 shrink-0"
+              >
+                {busy ? 'opening' : 'ending'}
+              </Badge>
+            ) : (
+              // The chip refuses to shrink everywhere else, which is
+              // right where it stands beside body text. Here it has
+              // the line to itself and what it is on cuts short only
+              // when the rail is genuinely too narrow for it
+              // (bw-jaoz.14.14).
+              //
+              // The word without its clause is not a rich status:
+              // "Helping", "Retrying" or "Summarising" only becomes
+              // actionable when the helper, reset time, or current
+              // work remains visible. ChatStateChip middle-ellipsizes
+              // that clause rather than dropping it.
+              says && <ChatStateChip state={rowState} testId="row-pill" className="h-5 min-w-0 max-w-full shrink" />
+            )}
+            {/*
+              A review, proposal, plan change, grid draft or N/A request in this
+              chat, drawn the way a permission question is: the agent is as
+              stopped, and the owner as needed, whatever the chat's own state
+              says. A sleeping chat's chip draws nothing, so this can be alone.
+            */}
+            {/* The stage this chat's workflow run is on. */}
+            {stage && <WorkflowStageChip stage={stage} testId="row-workflow-stage" className="h-5 max-w-full shrink" />}
+            {waiting && (
+              <Badge
+                variant="warning"
+                appearance="light"
+                size="sm"
+                shape="circle"
+                data-testid="row-waiting"
+                className="h-5 min-w-0 max-w-full shrink gap-1.5"
+              >
+                <Hand className="size-3 shrink-0 animate-pulse" aria-hidden="true" />
+                <span className="min-w-0 truncate">{waiting}</span>
+              </Badge>
+            )}
+          </div>
         )}
         {/*
           The clock, on a phone only — the name's line hands it down
           here so a long title keeps that end of the line
-          (bw-8kk4.1). Last and unshrinkable, with the chip taking
-          the squeeze instead: a status long enough to fill the line
+          (bw-8kk4.1). Last and unshrinkable, level with the first
+          line of chips: a status long enough to fill the line
           middle-ellipsizes, and the time it would otherwise have
           shoved off the screen stays where the eye looks for it.
         */}
-        <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground md:hidden">
+        <span data-testid="row-clock" className="ml-auto flex h-5 shrink-0 items-center font-mono text-[11px] text-muted-foreground md:hidden">
           {clockTime(row.lastActiveAt)}
         </span>
       </div>
