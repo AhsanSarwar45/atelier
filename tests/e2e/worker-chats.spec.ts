@@ -37,6 +37,18 @@ async function shotAround(page: Page, testids: string[]): Promise<{ x: number; y
   };
 }
 
+/**
+ * Opens the composer's More settings panel, where Workers, Collaboration mode
+ * and the provider's own switches live. It stays open while a setting's list
+ * is used, and closes on a reload or a click on the row.
+ */
+async function openMoreSettings(page: Page) {
+  const panel = page.getByTestId('more-composer-settings');
+  if (!(await panel.isVisible())) await page.getByTestId('more-composer-settings-button').click({ timeout: 60_000 });
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
 async function project(request: APIRequestContext, name: string): Promise<{ id: string; path: string }> {
   const path = join(FIXTURE, name);
   rmSync(path, { recursive: true, force: true });
@@ -71,6 +83,7 @@ test('the chat bar Workers setting chooses none or a provider and account', asyn
     });
     started.push(chat.id as string);
     await page.goto(`/project?id=${made.id}&tab=chat&chat=${chat.id}`);
+    await openMoreSettings(page);
     const workers = page.getByTestId('workers-picker');
     await expect(workers).toHaveAttribute('data-current', 'none');
     await expect(workers).toHaveAccessibleName(/Workers/);
@@ -89,6 +102,7 @@ test('the chat bar Workers setting chooses none or a provider and account', asyn
 
     // Kept on the chat, so it is still there after a reload.
     await page.reload();
+    await openMoreSettings(page);
     await expect(page.getByTestId('workers-picker')).toHaveAttribute('data-current', /^codex:/);
 
     // And None turns workers off again.
@@ -121,6 +135,7 @@ test('the worker model and effort are chosen in the chat bar before any worker s
     await page.goto(`/project?id=${made.id}&tab=chat&chat=${chat.id}`);
     // With no workers there is no worker model to choose.
     await expect(page.getByTestId('workers-model-picker'), 'a worker model is offered with workers off').toHaveCount(0);
+    await openMoreSettings(page);
     await page.getByTestId('workers-picker').click();
     await page.locator('[data-testid="workers-picker-option"][data-value^="codex:"]').first().click();
 
@@ -151,6 +166,7 @@ test('the worker model and effort are chosen in the chat bar before any worker s
 
     // Kept on the chat with the provider and account.
     await page.reload();
+    await openMoreSettings(page);
     await page.getByTestId('workers-picker').click();
     await expect(page.getByTestId('workers-model-picker')).toHaveAttribute('data-current', picked!);
   } finally {
@@ -169,6 +185,7 @@ test('the Workers setting works from the keyboard', async ({ page, request }) =>
     });
     started.push(chat.id as string);
     await page.goto(`/project?id=${made.id}&tab=chat&chat=${chat.id}`);
+    await openMoreSettings(page);
     const workers = page.getByTestId('workers-picker');
     await expect(workers).toHaveAttribute('data-current', 'none');
     await workers.focus();
@@ -291,6 +308,7 @@ test('the worker model setting fits a phone screen and works from the keyboard',
 
     // Keyboard: open the Workers menu, step into Worker model and choose a model with Enter.
     await page.goto(`/project?id=${made.id}&tab=chat&chat=${chat.id}`);
+    await openMoreSettings(page);
     await page.getByTestId('workers-picker').focus();
     await page.keyboard.press('Enter');
     const model = page.getByTestId('workers-model-picker');

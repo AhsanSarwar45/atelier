@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { restartInstance } from './restart';
 
@@ -38,6 +38,18 @@ function backend(): string {
 }
 
 /** Waits until the chat has no agent, which is what a stopped chat is. */
+/**
+ * Opens the composer's More settings panel, where Workers, Collaboration mode
+ * and the provider's own switches live. It stays open while a setting's list
+ * is used, and closes on a reload or a click on the row.
+ */
+async function openMoreSettings(page: Page) {
+  const panel = page.getByTestId('more-composer-settings');
+  if (!(await panel.isVisible())) await page.getByTestId('more-composer-settings-button').click({ timeout: 60_000 });
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
 async function untilStopped(request: APIRequestContext, project: Project, chat: string) {
   const q = new URLSearchParams({ project: project.id, path: project.path, all: '1' });
   await expect.poll(async () => {
@@ -267,6 +279,8 @@ test.describe('what a chat is set to survives sending a message', () => {
     const chat = started.id;
     await command({ type: 'prompt.send', sessionId: chat, text: 'The first message.' });
     await page.goto(`/project?id=${project.id}&tab=chat&chat=${chat}`);
+    await expect(page.getByTestId('effort-picker')).toBeVisible({ timeout: HELLO_MS });
+    await openMoreSettings(page);
     await expect(page.getByTestId('config-fast-mode-picker')).toBeVisible({ timeout: HELLO_MS });
     await command({ type: 'session.close', sessionId: chat });
     await untilStopped(request, project, chat);
@@ -285,14 +299,18 @@ test.describe('what a chat is set to survives sending a message', () => {
     await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
     const controls = page.getByTestId('desktop-composer-settings');
     const effort = controls.getByTestId('effort-picker');
-    const fast = controls.getByTestId('config-fast-mode-picker');
+    // Fast mode is in the More settings panel, which a click on the row closes.
+    const fast = page.getByTestId('more-composer-settings').getByTestId('config-fast-mode-picker');
     await expect(effort).toBeVisible({ timeout: 60_000 });
+    await openMoreSettings(page);
     await expect(fast).toBeVisible();
+    await page.keyboard.press('Escape');
     await expect(effort).toHaveAttribute('data-asleep', 'true');
 
     await effort.click();
     await page.locator('[data-testid="effort-picker-option"][data-value="high"]').click();
     await expect(effort).toHaveAttribute('data-current', EFFORT);
+    await openMoreSettings(page);
     await fast.click();
     await page.locator('[data-testid="config-fast-mode-picker-option"][data-value="true"]').click();
     await expect(fast).toHaveAttribute('data-current', 'true');

@@ -24,6 +24,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -853,6 +854,9 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
   );
 }
 
+/** The composer's button for the settings that are not on its row. */
+const MORE_SETTINGS = 'More settings';
+
 const CHECKLIST_NOTE: Partial<Record<ChecklistItem['status'], string>> = {
   paused: 'Paused',
   blocked: 'Blocked',
@@ -1446,6 +1450,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [permissionDefaults, setPermissionDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [autoApproveDefaults, setAutoApproveDefaults] = useState<Partial<Record<Brand, boolean>>>({});
   const [composerSettingsOpen, setComposerSettingsOpen] = useState(false);
+  const [moreSettingsOpen, setMoreSettingsOpen] = useState(false);
   const availableBrand = firstAvailableProvider(providers);
   const newBrandAvailable = providerIsAvailable(providers, newBrand);
   useEffect(() => {
@@ -3206,28 +3211,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               onDefault={sessionBrand === 'local' ? undefined : (on) => makeProviderDefault('autoApprove', on ? 'on' : 'off')}
               onError={setSteerError}
             />
-            <WorkersPicker sessionId={chatId} choice={view.workers} accounts={accounts} providers={providers} asleep={asleep} onError={setSteerError} />
-            {composer.collaborationModes.length > 0 && (
-              <Picker
-                icon={<Workflow className="h-3.5 w-3.5" />}
-                label="Collaboration mode"
-                testid="collaboration-mode-picker"
-                current={view.collaborationMode}
-                currentLabel={composer.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
-                asleep={asleep}
-                options={composer.collaborationModes.map((mode) => ({
-                  value: mode.value,
-                  label: mode.displayName,
-                  hint: mode.description,
-                }))}
-                onPick={(mode) => {
-                  setSteerError(null);
-                  void sendCommand({ type: 'session.collaboration-mode', sessionId: chatId, mode }).catch((e: unknown) =>
-                    setSteerError(e instanceof Error ? e.message : String(e)),
-                  );
-                }}
-              />
-            )}
             {sessionAccounts.length > 1 && (
               <Picker
                 icon={<UserRound className="h-3.5 w-3.5" />}
@@ -3301,12 +3284,70 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 );
               }}
             />
-            <SessionConfigPickers
-              options={view.menu.configOptions}
-              sessionId={chatId}
-              asleep={asleep}
-              onError={setSteerError}
-            />
+            {/* The settings changed less often wait behind one button, so the
+                row keeps room for the message box. Each still opens its own
+                list, over this panel. */}
+            <Popover open={moreSettingsOpen} onOpenChange={setMoreSettingsOpen}>
+              <PopoverTrigger asChild>
+                <Tooltip label={MORE_SETTINGS}>
+                  <Button
+                    variant="ghost"
+                    mode="icon"
+                    size="sm"
+                    aria-label={MORE_SETTINGS}
+                    data-testid="more-composer-settings-button"
+                    radius="full" className="text-muted-foreground"
+                  >
+                    <SlidersHorizontal className="h-4 w-4" />
+                  </Button>
+                </Tooltip>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                side="top"
+                data-testid="more-composer-settings"
+                // A setting's tooltip opens on keyboard focus and would take
+                // the first Escape, leaving the panel open. Escape on the panel
+                // itself closes it; a setting's own list sits outside it and
+                // still closes alone.
+                onKeyDownCapture={(event) => {
+                  if (event.key === 'Escape' && event.currentTarget.contains(event.target as Node)) {
+                    event.preventDefault();
+                    setMoreSettingsOpen(false);
+                  }
+                }}
+                className="flex w-auto min-w-56 max-w-[min(20rem,calc(100vw-2rem))] flex-col gap-1 p-1.5 [&_[data-testid$='-picker']]:w-full [&_[data-testid$='-picker']]:justify-start"
+              >
+                <WorkersPicker sessionId={chatId} choice={view.workers} accounts={accounts} providers={providers} asleep={asleep} onError={setSteerError} />
+                {composer.collaborationModes.length > 0 && (
+                  <Picker
+                    icon={<Workflow className="h-3.5 w-3.5" />}
+                    label="Collaboration mode"
+                    testid="collaboration-mode-picker"
+                    current={view.collaborationMode}
+                    currentLabel={composer.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
+                    asleep={asleep}
+                    options={composer.collaborationModes.map((mode) => ({
+                      value: mode.value,
+                      label: mode.displayName,
+                      hint: mode.description,
+                    }))}
+                    onPick={(mode) => {
+                      setSteerError(null);
+                      void sendCommand({ type: 'session.collaboration-mode', sessionId: chatId, mode }).catch((e: unknown) =>
+                        setSteerError(e instanceof Error ? e.message : String(e)),
+                      );
+                    }}
+                  />
+                )}
+                <SessionConfigPickers
+                  options={view.menu.configOptions}
+                  sessionId={chatId}
+                  asleep={asleep}
+                  onError={setSteerError}
+                />
+              </PopoverContent>
+            </Popover>
             </div>
             <Tooltip label="Chat settings">
               <Button
@@ -3377,7 +3418,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             />
           </div>
     </>
-  ), [asleep, busy, cannotSend, chatId, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, effortDefaults, holdSteady, autoApproveDefaults, makeProviderDefault, midTurn, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, sessionStanding, submitSteady, switchAccount, view.collaborationMode, view.effort, view.menu.agentDefinitions, view.menu.configOptions, view.autoApprove, view.model, view.permissionMode, view.workers, accounts, providers]);
+  ), [asleep, busy, cannotSend, chatId, moreSettingsOpen, composer.collaborationModes, composer.efforts, composer.models, composer.permissionModes, effortDefaults, holdSteady, autoApproveDefaults, makeProviderDefault, midTurn, modelDefaults, permissionDefaults, selectedModel, sessionAccounts, sessionBrand, sessionProfile, sessionProfileLabel, sessionStanding, submitSteady, switchAccount, view.collaborationMode, view.effort, view.menu.agentDefinitions, view.menu.configOptions, view.autoApprove, view.model, view.permissionMode, view.workers, accounts, providers]);
 
   const mobileSettings = useMemo(() => (
     <>

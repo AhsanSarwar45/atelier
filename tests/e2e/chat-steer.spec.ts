@@ -55,6 +55,18 @@ const PLANTED_COMMAND = 'atelier-e2e-steer-proof';
  * exists — so the loser looks again and adopts it. The five sibling specs are
  * written this way already (bw-f7tu.1).
  */
+/**
+ * Opens the composer's More settings panel, where Workers, Collaboration mode
+ * and the provider's own switches live. It stays open while a setting's list
+ * is used, and closes on a reload or a click on the row.
+ */
+async function openMoreSettings(page: Page) {
+  const panel = page.getByTestId('more-composer-settings');
+  if (!(await panel.isVisible())) await page.getByTestId('more-composer-settings-button').click({ timeout: 60_000 });
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
 async function steerProject(request: APIRequestContext): Promise<Project> {
   const api = backend();
   const there = async (): Promise<Project | undefined> => {
@@ -157,6 +169,7 @@ test.describe('steering the chat you are in', () => {
 
     const permissions = page.getByTestId('mode-picker');
     const collaboration = page.getByTestId('collaboration-mode-picker');
+    await openMoreSettings(page);
     await collaboration.waitFor({ timeout: HELLO_MS });
     await expect(permissions).toHaveAttribute('data-current', /.+/);
     const permissionBefore = await permissions.getAttribute('data-current');
