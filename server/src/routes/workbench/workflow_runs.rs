@@ -260,8 +260,28 @@ fn how_to_report(workflow: &Workflow, stage: &Stage) -> String {
         "This chat is running the workflow \"{}\", stage \"{}\" ({at} of {}). Run `atelier workflow show` to see every stage and where each outcome leads.\n\
          Every turn must end with one of these commands. When this stage is finished, run one of these, then end your reply:\n{}\n\
          To wait for something that takes minutes, such as a review bot or CI, run `atelier workflow wait --minutes N --for \"what you wait for\"` (at most {MAX_WAIT_MINUTES}) and end your reply; you are told to check again when the time is up.\n\
-         If you cannot finish without the owner, run `atelier workflow block --needs \"what you need\"` and end your reply.",
-        workflow.name, stage.name, workflow.stages.len(), lines.join("\n")
+         If you cannot finish without the owner, run `atelier workflow block --needs \"what you need\"` and end your reply.{}",
+        workflow.name, stage.name, workflow.stages.len(), lines.join("\n"), while_waiting(workflow)
+    )
+}
+
+/// What an agent may do while its run waits in one of the workflow's Wait
+/// stages: report the outcome itself when it already knows it, as when QA
+/// answers in the chat. Nothing for a workflow without Wait stages.
+fn while_waiting(workflow: &Workflow) -> String {
+    let waits: Vec<String> = workflow
+        .stages
+        .iter()
+        .filter(|stage| stage.kind == StageKind::Wait)
+        .map(|stage| format!("\"{}\"", stage.name))
+        .collect();
+    if waits.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\nLater, while the run waits in {}, you can still move it when you already know the result, for example when QA answers here: \
+         run `atelier workflow show` to see that stage's outcomes, then `atelier workflow done OUTCOME`, and end your reply.",
+        waits.join(" or ")
     )
 }
 
@@ -421,6 +441,12 @@ fn wait_of(run: &Run) -> Option<(i64, String)> {
     let report = run.report.as_ref()?;
     let wake = report["wake"].as_i64()?;
     Some((wake, report["for"].as_str().unwrap_or_default().to_string()))
+}
+
+/// The outcome the run's agent reported with `atelier workflow done` and the
+/// run has not followed yet.
+fn reported_outcome(run: &Run) -> Option<String> {
+    run.report.as_ref()?["outcome"].as_str().map(str::to_string)
 }
 
 /// The run waits inside an agent stage and its time is up.
@@ -604,6 +630,9 @@ async fn follow(state: &WorkbenchState, flow: &Workflow, run: &mut Run, outcome:
 /// Run a Wait stage's check and take the route whose outcome it printed.
 async fn check(state: &WorkbenchState, flow: &Workflow, run: &mut Run) -> Result<(), String> {
     let Some(stage) = flow.stages.iter().find(|stage| stage.id == run.stage) else { return Ok(()) };
+    if reported_outcome(run).is_some() {
+        return Ok(());
+    }
     let cwd = run.cwd.clone().unwrap_or_else(|| run.project_path.clone());
     let printed = match shell(&cwd, &fill(&stage.prompt, &run.item)).await {
         Ok((_, out, _)) => out,
@@ -612,6 +641,16 @@ async fn check(state: &WorkbenchState, flow: &Workflow, run: &mut Run) -> Result
             return save(state, run).await;
         }
     };
+    // The check takes a while; an agent may have reported meanwhile, and its
+    // report wins over what the check printed.
+    match run_by_id(state, &run.id).await? {
+        Some(now) if now.stage == run.stage && now.status == run.status && reported_outcome(&now).is_none() => {}
+        Some(now) => {
+            *run = now;
+            return Ok(());
+        }
+        None => return Ok(()),
+    }
     let lines: Vec<&str> = printed.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
     let matched = stage
         .routes
@@ -672,7 +711,7 @@ async fn turn_ended(state: &WorkbenchState, session: &str, ended_in: &str) {
         Ok(runs) => runs,
         Err(error) => return tracing::warn!(chat = session, %error, "workflow runs could not be read"),
     };
-    for mut run in runs.into_iter().filter(|run| run.status == "running" || run.status == "needs_owner") {
+    for mut run in runs.into_iter().filter(|run| ["running", "needs_owner", "waiting"].contains(&run.status.as_str())) {
         if let Err(error) = advance(state, &mut run, session, ended_in).await {
             tracing::warn!(run = run.id, %error, "a workflow run could not move on");
             let _ = hold(state, &mut run, error).await;
@@ -686,6 +725,11 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
     let Some(stage) = flow.stages.iter().find(|stage| stage.id == run.stage).cloned() else {
         return hold(state, run, format!("The workflow no longer has a stage {}", run.stage)).await;
     };
+    // A run that waits, in a Wait stage or inside its agent stage, moves only
+    // on what the agent reported; a turn without a report leaves it waiting.
+    if stage.kind == StageKind::Wait || run.status == "waiting" {
+        return reported_while_waiting(state, &flow, run).await;
+    }
     if stage.kind != StageKind::Agent {
         return Ok(());
     }
@@ -759,6 +803,20 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
     );
     tell_chat(state, session, text).await;
     Ok(())
+}
+
+/// The turn of a waiting run's chat ended: follow the outcome its agent
+/// reported, or start the new wait it asked for. Anything else leaves the
+/// run as it is; a block already holds it for the owner.
+async fn reported_while_waiting(state: &WorkbenchState, flow: &Workflow, run: &mut Run) -> Result<(), String> {
+    if let Some(outcome) = reported_outcome(run) {
+        run.reminders = 0;
+        return follow(state, flow, run, &outcome).await;
+    }
+    match run.report.clone() {
+        Some(waits) if run.status == "waiting" && waits["wake"].is_i64() => wait(state, run, waits).await,
+        _ => Ok(()),
+    }
 }
 
 /// The agent asked to wait inside its stage: the run waits without a slot
@@ -842,6 +900,21 @@ async fn tick(state: &WorkbenchState, project_id: &str, project_path: &str, forc
             continue;
         }
         let Ok(flow) = workflow(&run.project_path, &run.workflow) else { continue };
+        // An outcome the agent reported is followed when its turn ends; if
+        // the chat is gone, as after a restart, that turn never ends.
+        if let Some(outcome) = reported_outcome(&run) {
+            let gone = match run.session.as_deref() {
+                Some(session) => !state.registry.has_driver(session).await,
+                None => true,
+            };
+            if gone {
+                if let Err(error) = follow(state, &flow, &mut run, &outcome).await {
+                    tracing::warn!(run = run.id, %error, "a workflow run could not follow its reported outcome");
+                    let _ = hold(state, &mut run, error).await;
+                }
+            }
+            continue;
+        }
         // An agent waiting inside its stage is woken by `promote` below, once
         // its time is up and a slot is free.
         if wait_of(&run).is_some() {
@@ -1071,7 +1144,7 @@ pub(super) async fn report(State(state): State<WorkbenchState>, Json(ask): Json<
     let runs = runs_where(&state, "session_id = ?1", ask.session.clone()).await.map_err(ApiError::from)?;
     let mut run = runs
         .into_iter()
-        .find(|run| run.status == "running" || run.status == "needs_owner")
+        .find(|run| ["running", "needs_owner", "waiting"].contains(&run.status.as_str()))
         .ok_or_else(|| ApiError::not_found("This chat is not running a workflow stage".to_string()))?;
     let flow = workflow(&run.project_path, &run.workflow)?;
     let stage = flow
@@ -1110,7 +1183,20 @@ pub(super) async fn report(State(state): State<WorkbenchState>, Json(ask): Json<
             }
             run.report = Some(json!({"outcome": outcome}));
             save(&state, &run).await?;
-            Ok(Json(json!({"summary": format!("Stage {} reported \"{outcome}\". End your reply; the workflow moves on when it ends.", stage.name)})))
+            let to = stage
+                .routes
+                .iter()
+                .find(|route| route.outcome == outcome)
+                .and_then(|route| flow.stages.iter().find(|next| next.id == route.to))
+                .map_or_else(|| "finishes".to_string(), |next| format!("moves to stage \"{}\"", next.name));
+            Ok(Json(json!({"summary": format!("Stage {} reported \"{outcome}\". End your reply; the run {to} when it ends.", stage.name)})))
+        }
+        "wait" if stage.kind == StageKind::Wait => {
+            let listed = outcomes(&stage).iter().map(|outcome| format!("atelier workflow done {}", quoted(outcome))).collect::<Vec<_>>().join(", ");
+            Err(refused(
+                axum::http::StatusCode::CONFLICT,
+                format!("The run already waits in stage {}, which checks on its own. To move it now, run one of: {listed}", stage.name),
+            ))
         }
         "wait" => {
             let minutes = ask.minutes.ok_or_else(|| ApiError::from("--minutes is required".to_string()))?;

@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 pub const USAGE: &str = "\
 usage: atelier workflow <command>
   show                         the workflow this chat runs: every stage, where each outcome leads, and the current stage
-  done OUTCOME                 finish the current stage with one of its outcomes; the run moves on when your reply ends
+  done OUTCOME                 finish the current stage with one of its outcomes, also while the run waits; the run moves on when your reply ends
   wait --minutes N --for TEXT  wait up to 60 minutes inside the stage (a review bot, CI); you are told to check again when the time is up
   block --needs TEXT           stop for the owner, saying what you need";
 
@@ -60,7 +60,12 @@ fn listing(shown: &Value) -> String {
         }
     }
     let outcomes: Vec<&str> = shown["outcomes"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-    out.push_str(&format!("This stage finishes with: atelier workflow done <{}>", outcomes.join("|")));
+    let waits = shown["stages"].as_array().into_iter().flatten().any(|stage| stage["id"] == current && stage["kind"] == "wait");
+    if waits {
+        out.push_str(&format!("This stage checks on its own. To move the run now: atelier workflow done <{}>", outcomes.join("|")));
+    } else {
+        out.push_str(&format!("This stage finishes with: atelier workflow done <{}>", outcomes.join("|")));
+    }
     out
 }
 

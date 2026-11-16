@@ -1388,3 +1388,152 @@ async fn the_atelier_workflow_cli_waits() {
     let waiting = run_where(&fixture, &run["id"], |run| run["status"] == "waiting").await;
     assert_eq!(waiting["status"], "waiting", "the CLI's wait did not put the run to wait: {waiting}");
 }
+
+// --- An agent moves a run that waits in a Wait stage ---
+
+/// Implement, then wait for QA's verdict in Linear (a file here), then fix or
+/// merge. The status file starts at a status no route names.
+fn qa_flow(fixture: &Fixture) -> Value {
+    let status = fixture._directory.path().join("qa-status");
+    std::fs::write(&status, "In Tapforce QA\n").unwrap();
+    json!({
+        "id": "qa", "name": "Linear work", "enabled": true, "trigger": {"kind": "manual"}, "agent": {"brand": "claude"},
+        "setup": {"branch": "{{item.branchName}}", "base": "staging"},
+        "stages": [
+            agent("implement", "Work on {{item.identifier}}: {{item.title}}", json!([{"outcome": "done", "to": "qa-result"}])),
+            {"id": "qa-result", "name": "Wait for QA", "kind": "wait", "prompt": format!("cat {}", status.display()),
+             "routes": [{"outcome": "Rejected", "to": "fix"}, {"outcome": "Needs merging to staging", "to": "merge"}]},
+            agent("fix", "Fix what QA rejected on {{item.identifier}}", json!([{"outcome": "fixed", "to": "qa-result"}])),
+            agent("merge", "Merge {{item.identifier}}", json!([])),
+        ]
+    })
+}
+
+/// Starts a run of `qa_flow` and brings it to Wait for QA; the run.
+async fn waiting_for_qa(fixture: &Fixture, n: u32) -> Value {
+    save(fixture, qa_flow(fixture));
+    let run = start(fixture, "qa", item(n)).await;
+    finishes(fixture, &session(&run), "done").await;
+    let waiting = run_where(fixture, &run["id"], |run| run["stage"] == "qa-result" && run["status"] == "waiting").await;
+    assert_eq!((waiting["stage"].as_str(), waiting["status"].as_str()), (Some("qa-result"), Some("waiting")), "the run did not reach Wait for QA: {waiting}");
+    waiting
+}
+
+#[tokio::test]
+async fn an_agent_reports_a_wait_stages_outcome_and_the_run_takes_that_route() {
+    let fixture = fixture().await;
+    let run = waiting_for_qa(&fixture, 70).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "done", json!({"outcome": "rejected"})).await;
+    assert_eq!(code, 200, "workflow done was refused while the run waits in a Wait stage: {body}");
+    replies(&fixture, &id, "QA rejected it in the thread; sending it back.").await;
+    let moved = run_where(&fixture, &run["id"], |run| run["stage"] == "fix").await;
+    assert_eq!(moved["stage"], "fix", "the reported Wait stage outcome did not move the run: {moved}");
+    let prompts = told(&fixture, &id).await;
+    assert!(prompts.iter().any(|p| p.contains("Fix what QA rejected on KEY-70")), "the fix stage's prompt was not sent: {prompts:?}");
+}
+
+#[tokio::test]
+async fn a_wait_stage_refuses_an_outcome_it_has_no_route_for() {
+    let fixture = fixture().await;
+    let run = waiting_for_qa(&fixture, 71).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "done", json!({"outcome": "fixed"})).await;
+    assert_eq!(code, 400, "a Wait stage took an outcome it has no route for: {body}");
+    assert!(body.to_string().contains("Rejected"), "the refusal does not list the Wait stage's outcomes: {body}");
+    replies(&fixture, &id, "Done.").await;
+    let still = run_now(&fixture, &run["id"]).await;
+    assert_eq!((still["stage"].as_str(), still["status"].as_str()), (Some("qa-result"), Some("waiting")), "a refused outcome moved the run: {still}");
+}
+
+#[tokio::test]
+async fn a_wait_stages_check_does_not_override_what_the_agent_reported() {
+    let fixture = fixture().await;
+    let run = waiting_for_qa(&fixture, 72).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "done", json!({"outcome": "Rejected"})).await;
+    assert_eq!(code, 200, "workflow done was refused: {body}");
+    // The check would send it to merge, but the agent's report came first.
+    std::fs::write(fixture._directory.path().join("qa-status"), "Needs merging to staging\n").unwrap();
+    act(&fixture, json!({"action": "tick"})).await;
+    replies(&fixture, &id, "Sending it back.").await;
+    let moved = run_where(&fixture, &run["id"], |run| run["stage"] == "fix").await;
+    assert_eq!(moved["stage"], "fix", "the check overrode the outcome the agent reported: {moved}");
+}
+
+#[tokio::test]
+async fn a_turn_in_a_wait_stage_without_a_report_leaves_the_run_waiting() {
+    let fixture = fixture().await;
+    let run = waiting_for_qa(&fixture, 73).await;
+    let id = session(&run);
+    let before = told(&fixture, &id).await.len();
+    replies(&fixture, &id, "QA has not answered yet.").await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let still = run_now(&fixture, &run["id"]).await;
+    assert_eq!((still["stage"].as_str(), still["status"].as_str()), (Some("qa-result"), Some("waiting")), "a turn without a report moved a waiting run: {still}");
+    let prompts = told(&fixture, &id).await;
+    assert_eq!(prompts.len(), before, "a turn in a Wait stage was reminded to report: {prompts:?}");
+}
+
+#[tokio::test]
+async fn workflow_show_works_while_the_run_waits_in_a_wait_stage() {
+    let fixture = fixture().await;
+    let run = waiting_for_qa(&fixture, 74).await;
+    let (code, body) = report(&fixture, &session(&run), "show", json!({})).await;
+    assert_eq!(code, 200, "workflow show was refused while the run waits: {body}");
+    assert_eq!(body["current"], "qa-result", "workflow show does not name the Wait stage: {body}");
+    assert_eq!(body["outcomes"], json!(["Rejected", "Needs merging to staging"]), "workflow show does not list the Wait stage's outcomes: {body}");
+}
+
+#[tokio::test]
+async fn workflow_wait_is_refused_in_a_wait_stage() {
+    let fixture = fixture().await;
+    let run = waiting_for_qa(&fixture, 75).await;
+    let (code, body) = report(&fixture, &session(&run), "wait", json!({"minutes": 5, "for": "QA"})).await;
+    assert_eq!(code, 409, "workflow wait was taken in a stage that already waits: {body}");
+    assert!(body.to_string().contains("atelier workflow done"), "the refusal does not say how to move the run: {body}");
+}
+
+#[tokio::test]
+async fn an_agent_waiting_inside_its_stage_can_finish_it_early() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(76)).await;
+    let id = session(&run);
+    report(&fixture, &id, "wait", json!({"minutes": 30, "for": "CI"})).await;
+    replies(&fixture, &id, "Waiting for CI.").await;
+    run_where(&fixture, &run["id"], |run| run["status"] == "waiting").await;
+    let (code, body) = report(&fixture, &id, "done", json!({"outcome": "done"})).await;
+    assert_eq!(code, 200, "workflow done was refused during the agent's own wait: {body}");
+    replies(&fixture, &id, "CI passed early.").await;
+    let moved = run_where(&fixture, &run["id"], |run| run["stage"] == "qa").await;
+    assert_eq!(moved["stage"], "qa", "finishing during a wait did not move the run: {moved}");
+}
+
+#[tokio::test]
+async fn a_wait_stage_outcome_reported_before_a_restart_is_followed() {
+    let fixture = fixture().await;
+    let run = waiting_for_qa(&fixture, 77).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "done", json!({"outcome": "Rejected"})).await;
+    assert_eq!(code, 200, "workflow done was refused: {body}");
+    // The app stops before the turn ends.
+    act(&fixture, json!({"action": "tick"})).await;
+    let after = restart(&fixture);
+    act(&after, json!({"action": "tick"})).await;
+    let moved = run_where(&after, &run["id"], |run| run["stage"] == "fix").await;
+    assert_eq!(moved["stage"], "fix", "the outcome reported before the restart was lost: {moved}");
+}
+
+#[tokio::test]
+async fn the_stage_prompt_says_a_later_wait_stage_can_be_reported() {
+    let fixture = fixture().await;
+    save(&fixture, qa_flow(&fixture));
+    let run = start(&fixture, "qa", item(78)).await;
+    let prompts = told_more(&fixture, &session(&run), 0).await;
+    let first = prompts.first().cloned().unwrap_or_default();
+    assert!(
+        first.contains("\"Wait for QA\"") && first.contains("atelier workflow done"),
+        "the prompt does not say the agent can report a Wait stage's outcome: {first}"
+    );
+}

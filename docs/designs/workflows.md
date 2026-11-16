@@ -1,6 +1,6 @@
 # Workflows
 
-Tasks #35, #38, #39, #43, #45, #46 and #48. A workflow takes an item, such as a Linear ticket,
+Tasks #35, #38, #39, #43, #45, #46, #48 and #52. A workflow takes an item, such as a Linear ticket,
 through a fixed set of stages. Each item gets its own worktree and chat, and
 the server moves it from stage to stage. The owner steps in only where the
 workflow says so.
@@ -146,6 +146,29 @@ without reporting the stage". Reminders count from zero again when the agent
 reports or a stage starts. A turn that ends while the agent waits on its own
 subagents is left alone; its turn ends for real later. Matching outcomes
 ignores case.
+
+**Reporting while a run waits.** A run that waits keeps listening to its
+agent. This covers a Wait stage such as Wait for QA, and an agent's own
+`atelier workflow wait`. It helps when the result is already known before
+the check sees it, for example when QA answers in the chat and the work has
+to go back to fixing.
+
+- `atelier workflow show` works while the run waits and lists the current
+  stage's outcomes. In a Wait stage these are its routes' outcomes.
+- `atelier workflow done OUTCOME` accepts only those outcomes. The run takes
+  that route when the agent's turn ends.
+- The stage's check never overrides a reported outcome. The tick skips a run
+  whose agent has reported, and a check that finishes after a report
+  changes nothing. If the chat is gone before its turn ends, as after a
+  restart, the next tick follows the reported outcome.
+- An agent waiting inside its own stage can finish the stage early the same
+  way.
+- `atelier workflow wait` is refused in a Wait stage, which already checks on
+  its own. The refusal lists the `done` commands.
+- A turn that ends without a report leaves a waiting run as it is. It gets
+  no reminder.
+- Every agent stage prompt names the workflow's Wait stages and says that
+  their outcomes can be reported this way.
 
 ## Automatic switches
 
