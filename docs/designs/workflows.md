@@ -1,6 +1,6 @@
 # Workflows
 
-Tasks #35, #38, #39, #43, #45 and #46. A workflow takes an item, such as a Linear ticket,
+Tasks #35, #38, #39, #43, #45, #46 and #48. A workflow takes an item, such as a Linear ticket,
 through a fixed set of stages. Each item gets its own worktree and chat, and
 the server moves it from stage to stage. The owner steps in only where the
 workflow says so.
@@ -124,12 +124,28 @@ names the chat with `ATELIER_CHAT_SESSION_ID` and talks to the running app.
   stage has no route for is refused, with the stage's outcomes listed, and
   so is `done` while a task the chat holds is still in progress. The server
   keeps the outcome and acts on it when the turn ends.
+- `atelier workflow wait --minutes N --for TEXT` waits inside the stage for
+  something that takes minutes, such as a review bot or CI. N is 1 to 60.
+  When the turn ends, the run shows **Waiting** with "Checks again at HH:MM:
+  TEXT" and gives up its slot. Once the time is up and a slot is free, the
+  chat is told to check TEXT again, with the commands for reporting. The
+  wait is kept on the run, so it survives a restart; a chat gone by then is
+  sent its stage again. A longer wait is refused: something that takes
+  hours, such as QA testing the ticket, is outside the stage. The agent
+  reports `done`, and a Wait stage after it checks for it.
 - `atelier workflow block --needs TEXT` stops the run for the owner at once.
   The run shows **Needs you** with that text and gives up its slot.
 
-An agent that cannot run commands can still end its reply with an
-`Outcome: NAME` line. The server reads the last such line when no outcome
-was reported with the command. Matching ignores case either way.
+Only these commands move a run. Nothing is read from the agent's reply.
+
+**Reminders.** A turn that ends with no report, no task proposal and no task
+in review gets a reminder: "This chat ended its turn without reporting stage
+…", with every command. After two reminders in a row, the next such turn
+puts the run on **Needs you** with "The agent ended its turn 3 times in a row
+without reporting the stage". Reminders count from zero again when the agent
+reports or a stage starts. A turn that ends while the agent waits on its own
+subagents is left alone; its turn ends for real later. Matching outcomes
+ignores case.
 
 ## Automatic switches
 
@@ -142,14 +158,15 @@ off, the run stops for the owner at that point.
   the server approves it. The chat is told only "The workflow approved task
   #N", with nothing about merging: what happens next is up to the
   workflow's stages.
-- **Answer questions:** when a turn ends with no outcome, which usually means
-  the agent asked something, the server tells the agent to use its best
-  judgment, say what it chose and carry on.
+- **Answer questions:** the reminder for a turn that ends with no report,
+  which usually means the agent asked something, also tells the agent to use
+  its best judgment, say what it chose and carry on. With the switch off,
+  the reminder says to ask the owner with `atelier workflow block`.
 
 These checks run in that order whenever a turn ends: a `block` first, then a
-waiting proposal, then a task in review, then the outcome. An outcome
-reported in the same turn as a task in review still moves the run on after
-the server approves the task.
+waiting proposal, then a task in review, then a wait, then the outcome, then
+a reminder. A wait or an outcome reported in the same turn as a task in
+review still applies after the server approves the task.
 
 ## Schedules
 
@@ -185,4 +202,5 @@ body names the chat with `session`, and the chat must be running a stage.
 |---|---|---|
 | `show` | | `{workflow, item, current, outcomes, status, stages}` |
 | `done` | `outcome` | `{summary}`; 400 for an outcome the stage has no route for, 409 while the chat's task is in progress |
+| `wait` | `minutes`, `for` | `{summary}`; 400 for fewer than 1 or more than 60 minutes, or no `for` |
 | `block` | `needs` | `{summary}`; the run is **Needs you** with `needs` as its note |

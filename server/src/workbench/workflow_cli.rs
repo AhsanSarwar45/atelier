@@ -11,6 +11,7 @@ pub const USAGE: &str = "\
 usage: atelier workflow <command>
   show                         the workflow this chat runs: every stage, where each outcome leads, and the current stage
   done OUTCOME                 finish the current stage with one of its outcomes; the run moves on when your reply ends
+  wait --minutes N --for TEXT  wait up to 60 minutes inside the stage (a review bot, CI); you are told to check again when the time is up
   block --needs TEXT           stop for the owner, saying what you need";
 
 fn session() -> Result<String, String> {
@@ -73,6 +74,26 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
                 return Err("usage: atelier workflow done OUTCOME".into());
             }
             json!({"action": "done", "session": session()?, "outcome": outcome})
+        }
+        Some("wait") => {
+            let (mut minutes, mut what) = (None, Vec::new());
+            let mut words = rest[1..].iter().peekable();
+            while let Some(word) = words.next() {
+                match word.as_str() {
+                    "--minutes" => minutes = words.next().and_then(|n| n.parse::<i64>().ok()),
+                    "--for" => {
+                        while let Some(word) = words.next_if(|word| word.as_str() != "--minutes") {
+                            what.push(word.clone());
+                        }
+                    }
+                    _ => return Err("usage: atelier workflow wait --minutes N --for TEXT".into()),
+                }
+            }
+            let what = what.join(" ");
+            let Some(minutes) = minutes.filter(|_| !what.trim().is_empty()) else {
+                return Err("usage: atelier workflow wait --minutes N --for TEXT".into());
+            };
+            json!({"action": "wait", "session": session()?, "minutes": minutes, "for": what})
         }
         Some("block") => {
             let needs = match rest.get(1).map(String::as_str) {

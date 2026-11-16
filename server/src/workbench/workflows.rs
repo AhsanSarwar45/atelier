@@ -215,6 +215,7 @@ CREATE TABLE IF NOT EXISTS workflow_run (
   cwd TEXT,
   attempts TEXT NOT NULL DEFAULT '{}',
   seen_message INTEGER NOT NULL DEFAULT 0,
+  reminders INTEGER NOT NULL DEFAULT 0,
   note TEXT,
   agent TEXT,
   report TEXT,
@@ -244,6 +245,15 @@ pub fn ensure_schema(connection: &rusqlite::Connection) -> rusqlite::Result<()> 
     )?;
     if !has_report {
         connection.execute_batch("ALTER TABLE workflow_run ADD COLUMN report TEXT")?;
+    }
+    // 0.25.11 counts reminders for turns that end without a report.
+    let has_reminders: bool = connection.query_row(
+        "SELECT count(*) > 0 FROM pragma_table_info('workflow_run') WHERE name = 'reminders'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_reminders {
+        connection.execute_batch("ALTER TABLE workflow_run ADD COLUMN reminders INTEGER NOT NULL DEFAULT 0")?;
     }
     Ok(())
 }

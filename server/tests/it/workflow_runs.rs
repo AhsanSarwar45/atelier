@@ -285,6 +285,21 @@ async fn replies(fixture: &Fixture, id: &str, reply: &str) {
     event(fixture, json!({"type": "session.state", "sessionId": id, "state": "idle"})).await;
 }
 
+/// The agent in chat `id` reports `outcome` with `atelier workflow done` and
+/// ends its turn. The report is refused for a run that is not working.
+async fn finishes(fixture: &Fixture, id: &str, outcome: &str) {
+    report(fixture, id, "done", json!({"outcome": outcome})).await;
+    replies(fixture, id, "Finished the stage.").await;
+}
+
+/// The agent in chat `id` asks the owner with `atelier workflow block` and
+/// ends its turn.
+async fn asks_the_owner(fixture: &Fixture, id: &str, question: &str) {
+    let (code, body) = report(fixture, id, "block", json!({"needs": question})).await;
+    assert_eq!(code, 200, "workflow block was refused: {body}");
+    replies(fixture, id, question).await;
+}
+
 fn session(run: &Value) -> String {
     run["sessionId"].as_str().unwrap_or_else(|| panic!("the run has no chat: {run}")).to_string()
 }
@@ -316,7 +331,7 @@ async fn a_reported_outcome_moves_the_run_to_the_routed_stage() {
     let run = start(&fixture, "ticket", item(2)).await;
     let id = session(&run);
     let before = told_more(&fixture, &id, 0).await.len();
-    replies(&fixture, &id, "Implemented the fix.\n\nOutcome: done").await;
+    finishes(&fixture, &id, "done").await;
     let prompts = told_more(&fixture, &id, before).await;
     assert!(prompts.len() > before, "the chat never heard the next stage's prompt");
     assert!(prompts.last().unwrap().contains("Test KEY-2 in a browser"), "the next prompt is not QA's: {prompts:?}");
@@ -333,7 +348,7 @@ async fn the_last_stage_finishes_the_run() {
         "stages": [agent("ship", "Ship {{item.identifier}}", json!([]))]
     }));
     let run = start(&fixture, "one", item(3)).await;
-    replies(&fixture, &session(&run), "Shipped.\nOutcome: done").await;
+    finishes(&fixture, &session(&run), "done").await;
     let finished = run_where(&fixture, &run["id"], |run| run["status"] == "done").await;
     assert_eq!(finished["status"], "done", "a run past its last stage is not done: {finished}");
 }
@@ -369,17 +384,89 @@ async fn a_wait_stage_routes_on_what_its_check_prints() {
 }
 
 #[tokio::test]
-async fn an_unknown_outcome_waits_for_the_owner() {
+async fn an_outcome_line_in_a_reply_does_not_move_the_run() {
     let fixture = fixture().await;
     save(&fixture, ticket_flow());
     let run = start(&fixture, "ticket", item(5)).await;
     let id = session(&run);
     let before = told_more(&fixture, &id, 0).await.len();
+    replies(&fixture, &id, "Implemented the fix.\n\nOutcome: done").await;
+    told_more(&fixture, &id, before).await;
+    let now = run_now(&fixture, &run["id"]).await;
+    assert_eq!(now["stage"], "implement", "an Outcome line in the reply moved the run; only `atelier workflow done` may: {now}");
+}
+
+#[tokio::test]
+async fn a_turn_that_ends_without_a_report_is_reminded_how_to_report() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(55)).await;
+    let id = session(&run);
+    let before = told_more(&fixture, &id, 0).await.len();
     replies(&fixture, &id, "Should the button be blue or green?").await;
+    let prompts = told_more(&fixture, &id, before).await;
+    assert!(prompts.len() > before, "a turn that ended without a report was left idle instead of being reminded");
+    let reminder = prompts.last().unwrap();
+    for command in ["atelier workflow done done", "atelier workflow wait", "atelier workflow block"] {
+        assert!(reminder.contains(command), "the reminder does not offer `{command}`: {reminder}");
+    }
+    let now = run_now(&fixture, &run["id"]).await;
+    assert_eq!((now["status"].as_str(), now["stage"].as_str()), (Some("running"), Some("implement")), "the reminded run moved: {now}");
+}
+
+#[tokio::test]
+async fn an_agent_that_keeps_ending_without_a_report_goes_to_the_owner() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(56)).await;
+    let id = session(&run);
+    let mut heard = told_more(&fixture, &id, 0).await.len();
+    for _ in 0..2 {
+        replies(&fixture, &id, "Still looking.").await;
+        heard = told_more(&fixture, &id, heard).await.len();
+    }
+    replies(&fixture, &id, "Still looking.").await;
     let held = run_where(&fixture, &run["id"], |run| run["status"] == "needs_owner").await;
-    assert_eq!(held["status"], "needs_owner", "a turn with no outcome did not stop for the owner: {held}");
-    assert_eq!(held["stage"], "implement", "the run moved without an outcome: {held}");
-    assert_eq!(told(&fixture, &id).await.len(), before, "the chat was sent something without the owner");
+    assert_eq!(held["status"], "needs_owner", "an agent reminded twice that still did not report was reminded forever: {held}");
+    assert!(held["note"].as_str().unwrap_or("").contains("without reporting"), "the run does not say why it waits: {held}");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(told(&fixture, &id).await.len(), heard, "a third reminder was sent instead of handing the run to the owner");
+}
+
+#[tokio::test]
+async fn a_report_after_a_reminder_moves_the_run_and_resets_the_reminders() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(57)).await;
+    let id = session(&run);
+    let heard = told_more(&fixture, &id, 0).await.len();
+    replies(&fixture, &id, "Looking.").await;
+    let heard = told_more(&fixture, &id, heard).await.len();
+    replies(&fixture, &id, "Looking.").await;
+    told_more(&fixture, &id, heard).await;
+    finishes(&fixture, &id, "done").await;
+    run_where(&fixture, &run["id"], |run| run["stage"] == "qa").await;
+    // QA starts with no reminders used: one bare turn is reminded, not held.
+    let heard = told_more(&fixture, &id, 0).await.len();
+    replies(&fixture, &id, "Testing.").await;
+    told_more(&fixture, &id, heard).await;
+    let now = run_now(&fixture, &run["id"]).await;
+    assert_eq!((now["status"].as_str(), now["stage"].as_str()), (Some("running"), Some("qa")), "reminders used in one stage counted against the next: {now}");
+}
+
+#[tokio::test]
+async fn a_turn_that_ends_while_its_subagents_work_is_not_reminded() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(58)).await;
+    let id = session(&run);
+    let before = told_more(&fixture, &id, 0).await.len();
+    event(&fixture, json!({"type": "session.state", "sessionId": id, "state": "thinking"})).await;
+    event(&fixture, json!({"type": "session.state", "sessionId": id, "state": "waiting_for_agents"})).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(told(&fixture, &id).await.len(), before, "an agent waiting on its own subagents was reminded to report");
+    let now = run_now(&fixture, &run["id"]).await;
+    assert_eq!(now["status"], "running", "an agent waiting on its own subagents was stopped: {now}");
 }
 
 #[tokio::test]
@@ -405,13 +492,13 @@ async fn max_attempts_hands_a_looping_stage_to_the_owner() {
     save(&fixture, ticket_flow());
     let run = start(&fixture, "ticket", item(7)).await;
     let id = session(&run);
-    replies(&fixture, &id, "Outcome: done").await;
+    finishes(&fixture, &id, "done").await;
     run_where(&fixture, &run["id"], |run| run["stage"] == "qa").await;
-    replies(&fixture, &id, "Broken.\nOutcome: fail").await;
+    finishes(&fixture, &id, "fail").await;
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let after_one = runs(&fixture).await.into_iter().find(|r| r["id"] == run["id"]).unwrap();
     assert_eq!(after_one["status"], "running", "QA's second attempt did not run: {after_one}");
-    replies(&fixture, &id, "Still broken.\nOutcome: fail").await;
+    finishes(&fixture, &id, "fail").await;
     let held = run_where(&fixture, &run["id"], |run| run["status"] == "needs_owner").await;
     assert_eq!(held["status"], "needs_owner", "QA ran past its 2 attempts: {held}");
 }
@@ -430,7 +517,7 @@ async fn an_approval_stage_waits_until_the_owner_continues() {
     }));
     let run = start(&fixture, "ask", item(8)).await;
     let id = session(&run);
-    replies(&fixture, &id, "Outcome: done").await;
+    finishes(&fixture, &id, "done").await;
     let held = run_where(&fixture, &run["id"], |run| run["stage"] == "check").await;
     assert_eq!(held["status"], "needs_owner", "an approval stage did not wait for the owner: {held}");
     let before = told(&fixture, &id).await.len();
@@ -501,7 +588,7 @@ async fn a_run_can_be_stopped() {
     let (code, body) = act(&fixture, json!({"action": "stop", "run": run["id"]})).await;
     assert_eq!(code, 200, "stop failed: {body}");
     let before = told(&fixture, &id).await.len();
-    replies(&fixture, &id, "Outcome: done").await;
+    finishes(&fixture, &id, "done").await;
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let stopped = runs(&fixture).await.into_iter().find(|r| r["id"] == run["id"]).unwrap();
     assert_eq!(stopped["status"], "stopped", "the run is not stopped: {stopped}");
@@ -697,7 +784,7 @@ async fn a_queued_run_starts_when_a_run_finishes() {
     let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(35), item(36)]})).await;
     assert_eq!(body["runs"][1]["status"], "queued", "the second run did not wait its turn: {body}");
     let first = session(&body["runs"][0]);
-    replies(&fixture, &first, "Outcome: done").await;
+    finishes(&fixture, &first, "done").await;
     let next = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
     assert_eq!(next["status"], "running", "the queued run did not start after the first finished: {next}");
     let prompts = told_more(&fixture, &session(&next), 0).await;
@@ -718,7 +805,7 @@ async fn a_run_waiting_on_a_check_frees_its_slot() {
     save(&fixture, flow);
     let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(37), item(38)]})).await;
     assert_eq!(body["runs"][1]["status"], "queued", "the second run did not wait its turn: {body}");
-    replies(&fixture, &session(&body["runs"][0]), "Outcome: done").await;
+    finishes(&fixture, &session(&body["runs"][0]), "done").await;
     let next = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
     assert_eq!(next["status"], "running", "a run waiting on its check still held the only slot: {next}");
 }
@@ -768,6 +855,7 @@ fn an_older_run_table_gains_the_agent_column() {
     let columns: Vec<String> = connection.prepare("SELECT name FROM pragma_table_info('workflow_run')").unwrap()
         .query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
     assert!(columns.iter().any(|c| c == "agent"), "the run table from 0.25.9 did not gain the agent column: {columns:?}");
+    assert!(columns.iter().any(|c| c == "reminders"), "the run table did not gain the reminders column: {columns:?}");
     let kept: i64 = connection.query_row("SELECT count(*) FROM workflow_run", [], |row| row.get(0)).unwrap();
     assert_eq!(kept, 1, "upgrading the run table lost a run");
 }
@@ -847,6 +935,7 @@ async fn the_stage_prompt_tells_the_agent_to_report_with_the_command() {
     assert!(first.contains("atelier workflow done done"), "the prompt does not say to run atelier workflow done: {first}");
     assert!(first.contains("atelier workflow show"), "the prompt does not point at atelier workflow show: {first}");
     assert!(first.contains("atelier workflow block"), "the prompt does not say how to ask for the owner: {first}");
+    assert!(first.contains("atelier workflow wait"), "the prompt does not say how to wait inside the stage: {first}");
 }
 
 #[tokio::test]
@@ -878,7 +967,7 @@ async fn finishes_task_and_stage(fixture: &Fixture, run: &Value) {
     let (code, body) = task(fixture, &id, "done", Some(1), json!({"summary": "done", "commits": [], "followups": [],
         "result": {"document": "# Plan", "decisions": [], "open_questions": [], "proposed_tasks": []}})).await;
     assert_eq!(code, 200, "done failed: {body}");
-    replies(fixture, &id, "Finished; the task is in review.\n\nOutcome: done").await;
+    finishes(fixture, &id, "done").await;
 }
 
 fn auto_plan_and_done() -> Value {
@@ -963,7 +1052,7 @@ async fn a_run_waiting_for_the_owner_frees_its_slot() {
     save(&fixture, single(1));
     let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(49), item(50)]})).await;
     assert_eq!(body["runs"][1]["status"], "queued", "the second run did not wait its turn: {body}");
-    replies(&fixture, &session(&body["runs"][0]), "Which login page do you mean?").await;
+    asks_the_owner(&fixture, &session(&body["runs"][0]), "Which login page do you mean?").await;
     let held = run_where(&fixture, &body["runs"][0]["id"], |run| run["status"] == "needs_owner").await;
     assert_eq!(held["status"], "needs_owner", "the first run did not wait for the owner: {held}");
     let next = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
@@ -976,14 +1065,14 @@ async fn a_continued_run_waits_for_a_free_slot_ahead_of_new_items() {
     save(&fixture, single(1));
     let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(51), item(52), item(53)]})).await;
     let first = body["runs"][0].clone();
-    replies(&fixture, &session(&first), "Which login page do you mean?").await;
+    asks_the_owner(&fixture, &session(&first), "Which login page do you mean?").await;
     let second = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
     assert_eq!(second["status"], "running", "a run waiting for the owner still held the only slot: {second}");
     let (code, answer) = act(&fixture, json!({"action": "continue", "run": first["id"]})).await;
     assert_eq!(code, 200, "continue failed: {answer}");
     let waiting = run_where(&fixture, &first["id"], |run| run["status"] == "queued").await;
     assert_eq!(waiting["status"], "queued", "a continued run went past the limit instead of waiting for a slot: {waiting}");
-    replies(&fixture, &session(&second), "Outcome: done").await;
+    finishes(&fixture, &session(&second), "done").await;
     let resumed = run_where(&fixture, &first["id"], |run| run["status"] == "running").await;
     assert_eq!(resumed["status"], "running", "the continued run did not take the freed slot first: {resumed}");
     let third = run_where(&fixture, &body["runs"][2]["id"], |run| run["status"] == "queued").await;
@@ -1038,7 +1127,7 @@ async fn a_stage_whose_chat_keeps_stopping_goes_to_the_owner() {
     save(&fixture, ticket_flow());
     let run = start(&fixture, "ticket", item(42)).await;
     let id = session(&run);
-    replies(&fixture, &id, "Outcome: done").await;
+    finishes(&fixture, &id, "done").await;
     run_where(&fixture, &run["id"], |run| run["stage"] == "qa").await;
     // QA allows 2 attempts: the first was its own, the restart is the second,
     // and a second restart would be a third.
@@ -1121,7 +1210,7 @@ async fn each_workflow_chat_names_the_stage_it_is_on() {
     assert_eq!(at[&id]["workflow"], "Ticket", "the chat does not name its workflow: {at}");
     assert_eq!((at[&id]["step"].clone(), at[&id]["steps"].clone()), (json!(1), json!(3)), "the chat does not say how far along it is: {at}");
 
-    replies(&fixture, &id, "Outcome: done").await;
+    finishes(&fixture, &id, "done").await;
     run_where(&fixture, &run["id"], |r| r["stage"] == "qa").await;
     let at = stages(&fixture).await;
     assert_eq!(at[&id]["stage"], "QA", "the chat still names the stage it left: {at}");
@@ -1130,4 +1219,140 @@ async fn each_workflow_chat_names_the_stage_it_is_on() {
     act(&fixture, json!({"action": "stop", "run": run["id"]})).await;
     let at = stages(&fixture).await;
     assert!(at.get(&id).is_none(), "a stopped run's chat still names a stage: {at}");
+}
+
+// --- `atelier workflow wait`: a short pause inside an agent stage ---
+
+/// Makes run `id`'s wait due now, as if its minutes had passed.
+fn wait_is_due(fixture: &Fixture, id: &Value) {
+    let db = rusqlite::Connection::open(fixture._directory.path().join("workbench.db")).unwrap();
+    let changed = db
+        .execute("UPDATE workflow_run SET report = json_set(report, '$.wake', 0) WHERE id = ?1 AND report IS NOT NULL", [id.as_str().unwrap()])
+        .unwrap();
+    assert_eq!(changed, 1, "the run keeps no wait to make due");
+}
+
+#[tokio::test]
+async fn workflow_wait_frees_the_runs_slot_until_it_is_time() {
+    let fixture = fixture().await;
+    save(&fixture, single(1));
+    let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(60), item(61)]})).await;
+    let first = body["runs"][0].clone();
+    assert_eq!(body["runs"][1]["status"], "queued", "the second run did not wait its turn: {body}");
+    let id = session(&first);
+    let (code, answer) = report(&fixture, &id, "wait", json!({"minutes": 10, "for": "CodeRabbit to review the pull request"})).await;
+    assert_eq!(code, 200, "workflow wait was refused: {answer}");
+    replies(&fixture, &id, "Waiting for CodeRabbit.").await;
+    let waiting = run_where(&fixture, &first["id"], |run| run["status"] == "waiting").await;
+    assert_eq!(waiting["status"], "waiting", "a run whose agent waits is not shown as waiting: {waiting}");
+    assert!(waiting["note"].as_str().unwrap_or("").contains("CodeRabbit"), "the run does not say what it waits for: {waiting}");
+    let next = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
+    assert_eq!(next["status"], "running", "a run whose agent waits still held the only slot: {next}");
+}
+
+#[tokio::test]
+async fn a_waiting_agent_is_told_to_check_again_when_its_time_comes() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(62)).await;
+    let id = session(&run);
+    report(&fixture, &id, "wait", json!({"minutes": 10, "for": "CI to finish"})).await;
+    replies(&fixture, &id, "Waiting for CI.").await;
+    run_where(&fixture, &run["id"], |run| run["status"] == "waiting").await;
+    let heard = told(&fixture, &id).await.len();
+    act(&fixture, json!({"action": "tick"})).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(told(&fixture, &id).await.len(), heard, "the agent was woken before its minutes were up");
+
+    wait_is_due(&fixture, &run["id"]);
+    act(&fixture, json!({"action": "tick"})).await;
+    let prompts = told_more(&fixture, &id, heard).await;
+    assert!(prompts.len() > heard, "the agent was never woken when its wait was due");
+    let woken = prompts.last().unwrap();
+    assert!(woken.contains("CI to finish"), "the wake-up does not say what to check: {woken}");
+    assert!(woken.contains("atelier workflow done done"), "the wake-up does not say how to report: {woken}");
+    let now = run_now(&fixture, &run["id"]).await;
+    assert_eq!((now["status"].as_str(), now["stage"].as_str()), (Some("running"), Some("implement")), "the woken run is not working its stage: {now}");
+}
+
+#[tokio::test]
+async fn a_due_wait_keeps_waiting_while_every_slot_is_taken() {
+    let fixture = fixture().await;
+    save(&fixture, single(1));
+    let (_, body) = act(&fixture, json!({"action": "start", "workflow": "single", "items": [item(63), item(64)]})).await;
+    let first = body["runs"][0].clone();
+    report(&fixture, &session(&first), "wait", json!({"minutes": 5, "for": "CI"})).await;
+    replies(&fixture, &session(&first), "Waiting for CI.").await;
+    let second = run_where(&fixture, &body["runs"][1]["id"], |run| run["status"] == "running").await;
+    wait_is_due(&fixture, &first["id"]);
+    act(&fixture, json!({"action": "tick"})).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let still = run_now(&fixture, &first["id"]).await;
+    assert_eq!(still["status"], "waiting", "a woken run went past the workflow's limit: {still}");
+    finishes(&fixture, &session(&second), "done").await;
+    let woken = run_where(&fixture, &first["id"], |run| run["status"] == "running").await;
+    assert_eq!(woken["status"], "running", "the due wait did not take the freed slot: {woken}");
+}
+
+#[tokio::test]
+async fn workflow_wait_refuses_a_wait_longer_than_an_hour() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(65)).await;
+    let id = session(&run);
+    let (code, body) = report(&fixture, &id, "wait", json!({"minutes": 600, "for": "QA to test the ticket"})).await;
+    assert_eq!(code, 400, "workflow wait took a wait of ten hours: {body}");
+    let said = body.to_string();
+    assert!(said.contains("Wait stage") && said.contains("atelier workflow block"), "the refusal does not say what to do instead: {said}");
+    let (code, body) = report(&fixture, &id, "wait", json!({"minutes": 5})).await;
+    assert_eq!(code, 400, "workflow wait took a wait that does not say what it waits for: {body}");
+}
+
+#[tokio::test]
+async fn a_wait_survives_a_restart() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(66)).await;
+    let id = session(&run);
+    report(&fixture, &id, "wait", json!({"minutes": 5, "for": "CI"})).await;
+    replies(&fixture, &id, "Waiting for CI.").await;
+    run_where(&fixture, &run["id"], |run| run["status"] == "waiting").await;
+    // The app before the restart finishes handling the turn first, so it is
+    // done, as a dead app is, before the wait comes due: its tick queues
+    // behind the turn's own promote for the one-at-a-time lock.
+    act(&fixture, json!({"action": "tick"})).await;
+    let after = restart(&fixture);
+    wait_is_due(&after, &run["id"]);
+    act(&after, json!({"action": "tick"})).await;
+    let now = run_where(&after, &run["id"], |run| run["status"] == "running").await;
+    assert_eq!((now["status"].as_str(), now["stage"].as_str()), (Some("running"), Some("implement")), "the wait was lost in the restart: {now}");
+    let prompts = told_more(&after, &id, 0).await;
+    assert!(prompts.iter().any(|p| p.contains("Work on KEY-66")), "after a restart the gone chat was not sent its stage again: {prompts:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_atelier_workflow_cli_waits() {
+    let fixture = fixture().await;
+    save(&fixture, ticket_flow());
+    let run = start(&fixture, "ticket", item(67)).await;
+    let id = session(&run);
+    let port = serve(&fixture).await;
+    let cli = |args: &[&str]| {
+        Shell::new(env!("CARGO_BIN_EXE_atelier"))
+            .args(args)
+            .current_dir(run["cwd"].as_str().unwrap())
+            .env("ATELIER_DATA_DIR", fixture._directory.path())
+            .env("ATELIER_CHAT_SESSION_ID", &id)
+            .env("ATELIER_PORT", port.to_string())
+            .output()
+            .unwrap()
+    };
+    let help = cli(&["workflow", "help"]);
+    assert!(String::from_utf8_lossy(&help.stdout).contains("wait --minutes"), "atelier workflow help does not list wait");
+    let waited = cli(&["workflow", "wait", "--minutes", "5", "--for", "CodeRabbit to review"]);
+    let said = format!("{}{}", String::from_utf8_lossy(&waited.stdout), String::from_utf8_lossy(&waited.stderr));
+    assert!(waited.status.success(), "atelier workflow wait failed: {said}");
+    replies(&fixture, &id, "Waiting for CodeRabbit.").await;
+    let waiting = run_where(&fixture, &run["id"], |run| run["status"] == "waiting").await;
+    assert_eq!(waiting["status"], "waiting", "the CLI's wait did not put the run to wait: {waiting}");
 }

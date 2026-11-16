@@ -10,8 +10,8 @@ import { restartInstance } from './restart';
  * Running a workflow: the owner picks items from the workflow's Items command,
  * each gets a run with a worktree chat, and the Runs list follows it from
  * stage to stage. The scripted ACP agent answers "say you read this" by
- * repeating the prompt. It cannot run `atelier workflow done`, so the stage
- * prompt carries an "Outcome: done" line, the reply fallback, for it to echo.
+ * repeating the prompt; a prompt that says "report the outcome done" makes it
+ * report that outcome first, as `atelier workflow done done` does.
  *
  * Run: tests/e2e/workflow-runs.sh 'test name'
  */
@@ -33,7 +33,7 @@ function flow(items: string) {
     trigger: { kind: 'manual', items },
     agent: { brand: 'claude' },
     setup: { branch: '{{item.branchName}}', base: 'main' },
-    stages: [{ id: 'implement', name: 'Implement', kind: 'agent', prompt: 'say you read this {{item.identifier}}\nOutcome: done', routes: [],
+    stages: [{ id: 'implement', name: 'Implement', kind: 'agent', prompt: 'say you read this {{item.identifier}}, then report the outcome done', routes: [],
       auto: { plan: false, done: false, questions: false } }],
   };
 }
@@ -82,8 +82,8 @@ test('runs a workflow on a picked item and follows it to its chat', async ({ pag
   const row = runs.getByTestId('workflow-run').filter({ hasText: 'KEY-1' });
   await expect(row).toBeVisible();
   await expect(runs.getByTestId('workflow-run').filter({ hasText: 'KEY-2' })).toHaveCount(0);
-  // The scripted agent repeats the prompt, "Outcome: done" included, and the
-  // only stage has no route, so the run finishes.
+  // The scripted agent reports "done", and the only stage has no route, so
+  // the run finishes.
   await expect(row.getByText('Done', { exact: true })).toBeVisible({ timeout: 30_000 });
   await runs.screenshot({ path: join(results, 'runs.png'), animations: 'disabled' });
 
@@ -265,7 +265,7 @@ function stageFlow(first: string) {
     ...flow(`printf '[]'`), id: 'stage-flow', name: 'Stage flow',
     stages: [
       { id: 'plan-check', name: first, kind: 'approval', prompt: '', routes: [{ outcome: 'done', to: 'implement' }] },
-      { id: 'implement', name: 'Implement', kind: 'agent', prompt: 'say you read this {{item.identifier}}\nOutcome: done',
+      { id: 'implement', name: 'Implement', kind: 'agent', prompt: 'say you read this {{item.identifier}}, then report the outcome done',
         routes: [{ outcome: 'done', to: 'review' }], auto: { plan: false, done: false, questions: false } },
       { id: 'review', name: 'Review', kind: 'approval', prompt: '', routes: [] },
     ],
@@ -361,4 +361,28 @@ test('the stage badge fits a phone', async ({ page, request }) => {
   expect(over, 'nothing runs past the screen edge').toBeLessThanOrEqual(0);
   await page.screenshot({ path: join(results, 'phone-stage.png'), animations: 'disabled' });
   await act(request, 'stop', run.id);
+});
+
+// An agent that ends its turn without reporting is reminded how to report,
+// and the run moves on once it does: nothing reads the outcome from its reply.
+test('an agent stage that ends without reporting is reminded and moves on when it reports', async ({ page, request }) => {
+  await seed(request, [{
+    ...flow(`printf '[]'`), id: 'remind-flow', name: 'Remind flow',
+    stages: [{ id: 'implement', name: 'Implement', kind: 'agent', prompt: 'say you read this {{item.identifier}}\nOutcome: done',
+      routes: [], auto: { plan: false, done: false, questions: false } }],
+  }]);
+  const started = await request.post('/api/workbench/workflow-runs', {
+    data: { action: 'start', projectId: project.id, projectPath: project.path, workflow: 'remind-flow',
+      items: [{ identifier: 'KEY-31', title: 'Remind', branchName: 'feature/key-31-remind' }] },
+  });
+  expect(started.ok(), await started.text()).toBeTruthy();
+  const id = (await started.json()).runs[0].id;
+  const read = async () => {
+    const answer = await (await request.get(`/api/workbench/workflow-runs?projectPath=${encodeURIComponent(project.path)}`)).json();
+    return answer.runs.find((r: { id: string }) => r.id === id);
+  };
+  await expect.poll(async () => (await read())?.status, { timeout: 45_000, message: 'the reminded agent did not finish the run' }).toBe('done');
+  await page.goto(`/project?id=${project.id}&tab=chat&chat=${(await read()).sessionId}`);
+  await expect(page.getByText(/ended its turn without reporting/).first(), 'the chat does not show the reminder').toBeVisible({ timeout: 15_000 });
+  await page.screenshot({ path: join(results, 'reminded.png'), animations: 'disabled' });
 });

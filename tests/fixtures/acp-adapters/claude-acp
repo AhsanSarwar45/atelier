@@ -362,6 +362,26 @@ const LONG_COMMAND = 'run the long command';
 const LONG_COMMAND_MS = Number(process.env.BEADS_E2E_ACP_LONG_COMMAND_MS ?? 180_000);
 const SAY_YOU_READ = 'say you read this';
 /**
+ * A workflow stage the agent finishes the way a real one does: it reports
+ * the named outcome with what `atelier workflow done` sends, then ends its
+ * turn. A reminder to report, sent after a turn that ended without one, is
+ * answered the same way with the outcome it offers first.
+ */
+const REPORT_OUTCOME = /report the outcome (\S+)/;
+const REMINDED = /ended its turn without reporting[\s\S]*?atelier workflow done (\S+)/;
+
+async function reportOutcome(outcome) {
+  const session = process.env.ATELIER_CHAT_SESSION_ID;
+  const port = process.env.ATELIER_PORT ?? process.env.BEADS_WEB_PORT;
+  if (!session || !port) throw new Error('the scripted agent cannot report: ATELIER_CHAT_SESSION_ID or ATELIER_PORT is not set');
+  const answer = await fetch(`http://127.0.0.1:${port}/api/workbench/workflow-run`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'done', session, outcome }),
+  });
+  if (!answer.ok) throw new Error(`workflow done was refused: ${await answer.text()}`);
+}
+/**
  * A turn that leaves a command behind growing its memory, as a build that
  * runs away does. It keeps what it took until the chat's processes are killed.
  */
@@ -530,7 +550,11 @@ async function turn(id, params) {
     holdMemory(id, params);
     return;
   }
-  if (asked.includes(SAY_YOU_READ)) {
+  const reminded = asked.match(REMINDED);
+  if (reminded) await reportOutcome(reminded[1].replace(/^'|'$/g, ''));
+  if (asked.includes(SAY_YOU_READ) || reminded) {
+    const outcome = asked.match(REPORT_OUTCOME);
+    if (outcome && !reminded) await reportOutcome(outcome[1]);
     say({
       method: 'session/update',
       params: {

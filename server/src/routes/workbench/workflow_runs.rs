@@ -27,6 +27,14 @@ const COMMAND_LIMIT: Duration = Duration::from_secs(120);
 /// How often the server ticks: Wait checks, and schedules that are due.
 const TICK: Duration = Duration::from_secs(60);
 
+/// The longest `atelier workflow wait`. Anything longer is outside the stage:
+/// the agent finishes it and a Wait stage after it checks.
+const MAX_WAIT_MINUTES: i64 = 60;
+
+/// Reminders a stage's agent gets in a row for turns that end without a
+/// report before the run goes to the owner.
+const REMINDERS: i64 = 2;
+
 /// When each schedule last asked for items, by project folder and workflow.
 static POLLED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
 /// The runs whose Command stage is running in this process. A run that says
@@ -81,11 +89,13 @@ struct Run {
     session: Option<String>,
     cwd: Option<String>,
     attempts: Map<String, Value>,
-    seen_message: i64,
+    /// Reminders sent in a row for turns that ended without a report.
+    reminders: i64,
     note: Option<String>,
     agent: Option<Value>,
     /// What the agent reported for the current stage with `atelier workflow`:
-    /// `{"outcome": …}` or `{"needs": …}`, acted on when its turn ends.
+    /// `{"outcome": …}`, `{"needs": …}` or `{"wake": ms, "for": …}`, acted on
+    /// when its turn ends. A wait stays here while the run waits.
     report: Option<Value>,
 }
 
@@ -100,7 +110,7 @@ impl Run {
 }
 
 const COLUMNS: &str =
-    "id, project_id, project_path, workflow_id, item, stage, status, session_id, cwd, attempts, seen_message, note, agent, report";
+    "id, project_id, project_path, workflow_id, item, stage, status, session_id, cwd, attempts, reminders, note, agent, report";
 
 fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Run> {
     let item: String = row.get(4)?;
@@ -116,7 +126,7 @@ fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Run> {
         session: row.get(7)?,
         cwd: row.get(8)?,
         attempts: serde_json::from_str(&attempts).unwrap_or_default(),
-        seen_message: row.get(10)?,
+        reminders: row.get(10)?,
         note: row.get(11)?,
         agent: row.get::<_, Option<String>>(12)?.and_then(|text| serde_json::from_str(&text).ok()),
         report: row.get::<_, Option<String>>(13)?.and_then(|text| serde_json::from_str(&text).ok()),
@@ -151,10 +161,10 @@ async fn save(state: &WorkbenchState, run: &Run) -> Result<(), String> {
         .write_tasks(move |store| {
             store.connection().execute(
                 "UPDATE workflow_run SET stage = ?2, status = ?3, session_id = ?4, cwd = ?5, attempts = ?6,
-                   seen_message = ?7, note = ?8, updated_at = ?9, report = ?10 WHERE id = ?1",
+                   reminders = ?7, note = ?8, updated_at = ?9, report = ?10 WHERE id = ?1",
                 params![
                     run.id, run.stage, run.status, run.session, run.cwd,
-                    Value::Object(run.attempts.clone()).to_string(), run.seen_message, run.note, now(),
+                    Value::Object(run.attempts.clone()).to_string(), run.reminders, run.note, now(),
                     run.report.as_ref().map(Value::to_string)
                 ],
             )
@@ -242,7 +252,8 @@ fn how_to_report(workflow: &Workflow, stage: &Stage) -> String {
     let lines: Vec<String> = outcomes(stage).iter().map(|outcome| format!("atelier workflow done {}", quoted(outcome))).collect();
     format!(
         "This chat is running the workflow \"{}\", stage \"{}\" ({at} of {}). Run `atelier workflow show` to see every stage and where each outcome leads.\n\
-         When this stage is finished, run one of these commands, then end your reply:\n{}\n\
+         Every turn must end with one of these commands. When this stage is finished, run one of these, then end your reply:\n{}\n\
+         To wait for something that takes minutes, such as a review bot or CI, run `atelier workflow wait --minutes N --for \"what you wait for\"` (at most {MAX_WAIT_MINUTES}) and end your reply; you are told to check again when the time is up.\n\
          If you cannot finish without the owner, run `atelier workflow block --needs \"what you need\"` and end your reply.",
         workflow.name, stage.name, workflow.stages.len(), lines.join("\n")
     )
@@ -250,15 +261,6 @@ fn how_to_report(workflow: &Workflow, stage: &Stage) -> String {
 
 fn agent_prompt(workflow: &Workflow, stage: &Stage, item: &Value) -> String {
     format!("{}\n\n{}", fill(&stage.prompt, item), how_to_report(workflow, stage))
-}
-
-/// The last `Outcome:` line in what the agent said.
-fn reported(text: &str) -> Option<String> {
-    text.lines()
-        .rev()
-        .map(|line| line.trim().trim_matches(|c| c == '*' || c == '`' || c == '_').trim())
-        .find_map(|line| line.strip_prefix("Outcome:").map(|rest| rest.trim().trim_matches(|c| c == '*' || c == '`' || c == '.').trim().to_string()))
-        .filter(|outcome| !outcome.is_empty())
 }
 
 async fn shell(cwd: &str, command: &str) -> Result<(bool, String, String), String> {
@@ -380,6 +382,14 @@ async fn promote(state: &WorkbenchState, project_path: &str, workflow_id: &str) 
         if runs.iter().filter(|run| holds_a_slot(run)).count() >= limit {
             return;
         }
+        // An agent whose wait is due goes first: its work is furthest along.
+        if let Some(mut due) = runs.iter().rev().find(|run| wait_is_due(&flow, run)).cloned() {
+            if let Err(error) = wake(state, &flow, &mut due).await {
+                tracing::warn!(run = due.id, %error, "a waiting workflow run could not wake");
+                let _ = hold(state, &mut due, error).await;
+            }
+            continue;
+        }
         // Newest first from the table; the queue goes oldest first, and a run
         // the owner continued (it has its chat already) goes before new items.
         let queued: Vec<Run> = runs.into_iter().rev().filter(|run| run.status == "queued").collect();
@@ -398,6 +408,43 @@ async fn promote(state: &WorkbenchState, project_path: &str, workflow_id: &str) 
             let _ = hold(state, &mut next, error).await;
         }
     }
+}
+
+/// A run whose agent asked to wait with `atelier workflow wait`, and when.
+fn wait_of(run: &Run) -> Option<(i64, String)> {
+    let report = run.report.as_ref()?;
+    let wake = report["wake"].as_i64()?;
+    Some((wake, report["for"].as_str().unwrap_or_default().to_string()))
+}
+
+/// The run waits inside an agent stage and its time is up.
+fn wait_is_due(flow: &Workflow, run: &Run) -> bool {
+    run.status == "waiting"
+        && flow.stages.iter().any(|stage| stage.id == run.stage && stage.kind == StageKind::Agent)
+        && wait_of(run).is_some_and(|(wake, _)| wake <= now())
+}
+
+/// Wake an agent whose wait is due: tell its chat what to check, or send the
+/// stage again when the chat is gone, as after a restart.
+async fn wake(state: &WorkbenchState, flow: &Workflow, run: &mut Run) -> Result<(), String> {
+    let Some(stage) = flow.stages.iter().find(|stage| stage.id == run.stage).cloned() else {
+        return hold(state, run, format!("The workflow no longer has a stage {}", run.stage)).await;
+    };
+    let waited_for = wait_of(run).map(|(_, what)| what).unwrap_or_default();
+    let session = match run.session.clone() {
+        Some(session) if state.registry.has_driver(&session).await => session,
+        _ => {
+            let at = run.stage.clone();
+            return enter(state, flow, run, &at).await;
+        }
+    };
+    run.status = "running".into();
+    run.note = None;
+    run.report = None;
+    save(state, run).await?;
+    let text = format!("The wait is over. Check again: {waited_for}\n\n{}", how_to_report(flow, &stage));
+    tell_chat(state, &session, text).await;
+    Ok(())
 }
 
 /// Give a queued run its worktree and chat, and enter its first stage.
@@ -468,6 +515,7 @@ fn enter<'a>(
         run.stage = id.to_string();
         run.note = None;
         run.report = None;
+        run.reminders = 0;
         if let Some(limit) = stage.max_attempts.filter(|limit| *limit > 0) {
             if tries > u64::from(limit) {
                 return hold(state, run, format!("{} ran {limit} times without getting through", stage.name)).await;
@@ -573,29 +621,6 @@ async fn check(state: &WorkbenchState, flow: &Workflow, run: &mut Run) -> Result
     }
 }
 
-/// The agent's messages in `session` since `after`: the newest's text and
-/// the newest's row.
-async fn said_since(state: &WorkbenchState, session: &str, after: i64) -> (Option<String>, i64) {
-    let session = session.to_string();
-    state
-        .database()
-        .read_tasks(move |store| {
-            store
-                .connection()
-                .query_row(
-                    "SELECT text, rowid FROM message WHERE session_id = ?1 AND role = 'assistant' AND text <> '' AND rowid > ?2
-                     ORDER BY rowid DESC LIMIT 1",
-                    params![session, after],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .optional()
-        })
-        .await
-        .ok()
-        .flatten()
-        .map_or((None, after), |(text, row)| (Some(text), row))
-}
-
 /// A task proposal of `session` still waiting for an answer, and a task it
 /// holds that waits for review.
 async fn waiting_task_work(state: &WorkbenchState, project: &str, session: &str) -> (Option<i64>, Option<i64>) {
@@ -658,20 +683,23 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
     if stage.kind != StageKind::Agent {
         return Ok(());
     }
-    let (said, newest) = said_since(state, session, run.seen_message).await;
-    run.seen_message = newest;
     // A turn cut off, as when the app shuts down and stops its agents, is
     // left to the next tick: it starts a stage whose agent is gone again and
     // hands one whose agent is still there to the owner. The owner's own Stop
-    // has already handed the run to them.
-    if ended_in == "errored" || ended_in == "stopped" {
+    // has already handed the run to them. An agent waiting on its own
+    // subagents is still working: its turn ends for real later.
+    if ["errored", "stopped", "waiting_for_agents"].contains(&ended_in) {
         return Ok(());
     }
+    // Only what the agent reported with `atelier workflow` moves the run;
+    // nothing is read from its reply.
     let report = run.report.take();
     if let Some(needs) = report.as_ref().and_then(|report| report["needs"].as_str()) {
+        run.reminders = 0;
         return hold(state, run, needs.to_string()).await;
     }
-    let outcome = report.as_ref().and_then(|report| report["outcome"].as_str().map(str::to_string)).or_else(|| said.as_deref().and_then(reported));
+    let outcome = report.as_ref().and_then(|report| report["outcome"].as_str().map(str::to_string));
+    let waits = report.as_ref().filter(|report| report["wake"].is_i64()).cloned();
     let (proposal, review) = waiting_task_work(state, &run.project_id, session).await;
     if let Some(id) = proposal {
         if !stage.auto.plan {
@@ -679,6 +707,8 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
         }
         run.status = "running".into();
         run.note = None;
+        run.reminders = 0;
+        run.report = report;
         save(state, run).await?;
         return as_owner(state, &run.project_id, "answer_proposal", id, json!({"choice": "create"})).await;
     }
@@ -688,27 +718,55 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
         }
         run.status = "running".into();
         run.note = None;
+        run.reminders = 0;
         save(state, run).await?;
         as_owner(state, &run.project_id, "approve", number, json!({})).await?;
-        // An outcome reported in the same turn still moves the run on.
+        // A report made in the same turn still moves the run on.
+        if let Some(waits) = waits {
+            return wait(state, run, waits).await;
+        }
         let Some(outcome) = outcome else { return Ok(()) };
         return follow(state, &flow, run, &outcome).await;
     }
+    if let Some(waits) = waits {
+        return wait(state, run, waits).await;
+    }
     if let Some(outcome) = outcome {
+        run.reminders = 0;
         return follow(state, &flow, run, &outcome).await;
     }
-    if stage.auto.questions {
-        run.status = "running".into();
-        run.note = None;
-        save(state, run).await?;
-        let text = format!(
-            "The owner is not answering questions in this stage. Use your best judgment: pick the answer that fits the ticket and the codebase, say what you chose and why, and continue.\n\n{}",
-            how_to_report(&flow, &stage)
-        );
-        tell_chat(state, session, text).await;
-        return Ok(());
+    if run.reminders >= REMINDERS {
+        return hold(state, run, format!("The agent ended its turn {} times in a row without reporting the stage", REMINDERS + 1)).await;
     }
-    hold(state, run, "The agent stopped without an outcome; it may be asking you something".into()).await
+    run.reminders += 1;
+    run.status = "running".into();
+    run.note = None;
+    save(state, run).await?;
+    let decide = if stage.auto.questions {
+        "The owner is not answering questions in this stage. Use your best judgment: pick the answer that fits the ticket and the codebase, say what you chose and why, and continue.\n\n"
+    } else {
+        "If you need the owner to answer a question, ask it with `atelier workflow block --needs`.\n\n"
+    };
+    let text = format!(
+        "This chat ended its turn without reporting stage \"{}\" (reminder {} of {REMINDERS}). {decide}{}",
+        stage.name, run.reminders, how_to_report(&flow, &stage)
+    );
+    tell_chat(state, session, text).await;
+    Ok(())
+}
+
+/// The agent asked to wait inside its stage: the run waits without a slot
+/// until the tick finds its time is up.
+async fn wait(state: &WorkbenchState, run: &mut Run, waits: Value) -> Result<(), String> {
+    let at = waits["wake"].as_i64().unwrap_or_else(now);
+    let until = chrono::DateTime::from_timestamp_millis(at)
+        .map(|time| time.with_timezone(&chrono::Local).format("%H:%M").to_string())
+        .unwrap_or_default();
+    run.status = "waiting".into();
+    run.note = Some(format!("Checks again at {until}: {}", waits["for"].as_str().unwrap_or_default()));
+    run.reminders = 0;
+    run.report = Some(waits);
+    save(state, run).await
 }
 
 /// A run that says it is working on a stage whose agent or command is gone,
@@ -778,6 +836,11 @@ async fn tick(state: &WorkbenchState, project_id: &str, project_path: &str, forc
             continue;
         }
         let Ok(flow) = workflow(&run.project_path, &run.workflow) else { continue };
+        // An agent waiting inside its stage is woken by `promote` below, once
+        // its time is up and a slot is free.
+        if wait_of(&run).is_some() {
+            continue;
+        }
         if let Err(error) = check(state, &flow, &mut run).await {
             tracing::warn!(run = run.id, %error, "a workflow run's check failed");
         }
@@ -964,6 +1027,10 @@ pub(super) struct Report {
     outcome: Option<String>,
     #[serde(default)]
     needs: Option<String>,
+    #[serde(default)]
+    minutes: Option<i64>,
+    #[serde(default, rename = "for")]
+    waiting_for: Option<String>,
 }
 
 fn refused(status: axum::http::StatusCode, message: String) -> ApiError {
@@ -991,8 +1058,9 @@ async fn task_in_progress(state: &WorkbenchState, project: &str, session: &str) 
 }
 
 /// POST /api/workbench/workflow-run — what `atelier workflow` sends from a
-/// run's chat: `show` the workflow, `done` with an outcome, or `block` for
-/// the owner. `done` and `block` are acted on when the chat's turn ends.
+/// run's chat: `show` the workflow, `done` with an outcome, `wait` some
+/// minutes inside the stage, or `block` for the owner. `done` and `wait` are
+/// acted on when the chat's turn ends.
 pub(super) async fn report(State(state): State<WorkbenchState>, Json(ask): Json<Report>) -> Result<Json<Value>, ApiError> {
     let runs = runs_where(&state, "session_id = ?1", ask.session.clone()).await.map_err(ApiError::from)?;
     let mut run = runs
@@ -1037,6 +1105,25 @@ pub(super) async fn report(State(state): State<WorkbenchState>, Json(ask): Json<
             run.report = Some(json!({"outcome": outcome}));
             save(&state, &run).await?;
             Ok(Json(json!({"summary": format!("Stage {} reported \"{outcome}\". End your reply; the workflow moves on when it ends.", stage.name)})))
+        }
+        "wait" => {
+            let minutes = ask.minutes.ok_or_else(|| ApiError::from("--minutes is required".to_string()))?;
+            if !(1..=MAX_WAIT_MINUTES).contains(&minutes) {
+                return Err(refused(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    format!(
+                        "Wait between 1 and {MAX_WAIT_MINUTES} minutes. For something that takes longer, such as QA testing the ticket, \
+                         finish the stage with `atelier workflow done …`; a Wait stage after it checks for it. \
+                         If you cannot go on without the owner, run `atelier workflow block --needs \"…\"`."
+                    ),
+                ));
+            }
+            let what = needs(&ask.waiting_for, "--for")?.trim().to_string();
+            run.report = Some(json!({"wake": now() + minutes * 60_000, "for": what}));
+            save(&state, &run).await?;
+            Ok(Json(json!({"summary": format!(
+                "The run waits {minutes} minutes for {what}. End your reply; you are told to check again when the time is up."
+            )})))
         }
         "block" => {
             let why = needs(&ask.needs, "--needs")?.trim().to_string();
