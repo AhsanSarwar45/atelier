@@ -642,14 +642,13 @@ pub(super) async fn act(
         .database()
         .write_tasks(move |store| {
             tasks::apply(store, &asked).map(|outcome| {
-                let folder = folder_of(store, &outcome.task);
                 let json = tasks::to_json(store, &outcome.task);
-                (json, outcome.summary, outcome.grids, outcome.detail, outcome.task, folder)
+                (json, outcome.summary, outcome.grids, outcome.detail, outcome.task)
             })
         })
         .await
         .map_err(failed)?;
-    let (task, summary, grids, detail, row, folder) = refused_or(outcome)?;
+    let (task, summary, grids, detail, row) = refused_or(outcome)?;
     let widget = tasks::widget(&action, &task, &detail).map_err(failed)?;
     if let Some(chat) = printed_for.as_deref() {
         crate::workbench::wire::printed_card(chat, &widget);
@@ -659,24 +658,13 @@ pub(super) async fn act(
     // The owner's approve, reopen and plan-change answers are told to the
     // chat holding the task, like a proposal's answer.
     if let Some(session) = tasks::told_chat(&actor, &action, &row).map(str::to_string) {
-        let workflow_chat = action == "approve" && (by_workflow || super::workflow_runs::is_run_chat(&state, &session).await);
-        let merge = if action == "approve" && !workflow_chat {
-            let commits: Vec<String> = task["result"]["commits"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect();
-            let folder = folder.or_else(|| project_folder(&state, &announced));
-            tasks::git::merge_state(folder.as_deref().map(std::path::Path::new), &commits).await
+        // An approval says only that, in every chat: never a word about
+        // merging, which is the owner's own call (`@merge`) or a workflow
+        // stage's.
+        let said = if by_workflow && action == "approve" {
+            Some(tasks::workflow_approval(&row))
         } else {
-            tasks::git::MergeState::Unknown
-        };
-        let said = if workflow_chat {
-            Some(tasks::workflow_approval(&row, by_workflow))
-        } else {
-            tasks::owner_prompt(&action, &row, &note, &merge)
+            tasks::owner_prompt(&action, &row, &note)
         };
         if let Some(said) = said {
             // Queued behind a turn still running, as a proposal's answer is.

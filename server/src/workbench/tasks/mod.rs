@@ -1251,40 +1251,24 @@ fn sentence(note: &str) -> String {
     if note.ends_with(['.', '!', '?']) { note.to_string() } else { format!("{note}.") }
 }
 
-/// What a workflow run's chat is told when its task is approved, by the
-/// workflow (`by_workflow`) or by the owner. Nothing about merging: whether
-/// and where the work is merged is the workflow's own business, in its stages.
-pub fn workflow_approval(task: &TaskRow, by_workflow: bool) -> String {
-    let who = if by_workflow { "The workflow" } else { "Owner" };
-    format!(
-        "{who} approved task #{} \"{}\". This chat runs a workflow, and its stages decide what happens to the branch, so leave the branch as it is.",
-        task.number, task.title
-    )
+/// What the holding chat is told when the workflow approves its task. Like
+/// the owner's approval, it says nothing about merging or branches: merging
+/// is the owner's own call (`@merge`) or a workflow stage's.
+pub fn workflow_approval(task: &TaskRow) -> String {
+    format!("The workflow approved task #{} \"{}\".", task.number, task.title)
 }
 
 /// What the holding chat's agent is told when the owner approves or reopens
 /// its task, or answers its plan change. `task` is the task after the action;
-/// `note` is the owner's, if any; `merge` only matters to `approve`. None for
-/// any other action.
-pub fn owner_prompt(action: &str, task: &TaskRow, note: &str, merge: &git::MergeState) -> Option<String> {
+/// `note` is the owner's, if any. An approval says only that: nothing about
+/// merging, branches or a base branch, which git can only guess. None for any
+/// other action.
+pub fn owner_prompt(action: &str, task: &TaskRow, note: &str) -> Option<String> {
     let number = task.number;
     let named = format!("task #{number} \"{}\"", task.title);
     let note = note.trim();
     Some(match action {
-        "approve" => {
-            let state = match merge {
-                git::MergeState::NoCommits => "It names no commits, so nothing is left to merge.".to_string(),
-                git::MergeState::Merged { base } => format!("Its commits are on {base} already; nothing is left to merge."),
-                git::MergeState::Unmerged { branch: Some(branch), base } => format!(
-                    "Its commits are on branch {branch}, not yet on {base}. Ask the owner whether to merge {branch} into {base}, and don't merge without their yes."
-                ),
-                git::MergeState::Unmerged { branch: None, base } => format!(
-                    "Its commits are not all on {base} yet. Ask the owner whether to merge them into {base}, and don't merge without their yes."
-                ),
-                git::MergeState::Unknown => "Merge state is unknown: its commits or folder could not be read. Check whether its commits are on the base branch before asking the owner about merging, and don't merge without their yes.".to_string(),
-            };
-            format!("Owner approved {named}. {state}")
-        }
+        "approve" => format!("Owner approved {named}."),
         "reopen" => {
             let said = if note.is_empty() { format!("Owner reopened {named}.") } else { format!("Owner reopened {named}: {}", sentence(note)) };
             if task.status == "todo" {
@@ -2018,9 +2002,28 @@ mod tests {
         assert!(outcome.task.finished_at.is_some());
     }
 
+    /// An approval never brings up merging or names a base branch, in any
+    /// chat and whatever git says: merging is the owner's own call (`@merge`),
+    /// and a guessed base such as `main` can be the wrong one.
+    #[test]
+    fn an_approval_never_talks_about_merging() {
+        let (_d, store) = store();
+        let one = create(&store, "s1", "plan");
+        agent(&store, "s1", "start", Some(one), json!({})).unwrap();
+        agent(&store, "s1", "done", Some(one), done_payload("plan")).unwrap();
+        let task = owner(&store, "approve", one, json!({})).unwrap().task;
+        let said = [owner_prompt("approve", &task, "").unwrap(), workflow_approval(&task)];
+        for text in said {
+            let lower = text.to_lowercase();
+            assert!(
+                !lower.contains("merge") && !lower.contains("main") && !lower.contains("branch"),
+                "an approval talks about merging: {text}"
+            );
+        }
+    }
+
     #[test]
     fn the_owners_approve_reopen_and_plan_answers_are_told_to_the_holding_chat() {
-        use git::MergeState;
         let (_d, store) = store();
         let one = create(&store, "s1", "plan");
         agent(&store, "s1", "start", Some(one), json!({})).unwrap();
@@ -2030,17 +2033,17 @@ mod tests {
         let reopened = owner(&store, "reopen", one, json!({"note": "more detail"})).unwrap();
         assert_eq!(told_chat("owner", "reopen", &reopened.task), Some("s1"));
         assert_eq!(
-            owner_prompt("reopen", &reopened.task, "more detail", &MergeState::Unknown).unwrap(),
+            owner_prompt("reopen", &reopened.task, "more detail").unwrap(),
             "Owner reopened task #1 \"T\": more detail. Continue the work and run done again."
         );
         assert_eq!(
-            owner_prompt("reopen", &reopened.task, "  ", &MergeState::Unknown).unwrap(),
+            owner_prompt("reopen", &reopened.task, "  ").unwrap(),
             "Owner reopened task #1 \"T\". Continue the work and run done again."
         );
         let mut waiting = reopened.task.clone();
         waiting.status = "todo".into();
         assert_eq!(
-            owner_prompt("reopen", &waiting, "Fix it!", &MergeState::Unknown).unwrap(),
+            owner_prompt("reopen", &waiting, "Fix it!").unwrap(),
             "Owner reopened task #1 \"T\": Fix it! Start it again with `atelier task start 1`, continue the work and run done again."
         );
 
@@ -2051,26 +2054,17 @@ mod tests {
         let undone = owner(&store, "undo_amend", one, json!({})).unwrap();
         assert_eq!(told_chat("owner", "undo_amend", &undone.task), Some("s1"));
         assert_eq!(
-            owner_prompt("undo_amend", &undone.task, "", &MergeState::Unknown).unwrap(),
+            owner_prompt("undo_amend", &undone.task, "").unwrap(),
             "Owner undid the plan change for task #1 \"T\": continue with the plan as it was before."
         );
 
         agent(&store, "s1", "done", Some(one), done_payload("plan")).unwrap();
         let task = owner(&store, "approve", one, json!({})).unwrap().task;
         assert_eq!(told_chat("owner", "approve", &task), Some("s1"));
-        let said = |merge: MergeState| owner_prompt("approve", &task, "", &merge).unwrap();
-        assert_eq!(said(MergeState::Merged { base: "main".into() }),
-            "Owner approved task #1 \"T\". Its commits are on main already; nothing is left to merge.");
-        assert_eq!(said(MergeState::Unmerged { branch: Some("fix".into()), base: "main".into() }),
-            "Owner approved task #1 \"T\". Its commits are on branch fix, not yet on main. Ask the owner whether to merge fix into main, and don't merge without their yes.");
-        assert_eq!(said(MergeState::Unmerged { branch: None, base: "main".into() }),
-            "Owner approved task #1 \"T\". Its commits are not all on main yet. Ask the owner whether to merge them into main, and don't merge without their yes.");
-        assert_eq!(said(MergeState::Unknown),
-            "Owner approved task #1 \"T\". Merge state is unknown: its commits or folder could not be read. Check whether its commits are on the base branch before asking the owner about merging, and don't merge without their yes.");
-        assert_eq!(said(MergeState::NoCommits), "Owner approved task #1 \"T\". It names no commits, so nothing is left to merge.");
+        assert_eq!(owner_prompt("approve", &task, "").unwrap(), "Owner approved task #1 \"T\".");
 
         // Nothing for the other owner actions, nor for a task no chat holds.
-        assert_eq!(owner_prompt("cancel", &task, "", &MergeState::Unknown), None);
+        assert_eq!(owner_prompt("cancel", &task, ""), None);
         assert_eq!(told_chat("owner", "release", &task), None);
         let mut unheld = task.clone();
         unheld.session_id = None;

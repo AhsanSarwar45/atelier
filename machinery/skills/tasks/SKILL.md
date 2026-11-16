@@ -213,11 +213,9 @@ on; the server records them when the owner approves.
 
 The owner's answers to a task arrive as messages:
 
-- **Owner approved task #N.** The task is done. The message says where its
-  commits stand. If they are not yet on the base branch, ask the owner
-  whether to merge them. Never merge without the owner's yes. If merge
-  state is unknown, check whether the commits are on the base branch before
-  asking. If nothing is left to merge, there is nothing more to do.
+- **Owner approved task #N.** The task is done and there is nothing more to
+  do for it. Leave its commits and branch as they are; merging is the
+  owner's own call, made with `@merge`.
 - **Owner reopened task #N**, with a note: do what the note asks, then run
   `done` again. Start the task first if the message says so.
 - **Owner undid the plan change**: continue with the plan as it was

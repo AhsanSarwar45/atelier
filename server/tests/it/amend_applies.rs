@@ -4,7 +4,7 @@
 //! check changed), it still applies, and the agent is asked to make sure it
 //! does not. The owner can undo the last change.
 
-use atelier::workbench::tasks::{self, checks::{Gate, Run}, git::MergeState, Outcome, TaskError};
+use atelier::workbench::tasks::{self, checks::{Gate, Run}, Outcome, TaskError};
 use crate::gaps::*;
 use serde_json::{json, Value};
 
@@ -135,7 +135,7 @@ fn the_owner_can_undo_the_last_plan_change() {
     assert!(undone.task.pending_amend.is_none());
     assert_eq!(tasks::told_chat("owner", "undo_amend", &undone.task), Some("s1"), "the holding chat is told");
     assert_eq!(
-        tasks::owner_prompt("undo_amend", &undone.task, "", &MergeState::Unknown).as_deref(),
+        tasks::owner_prompt("undo_amend", &undone.task, "").as_deref(),
         Some("Owner undid the plan change for task #1 \"T\": continue with the plan as it was before."),
     );
     let message = refused(owner(&store, "undo_amend", one, None));
