@@ -11,8 +11,13 @@ use std::{fs, path::{Path, PathBuf}};
 
 const FILE: &str = "tasks.json";
 
-/// What `atelier task` and `atelier grid` print where tasks are off.
-pub const OFF: &str = "Tasks are turned off for this project. The owner can turn them on in Settings → Tasks.";
+/// What `atelier task` and `atelier grid` print where tasks are off, naming
+/// the switch that turned them off: the project's own, or the app's.
+pub fn off_message(data: &Path, root: Option<&Path>) -> String {
+    let project = root.and_then(|root| project_folder(data, root)).and_then(|folder| read(&folder));
+    let scope = if project == Some(false) { "this project" } else { "this app" };
+    format!("Tasks are turned off for {scope}. The owner can turn them on in Settings → Tasks.")
+}
 
 /// The choice saved in `folder`, if one is.
 pub fn read(folder: &Path) -> Option<bool> {
@@ -48,6 +53,12 @@ pub fn enabled(data: &Path, root: Option<&Path>) -> bool {
         .unwrap_or(true)
 }
 
+/// `off_message` for where this process runs.
+pub fn off_here() -> String {
+    let data = crate::workbench::library::data_dir().unwrap_or_default();
+    off_message(&data, std::env::current_dir().ok().as_deref())
+}
+
 /// Whether tasks are on where this process runs: the CLI's check, made
 /// before it reaches the app.
 pub fn here() -> bool {
@@ -72,5 +83,8 @@ mod tests {
         write(&project, None).unwrap();
         write(&project, None).unwrap();
         assert!(!enabled(data.path(), Some(root.path())));
+        assert!(off_message(data.path(), Some(root.path())).contains("for this app"));
+        write(&project, Some(false)).unwrap();
+        assert!(off_message(data.path(), Some(root.path())).contains("for this project"));
     }
 }

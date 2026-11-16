@@ -307,7 +307,7 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onOpenTask }: {
             {draft && (
               <Panel tone="attention" inset="md" className="space-y-3" data-testid="grid-pending">
                 <p className="text-sm font-medium">{grid.status === 'draft' ? 'Draft awaiting approval' : 'Edit awaiting approval'}</p>
-                <DraftView draft={draft} diff={grid.status === 'approved' ? draftDiff(draft, detail) : null} />
+                <DraftView draft={draft} diff={grid.status === 'approved' ? draftDiff(draft, detail, grid.pending) : null} />
                 <DraftActions projectId={projectId} slug={slug} onDone={refetch} />
               </Panel>
             )}

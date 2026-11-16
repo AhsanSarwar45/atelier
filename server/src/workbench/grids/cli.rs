@@ -310,8 +310,16 @@ fn strings(value: &Value) -> Vec<String> {
 }
 
 fn print_cell(slug: &str, value: &Value) {
+    print!("{}", cell_text(slug, value));
+}
+
+/// What `grid show SLUG ROW COL` prints for one cell.
+pub fn cell_text(slug: &str, value: &Value) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
     let cell = &value["cell"];
-    println!(
+    let _ = writeln!(
+        out,
         "{slug}.{}.{} — {} × {}: {}{}",
         cell["row"].as_str().unwrap_or(""),
         cell["col"].as_str().unwrap_or(""),
@@ -320,34 +328,44 @@ fn print_cell(slug: &str, value: &Value) {
         cell["state"].as_str().unwrap_or("").replace('_', " "),
         if cell["stale"] == true { " (stale)" } else { "" }
     );
-    println!("Proof rule: {}", value["column"]["proofRule"].as_str().unwrap_or(""));
-    println!("Covers: {}", strings(&value["row"]["paths"]).join(", "));
+    let _ = writeln!(out, "Proof rule: {}", value["column"]["proofRule"].as_str().unwrap_or(""));
+    let _ = writeln!(out, "Covers: {}", strings(&value["row"]["paths"]).join(", "));
+    let checks = value["checks"].as_array().cloned().unwrap_or_default();
+    if checks.is_empty() {
+        let _ = writeln!(out, "Checks: none yet (needs a check)");
+    } else {
+        let _ = writeln!(out, "Checks:");
+        for check in &checks {
+            let _ = writeln!(out, "  {}: {}", check["name"].as_str().unwrap_or("check"), check["command"].as_str().unwrap_or(""));
+        }
+    }
     if let Some(reason) = cell["reason"].as_str() {
-        println!("Reason: {reason}");
+        let _ = writeln!(out, "Reason: {reason}");
     }
     if let Some(task) = cell["claimedTask"].as_i64() {
-        println!("Claimed by task #{task}");
+        let _ = writeln!(out, "Claimed by task #{task}");
     }
     if !cell["proof"].is_null() {
-        println!("Proof (by {}):", cell["provedBy"].as_str().unwrap_or("?"));
-        println!("{}", serde_json::to_string_pretty(&cell["proof"]).unwrap_or_default());
+        let _ = writeln!(out, "Proof (by {}):", cell["provedBy"].as_str().unwrap_or("?"));
+        let _ = writeln!(out, "{}", serde_json::to_string_pretty(&cell["proof"]).unwrap_or_default());
     }
     if !cell["lastCheck"].is_null() {
-        println!("Last check: {}", serde_json::to_string_pretty(&cell["lastCheck"]).unwrap_or_default());
+        let _ = writeln!(out, "Last check: {}", serde_json::to_string_pretty(&cell["lastCheck"]).unwrap_or_default());
     }
     if let Some(at) = cell["auditedAt"].as_i64() {
-        println!("Audited at {at} by {}", cell["auditedBy"].as_str().unwrap_or("?"));
+        let _ = writeln!(out, "Audited at {at} by {}", cell["auditedBy"].as_str().unwrap_or("?"));
     }
     let notes = value["notes"].as_array().cloned().unwrap_or_default();
     if !notes.is_empty() {
-        println!("Notes:");
+        let _ = writeln!(out, "Notes:");
         for note in &notes {
-            println!("{}", note_line(note));
+            let _ = writeln!(out, "{}", note_line(note));
         }
     }
-    println!("History:");
+    let _ = writeln!(out, "History:");
     for event in value["events"].as_array().into_iter().flatten() {
-        println!(
+        let _ = writeln!(
+        out,
             "  {} {} by {}{}",
             event["seq"],
             event["kind"].as_str().unwrap_or(""),
@@ -358,6 +376,7 @@ fn print_cell(slug: &str, value: &Value) {
             }
         );
     }
+    out
 }
 
 /// One note as an indented line, labelled by where it was left.

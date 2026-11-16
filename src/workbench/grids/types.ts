@@ -265,7 +265,9 @@ const str = (value: unknown): string => (typeof value === 'string' ? value : '')
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
 
 /** A column as a draft or a template writes it, in either spelling. */
-export interface DraftColumn { id: string; name: string; proofRule: string; fromTemplate: boolean }
+/** A check a column's cells run, as the card shows it. */
+export interface DraftCheck { name: string; command: string }
+export interface DraftColumn { id: string; name: string; proofRule: string; fromTemplate: boolean; checks: DraftCheck[] }
 /** A row as a draft writes it. */
 export interface DraftRow { id: string; name: string; kind: RowKind; of: string[]; ref: { grid: string; row: string } | null; source: string }
 
@@ -277,6 +279,10 @@ export function draftColumns(value: unknown): DraftColumn[] {
       name: str(c.name) || str(c.id),
       proofRule: str(c.proofRule) || str(c.proof_rule),
       fromTemplate: c.fromTemplate === true || c.from_template === true || c.from_template === 1,
+      checks: (Array.isArray(c.checks) ? c.checks : []).map((raw) => {
+        const check = rec(raw);
+        return { name: str(check.name), command: str(check.command) };
+      }).filter((check) => check.command),
     };
   }).filter((c) => c.id);
 }
@@ -322,26 +328,35 @@ export function draftContent(pending: unknown, fallback?: Pick<GridSummary, 'tit
   };
 }
 
-/** A grid's own columns or rows against a draft's: what an edit adds and drops. */
+/**
+ * A grid's own columns or rows against a draft's: what an edit adds and drops,
+ * by id, with each id's name to show.
+ */
 export interface DraftDiff {
   columnsAdded: string[];
   columnsRetired: string[];
   rowsAdded: string[];
   rowsRemoved: string[];
+  names: Record<string, string>;
 }
 
-export function draftDiff(draft: DraftContent, now: Pick<GridDetail, 'columns' | 'rows'>): DraftDiff {
+/** `pending` is the draft as stored; `grid change` lists the rows it removes there. */
+export function draftDiff(draft: DraftContent, now: Pick<GridDetail, 'columns' | 'rows'>, pending?: unknown): DraftDiff {
   const liveCols = now.columns.filter((c) => !c.retired).map((c) => c.id);
   const liveRows = now.rows.filter((r) => !r.removed);
   const draftCols = new Set(draft.columns.map((c) => c.id));
   const draftRowIds = new Set(draft.rows.map((r) => r.id));
   const had = new Set(liveRows.map((r) => r.id));
+  const named = new Set(strings(rec(pending).removeRows));
+  const names: Record<string, string> = {};
+  for (const item of [...now.columns, ...now.rows, ...draft.columns, ...draft.rows]) names[item.id] = item.name || item.id;
   return {
     columnsAdded: draft.columns.map((c) => c.id).filter((id) => !liveCols.includes(id)),
     columnsRetired: liveCols.filter((id) => !draftCols.has(id)),
     rowsAdded: draft.rows.map((r) => r.id).filter((id) => !had.has(id)),
-    // Rows the search finds come and go by discovery; only a manual row is
-    // removed by an edit.
-    rowsRemoved: liveRows.filter((r) => r.source === 'manual' && !draftRowIds.has(r.id)).map((r) => r.id),
+    names,
+    // Rows the search finds come and go by discovery; an edit removes a
+    // manual row, or one `grid change` names.
+    rowsRemoved: liveRows.filter((r) => (r.source === 'manual' || named.has(r.id)) && !draftRowIds.has(r.id)).map((r) => r.id),
   };
 }

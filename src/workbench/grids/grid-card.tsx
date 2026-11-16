@@ -45,11 +45,11 @@ function Label({ children }: { children: ReactNode }) {
   return <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{children}</div>;
 }
 
-function IdList({ ids, tone }: { ids: string[]; tone?: 'add' | 'drop' }) {
+function IdList({ ids, names, tone }: { ids: string[]; names?: Record<string, string>; tone?: 'add' | 'drop' }) {
   if (!ids.length) return null;
   return (
-    <span className={cn('font-mono text-xs', tone === 'add' && 'text-[var(--color-success-accent)]', tone === 'drop' && 'text-[var(--color-destructive-accent)]')}>
-      {ids.join(', ')}
+    <span className={cn('text-xs', !names && 'font-mono', tone === 'add' && 'text-[var(--color-success-accent)]', tone === 'drop' && 'text-[var(--color-destructive-accent)]')}>
+      {ids.map((id) => names?.[id] ?? id).join(', ')}
     </span>
   );
 }
@@ -82,10 +82,10 @@ export function DraftView({ draft, diff }: { draft: DraftContent; diff?: DraftDi
       {diff && (
         <Panel tone="info" inset="sm" className="space-y-1 text-xs" data-testid="grid-draft-diff">
           {!changes && <div>No rows or columns change</div>}
-          {diff.columnsAdded.length > 0 && <div>Columns added: <IdList ids={diff.columnsAdded} tone="add" /></div>}
-          {diff.columnsRetired.length > 0 && <div>Columns retired: <IdList ids={diff.columnsRetired} tone="drop" /></div>}
-          {diff.rowsAdded.length > 0 && <div>Rows added: <IdList ids={diff.rowsAdded} tone="add" /></div>}
-          {diff.rowsRemoved.length > 0 && <div>Rows removed: <IdList ids={diff.rowsRemoved} tone="drop" /></div>}
+          {diff.columnsAdded.length > 0 && <div>Columns added: <IdList ids={diff.columnsAdded} names={diff.names} tone="add" /></div>}
+          {diff.columnsRetired.length > 0 && <div>Columns retired: <IdList ids={diff.columnsRetired} names={diff.names} tone="drop" /></div>}
+          {diff.rowsAdded.length > 0 && <div>Rows added: <IdList ids={diff.rowsAdded} names={diff.names} tone="add" /></div>}
+          {diff.rowsRemoved.length > 0 && <div>Rows removed: <IdList ids={diff.rowsRemoved} names={diff.names} tone="drop" /></div>}
         </Panel>
       )}
       <section className="space-y-1">
@@ -94,8 +94,16 @@ export function DraftView({ draft, diff }: { draft: DraftContent; diff?: DraftDi
           {draft.columns.map((c) => (
             <li key={c.id} className="text-sm" data-testid="grid-draft-column" data-template={c.fromTemplate ? 'yes' : 'no'}>
               <span className="font-medium">{c.name}</span>
+              {diff?.columnsAdded.includes(c.id) && <Badge variant="success" appearance="light" size="xs" className="ml-1.5 align-middle"><span>New</span></Badge>}
               {c.fromTemplate && <Badge variant="secondary" size="xs" className="ml-1.5 align-middle"><span>Template</span></Badge>}
               {c.proofRule && <div className="text-xs text-muted-foreground">{c.proofRule}</div>}
+              {c.checks.length > 0 && (
+                <ul className="mt-0.5 space-y-0.5" data-testid="grid-draft-checks">
+                  {c.checks.map((check, i) => (
+                    <li key={i} className="break-all font-mono text-xs text-muted-foreground">{check.command}</li>
+                  ))}
+                </ul>
+              )}
             </li>
           ))}
         </ul>
@@ -265,7 +273,7 @@ function DraftRow({ widget }: { widget: GridCardWidget }) {
   return (
     <GridLine event="draft" icon={icon} tone={tone} label={label} what={grid.title || grid.slug} onOpen={grid.status === 'approved' ? open : null}
       waiting={!!draft}
-      more={draft ? <DraftView draft={draft} diff={edit && data ? draftDiff(draft, data) : null} /> : null}
+      more={draft ? <DraftView draft={draft} diff={edit && data ? draftDiff(draft, data, grid.pending) : null} /> : null}
       actions={<DraftActions projectId={grid.projectId} slug={grid.slug} onDone={refetch} />} />
   );
 }
@@ -307,9 +315,9 @@ function TemplateRow({ widget }: { widget: GridWidget }) {
   const more = pending ? (
     <div className="space-y-3" data-testid="grid-template">
       <Panel tone="info" inset="sm" className="space-y-1 text-xs">
-        {next.filter((c) => !had.has(c.id)).length > 0 && <div>Columns added: <IdList ids={next.filter((c) => !had.has(c.id)).map((c) => c.id)} tone="add" /></div>}
-        {now.filter((c) => !will.has(c.id)).length > 0 && <div>Columns removed: <IdList ids={now.filter((c) => !will.has(c.id)).map((c) => c.id)} tone="drop" /></div>}
-        {changed.length > 0 && <div>Columns changed: <IdList ids={changed.map((c) => c.id)} /></div>}
+        {next.filter((c) => !had.has(c.id)).length > 0 && <div>Columns added: <IdList ids={next.filter((c) => !had.has(c.id)).map((c) => c.name || c.id)} names={{}} tone="add" /></div>}
+        {now.filter((c) => !will.has(c.id)).length > 0 && <div>Columns removed: <IdList ids={now.filter((c) => !will.has(c.id)).map((c) => c.name || c.id)} names={{}} tone="drop" /></div>}
+        {changed.length > 0 && <div>Columns changed: <IdList ids={changed.map((c) => c.name || c.id)} names={{}} /></div>}
       </Panel>
       <ul className="space-y-1">
         {next.map((c) => (

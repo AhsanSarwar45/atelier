@@ -21,6 +21,7 @@ mod build_hygiene;
 mod check_lock_scope;
 mod gaps;
 mod grid_change;
+mod grid_card_fixes;
 mod grid_column_checks;
 mod grid_next_exit;
 mod grid_next_needs_check;

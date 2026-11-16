@@ -1286,6 +1286,8 @@ fn draft(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
             "fromTemplate": c["from_template"], "checks": c.get("checks").cloned().unwrap_or_else(|| json!([]))})).collect::<Vec<_>>(),
         "cells": cell_checks,
         "rows": all_rows, "draftedBy": session, "draftedAt": now, "edit": edit, "diff": Value::Null,
+        // Drafting ran the row search; approval records it as the grid's last run.
+        "searched": {"at": now, "head": run.head},
     });
     let (rows_n, cols_n) = (all_rows.len(), all_columns.len());
     let grid = match existing.filter(|grid| grid.status != "discarded") {
@@ -1500,6 +1502,10 @@ fn approve(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
     grid.status = "approved".into();
     grid.approved_at = Some(now);
     grid.updated_at = now;
+    if pending["searched"].is_object() {
+        grid.discovery = Some(json!({"at": pending["searched"]["at"], "head": pending["searched"]["head"], "ok": true,
+            "added": [], "missing": [], "back": [], "skipped": []}));
+    }
     grid.pending = None;
     save_grid(connection, &grid)?;
     let rows_n = rows_wanted.iter().filter(|row| row["kind"] != "reference").count();
