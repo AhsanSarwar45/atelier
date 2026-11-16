@@ -233,6 +233,9 @@ fn held_as_prompt(session_id: &str, held: &Value) -> Result<Command, String> {
     if held["parts"].is_array() {
         fields.insert("parts".into(), held["parts"].clone());
     }
+    if held["from"].is_object() {
+        fields.insert("from".into(), held["from"].clone());
+    }
     serde_json::from_value(Value::Object({
         let mut map = fields;
         map.insert("type".into(), json!("prompt.send"));
@@ -2844,6 +2847,7 @@ impl WorkbenchRegistry {
             Value::Array(parts) => Some(Value::Array(parts.clone())),
             _ => None,
         };
+        let from = command.fields.get("from").filter(|from| from.is_object()).cloned();
         self.database
             .hold_message(
                 session_id.to_string(),
@@ -2851,6 +2855,7 @@ impl WorkbenchRegistry {
                 text,
                 images,
                 parts,
+                from,
                 chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             )
             .await

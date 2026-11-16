@@ -2184,6 +2184,7 @@ fn held_in_its_project(
         text: &str,
         images: &Value,
         parts: Option<&Value>,
+        from: Option<&Value>,
         at: &str,
     ) -> rusqlite::Result<Value> {
         let position: i64 = self
@@ -2195,8 +2196,8 @@ fn held_in_its_project(
             )
             .unwrap_or(1);
         self.connection.prepare_cached(
-            "INSERT INTO held_message (id, session_id, position, text, images, parts, held_at, sending)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,0)",
+            "INSERT INTO held_message (id, session_id, position, text, images, parts, held_at, sending, origin)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,0,?8)",
         )?.execute(params![
             id,
             session_id,
@@ -2204,15 +2205,16 @@ fn held_in_its_project(
             text,
             images.to_string(),
             parts.map(Value::to_string),
-            at
+            at,
+            from.map(Value::to_string)
         ])?;
-        Ok(held_row(id, session_id, text, images.clone(), parts.cloned(), at, false))
+        Ok(held_row(id, session_id, text, images.clone(), parts.cloned(), from.cloned(), at, false))
     }
 
     /// Every message this chat is holding, oldest first.
     pub fn held_messages(&self, session_id: &str) -> rusqlite::Result<Vec<Value>> {
         let mut statement = self.connection.prepare_cached(
-            "SELECT id, text, images, parts, held_at, pushed FROM held_message
+            "SELECT id, text, images, parts, held_at, pushed, origin FROM held_message
              WHERE session_id = ?1 ORDER BY position",
         )?;
         let rows = statement.query_map(params![session_id], |row| {
@@ -2222,12 +2224,14 @@ fn held_in_its_project(
             let parts: Option<String> = row.get(3)?;
             let at: String = row.get(4)?;
             let pushed: bool = row.get(5)?;
+            let from: Option<String> = row.get(6)?;
             Ok(held_row(
                 &id,
                 session_id,
                 &text,
                 serde_json::from_str(&images).unwrap_or_else(|_| json!([])),
                 parts.and_then(|parts| serde_json::from_str(&parts).ok()),
+                from.and_then(|from| serde_json::from_str(&from).ok()),
                 &at,
                 pushed,
             ))
@@ -3847,10 +3851,11 @@ fn held_row(
     text: &str,
     images: Value,
     parts: Option<Value>,
+    from: Option<Value>,
     at: &str,
     pushed: bool,
 ) -> Value {
-    json!({
+    let mut row = json!({
         "id": id,
         "sessionId": session_id,
         "text": text,
@@ -3858,7 +3863,13 @@ fn held_row(
         "parts": parts,
         "heldAt": at,
         "pushed": pushed,
-    })
+    });
+    // Where a line Atelier sent on its own came from (`tell_chat`); absent
+    // for what the owner wrote.
+    if let Some(from) = from {
+        row["from"] = from;
+    }
+    row
 }
 
 fn json_error(error: serde_json::Error) -> rusqlite::Error {
@@ -4040,6 +4051,14 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     {
         transaction
             .execute_batch("ALTER TABLE held_message ADD COLUMN pushed INTEGER NOT NULL DEFAULT 0;")?;
+    }
+    // Where a line Atelier sent on its own came from, kept while it waits so
+    // it is still drawn as an automated message once sent.
+    if !columns(transaction, "held_message")?
+        .iter()
+        .any(|name| name == "origin")
+    {
+        transaction.execute_batch("ALTER TABLE held_message ADD COLUMN origin TEXT;")?;
     }
     /*
       The choices a provider last offered, one row per provider account and

@@ -2359,6 +2359,7 @@ impl AcpDriver {
         text: &str,
         images: &[Value],
         content: Vec<ContentBlock>,
+        from: Option<&Value>,
     ) -> Result<Value, String> {
         let active = self.normalizer.lock().await.request_is_active(&self.in_flight);
         // The id of the line just written is the only handle anyone has on it
@@ -2372,6 +2373,7 @@ impl AcpDriver {
             message_id,
             text,
             images,
+            from,
         )
         .await?;
         let mut accepted = if active {
@@ -3638,6 +3640,7 @@ impl AcpDriver {
                     command.at("text").as_str().unwrap_or_default(),
                     images,
                     content,
+                    command.fields.get("from"),
                 )
                 .await?;
                 if !native_command { self.pending_guidance = None; }
@@ -3868,6 +3871,7 @@ impl AcpDriver {
                         &instruction,
                         &[],
                         vec![ContentBlock::Text(TextContent::new(instruction.clone()))],
+                        None,
                     )
                     .await?;
                 self.database
@@ -4685,6 +4689,7 @@ mod tests {
                     "Use the safer route",
                     &[],
                     vec![ContentBlock::Text(TextContent::new("Use the safer route"))],
+                    None,
                 )
                 .await
         });
@@ -4849,6 +4854,7 @@ mod tests {
                     "Never mind",
                     &[],
                     vec![ContentBlock::Text(TextContent::new("Never mind"))],
+                    None,
                 )
                 .await
         });
@@ -4914,6 +4920,7 @@ mod tests {
                     "Start here",
                     &[],
                     vec![ContentBlock::Text(TextContent::new("Start here"))],
+                    None,
                 )
                 .await
         });

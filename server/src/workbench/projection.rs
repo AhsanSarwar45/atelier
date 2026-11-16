@@ -295,6 +295,7 @@ pub fn fold_from(view: &mut Map<String, Value>, events: &[Event]) -> Projection 
                 row.insert("parentId".into(), value(event, "parentToolCallId"));
                 copy_if_present(&mut row, event, "execution");
                 copy_if_present(&mut row, event, "composedHere");
+                copy_if_present(&mut row, event, "from");
                 items.push(Value::Object(row));
             }
             // A picture a CALL answered with belongs to the call's own row:

@@ -469,7 +469,7 @@ async fn wake(state: &WorkbenchState, flow: &Workflow, run: &mut Run) -> Result<
     run.report = None;
     save(state, run).await?;
     let text = format!("The wait is over. Check again: {waited_for}\n\n{}", how_to_report(flow, &stage));
-    tell_chat(state, &session, text).await;
+    tell_chat(state, &session, text, super::tell::from("workflow", format!("Wait over: {}", stage.name))).await;
     Ok(())
 }
 
@@ -552,7 +552,8 @@ fn enter<'a>(
                 run.status = "running".into();
                 save(state, run).await?;
                 if let Some(session) = run.session.clone() {
-                    tell_chat(state, &session, agent_prompt(flow, stage, &run.item)).await;
+                    let from = super::tell::from("workflow", format!("Workflow stage: {}", stage.name));
+                    tell_chat(state, &session, agent_prompt(flow, stage, &run.item), from).await;
                 }
                 Ok(())
             }
@@ -795,7 +796,8 @@ async fn advance(state: &WorkbenchState, run: &mut Run, session: &str, ended_in:
         "This chat ended its turn without reporting stage \"{}\" (reminder {} of {REMINDERS}). {decide}{}",
         stage.name, run.reminders, how_to_report(&flow, &stage)
     );
-    tell_chat(state, session, text).await;
+    let from = super::tell::from("workflow", format!("Reminder to report: {}", stage.name));
+    tell_chat(state, session, text, from).await;
     Ok(())
 }
 

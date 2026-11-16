@@ -383,6 +383,8 @@ async fn stop_and_tell(registry: &WorkbenchRegistry, session_id: &str, invoice: 
             ("sessionId".into(), json!(session_id)),
             ("text".into(), json!(invoice.message())),
             ("images".into(), json!([])),
+            // Drawn as an automated message (`routes::workbench::tell::from`).
+            ("from".into(), json!({"kind": "limit", "label": "Stopped: the computer was low on memory"})),
         ]),
     };
     if let Err(error) = registry.execute(&tell).await {

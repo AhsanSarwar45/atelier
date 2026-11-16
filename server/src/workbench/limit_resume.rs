@@ -106,6 +106,8 @@ async fn resume(registry: &WorkbenchRegistry, session_id: &str) {
             ("sessionId".into(), json!(session_id)),
             ("text".into(), json!(CONTINUE)),
             ("images".into(), json!([])),
+            // Drawn as an automated message (`routes::workbench::tell::from`).
+            ("from".into(), json!({"kind": "limit", "label": "Resumed after the usage limit reset"})),
         ]),
     };
     if let Err(error) = registry.execute(&tell).await {

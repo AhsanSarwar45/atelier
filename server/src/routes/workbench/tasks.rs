@@ -517,7 +517,8 @@ pub(super) async fn act(
             announce(&state, &proposal["projectId"], &Value::Null);
             let telling = state.clone();
             let said = prompt.clone();
-            tokio::spawn(async move { tell_chat(&telling, &session, said).await });
+            let from = super::tell::from("proposal", "You asked for changes to the proposal");
+            tokio::spawn(async move { tell_chat(&telling, &session, said, from).await });
             return Ok(Json(json!({"proposal": proposal, "task": null, "summary": prompt})));
         }
         let asked = project.clone();
@@ -554,7 +555,12 @@ pub(super) async fn act(
         // next message, queued behind a turn still running.
         let telling = state.clone();
         let said = prompt.clone();
-        tokio::spawn(async move { tell_chat(&telling, &session, said).await });
+        let from = super::tell::from("proposal", match (&task, proposal["status"].as_str()) {
+            (Some(task), _) => format!("You created task #{} from the proposal", task["number"]),
+            (None, Some("cancelled")) => "You cancelled the proposal".to_string(),
+            _ => "You chose Just do it".to_string(),
+        });
+        tokio::spawn(async move { tell_chat(&telling, &session, said, from).await });
         return Ok(Json(json!({"proposal": proposal, "task": task, "summary": prompt})));
     }
     if request.action == "create" && request.actor == "owner" {
@@ -669,7 +675,15 @@ pub(super) async fn act(
         if let Some(said) = said {
             // Queued behind a turn still running, as a proposal's answer is.
             let telling = state.clone();
-            tokio::spawn(async move { tell_chat(&telling, &session, said).await });
+            let number = row.number;
+            let label = match action.as_str() {
+                "approve" if by_workflow => format!("Workflow approved #{number}"),
+                "approve" => format!("You approved #{number}"),
+                "reopen" => format!("You reopened #{number}"),
+                _ => format!("You undid the plan change for #{number}"),
+            };
+            let from = super::tell::from("task", label);
+            tokio::spawn(async move { tell_chat(&telling, &session, said, from).await });
         }
     }
     // A check that leaves its item unmet is recorded, and the CLI exits non-zero.
@@ -757,7 +771,8 @@ async fn owner_create(
     announce_grids(state, &project, &grids);
     let telling = state.clone();
     let told = session.clone();
-    tokio::spawn(async move { tell_chat(&telling, &told, prompt).await });
+    let from = super::tell::from("grid", format!("You created task #{} from the grid", task["number"]));
+    tokio::spawn(async move { tell_chat(&telling, &told, prompt, from).await });
     Ok(Json(json!({"task": task, "sessionId": session})))
 }
 

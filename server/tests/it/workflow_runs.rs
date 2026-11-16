@@ -1039,6 +1039,68 @@ async fn a_task_the_owner_approves_in_a_workflow_chat_does_not_ask_the_agent_abo
     assert!(!approval.to_lowercase().contains("merge"), "the owner's approval asks the agent about merging: {approval}");
 }
 
+/// Where each line chat `id` was sent or has waiting came from: its text and
+/// its `from` (`{"kind", "label"}`), oldest first.
+async fn told_from(fixture: &Fixture, id: &str) -> Vec<(String, Value)> {
+    let mut found: Vec<(String, Value)> = fixture
+        .seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(kind, fields)| kind == "PromptSend" && fields["sessionId"] == id)
+        .map(|(_, fields)| (fields["text"].as_str().unwrap_or_default().to_string(), fields["from"].clone()))
+        .collect();
+    for held in fixture.state.database().held_messages(id.to_string()).await.unwrap_or_default() {
+        found.push((held["text"].as_str().unwrap_or_default().to_string(), held["from"].clone()));
+    }
+    found
+}
+
+/// Every line Atelier sends into a chat on its own (a stage's prompt, a
+/// task's approval) says so: it carries `from`, a kind and a short label,
+/// so the chat can draw it as an automated message, not as one the owner
+/// typed.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_line_atelier_sends_into_a_chat_says_where_it_came_from() {
+    let fixture = fixture().await;
+    let mut flow = ticket_flow();
+    flow["stages"][0]["auto"]["plan"] = json!(true);
+    save(&fixture, flow);
+    let run = start(&fixture, "ticket", item(49)).await;
+    let id = session(&run);
+    let cwd = run["cwd"].as_str().unwrap().to_string();
+    let lines = until(|| async { json!(told_from(&fixture, &id).await.len()) }, |n| n.as_u64() > Some(0)).await;
+    assert!(lines.as_u64() > Some(0), "the stage prompt was never sent");
+    let (prompt, from) = told_from(&fixture, &id).await.remove(0);
+    assert!(prompt.contains("Work on KEY-49"), "the first line is not the stage prompt: {prompt}");
+    assert_eq!(from["kind"], "workflow", "the stage prompt does not say it came from the workflow: {from}");
+    assert!(from["label"].as_str().is_some_and(|label| label.contains("implement")), "the stage prompt has no label naming its stage: {from}");
+
+    proposes(&fixture, &id).await;
+    until(|| shown(&fixture, &id, 1), |task| task["status"] == "todo").await;
+    let (code, body) = task(&fixture, &id, "start", Some(1), json!({})).await;
+    assert_eq!(code, 200, "start failed: {body}");
+    std::fs::write(format!("{cwd}/made.txt"), "x").unwrap();
+    git(&cwd, &["add", "made.txt"]);
+    git(&cwd, &["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "made"]);
+    let commit = git(&cwd, &["rev-parse", "HEAD"]);
+    let (code, body) = task(&fixture, &id, "done", Some(1), json!({"summary": "done", "commits": [commit], "followups": [],
+        "result": {"document": "# Plan", "decisions": [], "open_questions": [], "proposed_tasks": []}})).await;
+    assert_eq!(code, 200, "done failed: {body}");
+    finishes(&fixture, &id, "done").await;
+    let (code, body) = post(&fixture, "/task", json!({"action": "approve", "actor": "owner", "project": "project-1", "number": 1})).await;
+    assert_eq!(code, 200, "the owner's approve failed: {body}");
+    until(
+        || async { json!(told(&fixture, &id).await) },
+        |p| p.as_array().is_some_and(|p| p.iter().any(|p| p.as_str().is_some_and(|p| p.contains("approved task #1")))),
+    ).await;
+    let lines = told_from(&fixture, &id).await;
+    let (approval, from) = lines.iter().find(|(text, _)| text.contains("approved task #1")).cloned()
+        .unwrap_or_else(|| panic!("the agent was not told the owner approved its task: {lines:?}"));
+    assert_eq!(from["kind"], "task", "the approval does not say it came from the task: {approval} {from}");
+    assert!(from["label"].as_str().is_some_and(|label| label.contains("#1")), "the approval has no label naming its task: {from}");
+}
+
 /// Serves the router on a free port, as the app does, for the real CLI.
 async fn serve(fixture: &Fixture) -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

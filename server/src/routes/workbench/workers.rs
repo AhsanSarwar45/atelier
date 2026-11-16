@@ -129,7 +129,7 @@ async fn start(state: &WorkbenchState, orchestrator: &Session, ask: &Ask) -> Res
     if let Err(error) = state.registry.execute(&Command { kind: CommandKind::SessionRename, fields }).await {
         tracing::warn!(chat = id, %error, "a worker could not be named");
     }
-    tell_chat(state, &id, brief.to_string()).await;
+    tell_chat(state, &id, brief.to_string(), super::tell::from("worker", "Brief from the main chat")).await;
     Ok(Json(json!({"workerId": id})))
 }
 
@@ -145,6 +145,7 @@ async fn send(state: &WorkbenchState, orchestrator: &Session, ask: &Ask) -> Resu
             ("sessionId".into(), json!(worker.id)),
             ("text".into(), json!(text)),
             ("images".into(), json!([])),
+            ("from".into(), super::tell::from("worker", "Message from the main chat")),
         ]);
         match state.registry.execute(&Command { kind: CommandKind::PromptSend, fields }).await {
             Ok(_) => {
@@ -157,7 +158,7 @@ async fn send(state: &WorkbenchState, orchestrator: &Session, ask: &Ask) -> Resu
             Err(error) => tracing::warn!(chat = worker.id, %error, "a worker could not be interrupted"),
         }
     }
-    let delivery = tell_chat(state, &worker.id, text.to_string()).await;
+    let delivery = tell_chat(state, &worker.id, text.to_string(), super::tell::from("worker", "Message from the main chat")).await;
     state.publish_holds().await;
     Ok(Json(match delivery {
         Delivery::Sent => json!({"ok": true, "workerId": worker.id, "delivery": "sent"}),
@@ -277,5 +278,5 @@ async fn report(state: &WorkbenchState, worker: &str, ended_in: &str) {
         if tail.is_empty() { "(no messages yet)" } else { &tail }
     );
     let block = crate::workbench::metadata::added_by_atelier(crate::workbench::metadata::WORKER_REPORT, &details);
-    tell_chat(state, &orchestrator, format!("{line}\n\n{block}")).await;
+    tell_chat(state, &orchestrator, format!("{line}\n\n{block}"), super::tell::from("worker", line)).await;
 }

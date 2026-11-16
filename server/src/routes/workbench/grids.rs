@@ -483,7 +483,8 @@ async fn respond(
     announce_grids(state, project, &touched);
     for (session, text) in outcome.tell.clone() {
         let telling = state.clone();
-        tokio::spawn(async move { tell_chat(&telling, &session, text).await });
+        let from = super::tell::from("grid", super::tell::first_sentence(&text));
+        tokio::spawn(async move { tell_chat(&telling, &session, text, from).await });
     }
     let grid = match &outcome.slug {
         Some(slug) => Some(grid_detail(state, project, slug).await?),

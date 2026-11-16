@@ -110,6 +110,7 @@ enum Command {
         String,
         serde_json::Value,
         Option<serde_json::Value>,
+        Option<serde_json::Value>,
         String,
         Reply<serde_json::Value>,
     ),
@@ -645,9 +646,10 @@ impl ChatDb {
         text: String,
         images: serde_json::Value,
         parts: Option<serde_json::Value>,
+        from: Option<serde_json::Value>,
         at: String,
     ) -> Result<serde_json::Value, String> {
-        self.request(|reply| Command::HoldMessage(session_id, id, text, images, parts, at, reply))
+        self.request(|reply| Command::HoldMessage(session_id, id, text, images, parts, from, at, reply))
             .await
     }
 
@@ -1580,9 +1582,9 @@ fn run(
             Command::SummaryRuns(project, limit, reply) => {
                 respond(reply, store.summary_runs(&project, limit))
             }
-            Command::HoldMessage(session_id, id, text, images, parts, at, reply) => respond(
+            Command::HoldMessage(session_id, id, text, images, parts, from, at, reply) => respond(
                 reply,
-                store.hold_message(&session_id, &id, &text, &images, parts.as_ref(), &at),
+                store.hold_message(&session_id, &id, &text, &images, parts.as_ref(), from.as_ref(), &at),
             ),
             Command::HeldMessages(session_id, reply) => {
                 respond(reply, store.held_messages(&session_id))
@@ -2224,7 +2226,7 @@ mod tests {
         .unwrap();
         assert!(database.append(said).await.unwrap().is_some());
         database
-            .hold_message("chat".into(), "held-1".into(), "and then".into(), json!([]), None, "now".into())
+            .hold_message("chat".into(), "held-1".into(), "and then".into(), json!([]), None, None, "now".into())
             .await
             .unwrap();
         database

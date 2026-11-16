@@ -1015,11 +1015,16 @@ pub(super) async fn record_user_for_transport(
     id: String,
     text: &str,
     images: &[Value],
+    from: Option<&Value>,
 ) -> Result<String, String> {
     let at = now();
-    let mut values = vec![
-        json!({"type":"message.started","sessionId":session.id,"seq":0,"at":at,"messageId":id,"role":"user","composedHere":true}),
-    ];
+    let mut started = json!({"type":"message.started","sessionId":session.id,"seq":0,"at":at,"messageId":id,"role":"user","composedHere":true});
+    // A line Atelier sent on its own (`tell_chat`) says where it came from, so
+    // the chat draws it as an automated message, not as one the owner typed.
+    if let Some(from) = from.filter(|from| from.is_object()) {
+        started["from"] = from.clone();
+    }
+    let mut values = vec![started];
     values.extend(images.iter().map(|image| {
         json!({
             "type":"image", "sessionId":session.id, "seq":0, "at":at,
@@ -1089,6 +1094,7 @@ mod tests {
             "user-line-1".into(),
             "What is shown?",
             &[json!({"mimeType":"image/png","data":"aGVsbG8="})],
+            None,
         )
         .await
         .unwrap();
