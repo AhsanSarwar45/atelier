@@ -1526,7 +1526,8 @@ export function ProposalActions({ projectId, id, onAnswered, className }: {
           <Button type="button" size="sm" variant="ghost" disabled={busy !== null} loading={busy === 'cancel'} onClick={() => void answer('cancel')}>Cancel</Button>
         </div>
       )}
-      {error && <div role="alert" className="text-xs text-destructive">{`Couldn't answer. ${error}`}</div>}
+      {/* The error wraps to the buttons' width rather than widening the box past its card. */}
+      {error && <div role="alert" className="w-0 min-w-full break-words text-xs text-destructive">{`Couldn't answer. ${error}`}</div>}
     </div>
   );
 }
