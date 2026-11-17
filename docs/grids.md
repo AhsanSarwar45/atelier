@@ -312,27 +312,24 @@ atelier grid review SLUG ROW COL
 
 - `grid cases` replaces the cell's case list, and answers review gaps: a
   case's `covers` names the gap it answers, and `dismiss` gives a reason
-  for each gap that needs no case. Editing the cases of a reviewed or
-  approved cell sends it back to step cases and clears the review and the
-  row's approval.
+  for each gap that needs no case. Editing the cases of a reviewed cell
+  sends it back to step cases and clears the review.
 - `grid review` is run by Atelier, not by the chat: a fresh agent with no
   tools and no chat context gets only the column's name and proof rule,
   the row's name and paths, the column checks and the cases (with answered
   gaps), and returns the scenarios that are missing as gaps (`r1g1`, …). A
   review is refused while a gap is unanswered. The cell is **reviewed**
-  when a review returns no gaps. After 3 rounds with gaps it goes to the
-  owner, who sees every case and dismissal.
-- The owner approves a whole row's reviewed cases in one step: **Approve
-  cases** on the Grids screen (`approve_cases` with `row`). It is refused
-  while any live cell of the row is not reviewed, naming each with its step
-  and next command. Agents cannot approve.
+  when a review returns no gaps, or once the gaps of its 3rd round are
+  answered (no 4th review runs). No one approves cases: the owner has no
+  step here, and agents never wait for one.
 - No cell of a row is claimed (`grid next`, `task create`, `task propose`,
-  the owner's Create task) until every cell of the row is reviewed and
-  approved. Such a cell shows **Needs cases**; `grid next` lists those rows
-  with each cell's step and next command.
-- Grids approved before cases keep their proofs. Every cell without an
-  approved case list shows "Needs cases" and cannot be claimed or proved
-  again until it goes through cases, review and approval.
+  the owner's Create task) until every cell of the row is reviewed. Such a
+  cell shows **Needs cases**; `grid next` lists those rows with each cell's
+  step and next command, and the refusal names them too.
+- Grids from before cases keep their proofs. Every cell without reviewed
+  cases shows "Needs cases" and cannot be claimed or proved again until it
+  goes through cases and review. Cells that waited for the owner's approval
+  under an older build are reviewed now.
 
 ## Proof
 
@@ -399,9 +396,9 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
 | `na` | reopen | `gap` (reason) | owner | |
 | `proved` | owner reopen (reason) | `gap` | owner | |
 
-- Every cell also stores its **step**, order → cases → reviewed → approved → red → work → proved (or
+- Every cell also stores its **step**, order → cases → reviewed → red → work → proved (or
   `na`), and the one command that moves it on (`next`). Grids from before
-  cases called the approved step open (open → red → work → proved); grids
+  cases called the reviewed step open (open → red → work → proved); grids
   from before the order step have no order, so their unclaimed cells move
   to step order:
 
@@ -409,8 +406,7 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
   |---|---|---|
   | order | not claimed, and its row or column has no place in the written order | `atelier grid order SLUG` |
   | cases | no cases, unanswered gaps, or not yet reviewed clean | `atelier grid cases SLUG ROW COL`, or `atelier grid review SLUG ROW COL` once the gaps are answered |
-  | reviewed | the last review found no gaps; the row waits for the owner | owner: Approve cases for the row |
-  | approved | the row's cases are approved; not claimed (unchecked, gap, stale) | `atelier grid next SLUG` |
+  | reviewed | the review is finished (no gaps, or round 3's gaps answered); not claimed (unchecked, gap, stale). It is claimed once every cell of its row is reviewed | `atelier grid next SLUG` |
   | red | claimed by a task not yet started | `atelier task start N` |
   | work | claimed by a started (or blocked) task | `atelier grid prove SLUG ROW COL` |
   | proved | proved | `atelier task check N ROW.COL` while claimed, else `atelier grid next SLUG` |
@@ -839,11 +835,6 @@ N/A awaiting the owner: camera.ghosts.presets_grounded
   and prefills `@task @grid:SLUG.ROWS.COLS ` through `prefillChat`, with
   `startTaskIn` given the line. Cells that are not claimable are listed in a
   tooltip with the reason.
-- **Cases awaiting approval.** Above the heatmap, one panel per row with a
-  reviewed cell: each cell's column checks and cases with their commands
-  resolved, the review's gaps with the case that covers each or the
-  dismissal reason, and **Approve cases** (disabled while a cell of the row
-  still needs review).
 - **Cell detail panel.** State (and stale or claimed, with a link to the
   task); reason; the cell's checks and cases (Given/When/Then and command, the
   column's marked apart from the cell's own), or **Needs a check**; proof: summary, checks with the last result and time,
@@ -870,9 +861,9 @@ templates with `{row}` (a cell may add or override) and a cell without one
 shows "Needs a check" and cannot be claimed, the command list above, the
 work-through loop (`grid next` → `task create`, no `@task` needed →
 `task start` → prove → `task check` → `task done` → repeat), the cell
-steps order → cases → reviewed → approved → red → work → proved with the `Step:` line, the
+steps order → cases → reviewed → red → work → proved with the `Step:` line, the
 order an agent must write first (every row and column, each with a reason; no default), cases (`atelier grid cases`,
-`atelier grid review`, the owner's row approval, "Needs cases"), the
+`atelier grid review`, no one approving cases, "Needs cases"), the
 `CASE <grid>/<row>/<col>/<case> PASS|FAIL` line and `atelier case`, and cell
 prerequisites in `grid order` (`"cells":[{"row":…}]`), "`grid prove`
 runs the approved checks; commit the covered code first", "a task with `cells` must end with

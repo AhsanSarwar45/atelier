@@ -23,7 +23,6 @@ import { CellDetailPanel, failure } from '@/workbench/grids/cell-detail';
 import { cellCount, CreateTaskButton } from '@/workbench/grids/create-task';
 import { DraftActions, DraftView } from '@/workbench/grids/grid-card';
 import { GridHeatmap, Legend, orderRows } from '@/workbench/grids/grid-heatmap';
-import { RowCasesList } from '@/workbench/grids/row-cases';
 import { ALL_GAPS, selectedCells, type Selection } from '@/workbench/grids/selection';
 import { NEEDS_CHECK_LABEL, draftColumns, draftContent, draftDiff, type GridDetail, type GridSummary, type GridTemplate } from '@/workbench/grids/types';
 import { useGrid, useGrids } from '@/workbench/grids/use-grids';
@@ -324,7 +323,6 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onOpenTask }: {
                     </label>
                   )}
                 </div>
-                <RowCasesList detail={detail} onDone={refetch} />
                 {rows.length ? (
                   <GridHeatmap
                     rows={rows}

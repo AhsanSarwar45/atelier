@@ -118,17 +118,17 @@ export interface GridCell {
   checks?: Array<Record<string, unknown>>;
   /** Whether it has no checks at all, so it cannot be claimed or proved. */
   needsCheck?: boolean;
-  /** Where the cell is: cases, reviewed, approved, red, work, proved or na. */
+  /** Where the cell is: order, cases, reviewed, red, work, proved or na. */
   step?: string | null;
   /** The next allowed command for the cell. */
   next?: string | null;
-  /** Whether it has no reviewed, approved case list, so it cannot be claimed or re-proved. */
+  /** Whether its cases are not reviewed, so it cannot be claimed or re-proved. */
   needsCases?: boolean;
   /** The cell's own cases: one scenario of its row each. */
   cases?: GridCase[];
   /** The coverage review: its rounds of gaps and how each was answered. */
   review?: CaseReview | null;
-  /** When the owner approved the row's cases. */
+  /** When its review finished. */
   casesApproved?: number | null;
 }
 
@@ -194,7 +194,7 @@ export interface GridsList {
 
 export type GridOwnerAction =
   | 'approve' | 'discard' | 'approve_na' | 'reject_na' | 'reopen' | 'verify' | 'discover'
-  | 'approve_template' | 'reject_template' | 'note' | 'approve_cases';
+  | 'approve_template' | 'reject_template' | 'note';
 
 export type GridWidgetEvent = 'draft' | 'template' | 'prove' | 'na' | 'audit' | 'reopen' | 'pass' | 'discover';
 

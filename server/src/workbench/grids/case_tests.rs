@@ -1,8 +1,8 @@
 //! Cases before work: a cell holds a list of cases (one scenario each), a
 //! coverage review that Atelier runs looks for missing scenarios, the agent
-//! answers each gap with a case or a dismissal, and the owner approves a
-//! row's cases in one step. A cell moves cases → reviewed → approved → red →
-//! work → proved, and nothing in a row is claimed before the row is approved.
+//! answers each gap with a case or a dismissal, and no one approves the
+//! result: a cell moves order → cases → reviewed → red → work → proved, and
+//! nothing in a row is claimed before every cell of the row is reviewed.
 //! A column template may vary only by `{row}`. A proved cell with no approved
 //! cases keeps its proof but needs cases before it is claimed or re-proved.
 
@@ -99,25 +99,12 @@ fn review(store: &Store, row: &str, col: &str, gaps: &[&str]) -> Result<Outcome,
     apply(store.connection(), &asked)
 }
 
-fn approve_row(store: &Store, row: &str) -> Result<Outcome, TaskError> {
-    let mut asked = request("approve_cases");
-    asked.actor = "owner".into();
-    asked.session = None;
-    asked.row = Some(row.into());
-    apply(store.connection(), &asked)
-}
-
 /// Every cell of `row` gets one case and a clean review.
 fn reviewed_row(store: &Store, row: &str) {
     for col in ["gpu", "perf"] {
         cases(store, row, col, json!({"cases": [case(row, col, "dark-room")]})).unwrap();
         review(store, row, col, &[]).unwrap();
     }
-}
-
-fn approved_row(store: &Store, row: &str) {
-    reviewed_row(store, row);
-    approve_row(store, row).unwrap();
 }
 
 fn refused<T>(result: Result<T, TaskError>) -> String {
@@ -251,15 +238,16 @@ fn a_review_before_any_case_is_refused() {
     assert!(message.contains("atelier grid cases camera glare gpu"), "{message}");
 }
 
-/// Step 2: a clean review moves the cell to "reviewed".
+/// A clean review makes the cell "reviewed", ready for a task: its next
+/// command is the agent's own, and it waits for no one.
 #[test]
-fn a_review_with_no_gaps_moves_the_cell_to_reviewed() {
+fn a_clean_review_readies_the_cell_with_no_owner_step() {
     let (_d, store) = store();
     camera(&store);
     cases(&store, "glare", "gpu", json!({"cases": [case("glare", "gpu", "dark-room")]})).unwrap();
     review(&store, "glare", "gpu", &[]).unwrap();
     assert_eq!(step(&store, "glare", "gpu"), "reviewed");
-    assert!(next(&store, "glare", "gpu").contains("owner"), "a reviewed cell waits for the owner: {}", next(&store, "glare", "gpu"));
+    assert_eq!(next(&store, "glare", "gpu"), "atelier grid next camera");
 }
 
 /// Each gap must be answered, by a new case or a dismissal with a reason,
@@ -286,9 +274,9 @@ fn gaps_must_be_answered_before_the_next_review() {
 }
 
 /// Reviews stop after three rounds: once round 3's gaps are answered, the
-/// cell is reviewed and the owner sees the answers.
+/// cell is reviewed and ready, with no owner step.
 #[test]
-fn after_three_rounds_the_answers_go_to_the_owner() {
+fn after_three_rounds_the_answered_cell_is_ready() {
     let (_d, store) = store();
     camera(&store);
     cases(&store, "glare", "gpu", json!({"cases": [case("glare", "gpu", "dark-room")]})).unwrap();
@@ -297,66 +285,74 @@ fn after_three_rounds_the_answers_go_to_the_owner() {
         cases(&store, "glare", "gpu", json!({"dismiss": {format!("r{round}g1"): "not this feature"}})).unwrap();
     }
     assert_eq!(step(&store, "glare", "gpu"), "reviewed");
+    assert_eq!(next(&store, "glare", "gpu"), "atelier grid next camera");
     let message = refused(review(&store, "glare", "gpu", &[]));
-    assert!(message.contains("3 rounds"), "{message}");
+    assert!(!message.contains("owner"), "{message}");
 }
 
-/// The owner approves a row only when every cell of it is reviewed.
+/// There is no owner action for cases: `approve_cases` is not an action.
 #[test]
-fn the_owner_cannot_approve_a_row_before_every_cell_is_reviewed() {
+fn the_owner_has_no_cases_approval() {
     let (_d, store) = store();
     camera(&store);
-    cases(&store, "glare", "gpu", json!({"cases": [case("glare", "gpu", "dark-room")]})).unwrap();
-    review(&store, "glare", "gpu", &[]).unwrap();
-    let message = refused(approve_row(&store, "glare"));
-    assert!(message.contains("glare.perf") && message.contains("step cases"), "{message}");
+    reviewed_row(&store, "glare");
+    let mut asked = request("approve_cases");
+    asked.actor = "owner".into();
+    asked.session = None;
+    asked.row = Some("glare".into());
+    let message = refused(apply(store.connection(), &asked));
+    assert!(message.contains("approve_cases"), "{message}");
+}
+
+/// A reviewed cell is claimed by a task, which moves it to red.
+#[test]
+fn a_reviewed_cell_turns_red_once_claimed() {
+    let (_d, store) = store();
+    camera(&store);
+    reviewed_row(&store, "glare");
     assert_eq!(step(&store, "glare", "gpu"), "reviewed");
-}
-
-/// Approving a row moves each cell to "approved"; claiming it then moves it to red.
-#[test]
-fn an_approved_row_is_approved_then_red_once_claimed() {
-    let (_d, store) = store();
-    camera(&store);
-    approved_row(&store, "glare");
-    assert_eq!(step(&store, "glare", "gpu"), "approved");
-    assert_eq!(step(&store, "glare", "perf"), "approved");
+    assert_eq!(step(&store, "glare", "perf"), "reviewed");
     assert_eq!(step(&store, "sunstar", "gpu"), "cases");
     create(&store, "create", &[("glare", "gpu")]).unwrap();
     assert_eq!(step(&store, "glare", "gpu"), "red");
 }
 
-/// No cell of a row is claimed before the row is approved: not by
-/// `grid next`, `task create` or `task propose`.
+/// No cell of a row is claimed before every cell of it is reviewed: not by
+/// `grid next`, `task create` or `task propose`. The refusal names the
+/// agent's next command for each waiting cell, never the owner. Once the
+/// last cell's review is clean, the row opens on its own.
 #[test]
-fn no_cell_of_a_row_is_claimed_before_the_row_is_approved() {
+fn a_row_opens_once_every_cell_is_reviewed() {
     let (_d, store) = store();
     camera(&store);
-    reviewed_row(&store, "glare");
+    cases(&store, "glare", "gpu", json!({"cases": [case("glare", "gpu", "dark-room")]})).unwrap();
+    review(&store, "glare", "gpu", &[]).unwrap();
+    cases(&store, "glare", "perf", json!({"cases": [case("glare", "perf", "dark-room")]})).unwrap();
     let message = refused(create(&store, "create", &[("glare", "gpu")]));
-    assert!(message.contains("glare") && message.contains("approve"), "{message}");
+    assert!(message.contains("glare.perf") && message.contains("atelier grid review camera glare perf"), "{message}");
+    assert!(!message.contains("owner") && !message.contains("Approve"), "{message}");
     let message = refused(propose(&store, &[("glare", "gpu")]));
-    assert!(message.contains("glare") && message.contains("approve"), "{message}");
+    assert!(message.contains("glare.perf") && !message.contains("owner"), "{message}");
 
     let next = next_cells(store.connection(), "p", "camera", &Prints::new(), &Scope::First).unwrap();
-    assert!(handed(&next).is_empty(), "next hands out a cell of a row not approved: {next}");
+    assert!(handed(&next).is_empty(), "next hands out a cell of a row not reviewed: {next}");
     assert_eq!(next["finished"], false, "{next}");
-    approve_row(&store, "glare").unwrap();
+    review(&store, "glare", "perf", &[]).unwrap();
     let next = next_cells(store.connection(), "p", "camera", &Prints::new(), &Scope::First).unwrap();
     assert_eq!(handed(&next), ["glare.gpu"]);
 }
 
-/// Editing cases sends the cell back to "cases", and its row needs approval again.
+/// Editing cases sends the cell back to "cases", and its row waits for its review again.
 #[test]
 fn editing_cases_sends_the_cell_back_to_cases() {
     let (_d, store) = store();
     camera(&store);
-    approved_row(&store, "glare");
+    reviewed_row(&store, "glare");
     cases(&store, "glare", "gpu", json!({"cases": [case("glare", "gpu", "dark-room"), case("glare", "gpu", "fog")]})).unwrap();
     assert_eq!(step(&store, "glare", "gpu"), "cases");
     assert_eq!(cell_value(&store, "glare", "gpu", "review"), None, "the old review is cleared");
     let message = refused(create(&store, "create", &[("glare", "perf")]));
-    assert!(message.contains("approve"), "{message}");
+    assert!(message.contains("atelier grid review camera glare gpu") && !message.contains("owner"), "{message}");
 }
 
 /// Rule 3: a cell's checks are its column's checks and then its own cases.
@@ -364,7 +360,7 @@ fn editing_cases_sends_the_cell_back_to_cases() {
 fn a_cells_checks_are_its_columns_and_its_cases() {
     let (_d, store) = store();
     camera(&store);
-    approved_row(&store, "glare");
+    reviewed_row(&store, "glare");
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     let checks = loaded.cell_checks("glare", "gpu");
     let names: Vec<&str> = checks.iter().map(|check| check["name"].as_str().unwrap()).collect();
@@ -435,7 +431,7 @@ fn a_cell_proved_before_cases_keeps_its_proof_but_needs_cases() {
 fn a_proof_whose_check_prints_no_case_line_is_refused_as_invalid() {
     let (_d, store) = store();
     camera(&store);
-    approved_row(&store, "glare");
+    reviewed_row(&store, "glare");
     create(&store, "create", &[("glare", "gpu")]).unwrap();
     store.connection().execute("UPDATE task SET status = 'in_progress' WHERE number = 1", []).unwrap();
     refresh_steps(store.connection(), "1 = 1", params![]).unwrap();

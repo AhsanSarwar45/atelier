@@ -147,7 +147,7 @@ fn handed(next: &Value) -> Vec<String> {
 fn a_cell_stores_its_step_as_it_moves() {
     let (_d, store) = store();
     camera(&store);
-    assert_eq!(step(&store, "glare", "gpu"), "approved");
+    assert_eq!(step(&store, "glare", "gpu"), "reviewed");
     let number = create(&store, &[("glare", "gpu")]).unwrap().task.number;
     assert_eq!(step(&store, "glare", "gpu"), "red", "a claimed cell waits for its task to start");
     task(&store, "start", number, json!({})).unwrap();
@@ -163,7 +163,7 @@ fn every_reply_names_the_cells_step_and_next_command() {
     camera(&store);
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     let shown = cell_json(loaded.cell("glare", "gpu").unwrap(), false, true);
-    assert_eq!((shown["step"].as_str(), shown["next"].as_str()), (Some("approved"), Some("atelier grid next camera")), "grid show: {shown}");
+    assert_eq!((shown["step"].as_str(), shown["next"].as_str()), (Some("reviewed"), Some("atelier grid next camera")), "grid show: {shown}");
     let created = create(&store, &[("glare", "gpu")]).unwrap();
     let number = created.task.number;
     let wanted = format!("camera.glare.gpu: step red, next `atelier task start {number}`");
@@ -183,7 +183,7 @@ fn prove_is_refused_for_a_cell_no_started_task_holds() {
     camera(&store);
     let message = refused(prove(&store, "glare", "gpu"));
     assert!(
-        message.contains("camera.glare.gpu is at step approved; prove needs step work. Next: `atelier grid next camera`"),
+        message.contains("camera.glare.gpu is at step reviewed; prove needs step work. Next: `atelier grid next camera`"),
         "atelier grid prove camera glare gpu (unclaimed) said: {message}"
     );
     let number = create(&store, &[("glare", "gpu")]).unwrap().task.number;
@@ -233,7 +233,7 @@ fn task_create_refuses_a_cell_whose_prerequisites_are_not_done() {
         message.contains("camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A. Next: `atelier grid next camera`"),
         "atelier task create (cells sunstar.gpu) said: {message}"
     );
-    assert_eq!(step(&store, "sunstar", "gpu"), "approved", "a refused create claims nothing");
+    assert_eq!(step(&store, "sunstar", "gpu"), "reviewed", "a refused create claims nothing");
 }
 
 /// Rule 5: `task start` refuses a task holding a cell whose prerequisites are not done.

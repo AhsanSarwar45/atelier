@@ -7,9 +7,9 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 /**
  * Cases before work, in the real app: the agent adds a cell's cases, Atelier
  * runs the coverage review (a fresh agent that sees only the column, the row
- * and the cases), the agent answers the gap it finds, and the owner approves
- * the row's cases from the Grids screen, which shows each cell's column
- * checks and cases fully resolved and the dismissed gaps.
+ * and the cases), the agent answers the gap it finds, and a clean review
+ * readies the cell on its own. The owner approves nothing: there is no
+ * approve_cases action and no Approve cases button.
  *
  * Run:
  *   CLAUDE_PATH="$PWD/tests/e2e/fixtures/fake-review-agent.mjs" \
@@ -53,7 +53,7 @@ function stepOf(row: string, col: string): string {
   return execFileSync('sqlite3', [DATABASE, `SELECT step FROM grid_cell WHERE slug = 'camera' AND row = ${sql(row)} AND col = ${sql(col)}`], { encoding: 'utf8' }).trim();
 }
 
-test('a row goes cases, review, owner approval', async ({ page, request }) => {
+test('a row goes cases, review, ready with no owner step', async ({ page, request }) => {
   test.setTimeout(240_000);
   expect(LOG, 'start the run with FAKE_REVIEW_AGENT_LOG and CLAUDE_PATH set to the fake review agent').not.toBe('');
   rmSync(LOG, { force: true });
@@ -157,33 +157,24 @@ test('a row goes cases, review, owner approval', async ({ page, request }) => {
     }
     expect(prompts[3]).toContain('covered by the gpu column');
 
-    // An agent cannot approve; the owner approves from the Grids screen.
-    const refused = await request.post(`${backend()}/api/workbench/grid`, { data: { action: 'approve_cases', actor: 'agent', session, slug: 'camera', row: 'glare' } });
-    expect(refused.ok()).toBeFalsy();
+    // No one approves cases: not the agent, not the owner.
+    for (const actor of ['agent', 'owner']) {
+      const refused = await request.post(`${backend()}/api/workbench/grid`, { data: { action: 'approve_cases', actor, session, slug: 'camera', row: 'glare' } });
+      expect(refused.ok()).toBeFalsy();
+    }
+    expect(stepOf('glare', 'gpu')).toBe('reviewed');
+    expect(stepOf('glare', 'perf')).toBe('reviewed');
+    expect(stepOf('sunstar', 'gpu')).toBe('cases');
 
+    // The Grids screen asks the owner for nothing.
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(`/project?id=${project.id}&tab=tasks&view=grids&grid=camera`);
-    const panel = page.getByTestId('grid-row-cases').first();
-    await panel.waitFor({ timeout: 60_000 });
-    await expect(panel).toContainText('Glare');
-    await expect(panel).toContainText('atelier case camera/glare/gpu/gpu -- cargo test glare_gpu');
-    await expect(panel).toContainText('atelier case camera/glare/gpu/low-sun');
-    await expect(panel).toContainText('the sun at the horizon');
-    await expect(panel).toContainText('the sun low on the horizon');
-    await expect(panel).toContainText('covered by the gpu column');
-    await panel.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(800);
-    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'row-cases-desktop.png') });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForTimeout(800);
-    await panel.scrollIntoViewIfNeeded();
-    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'row-cases-phone.png') });
-    await page.setViewportSize({ width: 1280, height: 900 });
-
-    await panel.getByTestId('grid-approve-cases').click();
-    await expect.poll(() => stepOf('glare', 'gpu'), { timeout: 15_000 }).toBe('approved');
-    expect(stepOf('glare', 'perf')).toBe('approved');
-    expect(stepOf('sunstar', 'gpu')).toBe('cases');
+    await page.getByTestId('grid-discovery').first().waitFor({ timeout: 60_000 });
+    await page.waitForTimeout(1_000);
+    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'grid-reviewed.png') });
+    await expect(page.getByTestId('grid-row-cases')).toHaveCount(0);
+    await expect(page.getByTestId('grid-approve-cases')).toHaveCount(0);
+    await expect(page.getByText('Approve cases')).toHaveCount(0);
   } finally {
     await request.delete(`${backend()}/api/projects/${project.id}`);
   }

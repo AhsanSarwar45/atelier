@@ -1081,7 +1081,7 @@ fn a_grid_from_before_checks_keeps_working_with_the_agents_own_checks() {
     asked.payload = json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]});
     asked.checks = passing();
     asked.fingerprint = Some("f1".into());
-    assert!(refused(apply(store.connection(), &asked)).contains("is at step approved; prove needs step work"));
+    assert!(refused(apply(store.connection(), &asked)).contains("is at step reviewed; prove needs step work"));
     // A proof made before checks, with the agent's own, is kept; verify
     // re-runs what it stored.
     let mut cell = state(&store, "camera", "glare", "gpu");

@@ -205,11 +205,11 @@ with a reason; `after` names only earlier entries. Until then cells show
 **Cases.** Then give each cell its cases (one scenario each) with
 `atelier grid cases`, then run `atelier grid review`: a fresh agent lists
 missing scenarios as gaps. Answer each with a case (`covers`) or a
-dismissal with a reason, and review again until no gaps (3 rounds, then the
-owner decides). The owner approves a whole row's cases. Until then its cells
-show "Needs cases" and cannot be claimed. Editing cases restarts review.
+dismissal with a reason, and review again until no gaps (after 3 rounds,
+answering the gaps finishes it). No one approves cases. A row's cells show
+"Needs cases" and cannot be claimed until every cell of it is reviewed. Editing cases restarts review.
 
-**Steps.** order → cases → reviewed → approved → red → work → proved (or N/A).
+**Steps.** order → cases → reviewed → red → work → proved (or N/A).
 `grid show SLUG ROW COL` prints `Step: STEP. Next: COMMAND`; every reply
 names them, and anything out of order is refused.
 

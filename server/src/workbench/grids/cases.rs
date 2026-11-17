@@ -1,13 +1,13 @@
 //! Cases before work (docs/grids.md, "Cases"): a cell holds a list of cases,
 //! one scenario of its row's feature each; Atelier runs a coverage review that
 //! looks for missing scenarios; the agent answers every gap with a case or a
-//! dismissal; and the owner approves a row's cases in one step. A cell moves
-//! cases → reviewed → approved, and no cell of a row is claimed before the
-//! row is approved.
+//! dismissal; no one approves the result. A cell moves cases → reviewed when
+//! its review is finished, and no cell of a row is claimed before every cell
+//! of the row is reviewed.
 
 use super::*;
 
-/// Reviews a cell gets before its answered gaps go to the owner.
+/// Reviews a cell gets; once round 3's gaps are answered it is reviewed.
 pub const MAX_ROUNDS: usize = 3;
 const CASE_FIELDS: &[&str] = &["id", "given", "when", "then", "command", "red", "covers", "files", "timeout_s"];
 
@@ -45,17 +45,17 @@ pub fn as_checks(cell: &Cell) -> Vec<Value> {
         .collect()
 }
 
-/// A cell that counts but has no approved cases: shown as "Needs cases".
+/// A cell that counts but whose cases are not reviewed: shown as "Needs cases".
 pub fn needs_cases(cell: &Cell) -> bool {
     !matches!(cell.state.as_str(), "na" | "na_pending") && cell.cases_approved.is_none()
 }
 
-/// The live cells of `row`, not N/A, whose cases the owner has not approved.
+/// The live cells of `row`, not N/A, whose cases are not reviewed yet.
 pub fn row_waiting<'a>(loaded: &'a Loaded, row: &str) -> Vec<&'a Cell> {
     live_pairs(loaded).into_iter().filter(|(r, _, cell)| r.id == row && needs_cases(cell)).map(|(_, _, cell)| cell).collect()
 }
 
-/// Why no cell of `row` can be claimed yet, or None when its cases are approved.
+/// Why no cell of `row` can be claimed yet, or None when every cell of it is reviewed.
 pub fn unapproved_row(loaded: &Loaded, row: &str) -> Option<String> {
     let waiting = row_waiting(loaded, row);
     if waiting.is_empty() {
@@ -64,7 +64,7 @@ pub fn unapproved_row(loaded: &Loaded, row: &str) -> Option<String> {
     let slug = &loaded.grid.slug;
     let cells: Vec<String> = waiting.iter().map(|cell| format!("{row}.{} (step {}, next `{}`)", cell.col, cell.step, cell.next.as_deref().unwrap_or(""))).collect();
     Some(format!(
-        "Needs cases. No cell of row {row} is claimed until every cell of it has reviewed cases and the owner approves the row's cases (Approve cases on the Grids screen). Waiting: {}. Grid {slug}",
+        "Needs cases. No cell of row {row} is claimed until every cell of it is reviewed. Waiting: {}. Grid {slug}",
         cells.join(", ")
     ))
 }
@@ -153,7 +153,7 @@ pub fn set(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
     }
     if let Some((number, _)) = open_claim(connection, &request.project, &cell)? {
         return refuse(format!(
-            "{at} is claimed by task #{number} (step {}); its approved cases are fixed while a task works it. Finish or cancel #{number} first",
+            "{at} is claimed by task #{number} (step {}); its reviewed cases are fixed while a task works it. Finish or cancel #{number} first",
             cell.step
         ));
     }
@@ -248,8 +248,7 @@ pub fn set(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
         Some(_) => return Err(fail("dismiss must be an object: {GAP: reason}".into())),
     }
 
-    // Edited cases after a finished review or the owner's approval start
-    // the review over.
+    // Edited cases after a finished review start the review over.
     let edited = new_cases.as_ref().is_some_and(|cases| Some(cases) != cell.cases.as_ref().and_then(Value::as_array));
     if edited && (cell.case_step.as_deref() == Some("reviewed") || cell.cases_approved.is_some()) {
         cell.review = None;
@@ -266,6 +265,7 @@ pub fn set(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
         }
     }
     cell.case_step = case_step(&list(&cell), cell.review.as_ref());
+    ready(&mut cell, request.now);
     save_cell(connection, &request.project, &slug, &cell)?;
     append_event(connection, &request.project, &slug, request.now, "cases", Some((&row, &col)), request.session.as_deref(), &request.actor,
         &json!({"cases": cell.cases, "answers": answers.iter().map(|(gap, answer)| json!({"gap": gap, "answer": answer})).collect::<Vec<_>>()}))?;
@@ -295,12 +295,12 @@ pub fn review_ready(connection: &Connection, project: &str, slug: &str, row: &st
         return refuse(format!("{at} has no cases to review. It is at step cases; next `atelier grid cases {slug} {row} {col}`"));
     }
     if cell.cases_approved.is_some() {
-        return refuse(format!("{at}'s cases are approved; edit them with `atelier grid cases {slug} {row} {col}` to review them again"));
+        return refuse(format!("{at}'s cases are reviewed; edit them with `atelier grid cases {slug} {row} {col}` to review them again"));
     }
     let done = rounds(cell.review.as_ref()).len();
     if done >= MAX_ROUNDS {
         return refuse(format!(
-            "{at} has had {MAX_ROUNDS} rounds of review; the owner judges the rest when they approve row {row}'s cases. Step {}; next `{}`",
+            "{at} has had {MAX_ROUNDS} rounds of review. Step {}; next `{}`",
             cell.step,
             cell.next.as_deref().unwrap_or("")
         ));
@@ -424,6 +424,7 @@ pub fn record_review(connection: &Connection, request: &Request) -> Result<Outco
         rounds.push(json!(gaps));
     }
     cell.case_step = case_step(&list(&cell), cell.review.as_ref());
+    ready(&mut cell, request.now);
     save_cell(connection, &request.project, slug, &cell)?;
     append_event(connection, &request.project, slug, request.now, "reviewed", Some((row, col)), request.session.as_deref(), "reviewer",
         &json!({"round": round, "gaps": gaps}))?;
@@ -448,42 +449,10 @@ pub fn record_review(connection: &Connection, request: &Request) -> Result<Outco
     })
 }
 
-/// The owner approves a row's cases: every live cell of it that is not N/A
-/// must be reviewed. Its cells move to approved, and may be claimed.
-pub fn approve_row(connection: &Connection, request: &Request) -> Result<Outcome, TaskError> {
-    let slug = need(&request.slug, "slug", "approve_cases")?;
-    let row = need(&request.row, "row", "approve_cases")?;
-    let loaded = approved_grid(connection, &request.project, slug)?;
-    if !loaded.row(row).is_some_and(GridRow::counts) {
-        return refuse(format!("grid \"{slug}\" has no row \"{row}\" with cells"));
+/// A cell whose review is finished (clean, or round 3's gaps answered) is
+/// ready to be claimed; no one approves it.
+fn ready(cell: &mut Cell, now: i64) {
+    if cell.case_step.as_deref() == Some("reviewed") && cell.cases_approved.is_none() {
+        cell.cases_approved = Some(now);
     }
-    let waiting = row_waiting(&loaded, row);
-    let not_ready: Vec<String> = waiting
-        .iter()
-        .filter(|cell| cell.case_step.as_deref() != Some("reviewed"))
-        .map(|cell| format!("{row}.{} (step {}, next `{}`)", cell.col, cell.step, cell.next.as_deref().unwrap_or("")))
-        .collect();
-    if !not_ready.is_empty() {
-        return refuse(format!("Row {row}'s cases cannot be approved yet: every cell must be reviewed first. Not reviewed: {}", not_ready.join(", ")));
-    }
-    if waiting.is_empty() {
-        return refuse(format!("Row {row}'s cases are already approved"));
-    }
-    let approved: Vec<String> = waiting.iter().map(|cell| cell.col.clone()).collect();
-    for col in &approved {
-        let mut cell = get_cell(connection, &request.project, slug, row, col)?.expect("a live cell");
-        cell.cases_approved = Some(request.now);
-        save_cell(connection, &request.project, slug, &cell)?;
-    }
-    append_event(connection, &request.project, slug, request.now, "cases_approved", None, request.session.as_deref(), &request.actor,
-        &json!({"row": row, "cols": approved}))?;
-    let text = format!("The owner approved row {row}'s cases in grid {slug}; its cells can be claimed. Run `atelier grid next {slug}`.");
-    let tell = loaded.grid.drafted_by.clone().or_else(|| loaded.grid.created_by.clone()).map(|session| (session, text.clone())).into_iter().collect();
-    Ok(Outcome {
-        slug: Some(slug.to_string()),
-        summary: text,
-        tell,
-        grids: vec![slug.to_string()],
-        ..Default::default()
-    })
 }

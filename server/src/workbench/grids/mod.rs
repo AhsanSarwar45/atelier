@@ -166,6 +166,9 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
     // Cells from before steps get theirs from their state and claim; cells
     // from before cases (step open) need cases; cells not yet claimed in a
     // row or column with no order need the order first.
+    // A finished review readies a cell with no one's approval; cells that
+    // waited for the owner's approval before are ready now.
+    connection.execute("UPDATE grid_cell SET cases_approved = 1 WHERE case_step = 'reviewed' AND cases_approved IS NULL", [])?;
     refresh_steps(connection, "step IS NULL OR step IN ('open', 'cases', 'reviewed', 'approved')", params![])?;
     Ok(())
 }
@@ -173,8 +176,8 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
 /// Sets `step` and `next` of the cells `filter` picks from their state, their
 /// claim, the claiming task's status, the grid's order and their cases:
 /// order (its row or column has no place in the written order), cases (needs cases, or
-/// answers to its review's gaps, or a review), reviewed (waits for the owner
-/// to approve the row's cases), approved (unclaimed, ready for a task), red
+/// answers to its review's gaps, or a review), reviewed (its review is
+/// finished; unclaimed, ready for a task once its whole row is), red
 /// (claimed by a task not started), work (claimed by a started task),
 /// proved, or na.
 fn refresh_steps(connection: &Connection, filter: &str, values: impl rusqlite::Params) -> rusqlite::Result<()> {
@@ -187,8 +190,7 @@ fn refresh_steps(connection: &Connection, filter: &str, values: impl rusqlite::P
         WHEN (SELECT r.order_seq FROM grid_row r WHERE r.project_id = grid_cell.project_id AND r.slug = grid_cell.slug AND r.id = grid_cell.row) IS NULL
           OR (SELECT c.order_seq FROM grid_column c WHERE c.project_id = grid_cell.project_id AND c.slug = grid_cell.slug AND c.id = grid_cell.col) IS NULL
           THEN 'order'
-        WHEN cases_approved IS NOT NULL THEN 'approved'
-        WHEN case_step = 'reviewed' THEN 'reviewed'
+        WHEN cases_approved IS NOT NULL OR case_step = 'reviewed' THEN 'reviewed'
         ELSE 'cases' END";
     // One statement, so the filter sees each cell as it was.
     connection.execute(
@@ -200,7 +202,6 @@ fn refresh_steps(connection: &Connection, filter: &str, values: impl rusqlite::P
                  THEN 'atelier task check ' || claimed_task || ' ' || row || '.' || col
                  ELSE 'atelier grid next ' || slug END
                WHEN 'order' THEN 'atelier grid order ' || slug
-               WHEN 'reviewed' THEN 'owner: Approve cases for row ' || row || ' on the Grids screen'
                WHEN 'cases' THEN CASE WHEN case_step = 'review'
                  THEN 'atelier grid review ' || slug || ' ' || row || ' ' || col
                  ELSE 'atelier grid cases ' || slug || ' ' || row || ' ' || col END
@@ -270,7 +271,7 @@ pub const AGENT_ACTIONS: &[&str] = &[
     "draft", "checks", "change", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set", "note", "order", "cases", "review",
 ];
 pub const OWNER_ACTIONS: &[&str] = &[
-    "approve", "approve_cases", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template", "note", "order",
+    "approve", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template", "note", "order",
 ];
 /// What a `grid` widget's `event` may be.
 pub const WIDGET_EVENTS: &[&str] = &["draft", "template", "prove", "na", "audit", "reopen", "pass", "discover"];
@@ -1194,7 +1195,6 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         "order" => order(connection, request),
         "cases" => cases::set(connection, request),
         "review" => cases::record_review(connection, request),
-        "approve_cases" => cases::approve_row(connection, request),
         _ => refuse(format!("{action} is not a grid action")),
     }
 }
@@ -3741,7 +3741,7 @@ pub fn next_batch(connection: &Connection, project: &str, slug: &str, prints: &P
         "columns": unordered(loaded.columns.iter().filter(|col| col.retired_at.is_none()).map(|col| (&col.id, col.order_seq)).collect()),
     });
     // The rows to give cases first: each row with a cell that needs work and
-    // cases, with the cells of it not yet approved, step and next command.
+    // cases, with the cells of it not yet reviewed, step and next command.
     let mut needs_cases: Vec<Value> = Vec::new();
     for ((row, _, _), standing) in pairs.iter().zip(&standings) {
         if matches!(standing, Standing::NeedsCases) && !needs_cases.iter().any(|known| known["row"] == row.id.as_str()) {
