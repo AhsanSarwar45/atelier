@@ -64,7 +64,7 @@ struct Choosing {
     effort: Option<String>,
 }
 
-pub fn commit_message_settings(db: &AppState) -> Result<CommitMessageSettings, String> {
+pub fn commit_message_settings(db: &crate::db::Database) -> Result<CommitMessageSettings, String> {
     let read = |key: &str| db.setting(key).map_err(|why| why.to_string());
     Ok(CommitMessageSettings {
         provider: read(PROVIDER)?,
@@ -220,7 +220,7 @@ pub async fn generate(
 }
 
 /// Run the chosen agent once on `prompt` and hand back what it wrote.
-async fn ask_agent(settings: &CommitMessageSettings, prompt: &str) -> Result<String, Refused> {
+pub(crate) async fn ask_agent(settings: &CommitMessageSettings, prompt: &str) -> Result<String, Refused> {
     let unavailable = |said: String| Refused::new(StatusCode::UNPROCESSABLE_ENTITY, said);
     let brand = match settings.provider.as_deref() {
         Some(brand) if BRANDS.contains(&brand) => brand.to_string(),

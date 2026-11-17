@@ -6,7 +6,7 @@ spec=docs/grids.md
 need() {
   grep -qF -- "$2" "$1" || { echo "MISSING in $1: $2"; exit 1; }
 }
-need "$skill" "open → red → work → proved"
+need "$skill" "cases → reviewed → approved → red → work → proved"
 need "$skill" '"cells":[{"row":'
 need "$skill" "Step:"
 need "$spec" "open → red → work → proved"

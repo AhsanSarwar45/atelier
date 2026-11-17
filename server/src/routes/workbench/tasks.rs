@@ -971,9 +971,9 @@ mod tests {
             "row_search": {"command": "scripts/rows.sh", "watch": ["camera/"]},
             "columns": [
                 {"id": "gpu", "name": "Runs on the GPU", "proof_rule": "a GPU test", "checks": [{"name": "gpu", "command": "cargo test {row}_on_gpu", "kind": "test",
-                    "given": "the {row} pass", "when": "it renders", "then": "it ran on the GPU", "red": "FAILED|panicked"}]},
+                    "given": "the {row} pass", "when": "it renders", "then": "it ran on the GPU"}]},
                 {"id": "perf", "name": "Within budget", "proof_rule": "a benchmark check", "checks": [{"name": "perf", "command": "cargo test {row}_in_budget", "kind": "test",
-                    "given": "the {row} pass", "when": "it renders", "then": "it is within budget", "red": "FAILED|panicked"}]},
+                    "given": "the {row} pass", "when": "it renders", "then": "it is within budget"}]},
             ],
         });
         let found = |id: &str| search::Found {
@@ -986,11 +986,13 @@ mod tests {
         draft.search = Some(Ok(search::Run { rows: vec![found("glare"), found("sunstar")], head: Some("h1".into()) }));
         let mut approve = request("approve", "owner");
         approve.slug = Some("camera".into());
+        let project_id = project.clone();
         state
             .database()
             .write_tasks(move |store| {
                 grids::apply(store.connection(), &draft).unwrap();
                 grids::apply(store.connection(), &approve).unwrap();
+                grids::approve_all_cases(store.connection(), &project_id, "camera");
             })
             .await
             .unwrap();

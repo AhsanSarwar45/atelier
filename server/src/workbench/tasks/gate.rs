@@ -414,7 +414,10 @@ pub(crate) mod tests {
         let mut gate = Gate { head: Some("abc1234".into()), ..Default::default() };
         for (item, checks) in checks::item_checks(&task.kind, &task.plan) {
             for check in checks {
-                let output = if exit == 0 { "ok".to_string() } else { format!("{FAILING}\n{}", check.red.clone().unwrap_or_default()) };
+                let mut output = if exit == 0 { "ok".to_string() } else { format!("{FAILING}\n{}", check.red.clone().unwrap_or_default()) };
+                if let Some(case) = &check.case {
+                    output = format!("CASE {case} {} - -", if exit == 0 { "PASS" } else { "FAIL" });
+                }
                 let run = Run { exit: if check.is_characterisation() { 0 } else { exit }, output: output.clone(), output_tail: output, ..Default::default() };
                 gate.runs.entry(item.clone()).or_default().insert(check.name, run);
             }

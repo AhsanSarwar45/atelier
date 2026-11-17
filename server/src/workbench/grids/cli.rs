@@ -18,8 +18,10 @@ usage: atelier grid <command>
   next SLUG [--row ROW | --col COL] [--batch N]
                                   the next cell to work on, in the grid's order, and the task create payload for it;
                                   --batch N hands out up to N ready cells at once
-  order SLUG                      {rows?:[{id,after}],columns?:[{id,after}]}: what must be proved or N/A first; a column's
-                                  after holds back its cell in each row, a row's after its cell in each column
+  order SLUG                      {rows:[{id,after,reason}],columns:[{id,after,reason}],cells?:[{row,col,after,reason}]}:
+                                  required before any work; lists every row and column in hand-out order, after naming
+                                  only entries listed earlier; a column's after holds back its cell in each row, a row's
+                                  after its cell in each column; it may not drop a prerequisite that is not proved or N/A
   template list
   template set NAME               {columns:[{id,name,proof_rule,checks?}]} on stdin or --input FILE
   draft                           {slug,title,area,template?,row_search,columns,rows,cells?}; the owner approves or discards it
@@ -32,6 +34,12 @@ usage: atelier grid <command>
   checks SLUG                    {columns:[{id,checks}]}: check templates for columns of an approved grid; the owner
                                   approves only those, and rows, cells and proofs stay as they are
   discover SLUG                   rerun the grid's row search now
+  cases SLUG ROW COL              {cases?:[{id,given,when,then,command,red?,covers?,files?,timeout_s?}],dismiss?:{GAP:reason}}:
+                                  the cell's cases (replaces the list); covers names the review gap a case answers.
+                                  Each command prints one `CASE SLUG/ROW/COL/ID PASS|FAIL <measured> <limit>` line:
+                                  wrap it in `atelier case SLUG/ROW/COL/ID -- COMMAND`
+  review SLUG ROW COL             Atelier asks a fresh agent which scenarios the cases miss (3 rounds at most);
+                                  answer each gap with a case or a dismissal, then review again until it finds none
   prove SLUG ROW COL              {summary,commits?,evidence?}: runs the cell's approved checks
                                   (a cell with none, proved before checks: {summary,checks,tests?,commits?,benchmarks?,evidence?})
   verify SLUG [ROW COL]           re-run checks (whole grid: every proved cell)
@@ -346,6 +354,28 @@ pub fn cell_text(slug: &str, value: &Value) -> String {
             let _ = writeln!(out, "  {}: {}", check["name"].as_str().unwrap_or("check"), check["command"].as_str().unwrap_or(""));
         }
     }
+    if cell["needsCases"] == true {
+        let _ = writeln!(out, "Needs cases: add them with `atelier grid cases`, then `atelier grid review` until it finds no gaps");
+    }
+    let rounds = cell["review"]["rounds"].as_array().cloned().unwrap_or_default();
+    for (round, gaps) in rounds.iter().enumerate() {
+        let gaps = gaps.as_array().cloned().unwrap_or_default();
+        if gaps.is_empty() {
+            let _ = writeln!(out, "Review {}: no gaps", round + 1);
+            continue;
+        }
+        let _ = writeln!(out, "Review {}:", round + 1);
+        for gap in &gaps {
+            let id = gap["id"].as_str().unwrap_or("");
+            let answer = &cell["review"]["answers"][id];
+            let said = match (answer["case"].as_str(), answer["dismissed"].as_str()) {
+                (Some(case), _) => format!("covered by case {case}"),
+                (_, Some(reason)) => format!("dismissed: {reason}"),
+                _ => "not answered".into(),
+            };
+            let _ = writeln!(out, "  {id} {}: {said}", gap["scenario"].as_str().unwrap_or(""));
+        }
+    }
     if let Some(reason) = cell["reason"].as_str() {
         let _ = writeln!(out, "Reason: {reason}");
     }
@@ -408,7 +438,61 @@ pub fn next_exit(value: &Value) -> i32 {
     }
 }
 
+/// The rows and columns the grid's order has yet to name, and the command
+/// that names them.
+fn needs_order_text(value: &Value) -> String {
+    let slug = value["grid"].as_str().unwrap_or("");
+    let total = value["needsOrderInGrid"].as_u64().unwrap_or(0);
+    if total == 0 {
+        return String::new();
+    }
+    let ids = |key: &str| value["needsOrder"][key].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+    let (rows, cols) = (ids("rows"), ids("columns"));
+    let mut missing = Vec::new();
+    if !rows.is_empty() {
+        missing.push(format!("rows {rows}"));
+    }
+    if !cols.is_empty() {
+        missing.push(format!("columns {cols}"));
+    }
+    format!(
+        "Needs order: {total} {} in {slug} cannot be worked until the grid's order names {}. Write it with \
+         `atelier grid order {slug}`: every row and every column in the order to work them, each with what it comes after \
+         and a reason.\n",
+        if total == 1 { "cell" } else { "cells" },
+        missing.join(" and ")
+    )
+}
+
 /// The cells that wait for others to be proved or N/A, and what each waits for.
+/// Rows whose cells cannot be claimed until their cases are reviewed and the
+/// owner approves them, each cell with its step and next command.
+fn needs_cases_text(value: &Value) -> String {
+    let slug = value["grid"].as_str().unwrap_or("");
+    let rows = value["needsCases"].as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        return String::new();
+    }
+    let total = value["needsCasesInGrid"].as_u64().unwrap_or(0);
+    let mut out = format!(
+        "Needs cases: {total} {} in {slug} cannot be claimed until every cell of its row has reviewed cases and the owner approves the row:\n",
+        if total == 1 { "cell" } else { "cells" }
+    );
+    for row in &rows {
+        out.push_str(&format!("  row {} ({}):\n", row["row"].as_str().unwrap_or(""), row["rowName"].as_str().unwrap_or("")));
+        for cell in row["cells"].as_array().into_iter().flatten() {
+            out.push_str(&format!(
+                "    {slug}.{}.{}: step {}, next `{}`\n",
+                row["row"].as_str().unwrap_or(""),
+                cell["col"].as_str().unwrap_or(""),
+                cell["step"].as_str().unwrap_or(""),
+                cell["next"].as_str().unwrap_or("")
+            ));
+        }
+    }
+    out
+}
+
 fn waiting_text(value: &Value) -> String {
     let slug = value["grid"].as_str().unwrap_or("");
     let cells = value["waiting"].as_array().cloned().unwrap_or_default();
@@ -455,9 +539,10 @@ pub fn next_text(value: &Value) -> String {
         let pending = value["naPending"].as_u64().unwrap_or(0);
         let needing = value["needsCheckInGrid"].as_u64().unwrap_or(0);
         let waiting = value["waitingInGrid"].as_u64().unwrap_or(0);
+        let needs_cases = value["needsCasesInGrid"].as_u64().unwrap_or(0) + value["needsOrderInGrid"].as_u64().unwrap_or(0);
         if value["finished"] == true {
             out.push_str(&format!("No gaps left in {slug}. Every cell is proved or N/A.\n"));
-        } else if held > 0 && needing == 0 && pending == 0 && waiting == 0 {
+        } else if held > 0 && needing == 0 && pending == 0 && waiting == 0 && needs_cases == 0 {
             out.push_str(&format!(
                 "No free cells left in {slug}: {held} {} claimed by open tasks, and every other cell is proved or N/A.\n",
                 if held == 1 { "is" } else { "are" }
@@ -479,6 +564,8 @@ pub fn next_text(value: &Value) -> String {
                 if needing == 1 { "it" } else { "they" }
             ));
         }
+        out.push_str(&needs_order_text(value));
+        out.push_str(&needs_cases_text(value));
         out.push_str(&waiting_text(value));
         return out;
     }
@@ -514,6 +601,8 @@ pub fn next_text(value: &Value) -> String {
             if needing == 1 { "needs" } else { "need" }
         ));
     }
+    out.push_str(&needs_order_text(value));
+    out.push_str(&needs_cases_text(value));
     out.push_str(&waiting_text(value));
     if !taken.is_empty() {
         out.push_str("Taken by other tasks (leave these alone):\n");
@@ -544,6 +633,38 @@ pub fn next_text(value: &Value) -> String {
 
 fn cell_body(session: &str, action: &str, slug: &str, row: &str, col: &str, payload: Value) -> Value {
     json!({"action": action, "actor": "agent", "session": session, "slug": slug, "row": row, "col": col, "payload": payload})
+}
+
+/// `atelier case GRID/ROW/COL/CASE -- CMD…`: runs CMD and prints its output
+/// without any `CASE` line of its own, then the one line
+/// `CASE GRID/ROW/COL/CASE PASS - -` (or `FAIL`), and exits with CMD's code.
+pub fn case(rest: &[String]) -> Result<i32, String> {
+    const USE: &str = "usage: atelier case GRID/ROW/COL/CASE -- COMMAND [ARGS…]";
+    let (id, command) = match rest {
+        [id, dashes, command @ ..] if dashes == "--" && !command.is_empty() => (id, command),
+        _ => return Err(USE.into()),
+    };
+    let parts: Vec<&str> = id.split('/').collect();
+    if parts.len() != 4 || !parts.iter().all(|part| super::valid_id(part)) {
+        return Err(format!("\"{id}\" is not a case id GRID/ROW/COL/CASE, each part {}\n{USE}", super::ID_RULE));
+    }
+    use std::io::{BufRead, Write};
+    let mut child = std::process::Command::new(&command[0])
+        .args(&command[1..])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("could not start {}: {error}", command[0]))?;
+    let stdout = child.stdout.take().expect("piped");
+    let mut out = std::io::stdout().lock();
+    for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+        if !line.trim_start().starts_with("CASE ") {
+            let _ = writeln!(out, "{line}");
+        }
+    }
+    let status = child.wait().map_err(|error| format!("{} did not finish: {error}", command[0]))?;
+    let code = status.code().unwrap_or(1);
+    let _ = writeln!(out, "CASE {id} {} - -", if code == 0 { "PASS" } else { "FAIL" });
+    Ok(code)
 }
 
 pub async fn run(rest: &[String]) -> Result<i32, String> {
@@ -686,6 +807,17 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             let session = session()?;
             let payload = payload(rest, "{rows?: [{id, after}], columns?: [{id, after}]}")?;
             post(json!({"action": "order", "actor": "agent", "session": session, "slug": found[0], "payload": payload})).await
+        }
+        "cases" => {
+            let found = exactly(rest, &["--input"], &["SLUG", "ROW", "COL"], "cases")?;
+            let session = session()?;
+            let payload = payload(rest, "{cases?: [{id, given, when, then, command, red?, covers?}], dismiss?: {GAP: reason}}")?;
+            post(cell_body(&session, "cases", found[0], found[1], found[2], payload)).await
+        }
+        "review" => {
+            let found = exactly(rest, &[], &["SLUG", "ROW", "COL"], "review")?;
+            let session = session()?;
+            post(cell_body(&session, "review", found[0], found[1], found[2], json!({}))).await
         }
         "discover" => {
             let found = exactly(rest, &[], &["SLUG"], "discover")?;

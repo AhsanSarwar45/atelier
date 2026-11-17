@@ -384,6 +384,32 @@ pub(super) async fn act(
             let outcome = discover(&state, &project, &slug, session.clone(), &asked.actor).await?;
             return respond(&state, &project, outcome, session.clone()).await;
         }
+        "review" => {
+            // Atelier runs the coverage review: a fresh agent with no tools
+            // and no chat context gets only the column, the row and the
+            // cases, and its gaps are recorded as the reviewer's.
+            let (row, col) = (request.row.clone().unwrap_or_default(), request.col.clone().unwrap_or_default());
+            let (asked, slug) = (project.clone(), request.slug.clone().unwrap_or_default());
+            let prompt = state
+                .database()
+                .read_tasks(move |store| {
+                    Ok(grids::cases::review_ready(store.connection(), &asked, &slug, &row, &col)
+                        .map(|(loaded, cell)| grids::cases::review_prompt(&loaded, &cell)))
+                })
+                .await
+                .map_err(failed)?;
+            let prompt = refused_or(prompt)?;
+            let settings = match state.projects() {
+                Some(projects) => crate::routes::commit_message::commit_message_settings(projects).map_err(failed)?,
+                None => Default::default(),
+            };
+            let reply = crate::routes::commit_message::ask_agent(&settings, &prompt)
+                .await
+                .map_err(|why| ApiError::from(format!("the coverage review could not run: {}", why.said())))?;
+            let gaps = grids::cases::parse_reply(&reply).map_err(|why| ApiError::from(format!("the coverage review could not be read: {why}. Run it again")))?;
+            request.actor = "reviewer".into();
+            request.payload = json!({"gaps": gaps.iter().map(|scenario| json!({"scenario": scenario})).collect::<Vec<_>>()});
+        }
         "prove" => return prove(&state, request, asked.files, asked.ephemeral).await,
         "verify" => return verify(&state, request).await,
         "pass" => {

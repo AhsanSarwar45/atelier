@@ -229,17 +229,34 @@ is recursive and bounded, and only committed files count.
 ## Column checks
 
 Each column carries `checks: [Check]`, in the shape tasks use (docs/tasks.md,
-Checks), written when the grid is drafted. In a template's `name`,
-`command`, `given`, `when`, `then`, `red` and `files`, `{row}` is replaced
-by the row id, so one template covers every row:
+Checks), written when the grid is drafted. A column holds only checks that
+apply to every row and test the same requirement for each. In a template's
+`name`, `command`, `given`, `when`, `then`, `red` and `files`, `{row}` is
+replaced by the row id, so one template covers every row. `{row}` is the
+only placeholder: a template with any other `{name}` is refused, because
+row-specific scenarios, scenes, budgets or data belong in the cell's own
+cases (see Cases).
+
+Every check is one case and prints exactly one result line,
+`CASE <grid>/<row>/<col>/<case> PASS|FAIL <measured> <limit>` (`-` for
+no measure or limit). A column check's case id is `SLUG/{row}/COL/NAME`.
+Wrap a command that does not print the line in `atelier case ID -- COMMAND`:
+it hides the command's own `CASE` lines and prints the one line from its
+exit code. `red` must contain the case id; left out, it is
+`CASE <id> FAIL`.
 
 ```json
 {"id": "gpu", "name": "Runs on the GPU", "proof_rule": "The effect runs in a compute or fragment pass, not on the CPU",
- "checks": [{"name": "on-gpu-{row}", "kind": "test",
-   "command": "cargo test -p renderer --test gpu_passes {row}_runs_on_gpu -- --exact",
+ "checks": [{"name": "on-gpu", "kind": "test",
+   "command": "atelier case renderer/{row}/gpu/on-gpu -- cargo test -p renderer --test gpu_passes {row}_runs_on_gpu -- --exact",
    "given": "the {row} effect enabled", "when": "a frame renders", "then": "its work is in a GPU pass and the CPU path is not called",
-   "red": "{row}_runs_on_gpu.*FAILED|running 0 tests", "files": ["renderer/tests/gpu_passes.rs"]}]}
+   "red": "CASE renderer/{row}/gpu/on-gpu FAIL", "files": ["renderer/tests/gpu_passes.rs"]}]}
 ```
+
+A check run whose output has no `CASE` line, more than one, or one with
+another id is **invalid**, not failed: `task start`, `task check`, `task
+done` and `grid prove` refuse it and name the wrapper. A `FAIL` line fails
+the check, whatever the exit code.
 
 - A cell that needs more, or something else, carries its own checks in the
   draft's `cells: [{row, col, checks, override?}]`. Without `override` they
@@ -274,12 +291,48 @@ by the row id, so one template covers every row:
   `proof_rule` defaults to "its checks pass". The grid stays approved while
   the change waits, and the owner approves or discards it on the edit card.
   Kept cells keep their proofs. A removed row stays removed, even one the
-  row search finds. To make other columns wait for a new one, run
-  `atelier grid order SLUG` after the owner approves.
+  row search finds. A new row or column has no place in the order, so its
+  cells sit at step order until an agent runs `atelier grid order SLUG`
+  again with it listed.
 - `atelier grid next` never calls a grid finished while cells need a check.
   It says how many need one and names `atelier grid checks`. Its JSON has
   `finished: false`, and the command exits non-zero when it hands out
   nothing and the grid is not finished.
+
+## Cases
+
+A cell's checks are its column's checks plus its own **cases**. Each case
+is one scenario of the row's feature: `{id, given, when, then, command,
+red?, covers?, files?, timeout_s?}`, with case id `SLUG/ROW/COL/ID`.
+
+```
+atelier grid cases SLUG ROW COL   <<< '{"cases":[{"id":"low-sun","given":…,"when":…,"then":…,"command":"atelier case camera/glare/gpu/low-sun -- cargo test glare_low_sun","covers":"r1g1"}],"dismiss":{"r1g2":"covered by the perf column"}}'
+atelier grid review SLUG ROW COL
+```
+
+- `grid cases` replaces the cell's case list, and answers review gaps: a
+  case's `covers` names the gap it answers, and `dismiss` gives a reason
+  for each gap that needs no case. Editing the cases of a reviewed or
+  approved cell sends it back to step cases and clears the review and the
+  row's approval.
+- `grid review` is run by Atelier, not by the chat: a fresh agent with no
+  tools and no chat context gets only the column's name and proof rule,
+  the row's name and paths, the column checks and the cases (with answered
+  gaps), and returns the scenarios that are missing as gaps (`r1g1`, …). A
+  review is refused while a gap is unanswered. The cell is **reviewed**
+  when a review returns no gaps. After 3 rounds with gaps it goes to the
+  owner, who sees every case and dismissal.
+- The owner approves a whole row's reviewed cases in one step: **Approve
+  cases** on the Grids screen (`approve_cases` with `row`). It is refused
+  while any live cell of the row is not reviewed, naming each with its step
+  and next command. Agents cannot approve.
+- No cell of a row is claimed (`grid next`, `task create`, `task propose`,
+  the owner's Create task) until every cell of the row is reviewed and
+  approved. Such a cell shows **Needs cases**; `grid next` lists those rows
+  with each cell's step and next command.
+- Grids approved before cases keep their proofs. Every cell without an
+  approved case list shows "Needs cases" and cannot be claimed or proved
+  again until it goes through cases, review and approval.
 
 ## Proof
 
@@ -299,8 +352,9 @@ done:
 - `summary`: required, ≤ 600 chars.
 - The checks are the cell's resolved checks. Each `command` is run with
   `sh -c` in the proving chat's folder after the hashes are verified. Exit
-  0 means pass (a benchmark also needs its budget met). Every check must
-  pass, or `prove` is refused with the failing check's exit code and the
+  0 means pass (a benchmark also needs its budget met), and each output
+  must hold exactly one `CASE` line for that check, saying `PASS`. Every
+  check must pass, or `prove` is refused with the failing check's exit code and the
   last 40 lines of its output. A `checks` list in the payload is refused
   for a cell with approved checks, and required for a cell under the old
   rules (at least one; `timeout_s` defaults to 600, max 3600).
@@ -345,12 +399,18 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
 | `na` | reopen | `gap` (reason) | owner | |
 | `proved` | owner reopen (reason) | `gap` | owner | |
 
-- Every cell also stores its **step**, open → red → work → proved (or
-  `na`), and the one command that moves it on (`next`):
+- Every cell also stores its **step**, order → cases → reviewed → approved → red → work → proved (or
+  `na`), and the one command that moves it on (`next`). Grids from before
+  cases called the approved step open (open → red → work → proved); grids
+  from before the order step have no order, so their unclaimed cells move
+  to step order:
 
   | step | when | next |
   |---|---|---|
-  | open | not claimed (unchecked, gap, stale) | `atelier grid next SLUG` |
+  | order | not claimed, and its row or column has no place in the written order | `atelier grid order SLUG` |
+  | cases | no cases, unanswered gaps, or not yet reviewed clean | `atelier grid cases SLUG ROW COL`, or `atelier grid review SLUG ROW COL` once the gaps are answered |
+  | reviewed | the last review found no gaps; the row waits for the owner | owner: Approve cases for the row |
+  | approved | the row's cases are approved; not claimed (unchecked, gap, stale) | `atelier grid next SLUG` |
   | red | claimed by a task not yet started | `atelier task start N` |
   | work | claimed by a started (or blocked) task | `atelier grid prove SLUG ROW COL` |
   | proved | proved | `atelier task check N ROW.COL` while claimed, else `atelier grid next SLUG` |
@@ -359,7 +419,7 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
   The app sets the step on every change; a database from before steps gets
   them filled in once, and its proofs are kept. `grid prove` is refused
   unless the cell is at step work (or proved and still held by its started
-  task): `camera.glare.gpu is at step open; prove needs step work. Next:
+  task): `camera.glare.gpu is at step approved; prove needs step work. Next:
   \`atelier grid next camera\``. `grid show SLUG ROW COL` prints
   `Step: STEP. Next: COMMAND`, `task create` and `task start` print one
   line per claimed cell with its step and next command, and so does
@@ -508,8 +568,9 @@ atelier grid template set NAME   {columns: [{id, name, proof_rule, checks}]}
 - **Next cell.** `atelier grid next SLUG [--row ROW | --col COL] [--batch N]`
   (`GET /grids/:project/:slug/next[?row=|?col=][&batch=N]`) hands out one cell at a time:
   the first ready cell in the grid's order, over the whole grid or the row
-  or column named. The order is rows as drawn and columns by position. A
-  free cell (unchecked, gap, or stale, and not claimed by an open task) is
+  or column named. The order is the one an agent wrote with `grid order`
+  (rows in their listed order, and in each row the columns in theirs);
+  there is no default. A free cell (unchecked, gap, or stale, and not claimed by an open task) is
   ready when every cell it comes after is proved or N/A; otherwise it
   waits, and `next` lists it with what it waits for. `--batch N` hands out
   up to N ready cells in that order, for cells that are cheap to do
@@ -525,21 +586,33 @@ atelier grid template set NAME   {columns: [{id, name, proof_rule, checks}]}
   nothing is ready it says why (cells claimed, waiting, or needing a
   check) and exits 3; only a grid whose every cell is proved or N/A gets
   `No gaps left in camera. Every cell is proved or N/A.`
-- **Order.** `atelier grid order SLUG` takes
-  `{"rows": [{"id": ROW, "after": [ROW…]}], "columns": [{"id": COLUMN, "after": [COLUMN…]}], "cells":[{"row": ROW, "col": COLUMN, "after": [[ROW, COLUMN]…]}]}`
-  on stdin or `--input FILE`. A column's `"after"` holds back its cell in
+- **Order.** A grid has no default order. Before any cell is worked, an
+  agent writes it: no owner approval is involved, but the server refuses
+  `grid cases`, `grid review`, `task create`, `task propose` and `grid next`
+  hands out nothing for a cell whose row or column the order does not yet
+  name (step order, "Needs order" in `grid next`). `atelier grid order SLUG` takes
+  `{"rows": [{"id": ROW, "after": [ROW…], "reason": TEXT}], "columns": [{"id": COLUMN, "after": [COLUMN…], "reason": TEXT}], "cells":[{"row": ROW, "col": COLUMN, "after": [[ROW, COLUMN]…], "reason": TEXT}]}`
+  on stdin or `--input FILE`. `rows` and `columns` must each list every
+  live row and column once, in the order cells are handed out; each entry
+  needs a reason of at least three words, and its `"after"` may name only
+  entries listed earlier. `cells` is optional; a cell not listed keeps its
+  list. Rows and columns store their place (`order_seq`) and reason
+  (`order_reason`), cells their `after_reason`. A new order may add
+  prerequisites but may not drop one whose cell is not proved or N/A:
+  `that order drops prerequisites whose cells are not proved or N/A:
+  sunstar.gpu after glare.gpu`. A column's `"after"` holds back its cell in
   each row until that row's cells in the named columns are proved or N/A
   (glare's GPU cell waits for glare's iris cell); a row's `"after"` does
   the same down each column. A cell's `"after"` names cells in any row
   that must be proved or N/A first (sunstar's GPU cell waits for glare's
-  perf cell). Each id given replaces its list, so
-  `"after": []` clears it; ids not given keep theirs. Unknown ids and
-  cycles (over rows, columns and cells together) are refused, and nothing
-  changes. A prerequisite counts as done when it is N/A, or proved and not
+  perf cell). Missing, unknown or repeated ids, a missing or one-word
+  reason, an `"after"` naming a later entry, and cycles (over rows, columns
+  and cells together) are refused, and nothing changes. A prerequisite counts as done when it is N/A, or proved and not
   stale. `task create`, `task start`, `grid prove` and `task check` refuse a
   cell whose prerequisites are not done:
-  `camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A. Next: \`atelier grid next camera\``. The owner or any agent may set
-  it at any time; each change is a grid event of kind `order`.
+  `camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A. Next: \`atelier grid next camera\``. Any agent may rewrite
+  the order at any time within those rules; each change is a grid event
+  of kind `order`.
 - **The work-through loop.** `grid next` → `task create` with those cells →
   `task start` (the cells' checks go red) → `grid prove` each cell, which
   runs its checks, and `task check N ROW.COL` (or N/A, or a reason at
@@ -636,12 +709,14 @@ non-zero and name the field that is wrong.
 atelier grid list [--rows]                   grids with % proved and open counts; --rows adds every owned row id
 atelier grid show SLUG [ROW COL]             the matrix as text, or one cell with proof and history
 atelier grid next SLUG [--row ROW | --col COL] [--batch N]  the next ready cell (or N), and the task create payload for it
-atelier grid order SLUG                      {rows?:[{id,after}],columns?:[{id,after}],cells?:[{row,col,after:[[row,col]]}]}  what must be proved or N/A first
+atelier grid order SLUG                      {rows:[{id,after,reason}],columns:[{id,after,reason}],cells?:[{row,col,after:[[row,col]],reason}]}  the hand-out order and what must be proved or N/A first; required before any work
 atelier grid template list
 atelier grid template set NAME               {columns:[{id,name,proof_rule}]}
 atelier grid draft                           {slug,title,area,template?,row_search,columns,rows}
 atelier grid change SLUG                     {addColumns?,removeColumns?,addRows?,removeRows?}  add or remove rows and columns of an approved grid
 atelier grid discover SLUG
+atelier grid cases SLUG ROW COL              {cases?:[{id,given,when,then,command,red?,covers?}],dismiss?:{GAP:reason}}  the cell's cases and gap answers
+atelier grid review SLUG ROW COL             Atelier's coverage review of the cell's cases (3 rounds at most)
 atelier grid prove SLUG ROW COL              {summary,tests?,commits?,benchmarks?,evidence?}  runs the approved checks (old cells: checks in the payload)
 atelier grid verify SLUG [ROW COL]           re-run checks (whole grid: proved cells)
 atelier grid na SLUG ROW COL --reason TEXT
@@ -764,8 +839,13 @@ N/A awaiting the owner: camera.ghosts.presets_grounded
   and prefills `@task @grid:SLUG.ROWS.COLS ` through `prefillChat`, with
   `startTaskIn` given the line. Cells that are not claimable are listed in a
   tooltip with the reason.
+- **Cases awaiting approval.** Above the heatmap, one panel per row with a
+  reviewed cell: each cell's column checks and cases with their commands
+  resolved, the review's gaps with the case that covers each or the
+  dismissal reason, and **Approve cases** (disabled while a cell of the row
+  still needs review).
 - **Cell detail panel.** State (and stale or claimed, with a link to the
-  task); reason; the cell's checks (Given/When/Then and command, the
+  task); reason; the cell's checks and cases (Given/When/Then and command, the
   column's marked apart from the cell's own), or **Needs a check**; proof: summary, checks with the last result and time,
   benchmarks as a value/budget/unit table with pass marks, tests, commits
   (with the Merged badge logic), evidence inline; history from the cell's
@@ -790,7 +870,10 @@ templates with `{row}` (a cell may add or override) and a cell without one
 shows "Needs a check" and cannot be claimed, the command list above, the
 work-through loop (`grid next` → `task create`, no `@task` needed →
 `task start` → prove → `task check` → `task done` → repeat), the cell
-steps open → red → work → proved with the `Step:` line and cell
+steps order → cases → reviewed → approved → red → work → proved with the `Step:` line, the
+order an agent must write first (every row and column, each with a reason; no default), cases (`atelier grid cases`,
+`atelier grid review`, the owner's row approval, "Needs cases"), the
+`CASE <grid>/<row>/<col>/<case> PASS|FAIL` line and `atelier case`, and cell
 prerequisites in `grid order` (`"cells":[{"row":…}]`), "`grid prove`
 runs the approved checks; commit the covered code first", "a task with `cells` must end with
 proof, N/A or a reason for every cell", "leave cells another task claims

@@ -173,51 +173,54 @@ A coverage grid lists an area's features (rows) against what each must do
 (columns). A cell is proved, a gap or N/A; a proof goes stale when its
 covered code changes. `@matrix AREA` and `@audit SLUG` come with their own
 steps, `@grid:…` with the cells it names. You may draft a grid without
-`@matrix`; the owner approves or discards it.
+`@matrix`; the owner approves it.
 
 ```
-atelier grid list [--rows]
-atelier grid show SLUG [ROW COL]
+atelier grid list|show SLUG [ROW COL]
 atelier grid next SLUG [--row ROW | --col COL] [--batch N]
-atelier grid order SLUG        <<< '{"columns":[{"id":…,"after":[…]}],"rows":[…],"cells":[{"row":…,"col":…,"after":[["ROW","COL"]]}]}'
+atelier grid order SLUG        <<< '{"rows":[{"id":…,"after":[…],"reason":…}],"columns":[…],"cells":[{"row":…,"col":…,"after":[["ROW","COL"]],"reason":…}]}'
+atelier grid cases SLUG ROW COL  <<< '{"cases":[{"id":…,"given":…,"when":…,"then":…,"command":…,"covers":"r1g1"}],"dismiss":{"GAP":"reason"}}'
+atelier grid review SLUG ROW COL
 atelier grid prove SLUG ROW COL  <<< '{"summary":…,"commits":[…]}'
-atelier grid verify SLUG [ROW COL]
-atelier grid na SLUG ROW COL --reason TEXT
-atelier grid reopen SLUG ROW COL --reason TEXT
+atelier grid verify|na|reopen SLUG ROW COL [--reason TEXT]
 atelier grid note SLUG [--row ROW] [--col COL] --text TEXT
 atelier grid checks SLUG       <<< '{"columns":[{"id":…,"checks":[…]}]}'
 ```
 
-**Checks.** Every column carries check templates (`"checks"`, with `{row}`
-replaced by the row id); a cell may add its own or replace them with
-`"override": true`. Approving the grid approves them. A cell with no check
-shows "Needs a check" and cannot be claimed; add templates to an older grid
-with `atelier grid checks SLUG` (the owner approves just those; everything
-else stays). A check's `watch` paths also make its proof stale.
+**Checks.** A column's check templates apply to every row; `{row}` is
+their only placeholder. Row-specific scenarios belong in the cell's cases.
+A cell may add checks or replace them with `"override": true`; `watch`
+paths also make a proof stale.
+A cell without checks shows "Needs a check"; add column templates with
+`atelier grid checks SLUG`. Every check prints exactly one line
+`CASE <grid>/<row>/<col>/<case> PASS|FAIL <measured> <limit>` (`-` when
+none); wrap a command in `atelier case ID -- COMMAND`. Zero or several
+lines, or another id, make the run invalid; `red` must contain the case id.
 
-**Order.** `grid next` hands out the first ready cell (rows as drawn,
-columns by position). `atelier grid order SLUG` sets what must be proved or
-N/A first: a row's, column's or cell's `after` (a cell's may name any row).
-Use `--batch N` only for cells cheap to do together.
+**Order.** A grid has no default order. Before anything else, write it
+with `atelier grid order`: every row and column, in working order, each
+with a reason; `after` names only earlier entries. Until then cells show
+"Needs order".
 
-**Steps.** Each cell moves open → red → work → proved (or N/A): red is
-claimed by a task not yet started, work is held by a started one. `grid
-show SLUG ROW COL` prints `Step: STEP. Next: COMMAND`, and every grid and
-task reply names each cell's step and next command; out-of-order actions
-are refused with it: `grid prove` needs step work, and `task
-create`, `task start`, `grid prove` and `task check` refuse a cell whose
-prerequisites are not proved or N/A.
+**Cases.** Then give each cell its cases (one scenario each) with
+`atelier grid cases`, then run `atelier grid review`: a fresh agent lists
+missing scenarios as gaps. Answer each with a case (`covers`) or a
+dismissal with a reason, and review again until no gaps (3 rounds, then the
+owner decides). The owner approves a whole row's cases. Until then its cells
+show "Needs cases" and cannot be claimed. Editing cases restarts review.
 
-**The loop.** `atelier grid next SLUG` → create the task it prints (no
-`@task` needed) → start it (the cells' checks go red) → commit the covered
-code → `grid prove` each cell (it runs the approved checks) → `atelier task
-check N ROW.COL` → `done` → repeat until no gaps are left.
+**Steps.** order → cases → reviewed → approved → red → work → proved (or N/A).
+`grid show SLUG ROW COL` prints `Step: STEP. Next: COMMAND`; every reply
+names them, and anything out of order is refused.
 
-- A task with `cells` must end with proof, N/A or a reason for each
-  (`done` takes `"cells":[{"grid","row","col","reason"}]`).
-- Leave cells another task claims alone.
-- Pass cells only in an `@audit` request. Reopen a proved or N/A cell that
-  no longer meets its requirement with `atelier grid reopen`; new column
-  checks the owner approves reopen that column's proved cells themselves.
-- Leave a note with `atelier grid note` for whoever later works on a cell,
-  row, column or grid; read the notes `grid next` prints.
+**The loop.** `atelier grid next SLUG` (first ready cell; `--batch N`
+only for cheap cells) → create the
+task it prints (no `@task`) → start it → commit → `grid prove` (runs the
+approved checks) → `atelier task check N ROW.COL` → `done` → repeat.
+
+- A task with `cells` ends with proof, N/A or a reason for each (`done`
+  takes `"cells":[{"grid","row","col","reason"}]`). Leave others' cells alone.
+- Pass cells only in an `@audit` request; reopen a cell that no longer
+  meets its requirement with `atelier grid reopen`; new column checks
+  reopen that column's proved cells.
+- Leave notes with `atelier grid note`; read those `grid next` prints.

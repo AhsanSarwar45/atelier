@@ -1,7 +1,8 @@
-//! `grid next` hands out one cell at a time, in the grid's order: rows as
-//! drawn, columns by position, and a row or column may name what must come
-//! first (`after`). A cell whose prerequisites are not proved or N/A waits.
-//! `--batch N` hands out up to N ready cells in that order.
+//! `grid next` hands out one cell at a time, in the grid's written order:
+//! rows and columns as the order lists them, and a row or column may name
+//! what must come first (`after`, only entries listed earlier). A cell whose
+//! prerequisites are not proved or N/A waits. `--batch N` hands out up to N
+//! ready cells in that order.
 
 use atelier::workbench::grids::{self, cli::{next_exit, next_text}, next_batch, next_cells, Prints, Scope};
 use crate::gaps::*;
@@ -19,6 +20,7 @@ fn grid_with_checks(store: &Db) {
     asked.hashes = Some(json!({"files": {}}));
     apply(store, &asked).unwrap();
     apply(store, &request("approve", "owner", None, "camera")).unwrap();
+    approve_cases(store, "camera");
 }
 
 fn prove(store: &Db, row: &str, col: &str) {
@@ -29,6 +31,16 @@ fn order(store: &Db, payload: Value) -> Result<grids::Outcome, atelier::workbenc
     let mut asked = request("order", "agent", Some("s1"), "camera");
     asked.payload = payload;
     apply(store, &asked)
+}
+
+/// An order entry with a reason.
+fn entry(id: &str, after: &[&str]) -> Value {
+    json!({"id": id, "after": after, "reason": "it shares the pass the others build on"})
+}
+
+/// Rows glare then sunstar; columns perf then gpu, gpu after perf.
+fn gpu_after_perf() -> Value {
+    json!({"rows": [entry("glare", &[]), entry("sunstar", &[])], "columns": [entry("perf", &[]), entry("gpu", &["perf"])]})
 }
 
 fn handed(next: &Value) -> Vec<String> {
@@ -60,7 +72,7 @@ fn next_hands_out_one_cell_in_drawn_order() {
 fn a_cell_waits_for_the_cells_its_column_or_row_comes_after() {
     let (_d, store) = store();
     grid_with_checks(&store);
-    order(&store, json!({"columns": [{"id": "gpu", "after": ["perf"]}]})).unwrap();
+    order(&store, gpu_after_perf()).unwrap();
     let first = next(&store);
     assert_eq!(handed(&first), ["glare.perf"], "glare.gpu waits for glare.perf: {first}");
     let waiting = first["waiting"].as_array().cloned().unwrap_or_default();
@@ -69,19 +81,29 @@ fn a_cell_waits_for_the_cells_its_column_or_row_comes_after() {
     prove(&store, "glare", "perf");
     assert_eq!(handed(&next(&store)), ["glare.gpu"], "once glare.perf is proved, glare.gpu is ready");
 
-    order(&store, json!({"rows": [{"id": "glare", "after": ["sunstar"]}], "columns": [{"id": "gpu", "after": []}]})).unwrap();
-    // glare.gpu now waits for sunstar.gpu, which nothing holds back.
-    assert_eq!(handed(&next(&store)), ["sunstar.gpu"], "a row's after holds back its cells until the same column of that row is done");
+    order(&store, json!({"rows": [entry("sunstar", &[]), entry("glare", &["sunstar"])], "columns": [entry("perf", &[]), entry("gpu", &["perf"])]}))
+        .unwrap();
+    // glare.gpu now waits for sunstar.gpu, and sunstar comes first.
+    let after = next(&store);
+    assert_eq!(handed(&after), ["sunstar.perf"], "the rows' new order: {after}");
+    let waiting = after["waiting"].as_array().cloned().unwrap_or_default();
+    let glare_gpu = waiting.iter().find(|c| c["row"] == "glare" && c["col"] == "gpu").unwrap_or_else(|| panic!("glare.gpu is not listed as waiting: {after}"));
+    assert_eq!(glare_gpu["after"], json!(["sunstar.gpu"]), "a row's after holds back its cells until the same column of that row is done: {after}");
 }
 
 #[test]
 fn order_refuses_unknown_ids_and_cycles() {
     let (_d, store) = store();
     grid_with_checks(&store);
-    assert!(refused(order(&store, json!({"columns": [{"id": "lens", "after": ["gpu"]}]}))).contains("lens"));
-    assert!(refused(order(&store, json!({"columns": [{"id": "gpu", "after": ["lens"]}]}))).contains("lens"));
-    assert!(refused(order(&store, json!({"rows": [{"id": "glare", "after": ["nope"]}]}))).contains("nope"));
-    let cycle = refused(order(&store, json!({"columns": [{"id": "gpu", "after": ["perf"]}, {"id": "perf", "after": ["gpu"]}]})));
+    let rows = json!([entry("glare", &[]), entry("sunstar", &[])]);
+    let columns = json!([entry("gpu", &[]), entry("perf", &[])]);
+    assert!(refused(order(&store, json!({"rows": rows, "columns": [entry("gpu", &[]), entry("perf", &[]), entry("lens", &["gpu"])]}))).contains("lens"));
+    assert!(refused(order(&store, json!({"rows": rows, "columns": [entry("gpu", &["lens"]), entry("perf", &[])]}))).contains("lens"));
+    assert!(refused(order(&store, json!({"rows": [entry("glare", &["nope"]), entry("sunstar", &[])], "columns": columns}))).contains("nope"));
+    let cycle = refused(order(&store, json!({"rows": rows, "columns": columns, "cells": [
+        {"row": "glare", "col": "gpu", "after": [["glare", "perf"]], "reason": "it reads what perf measured"},
+        {"row": "glare", "col": "perf", "after": [["glare", "gpu"]], "reason": "it measures what gpu draws"},
+    ]})));
     assert!(cycle.contains("cycle"), "{cycle}");
     assert_eq!(handed(&next(&store)), ["glare.gpu"], "a refused order changes nothing");
 }
@@ -92,7 +114,7 @@ fn batch_hands_out_up_to_n_ready_cells_in_order() {
     grid_with_checks(&store);
     let three = next_batch(store.connection(), "p", "camera", &Prints::new(), &Scope::First, 3).unwrap();
     assert_eq!(handed(&three), ["glare.gpu", "glare.perf", "sunstar.gpu"], "{three}");
-    order(&store, json!({"columns": [{"id": "gpu", "after": ["perf"]}]})).unwrap();
+    order(&store, gpu_after_perf()).unwrap();
     let ready = next_batch(store.connection(), "p", "camera", &Prints::new(), &Scope::First, 4).unwrap();
     assert_eq!(handed(&ready), ["glare.perf", "sunstar.perf"], "waiting cells stay out of a batch: {ready}");
     let row = next_batch(store.connection(), "p", "camera", &Prints::new(), &Scope::Row("sunstar".into()), 4).unwrap();
@@ -105,7 +127,7 @@ fn next_says_what_cells_wait_for_when_none_is_ready() {
     grid_with_checks(&store);
     // Every gpu cell waits for its perf cell, and a task claims each perf
     // cell as next hands it out, so the only free cells are waiting ones.
-    order(&store, json!({"columns": [{"id": "gpu", "after": ["perf"]}]})).unwrap();
+    order(&store, gpu_after_perf()).unwrap();
     for expected in ["glare.perf", "sunstar.perf"] {
         let handing = next(&store);
         assert_eq!(handed(&handing), [expected], "{handing}");

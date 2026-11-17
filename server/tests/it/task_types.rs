@@ -256,6 +256,7 @@ fn grid_with_checks(store: &Db) {
     asked.hashes = Some(json!({"files": {}}));
     apply(store, &asked).unwrap();
     apply(store, &request("approve", "owner", None, "camera")).unwrap();
+    approve_cases(store, "camera");
 }
 
 #[test]

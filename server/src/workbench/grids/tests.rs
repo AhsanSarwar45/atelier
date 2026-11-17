@@ -65,9 +65,9 @@ pub(super) fn draft_payload(slug: &str) -> Value {
         "row_search": {"command": "scripts/rows.sh", "watch": [format!("{slug}/")]},
         "columns": [
             {"id": "gpu", "name": "Runs on the GPU", "proof_rule": "a GPU test", "checks": [{"name": "gpu", "command": "cargo test {row}_on_gpu", "kind": "test",
-                "given": "the {row} pass", "when": "it renders", "then": "it ran on the GPU", "red": "FAILED|panicked"}]},
+                "given": "the {row} pass", "when": "it renders", "then": "it ran on the GPU", "red": format!("CASE {slug}/{{row}}/gpu/gpu FAIL")}]},
             {"id": "perf", "name": "Within budget", "proof_rule": "a benchmark check", "checks": [{"name": "perf", "command": "cargo test {row}_in_budget", "kind": "test",
-                "given": "the {row} pass", "when": "it renders", "then": "it is within budget", "red": "FAILED|panicked"}]},
+                "given": "the {row} pass", "when": "it renders", "then": "it is within budget", "red": format!("CASE {slug}/{{row}}/perf/perf FAIL")}]},
         ],
     })
 }
@@ -85,6 +85,7 @@ fn approved(store: &Store, session: &str, slug: &str, rows: Vec<search::Found>) 
     owner_says(store, session, &format!("@matrix the {slug} area"));
     draft(store, session, draft_payload(slug), rows).unwrap();
     apply(store.connection(), &request("approve", "owner", None, slug)).unwrap();
+    super::approve_all_cases(store.connection(), "p", slug);
 }
 
 fn camera(store: &Store) {
@@ -289,6 +290,7 @@ fn a_feature_belongs_to_one_grid_and_a_reference_reads_the_owners_cells() {
     payload["rows"] = json!([{"id": "glare", "name": "Glare", "kind": "reference", "ref": {"grid": "camera", "row": "glare"}}]);
     draft(&store, "s2", payload, vec![found("bokeh", &[])]).unwrap();
     apply(store.connection(), &request("approve", "owner", None, "lens")).unwrap();
+    super::approve_all_cases(store.connection(), "p", "lens");
     let lens = load(store.connection(), "p", "lens").unwrap().unwrap();
     // The reference row has no cells of its own and does not count.
     assert!(lens.cells.iter().all(|cell| cell.row == "bokeh"));
@@ -317,6 +319,7 @@ fn an_edit_to_an_approved_grid_waits_for_the_owner() {
     assert_eq!(loaded.cells.len(), 4);
     assert!(loaded.rows.iter().all(|r| r.missing_since.is_none()));
     apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
+    super::approve_all_cases(store.connection(), "p", "camera");
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert!(loaded.column("perf").unwrap().retired_at.is_some());
     assert!(loaded.row("sunstar").unwrap().missing_since.is_some());
@@ -341,6 +344,7 @@ fn a_template_change_adds_unchecked_cells_and_retires_removed_columns() {
     apply(store.connection(), &request("approve_template", "owner", None, "physics")).unwrap();
     draft(&store, "s1", payload, vec![found("glare", &[])]).unwrap();
     apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
+    super::approve_all_cases(store.connection(), "p", "camera");
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert!(loaded.column("energy").unwrap().from_template);
     assert_eq!(loaded.cells.len(), 3);
@@ -944,7 +948,7 @@ fn refusals_say_what_to_do() {
 
 fn template(name: &str, command: &str) -> Value {
     json!({"name": name, "command": command, "kind": "test", "given": "the {row} pass", "when": "it renders",
-        "then": "it is right", "red": "FAILED|panicked"})
+        "then": "it is right"})
 }
 
 /// Camera with checks only on the gpu column; glare.perf adds its own,
@@ -959,6 +963,7 @@ fn camera_with_cell_checks(store: &Store) {
     ]);
     draft(store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
     apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
+    super::approve_all_cases(store.connection(), "p", "camera");
 }
 
 #[test]
@@ -1037,6 +1042,7 @@ fn approval_records_the_check_files_and_a_changed_one_is_named_on_the_proof() {
     let mut approve = request("approve", "owner", None, "camera");
     approve.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a1", "tests/sunstar_gpu.rs": "b1"}}));
     apply(store.connection(), &approve).unwrap();
+    super::approve_all_cases(store.connection(), "p", "camera");
     let grid = load(store.connection(), "p", "camera").unwrap().unwrap().grid;
     assert_eq!(grid.hashes.unwrap()["files"]["tests/glare_gpu.rs"], "a1", "the hashes are stored with the grid");
 
@@ -1066,6 +1072,7 @@ fn a_grid_from_before_checks_keeps_working_with_the_agents_own_checks() {
     }
     draft(&store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
     apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
+    super::approve_all_cases(store.connection(), "p", "camera");
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert!(loaded.grid.hashes.is_none());
     // A cell with no check is never claimed, so it never reaches step work
@@ -1074,7 +1081,7 @@ fn a_grid_from_before_checks_keeps_working_with_the_agents_own_checks() {
     asked.payload = json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]});
     asked.checks = passing();
     asked.fingerprint = Some("f1".into());
-    assert!(refused(apply(store.connection(), &asked)).contains("is at step open; prove needs step work"));
+    assert!(refused(apply(store.connection(), &asked)).contains("is at step approved; prove needs step work"));
     // A proof made before checks, with the agent's own, is kept; verify
     // re-runs what it stored.
     let mut cell = state(&store, "camera", "glare", "gpu");

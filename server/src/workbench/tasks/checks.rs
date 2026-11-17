@@ -19,7 +19,7 @@ use std::path::Path;
 use std::time::Duration;
 
 pub const KINDS: &[&str] = &["test", "benchmark", "structure", "characterisation"];
-pub const FIELDS: &[&str] = &["name", "command", "kind", "given", "when", "then", "red", "timeout_s", "files", "watch", "bench"];
+pub const FIELDS: &[&str] = &["name", "command", "kind", "given", "when", "then", "red", "timeout_s", "files", "watch", "bench", "case"];
 pub const DEFAULT_TIMEOUT_S: u64 = proof::CHECK_TIMEOUT_S;
 pub const MAX_TIMEOUT_S: u64 = proof::CHECK_TIMEOUT_MAX_S;
 /// A benchmark is timed at least this many times after its warmup.
@@ -65,6 +65,9 @@ pub struct Check {
     /// makes the proof stale. Not locked.
     pub watch: Vec<String>,
     pub bench: Option<Bench>,
+    /// A grid cell check's case id, `GRID/ROW/COL/CASE`: its output must
+    /// carry exactly one `CASE` line with this id (docs/grids.md, "Cases").
+    pub case: Option<String>,
 }
 
 impl Check {
@@ -206,7 +209,72 @@ pub fn parse_check(value: &Value, at: &str) -> Result<Check, String> {
         (_, None | Some(Value::Null)) => None,
         (_, Some(_)) => return Err(format!("{at}.bench is only for kind benchmark")),
     };
-    Ok(Check { name, command, kind, given, when, then, red, timeout_s, files, watch, bench })
+    let case = match row.get("case") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(text_field(row, "case", &at, 300)?),
+    };
+    let red = match (&case, red) {
+        (Some(id), Some(red)) if !red.contains(id.as_str()) => {
+            return Err(format!("{at}.red must contain the case id {id}, as in \"CASE {id} FAIL\""))
+        }
+        (Some(id), None) if kind != "characterisation" => Some(format!("CASE {id} FAIL")),
+        (_, red) => red,
+    };
+    Ok(Check { name, command, kind, given, when, then, red, timeout_s, files, watch, bench, case })
+}
+
+/// The one `CASE <grid>/<row>/<col>/<case> PASS|FAIL <measured> <limit>`
+/// line of a case check's output.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CaseLine {
+    pub id: String,
+    pub pass: bool,
+    pub measured: String,
+    pub limit: String,
+}
+
+/// Every `CASE` line in `output`, read; a malformed one is an error.
+fn case_lines(output: &str) -> Result<Vec<CaseLine>, String> {
+    let mut found = Vec::new();
+    for line in output.lines().map(str::trim).filter(|line| line.starts_with("CASE ")) {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let pass = match words.get(2) {
+            Some(&"PASS") => true,
+            Some(&"FAIL") => false,
+            _ => return Err(format!("\"{line}\" is not `CASE <id> PASS|FAIL <measured> <limit>`")),
+        };
+        if words.len() != 5 {
+            return Err(format!("\"{line}\" is not `CASE <id> PASS|FAIL <measured> <limit>` (use - for a value with none)"));
+        }
+        found.push(CaseLine { id: words[1].into(), pass, measured: words[3].into(), limit: words[4].into() });
+    }
+    Ok(found)
+}
+
+/// A case check's verdict from its output: `Ok(line)` for exactly one well
+/// formed `CASE` line with the check's own id; `Err("invalid: …")` for none,
+/// several, another id or a malformed line. `None` for a check with no case.
+pub fn case_verdict(check: &Check, output: &str) -> Option<Result<CaseLine, String>> {
+    let id = check.case.as_deref()?;
+    let shape = format!("a case check prints exactly one `CASE {id} PASS|FAIL <measured> <limit>` line; wrap its command in `atelier case {id} -- …`");
+    Some(match case_lines(output) {
+        Err(why) => Err(format!("invalid: {why}")),
+        Ok(lines) if lines.is_empty() => Err(format!("invalid: no CASE line; {shape}")),
+        Ok(lines) if lines.len() > 1 => Err(format!("invalid: {} CASE lines; {shape}", lines.len())),
+        Ok(mut lines) => {
+            let line = lines.remove(0);
+            if line.id == id {
+                Ok(line)
+            } else {
+                Err(format!("invalid: its CASE line is for {}, not {id}; {shape}", line.id))
+            }
+        }
+    })
+}
+
+/// The output a case verdict reads: the fuller output when there is one.
+fn case_output(run: &Run) -> &str {
+    if run.output.is_empty() { &run.output_tail } else { &run.output }
 }
 
 /// A check's list of paths (`files`, `watch`): relative, inside the folder,
@@ -598,6 +666,10 @@ pub fn judge_red(check: &Check, run: &Run) -> Result<Option<f64>, String> {
             (None, _) => Err(format!("failed for another reason (exit {}): {}", run.exit, last_lines(run, 5))),
         };
     }
+    if let Some(verdict) = case_verdict(check, case_output(run)) {
+        let line = verdict?;
+        return if line.pass { Err("already passes, so it proves nothing".into()) } else { Ok(None) };
+    }
     if run.exit == 0 {
         return Err("already passes, so it proves nothing".into());
     }
@@ -647,6 +719,12 @@ pub fn judge_count(run: &Run, at_start: Option<u64>) -> Result<(), String> {
 
 /// Green: `Err` with why the check does not pass.
 pub fn judge_green(check: &Check, run: &Run, baseline: Option<f64>) -> Result<(), String> {
+    if let Some(verdict) = case_verdict(check, case_output(run)) {
+        let line = verdict?;
+        if !line.pass {
+            return Err(format!("fails: its CASE line says FAIL {} {}", line.measured, line.limit));
+        }
+    }
     if run.exit != 0 {
         return Err(format!("fails (exit {}): {}", run.exit, last_lines(run, 3)));
     }
@@ -1086,6 +1164,10 @@ pub async fn diff_flags(folder: &Path, start: &str) -> Vec<Value> {
         Err(_) => Vec::new(),
     }
 }
+
+#[cfg(test)]
+#[path = "case_line_tests.rs"]
+mod case_line_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {

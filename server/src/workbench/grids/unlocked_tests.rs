@@ -15,6 +15,7 @@ fn a_changed_check_file_does_not_refuse_prove_and_the_proof_names_it() {
     let mut approve = request("approve", "owner", None, "camera");
     approve.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a1", "tests/sunstar_gpu.rs": "b1", "tests/common.rs": "c1"}}));
     apply(store.connection(), &approve).unwrap();
+    super::approve_all_cases(store.connection(), "p", "camera");
 
     hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");

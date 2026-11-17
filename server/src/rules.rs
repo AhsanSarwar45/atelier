@@ -350,6 +350,9 @@ pub fn hook(name: &str, _rest: &[String]) -> Result<i32, String> {
 /// an arbitrary relative path here would turn a documentation convenience into
 /// a general script runner over application data.
 pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
+    if name == "case" {
+        return crate::workbench::grids::cli::case(rest);
+    }
     if name == "skills" {
         return crate::workbench::library::cli(rest);
     }

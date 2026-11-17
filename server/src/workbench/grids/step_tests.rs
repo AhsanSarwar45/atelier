@@ -36,7 +36,7 @@ fn found(id: &str) -> search::Found {
 /// An approved grid camera: rows glare and sunstar, columns gpu and perf, each with a check.
 fn camera(store: &Store) {
     let check = |name: &str| json!([{"name": name, "command": format!("cargo test {{row}}_{name}"), "kind": "test",
-        "given": "g", "when": "w", "then": "t", "red": "FAILED|panicked"}]);
+        "given": "g", "when": "w", "then": "t"}]);
     let mut draft = request("draft");
     draft.slug = None;
     draft.payload = json!({
@@ -53,6 +53,7 @@ fn camera(store: &Store) {
     approve.actor = "owner".into();
     approve.session = None;
     apply(store.connection(), &approve).unwrap();
+    super::approve_all_cases(store.connection(), "p", "camera");
 }
 
 fn refused<T>(result: Result<T, TaskError>) -> String {
@@ -73,7 +74,16 @@ fn step(store: &Store, row: &str, col: &str) -> String {
         .unwrap_or_else(|error| panic!("grid_cell has no stored step for camera.{row}.{col}: {error}"))
 }
 
-fn order(store: &Store, payload: Value) -> Result<Outcome, TaskError> {
+/// `atelier grid order camera` with these cell prerequisites: every row and
+/// column as drawn, and each entry with a reason.
+fn order(store: &Store, mut payload: Value) -> Result<Outcome, TaskError> {
+    let why = "it shares the pass the others build on";
+    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
+    payload["rows"] = loaded.rows.iter().filter(|row| row.counts()).map(|row| json!({"id": row.id, "after": [], "reason": why})).collect();
+    payload["columns"] = loaded.columns.iter().map(|col| json!({"id": col.id, "after": [], "reason": why})).collect();
+    for cell in payload["cells"].as_array_mut().into_iter().flatten() {
+        cell["reason"] = json!(why);
+    }
     let mut asked = request("order");
     asked.payload = payload;
     apply(store.connection(), &asked)
@@ -84,7 +94,7 @@ fn prove(store: &Store, row: &str, col: &str) -> Result<Outcome, TaskError> {
     asked.row = Some(row.into());
     asked.col = Some(col.into());
     asked.payload = json!({"summary": "it works"});
-    asked.checks = vec![proof::CheckResult { name: col.into(), exit: 0, ms: 1, tail: String::new() }];
+    asked.checks = vec![proof::CheckResult { name: col.into(), exit: 0, ms: 1, tail: format!("CASE camera/{row}/{col}/{col} PASS - -") }];
     asked.fingerprint = Some("f1".into());
     asked.head = Some("h1".into());
     apply(store.connection(), &asked)
@@ -132,12 +142,12 @@ fn handed(next: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Rule 1: each cell's step is stored, and moves open → red → work → proved.
+/// Rule 1: each cell's step is stored, and moves approved → red → work → proved.
 #[test]
 fn a_cell_stores_its_step_as_it_moves() {
     let (_d, store) = store();
     camera(&store);
-    assert_eq!(step(&store, "glare", "gpu"), "open");
+    assert_eq!(step(&store, "glare", "gpu"), "approved");
     let number = create(&store, &[("glare", "gpu")]).unwrap().task.number;
     assert_eq!(step(&store, "glare", "gpu"), "red", "a claimed cell waits for its task to start");
     task(&store, "start", number, json!({})).unwrap();
@@ -153,7 +163,7 @@ fn every_reply_names_the_cells_step_and_next_command() {
     camera(&store);
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     let shown = cell_json(loaded.cell("glare", "gpu").unwrap(), false, true);
-    assert_eq!((shown["step"].as_str(), shown["next"].as_str()), (Some("open"), Some("atelier grid next camera")), "grid show: {shown}");
+    assert_eq!((shown["step"].as_str(), shown["next"].as_str()), (Some("approved"), Some("atelier grid next camera")), "grid show: {shown}");
     let created = create(&store, &[("glare", "gpu")]).unwrap();
     let number = created.task.number;
     let wanted = format!("camera.glare.gpu: step red, next `atelier task start {number}`");
@@ -173,7 +183,7 @@ fn prove_is_refused_for_a_cell_no_started_task_holds() {
     camera(&store);
     let message = refused(prove(&store, "glare", "gpu"));
     assert!(
-        message.contains("camera.glare.gpu is at step open; prove needs step work. Next: `atelier grid next camera`"),
+        message.contains("camera.glare.gpu is at step approved; prove needs step work. Next: `atelier grid next camera`"),
         "atelier grid prove camera glare gpu (unclaimed) said: {message}"
     );
     let number = create(&store, &[("glare", "gpu")]).unwrap().task.number;
@@ -223,7 +233,7 @@ fn task_create_refuses_a_cell_whose_prerequisites_are_not_done() {
         message.contains("camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A. Next: `atelier grid next camera`"),
         "atelier task create (cells sunstar.gpu) said: {message}"
     );
-    assert_eq!(step(&store, "sunstar", "gpu"), "open", "a refused create claims nothing");
+    assert_eq!(step(&store, "sunstar", "gpu"), "approved", "a refused create claims nothing");
 }
 
 /// Rule 5: `task start` refuses a task holding a cell whose prerequisites are not done.

@@ -33,7 +33,7 @@ fn found(id: &str) -> search::Found {
 /// An approved grid camera: rows glare and sunstar, columns gpu and perf, each with a check.
 fn camera(store: &Store) {
     let check = |name: &str| json!([{"name": name, "command": format!("cargo test {{row}}_{name}"), "kind": "test",
-        "given": "g", "when": "w", "then": "t", "red": "FAILED|panicked"}]);
+        "given": "g", "when": "w", "then": "t"}]);
     let mut draft = request("draft", "agent", None);
     draft.payload = json!({
         "slug": "camera", "title": "Camera", "area": "The camera.",
@@ -46,6 +46,7 @@ fn camera(store: &Store) {
     draft.search = Some(Ok(search::Run { rows: vec![found("glare"), found("sunstar")], head: Some("h1".into()) }));
     apply(store.connection(), &draft).unwrap();
     apply(store.connection(), &request("approve", "owner", Some("camera"))).unwrap();
+    super::approve_all_cases(store.connection(), "p", "camera");
 }
 
 fn note(store: &Store, actor: &str, row: Option<&str>, col: Option<&str>, text: &str) -> Result<Outcome, TaskError> {

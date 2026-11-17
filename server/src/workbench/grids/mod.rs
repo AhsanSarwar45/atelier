@@ -13,6 +13,7 @@
 //! fingerprint stored with the proof. Callers pass those fingerprints in as
 //! [`Prints`].
 
+pub mod cases;
 pub mod cli;
 pub mod proof;
 pub mod search;
@@ -138,7 +139,13 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
     // A cell's step, the command that moves it on, and the cells it waits
     // for (docs/grids.md, "Steps").
     for (table, column) in [("grid_column", "checks"), ("grid_cell", "checks"), ("grid", "hashes"), ("grid_column", "after"), ("grid_row", "after"),
-        ("grid_cell", "step"), ("grid_cell", "next"), ("grid_cell", "after")] {
+        ("grid_cell", "step"), ("grid_cell", "next"), ("grid_cell", "after"),
+        // A cell's cases, its coverage review and where its cases stand
+        // (docs/grids.md, "Cases").
+        ("grid_cell", "cases"), ("grid_cell", "review"), ("grid_cell", "case_step"),
+        // Why a row, column or cell comes where the order puts it
+        // (docs/grids.md, "Order").
+        ("grid_row", "order_reason"), ("grid_column", "order_reason"), ("grid_cell", "after_reason")] {
         let has = connection
             .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'"))?
             .exists([])?;
@@ -146,13 +153,28 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
             connection.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} TEXT;"))?;
         }
     }
-    // Cells from before steps get theirs from their state and claim.
-    refresh_steps(connection, "step IS NULL", params![])?;
+    // Where a row or column stands in the written order; NULL until an
+    // agent orders it, since a grid has no default order.
+    for (table, column) in [("grid_cell", "cases_approved"), ("grid_row", "order_seq"), ("grid_column", "order_seq")] {
+        let has = connection
+            .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'"))?
+            .exists([])?;
+        if !has {
+            connection.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} INTEGER;"))?;
+        }
+    }
+    // Cells from before steps get theirs from their state and claim; cells
+    // from before cases (step open) need cases; cells not yet claimed in a
+    // row or column with no order need the order first.
+    refresh_steps(connection, "step IS NULL OR step IN ('open', 'cases', 'reviewed', 'approved')", params![])?;
     Ok(())
 }
 
 /// Sets `step` and `next` of the cells `filter` picks from their state, their
-/// claim and the claiming task's status: open (needs work, unclaimed), red
+/// claim, the claiming task's status, the grid's order and their cases:
+/// order (its row or column has no place in the written order), cases (needs cases, or
+/// answers to its review's gaps, or a review), reviewed (waits for the owner
+/// to approve the row's cases), approved (unclaimed, ready for a task), red
 /// (claimed by a task not started), work (claimed by a started task),
 /// proved, or na.
 fn refresh_steps(connection: &Connection, filter: &str, values: impl rusqlite::Params) -> rusqlite::Result<()> {
@@ -162,7 +184,12 @@ fn refresh_steps(connection: &Connection, filter: &str, values: impl rusqlite::P
         WHEN state = 'in_progress' AND claimed_task IS NOT NULL THEN
           CASE WHEN (SELECT t.status FROM task t WHERE t.project_id = grid_cell.project_id AND t.number = grid_cell.claimed_task)
                  IN ('in_progress', 'blocked') THEN 'work' ELSE 'red' END
-        ELSE 'open' END";
+        WHEN (SELECT r.order_seq FROM grid_row r WHERE r.project_id = grid_cell.project_id AND r.slug = grid_cell.slug AND r.id = grid_cell.row) IS NULL
+          OR (SELECT c.order_seq FROM grid_column c WHERE c.project_id = grid_cell.project_id AND c.slug = grid_cell.slug AND c.id = grid_cell.col) IS NULL
+          THEN 'order'
+        WHEN cases_approved IS NOT NULL THEN 'approved'
+        WHEN case_step = 'reviewed' THEN 'reviewed'
+        ELSE 'cases' END";
     // One statement, so the filter sees each cell as it was.
     connection.execute(
         &format!(
@@ -172,12 +199,52 @@ fn refresh_steps(connection: &Connection, filter: &str, values: impl rusqlite::P
                WHEN 'proved' THEN CASE WHEN claimed_task IS NOT NULL
                  THEN 'atelier task check ' || claimed_task || ' ' || row || '.' || col
                  ELSE 'atelier grid next ' || slug END
+               WHEN 'order' THEN 'atelier grid order ' || slug
+               WHEN 'reviewed' THEN 'owner: Approve cases for row ' || row || ' on the Grids screen'
+               WHEN 'cases' THEN CASE WHEN case_step = 'review'
+                 THEN 'atelier grid review ' || slug || ' ' || row || ' ' || col
+                 ELSE 'atelier grid cases ' || slug || ' ' || row || ' ' || col END
                ELSE 'atelier grid next ' || slug END
              WHERE {filter}"
         ),
         values,
     )?;
     Ok(())
+}
+
+/// Marks every cell of grid `slug` as reviewed with its row's cases
+/// approved, for tests of the steps after cases. Rows and columns with no
+/// order get their drawn place, so those tests need not write one.
+#[cfg(test)]
+pub fn approve_all_cases(connection: &Connection, project: &str, slug: &str) {
+    connection
+        .execute("UPDATE grid_cell SET case_step = 'reviewed', cases_approved = 1 WHERE project_id = ?1 AND slug = ?2", params![project, slug])
+        .unwrap();
+    test_order(connection, project, slug);
+}
+
+/// Gives every unordered row and column of grid `slug` its drawn place, for
+/// tests of the steps after the order.
+#[cfg(test)]
+pub fn test_order(connection: &Connection, project: &str, slug: &str) {
+    connection
+        .execute_batch(&format!(
+            "UPDATE grid_row SET order_seq = rowid, order_reason = 'set by the test' WHERE project_id = '{project}' AND slug = '{slug}' AND order_seq IS NULL;
+             UPDATE grid_column SET order_seq = position, order_reason = 'set by the test' WHERE project_id = '{project}' AND slug = '{slug}' AND order_seq IS NULL;"
+        ))
+        .unwrap();
+    refresh_steps(connection, "project_id = ?1 AND slug = ?2", params![project, slug]).unwrap();
+}
+
+/// Forgets grid `slug`'s order, for tests of a grid that has none.
+#[cfg(test)]
+pub(crate) fn clear_order(connection: &Connection, project: &str, slug: &str) {
+    for table in ["grid_row", "grid_column"] {
+        connection
+            .execute(&format!("UPDATE {table} SET order_seq = NULL, order_reason = NULL WHERE project_id = ?1 AND slug = ?2"), params![project, slug])
+            .unwrap();
+    }
+    refresh_steps(connection, "project_id = ?1 AND slug = ?2", params![project, slug]).unwrap();
 }
 
 /// Moves the steps of every cell task `number` claims on, after the task
@@ -199,9 +266,11 @@ fn step_line(slug: &str, cell: &Cell) -> String {
     format!("{slug}.{}.{}: step {}, next `{}`", cell.row, cell.col, cell.step, cell.next.as_deref().unwrap_or(""))
 }
 
-pub const AGENT_ACTIONS: &[&str] = &["draft", "checks", "change", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set", "note", "order"];
+pub const AGENT_ACTIONS: &[&str] = &[
+    "draft", "checks", "change", "discover", "prove", "verify", "na", "audit_done", "pass", "reopen", "template_set", "note", "order", "cases", "review",
+];
 pub const OWNER_ACTIONS: &[&str] = &[
-    "approve", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template", "note", "order",
+    "approve", "approve_cases", "discard", "approve_na", "reject_na", "reopen", "verify", "discover", "approve_template", "reject_template", "note", "order",
 ];
 /// What a `grid` widget's `event` may be.
 pub const WIDGET_EVENTS: &[&str] = &["draft", "template", "prove", "na", "audit", "reopen", "pass", "discover"];
@@ -338,11 +407,14 @@ pub struct Column {
     pub checks: Vec<Value>,
     /// Columns whose cell in the same row must be proved or N/A first.
     pub after: Vec<String>,
+    /// Its place in the written order, and why; None until ordered.
+    pub order_seq: Option<i64>,
+    pub order_reason: Option<String>,
 }
 
 pub fn columns(connection: &Connection, project: &str, slug: &str) -> rusqlite::Result<Vec<Column>> {
     let mut statement = connection.prepare(
-        "SELECT id, name, proof_rule, position, from_template, retired_at, checks, after FROM grid_column
+        "SELECT id, name, proof_rule, position, from_template, retired_at, checks, after, order_seq, order_reason FROM grid_column
           WHERE project_id = ?1 AND slug = ?2 ORDER BY position, id",
     )?;
     let rows = statement
@@ -356,6 +428,8 @@ pub fn columns(connection: &Connection, project: &str, slug: &str) -> rusqlite::
                 retired_at: row.get(5)?,
                 checks: json_column(row, 6)?.and_then(|v| v.as_array().cloned()).unwrap_or_default(),
                 after: strings(&json_column(row, 7)?.unwrap_or(Value::Null)),
+                order_seq: row.get(8)?,
+                order_reason: row.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -379,6 +453,9 @@ pub struct GridRow {
     pub removed_at: Option<i64>,
     /// Rows whose cell in the same column must be proved or N/A first.
     pub after: Vec<String>,
+    /// Its place in the written order, and why; None until ordered.
+    pub order_seq: Option<i64>,
+    pub order_reason: Option<String>,
 }
 
 impl GridRow {
@@ -391,7 +468,7 @@ impl GridRow {
 
 pub fn rows(connection: &Connection, project: &str, slug: &str) -> rusqlite::Result<Vec<GridRow>> {
     let mut statement = connection.prepare(
-        "SELECT id, name, kind, paths, of, ref, source, added_at, missing_since, removed_at, after FROM grid_row
+        "SELECT id, name, kind, paths, of, ref, source, added_at, missing_since, removed_at, after, order_seq, order_reason FROM grid_row
           WHERE project_id = ?1 AND slug = ?2 ORDER BY rowid",
     )?;
     let rows = statement
@@ -408,6 +485,8 @@ pub fn rows(connection: &Connection, project: &str, slug: &str) -> rusqlite::Res
                 missing_since: row.get(8)?,
                 removed_at: row.get(9)?,
                 after: strings(&json_column(row, 10)?.unwrap_or(Value::Null)),
+                order_seq: row.get(11)?,
+                order_reason: row.get(12)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -437,6 +516,15 @@ pub struct Cell {
     pub next: Option<String>,
     /// Cells in any row this one waits for: `[[ROW, COL], …]`.
     pub after: Option<Value>,
+    /// The cell's cases, one scenario each, as checks with their case id.
+    pub cases: Option<Value>,
+    /// Its coverage review: `{rounds: [[{id, scenario}]], answers: {GAP: {case} | {dismissed}}}`.
+    pub review: Option<Value>,
+    /// Where its cases stand: none (needs cases or answers), `review` (ready
+    /// for a review) or `reviewed`.
+    pub case_step: Option<String>,
+    /// When the owner approved its row's cases.
+    pub cases_approved: Option<i64>,
 }
 
 impl Cell {
@@ -453,7 +541,7 @@ impl Cell {
 }
 
 const CELL_COLUMNS: &str = "row, col, state, proof, fingerprint, proved_by, proved_at, last_check, claimed_task, claimed_from,
-    reason, audited_at, audited_by, checks, step, next, after";
+    reason, audited_at, audited_by, checks, step, next, after, cases, review, case_step, cases_approved";
 
 fn cell_record(row: &Row) -> rusqlite::Result<Cell> {
     cell_record_at(row, 0)
@@ -479,6 +567,10 @@ fn cell_record_at(row: &Row, at: usize) -> rusqlite::Result<Cell> {
         step: row.get::<_, Option<String>>(at + 14)?.unwrap_or_else(|| "open".into()),
         next: row.get(at + 15)?,
         after: json_column(row, at + 16)?,
+        cases: json_column(row, at + 17)?,
+        review: json_column(row, at + 18)?,
+        case_step: row.get(at + 19)?,
+        cases_approved: row.get(at + 20)?,
     })
 }
 
@@ -505,12 +597,13 @@ fn save_cell(connection: &Connection, project: &str, slug: &str, cell: &Cell) ->
     connection.execute(
         &format!(
             "INSERT OR REPLACE INTO grid_cell (project_id, slug, {CELL_COLUMNS})
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)"
         ),
         params![
             project, slug, cell.row, cell.col, cell.state, text(&cell.proof), cell.fingerprint, cell.proved_by,
             cell.proved_at, text(&cell.last_check), cell.claimed_task, cell.claimed_from, cell.reason,
             cell.audited_at, cell.audited_by, text(&cell.own_checks), cell.step, cell.next, text(&cell.after),
+            text(&cell.cases), text(&cell.review), cell.case_step, cell.cases_approved,
         ],
     )?;
     refresh_steps(connection, "project_id = ?1 AND slug = ?2 AND row = ?3 AND col = ?4", params![project, slug, cell.row, cell.col])
@@ -576,7 +669,45 @@ impl Loaded {
             }
         }
         checks.extend(own["checks"].as_array().into_iter().flatten().map(|template| fill_row(template, row)));
+        if let Some(cell) = self.cell(row, col) {
+            checks.extend(cases::as_checks(cell));
+        }
         checks
+    }
+
+    /// The names of a cell's checks that are not its cases: the column's
+    /// (unless overridden) and its own.
+    pub fn plain_check_names(&self, row: &str, col: &str) -> Vec<String> {
+        let cases = self.cell(row, col).map(cases::ids).unwrap_or_default();
+        self.cell_checks(row, col)
+            .iter()
+            .filter_map(|check| check["name"].as_str())
+            .filter(|name| !cases.iter().any(|id| id == name))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Why cell `row`.`col` cannot be worked for want of an order: its row
+    /// or column has no place in the written order. None once both do.
+    pub fn unordered(&self, row: &str, col: &str) -> Option<String> {
+        let slug = &self.grid.slug;
+        let missing = if self.row(row).is_some_and(|r| r.order_seq.is_none()) {
+            format!("row {row}")
+        } else if self.column(col).is_some_and(|c| c.order_seq.is_none()) {
+            format!("column {col}")
+        } else {
+            return None;
+        };
+        Some(format!(
+            "grid {slug} has no order for {missing} yet. Write the order first with `atelier grid order {slug}`: \
+             every row and every column, each with what it comes after and a reason"
+        ))
+    }
+
+    /// Whether every live cell of `row` that is not N/A has its cases
+    /// approved by the owner.
+    pub fn row_approved(&self, row: &str) -> bool {
+        cases::row_waiting(self, row).is_empty()
     }
 
     /// Every row that has cells, with the paths it covers: what has to be
@@ -604,6 +735,12 @@ pub fn fill_row(template: &Value, row: &str) -> Value {
 pub fn with_checks(loaded: &Loaded, row: &str, col: &str, mut value: Value) -> Value {
     let checks = loaded.cell_checks(row, col);
     value["needsCheck"] = json!(checks.is_empty());
+    if let Some(cell) = loaded.cell(row, col) {
+        value["needsCases"] = json!(cases::needs_cases(cell));
+        value["cases"] = cell.cases.clone().unwrap_or_else(|| json!([]));
+        value["review"] = cell.review.clone().unwrap_or(Value::Null);
+        value["casesApproved"] = json!(cell.cases_approved);
+    }
     value["checks"] = Value::Array(checks);
     value
 }
@@ -1032,6 +1169,9 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             }
         }
         "app" if action == "discover" => {}
+        // The coverage review's answer, recorded by the route after it ran
+        // the reviewer (docs/grids.md, "Cases").
+        "reviewer" if action == "review" => {}
         other => return refuse(format!("actor must be agent or owner, not \"{other}\"")),
     }
     match action {
@@ -1052,6 +1192,9 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         "approve_template" | "reject_template" => answer_template(connection, request),
         "note" => note(connection, request),
         "order" => order(connection, request),
+        "cases" => cases::set(connection, request),
+        "review" => cases::record_review(connection, request),
+        "approve_cases" => cases::approve_row(connection, request),
         _ => refuse(format!("{action} is not a grid action")),
     }
 }
@@ -1070,14 +1213,47 @@ fn check_title(text: &str, key: &str, max: usize) -> Result<(), TaskError> {
 }
 
 /// A column's or cell's check templates: checks as a task item takes them,
-/// with `{row}` allowed anywhere for the row id.
-fn check_templates(value: &Value, at: &str) -> Result<Vec<Value>, TaskError> {
-    crate::workbench::tasks::checks::parse_checks(&fill_row(value, "row"), at)?;
-    Ok(value.as_array().cloned().unwrap_or_default())
+/// with `{row}` allowed anywhere for the row id and no other placeholder: a
+/// column check tests the same requirement for every row. With `prefix`
+/// (`GRID/{row}/COL`, or `GRID/ROW/COL` for a cell's own), each check gets
+/// its case id `PREFIX/NAME`, and its red must contain it (docs/grids.md,
+/// "Cases").
+fn check_templates(value: &Value, at: &str, prefix: Option<&str>) -> Result<Vec<Value>, TaskError> {
+    if let Some(found) = cases::other_placeholder(value) {
+        return refuse(format!(
+            "{at}: {found} is not allowed; {{row}} is the only placeholder in a column check. A check that needs row-specific scenarios, scenes, budgets or data belongs in the cell's own cases (`atelier grid cases`)"
+        ));
+    }
+    let mut templates = value.as_array().cloned().unwrap_or_default();
+    if let Some(prefix) = prefix {
+        for template in templates.iter_mut() {
+            if let (Some(name), Some(object)) = (template["name"].as_str().map(str::to_string), template.as_object_mut()) {
+                object.insert("case".into(), json!(format!("{prefix}/{name}")));
+            }
+        }
+    }
+    for (index, template) in templates.iter().enumerate() {
+        if let (Some(case), Some(red)) = (template["case"].as_str(), template["red"].as_str()) {
+            if !red.contains(case) {
+                let name = template["name"].as_str().unwrap_or("");
+                return refuse(format!("{at}[{index}] (check \"{name}\").red must contain its case id {case}, as in \"CASE {case} FAIL\""));
+            }
+        }
+    }
+    let parsed = crate::workbench::tasks::checks::parse_checks(&fill_row(&Value::Array(templates.clone()), "row"), at)?;
+    // The red a case check defaults to.
+    for (template, check) in templates.iter_mut().zip(parsed) {
+        if template.get("red").is_none_or(Value::is_null) {
+            if let (Some(case), Some(_)) = (template["case"].as_str().map(str::to_string), check.red) {
+                template["red"] = json!(format!("CASE {case} FAIL"));
+            }
+        }
+    }
+    Ok(templates)
 }
 
 /// `[{id, name, proof_rule, checks?}]`, checked.
-fn check_columns(value: Option<&Value>, at: &str) -> Result<Vec<Value>, TaskError> {
+fn check_columns(value: Option<&Value>, at: &str, slug: Option<&str>) -> Result<Vec<Value>, TaskError> {
     let items = match value {
         None | Some(Value::Null) => return Ok(Vec::new()),
         Some(Value::Array(items)) => items,
@@ -1102,7 +1278,8 @@ fn check_columns(value: Option<&Value>, at: &str) -> Result<Vec<Value>, TaskErro
         let rule = payload_text(item, "proof_rule", "what counts as proof for this requirement", 1000).map_err(|e| at_field(e, &here))?;
         let mut column = json!({"id": id, "name": name, "proof_rule": rule});
         if let Some(checks) = object.get("checks").filter(|checks| !checks.is_null()) {
-            column["checks"] = json!(check_templates(checks, &format!("{here}.checks"))?);
+            let prefix = slug.map(|slug| format!("{slug}/{{row}}/{id}"));
+            column["checks"] = json!(check_templates(checks, &format!("{here}.checks"), prefix.as_deref())?);
         }
         checked.push(column);
     }
@@ -1297,7 +1474,7 @@ fn draft(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
         Some(Value::String(name)) => Some(name.trim().to_string()),
         Some(_) => return refuse("template must be a template's name (text)"),
     };
-    let own_columns = check_columns(object.get("columns"), "columns")?;
+    let own_columns = check_columns(object.get("columns"), "columns", Some(slug))?;
 
     let existing = get_grid(connection, &request.project, slug)?;
     let edit = existing.as_ref().is_some_and(|grid| grid.status == "approved");
@@ -1359,7 +1536,7 @@ fn draft(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
         all_rows.push(row);
     }
     check_rows(connection, &request.project, slug, &all_rows)?;
-    let cell_checks = check_cell_checks(object.get("cells"), &all_rows, &all_columns)?;
+    let cell_checks = check_cell_checks(object.get("cells"), &all_rows, &all_columns, slug)?;
 
     let now = request.now;
     let mut pending = json!({
@@ -1425,7 +1602,7 @@ fn draft(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
 
 /// A draft's `cells: [{row, col, checks, override?}]`: a cell's own checks,
 /// added to its column's or, with `override`, instead of them.
-fn check_cell_checks(value: Option<&Value>, rows: &[Value], columns: &[Value]) -> Result<Vec<Value>, TaskError> {
+fn check_cell_checks(value: Option<&Value>, rows: &[Value], columns: &[Value], slug: &str) -> Result<Vec<Value>, TaskError> {
     let items = match value {
         None | Some(Value::Null) => return Ok(Vec::new()),
         Some(Value::Array(items)) => items,
@@ -1453,7 +1630,8 @@ fn check_cell_checks(value: Option<&Value>, rows: &[Value], columns: &[Value]) -
             Some(Value::Bool(flag)) => *flag,
             Some(_) => return refuse(format!("{here}.override must be true or false")),
         };
-        let checks = check_templates(item.get("checks").unwrap_or(&Value::Null), &format!("{here}.checks"))?;
+        let prefix = format!("{slug}/{row}/{col}");
+        let checks = check_templates(item.get("checks").unwrap_or(&Value::Null), &format!("{here}.checks"), Some(&prefix))?;
         checked.push(json!({"row": row, "col": col, "checks": checks, "override": over}));
     }
     Ok(checked)
@@ -1642,7 +1820,9 @@ fn add_checks(connection: &Connection, request: &Request) -> Result<Outcome, Tas
             return refuse(format!("{here}: column \"{id}\" is given twice"));
         }
         let checks = match column.get("checks") {
-            Some(Value::Array(items)) if !items.is_empty() => check_templates(&Value::Array(items.clone()), &format!("{here}.checks"))?,
+            Some(Value::Array(items)) if !items.is_empty() => {
+                check_templates(&Value::Array(items.clone()), &format!("{here}.checks"), Some(&format!("{slug}/{{row}}/{id}")))?
+            }
             _ => return refuse(format!("{here}: column \"{id}\" needs one or more checks")),
         };
         changed.push((id.to_string(), checks));
@@ -1746,7 +1926,7 @@ fn change(connection: &Connection, request: &Request) -> Result<Outcome, TaskErr
         if item.is_object() && item.get("proof_rule").is_none() {
             item["proof_rule"] = json!("its checks pass");
         }
-        let checked = check_columns(Some(&json!([item])), &here)?.remove(0);
+        let checked = check_columns(Some(&json!([item])), &here, Some(slug))?.remove(0);
         let id = checked["id"].as_str().unwrap_or("");
         if columns.iter().any(|c| c["id"] == id) {
             return refuse(format!("{here}: \"{id}\" is already a column of grid \"{slug}\""));
@@ -2146,6 +2326,12 @@ pub fn prove_precheck(connection: &Connection, request: &Request) -> Result<(pro
     if matches!(cell.state.as_str(), "na" | "na_pending") {
         return refuse(format!("{at} is {}; a cell the owner is asked to mark N/A is not proved", cell.state.replace('_', " ")));
     }
+    if cases::needs_cases(&cell) && open_claim(connection, &request.project, &cell)?.is_none() {
+        return refuse(format!(
+            "{at}: Needs cases. It is proved again only after its cases are reviewed and the owner approves row {}'s cases. Step {}; next `atelier grid cases {} {} {}`",
+            cell.row, cell.step, loaded.grid.slug, cell.row, cell.col
+        ));
+    }
     claim_is_this_chats(connection, &request.project, &cell, session, &at, "prove")?;
     // A proved cell its started task still holds may be proved again.
     let reproof = cell.step == "proved" && cell.claimed_task.is_some();
@@ -2287,6 +2473,18 @@ fn prove(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
     }
     if request.checks.len() != checked.checks.len() {
         return refuse("the checks were not run");
+    }
+    // A case check's output carries exactly one CASE line with its id.
+    for check in &approved {
+        let Ok(parsed) = crate::workbench::tasks::checks::parse_check(check, "check") else { continue };
+        let Some(result) = request.checks.iter().find(|result| result.name == parsed.name) else { continue };
+        match crate::workbench::tasks::checks::case_verdict(&parsed, &result.tail) {
+            Some(Err(why)) => return refuse(format!("check \"{}\" is {why}. {at} is not proved", parsed.name)),
+            Some(Ok(line)) if !line.pass => {
+                return refuse(format!("check \"{}\" failed: its CASE line says FAIL {} {}. {at} is not proved", parsed.name, line.measured, line.limit))
+            }
+            _ => {}
+        }
     }
     if let Some(failed) = request.checks.iter().find(|result| !result.passed()) {
         return refuse(format!(
@@ -2589,48 +2787,67 @@ pub const NOTE_MAX: usize = 4000;
 fn order(connection: &Connection, request: &Request) -> Result<Outcome, TaskError> {
     let slug = need(&request.slug, "slug", "order")?;
     let loaded = approved_grid(connection, &request.project, slug)?;
-    const SHAPE: &str = "order takes {rows?: [{id, after: [ROW…]}], columns?: [{id, after: [COLUMN…]}], \
-        cells?: [{row, col, after: [[ROW, COL]…]}]}";
+    const SHAPE: &str = "order takes {rows: [{id, after: [ROW…], reason}], columns: [{id, after: [COLUMN…], reason}], \
+        cells?: [{row, col, after: [[ROW, COL]…], reason}]}: every row and every column, in the order cells are handed out";
     let object = request.payload.as_object().ok_or(TaskError::Refused(SHAPE.into()))?;
     if let Some(unknown) = object.keys().find(|key| !["rows", "columns", "cells"].contains(&key.as_str())) {
         return refuse(format!("order takes only rows, columns and cells, not \"{unknown}\"; {SHAPE}"));
     }
-    let mut row_after: BTreeMap<String, Vec<String>> = loaded.rows.iter().map(|row| (row.id.clone(), row.after.clone())).collect();
-    let mut col_after: BTreeMap<String, Vec<String>> = loaded.columns.iter().map(|col| (col.id.clone(), col.after.clone())).collect();
-    let mut changed = (Vec::new(), Vec::new());
-    for (key, noun, lists, named) in [("rows", "row", &mut row_after, &mut changed.0), ("columns", "column", &mut col_after, &mut changed.1)] {
-        let Some(items) = object.get(key) else { continue };
-        let items = items.as_array().ok_or_else(|| TaskError::Refused(SHAPE.into()))?;
+    // A reason says why: at least three words.
+    let reason_of = |item: &Value, what: &str| -> Result<String, TaskError> {
+        match item.get("reason").and_then(Value::as_str).map(str::trim) {
+            Some(text) if text.split_whitespace().count() >= 3 => Ok(text.to_string()),
+            _ => refuse(format!("{what} needs a reason: a sentence of at least three words saying why it comes where it does; nothing changed")),
+        }
+    };
+    let live_rows: Vec<&str> = loaded.rows.iter().filter(|row| row.counts()).map(|row| row.id.as_str()).collect();
+    let live_cols: Vec<&str> = loaded.columns.iter().filter(|col| col.retired_at.is_none()).map(|col| col.id.as_str()).collect();
+    // Each list in its written order: (id, after, reason).
+    let mut written: [Vec<(String, Vec<String>, String)>; 2] = [Vec::new(), Vec::new()];
+    for ((key, noun, live), list) in [("rows", "row", &live_rows), ("columns", "column", &live_cols)].into_iter().zip(written.iter_mut()) {
+        let items = object.get(key).and_then(Value::as_array)
+            .ok_or_else(|| TaskError::Refused(format!("the order must list every {noun} under \"{key}\"; {SHAPE}")))?;
         for item in items {
             let id = item.get("id").and_then(Value::as_str).ok_or_else(|| TaskError::Refused(SHAPE.into()))?;
-            if !lists.contains_key(id) {
+            if !live.contains(&id) {
                 return refuse(format!("grid \"{slug}\" has no {noun} \"{id}\"; run `atelier grid show {slug}`"));
             }
-            let after = item.get("after").and_then(Value::as_array).ok_or_else(|| TaskError::Refused(format!("{noun} \"{id}\" needs after: a list of {noun} ids")))?;
-            let mut ids = Vec::new();
-            for other in after {
+            if list.iter().any(|(seen, _, _)| seen == id) {
+                return refuse(format!("{noun} \"{id}\" is listed twice; list each {noun} once; nothing changed"));
+            }
+            let mut ids: Vec<String> = Vec::new();
+            for other in item.get("after").and_then(Value::as_array).into_iter().flatten() {
                 let other = other.as_str().ok_or_else(|| TaskError::Refused(format!("{noun} \"{id}\": after must list {noun} ids")))?;
-                if !lists.contains_key(other) {
+                if !live.contains(&other) {
                     return refuse(format!("{noun} \"{id}\" comes after \"{other}\", but grid \"{slug}\" has no {noun} \"{other}\""));
                 }
-                if !ids.iter().any(|seen: &String| seen == other) {
+                if !list.iter().any(|(seen, _, _)| seen == other) {
+                    return refuse(format!(
+                        "{noun} \"{id}\" comes after \"{other}\", but \"{other}\" is not earlier in the list. \
+                         A {noun} may only come after {noun}s listed earlier; move \"{other}\" up; nothing changed"
+                    ));
+                }
+                if !ids.iter().any(|seen| seen == other) {
                     ids.push(other.to_string());
                 }
             }
-            lists.insert(id.to_string(), ids);
-            named.push(id.to_string());
+            let reason = reason_of(item, &format!("{noun} \"{id}\""))?;
+            list.push((id.to_string(), ids, reason));
+        }
+        let missing: Vec<&str> = live.iter().copied().filter(|id| !list.iter().any(|(seen, _, _)| seen == id)).collect();
+        if !missing.is_empty() {
+            return refuse(format!("the order must list every {noun}; missing: {}; nothing changed", missing.join(", ")));
         }
     }
-    for (noun, lists) in [("row", &row_after), ("column", &col_after)] {
-        if let Some(cycle) = cycle_in(lists) {
-            return refuse(format!("that order makes a cycle: {noun}s {}; nothing changed", cycle.join(" after ")));
-        }
-    }
+    let [rows_written, cols_written] = written;
+    let row_after: BTreeMap<String, Vec<String>> = rows_written.iter().map(|(id, after, _)| (id.clone(), after.clone())).collect();
+    let col_after: BTreeMap<String, Vec<String>> = cols_written.iter().map(|(id, after, _)| (id.clone(), after.clone())).collect();
     // A cell may wait for named cells in any row.
-    let live: Vec<(String, String)> = live_pairs(&loaded).iter().map(|(row, col, _)| (row.id.clone(), col.id.clone())).collect();
+    let pairs = live_pairs(&loaded);
+    let live: Vec<(String, String)> = pairs.iter().map(|(row, col, _)| (row.id.clone(), col.id.clone())).collect();
     let mut cell_after: BTreeMap<(String, String), Vec<(String, String)>> =
-        live_pairs(&loaded).iter().map(|(row, col, cell)| ((row.id.clone(), col.id.clone()), cell.waits_on())).collect();
-    let mut cells_named = Vec::new();
+        pairs.iter().map(|(row, col, cell)| ((row.id.clone(), col.id.clone()), cell.waits_on())).collect();
+    let mut cell_reason: BTreeMap<(String, String), String> = BTreeMap::new();
     if let Some(items) = object.get("cells") {
         let items = items.as_array().ok_or_else(|| TaskError::Refused(SHAPE.into()))?;
         for item in items {
@@ -2640,6 +2857,9 @@ fn order(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
             let at = (row.to_string(), col.to_string());
             if !live.contains(&at) {
                 return refuse(format!("{row}.{col} is not a cell of {slug}; run `atelier grid show {slug}`"));
+            }
+            if cell_reason.contains_key(&at) {
+                return refuse(format!("cell {row}.{col} is listed twice; list each cell once; nothing changed"));
             }
             let after = item.get("after").and_then(Value::as_array)
                 .ok_or_else(|| TaskError::Refused(format!("cell {row}.{col} needs after: a list of [ROW, COL] pairs")))?;
@@ -2658,8 +2878,8 @@ fn order(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
                     pairs.push(pair);
                 }
             }
-            cell_after.insert(at.clone(), pairs);
-            cells_named.push(at);
+            cell_reason.insert(at.clone(), reason_of(item, &format!("cell {row}.{col}"))?);
+            cell_after.insert(at, pairs);
         }
     }
     // Every cell's prerequisites together, from its column, its row and its own list.
@@ -2675,23 +2895,47 @@ fn order(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
     if let Some(cycle) = cycle_in(&graph) {
         return refuse(format!("that order makes a cycle: cells {}; nothing changed", cycle.join(" after ")));
     }
-    for (row, col) in &cells_named {
+    // Reordering cannot skip a step: a prerequisite the old order set stays
+    // until the cell it names is proved or N/A.
+    let settled: HashSet<String> = pairs.iter()
+        .filter(|(_, _, cell)| matches!(cell.state.as_str(), "proved" | "na"))
+        .map(|(row, col, _)| format!("{}.{}", row.id, col.id))
+        .collect();
+    let mut dropped = Vec::new();
+    for (row, col, cell) in &pairs {
+        let name = format!("{}.{}", row.id, col.id);
+        for (r, c) in prerequisites(row, col, cell) {
+            let before = format!("{r}.{c}");
+            if live.contains(&(r.clone(), c.clone())) && !settled.contains(&before) && !graph[&name].contains(&before) {
+                dropped.push(format!("{name} after {before}"));
+            }
+        }
+    }
+    if !dropped.is_empty() {
+        return refuse(format!(
+            "that order drops prerequisites whose cells are not proved or N/A: {}. Keep them in the new order; nothing changed",
+            dropped.join(", ")
+        ));
+    }
+    for (row, col) in cell_reason.keys() {
         let pairs: Vec<Value> = cell_after[&(row.clone(), col.clone())].iter().map(|(r, c)| json!([r, c])).collect();
-        connection.execute("UPDATE grid_cell SET after = ?5 WHERE project_id = ?1 AND slug = ?2 AND row = ?3 AND col = ?4",
-            params![request.project, slug, row, col, Value::Array(pairs).to_string()])?;
+        connection.execute("UPDATE grid_cell SET after = ?5, after_reason = ?6 WHERE project_id = ?1 AND slug = ?2 AND row = ?3 AND col = ?4",
+            params![request.project, slug, row, col, Value::Array(pairs).to_string(), cell_reason[&(row.clone(), col.clone())]])?;
     }
-    let (rows_named, cols_named) = changed;
-    for id in &rows_named {
-        connection.execute("UPDATE grid_row SET after = ?4 WHERE project_id = ?1 AND slug = ?2 AND id = ?3",
-            params![request.project, slug, id, json!(row_after[id]).to_string()])?;
+    for (table, list) in [("grid_row", &rows_written), ("grid_column", &cols_written)] {
+        for (seq, (id, after, reason)) in list.iter().enumerate() {
+            connection.execute(
+                &format!("UPDATE {table} SET after = ?4, order_seq = ?5, order_reason = ?6 WHERE project_id = ?1 AND slug = ?2 AND id = ?3"),
+                params![request.project, slug, id, json!(after).to_string(), seq as i64, reason],
+            )?;
+        }
     }
-    for id in &cols_named {
-        connection.execute("UPDATE grid_column SET after = ?4 WHERE project_id = ?1 AND slug = ?2 AND id = ?3",
-            params![request.project, slug, id, json!(col_after[id]).to_string()])?;
-    }
-    let order = json!({"rows": rows_named.iter().map(|id| json!({"id": id, "after": row_after[id]})).collect::<Vec<_>>(),
-        "columns": cols_named.iter().map(|id| json!({"id": id, "after": col_after[id]})).collect::<Vec<_>>(),
-        "cells": cells_named.iter().map(|(row, col)| json!({"row": row, "col": col, "after": cell_after[&(row.clone(), col.clone())]})).collect::<Vec<_>>()});
+    refresh_steps(connection, "project_id = ?1 AND slug = ?2", params![request.project, slug])?;
+    let entries = |list: &[(String, Vec<String>, String)]| -> Vec<Value> {
+        list.iter().map(|(id, after, reason)| json!({"id": id, "after": after, "reason": reason})).collect()
+    };
+    let order = json!({"rows": entries(&rows_written), "columns": entries(&cols_written),
+        "cells": cell_reason.iter().map(|((row, col), reason)| json!({"row": row, "col": col, "after": cell_after[&(row.clone(), col.clone())], "reason": reason})).collect::<Vec<_>>()});
     connection.execute(
         "INSERT INTO grid_event (project_id, slug, seq, at, kind, row, col, session_id, actor, payload)
          VALUES (?1, ?2, (SELECT COALESCE(MAX(seq), 0) + 1 FROM grid_event WHERE project_id = ?1 AND slug = ?2),
@@ -2700,7 +2944,10 @@ fn order(connection: &Connection, request: &Request) -> Result<Outcome, TaskErro
     )?;
     Ok(Outcome {
         slug: Some(slug.to_string()),
-        summary: format!("Order of {slug} set for {} row(s), {} column(s) and {} cell(s).", rows_named.len(), cols_named.len(), cells_named.len()),
+        summary: format!(
+            "Order of {slug} set: {} row(s), {} column(s) and {} cell(s). Cells are handed out in this order; next `atelier grid next {slug}`.",
+            rows_written.len(), cols_written.len(), cell_reason.len()
+        ),
         grids: vec![slug.to_string()],
         ..Default::default()
     })
@@ -2809,7 +3056,7 @@ fn template_set(connection: &Connection, request: &Request) -> Result<Outcome, T
     if let Some(unknown) = object.keys().find(|key| key.as_str() != "columns") {
         return refuse(format!("{unknown} is not a template field (allowed: columns)"));
     }
-    let columns = check_columns(object.get("columns"), "columns")?;
+    let columns = check_columns(object.get("columns"), "columns", None)?;
     if columns.is_empty() {
         return refuse("columns is required: at least one {id, name, proof_rule}");
     }
@@ -3010,6 +3257,12 @@ pub fn unclaimable(connection: &Connection, project: &str, cell: &CellRef, print
     };
     if needs_work {
         let loaded = load(connection, project, &cell.grid)?.expect("the cell was just found");
+        if let Some(why) = loaded.unordered(&cell.row, &cell.col) {
+            return Ok(Some(format!("{at}: {why}")));
+        }
+        if let Some(why) = cases::unapproved_row(&loaded, &cell.row) {
+            return Ok(Some(format!("{at}: {why}")));
+        }
         if loaded.cell_checks(&cell.row, &cell.col).is_empty() {
             return Ok(Some(format!("{at} has no check. Add one to the column or cell and get it approved")));
         }
@@ -3297,11 +3550,15 @@ pub fn check_task_prerequisites(connection: &Connection, project: &str, number: 
     Ok(())
 }
 
-/// Every cell that counts, row by row in drawn order, columns in place order.
+/// Every cell that counts, row by row in the written order, columns in the
+/// written order; rows and columns not yet ordered last, as drawn.
 fn live_pairs(loaded: &Loaded) -> Vec<(&GridRow, &Column, &Cell)> {
-    let columns: Vec<&Column> = loaded.columns.iter().filter(|col| col.retired_at.is_none()).collect();
+    let mut columns: Vec<&Column> = loaded.columns.iter().filter(|col| col.retired_at.is_none()).collect();
+    columns.sort_by_key(|col| (col.order_seq.is_none(), col.order_seq));
+    let mut rows: Vec<&GridRow> = loaded.rows.iter().filter(|row| row.counts()).collect();
+    rows.sort_by_key(|row| (row.order_seq.is_none(), row.order_seq));
     let mut pairs = Vec::new();
-    for row in loaded.rows.iter().filter(|row| row.counts()) {
+    for row in rows {
         for col in &columns {
             if let Some(cell) = loaded.cell(&row.id, &col.id) {
                 pairs.push((row, *col, cell));
@@ -3320,6 +3577,10 @@ enum Standing {
     /// Needs work, but has no approved check: it cannot be claimed until the
     /// owner approves one for its column or for it.
     NeedsCheck,
+    /// Needs work, but its row or column has no place in the written order.
+    NeedsOrder,
+    /// Needs work, but its row's cases are not reviewed and approved yet.
+    NeedsCases,
     /// Proved and fresh, N/A, or waiting for the owner's N/A answer.
     Settled,
 }
@@ -3334,6 +3595,8 @@ fn standing(connection: &Connection, project: &str, loaded: &Loaded, cell: &Cell
         _ => false,
     };
     Ok(match free {
+        true if loaded.unordered(&cell.row, &cell.col).is_some() => Standing::NeedsOrder,
+        true if !loaded.row_approved(&cell.row) => Standing::NeedsCases,
         true if loaded.cell_checks(&cell.row, &cell.col).is_empty() => Standing::NeedsCheck,
         true => Standing::Free,
         false => Standing::Settled,
@@ -3468,6 +3731,27 @@ pub fn next_batch(connection: &Connection, project: &str, slug: &str, prints: &P
     let taken_in_grid = standings.iter().filter(|s| matches!(s, Standing::Taken(..))).count();
     let needs_check_in_grid = standings.iter().filter(|s| matches!(s, Standing::NeedsCheck)).count();
     let na_pending = pairs.iter().filter(|(_, _, cell)| cell.state == "na_pending").count();
+    let needs_cases_in_grid = standings.iter().filter(|s| matches!(s, Standing::NeedsCases)).count();
+    // The rows and columns the order has yet to name: nothing in them can be
+    // worked until it does.
+    let needs_order_in_grid = standings.iter().filter(|s| matches!(s, Standing::NeedsOrder)).count();
+    let unordered = |ids: Vec<(&String, Option<i64>)>| ids.into_iter().filter(|(_, seq)| seq.is_none()).map(|(id, _)| id.clone()).collect::<Vec<_>>();
+    let needs_order = json!({
+        "rows": unordered(loaded.rows.iter().filter(|row| row.counts()).map(|row| (&row.id, row.order_seq)).collect()),
+        "columns": unordered(loaded.columns.iter().filter(|col| col.retired_at.is_none()).map(|col| (&col.id, col.order_seq)).collect()),
+    });
+    // The rows to give cases first: each row with a cell that needs work and
+    // cases, with the cells of it not yet approved, step and next command.
+    let mut needs_cases: Vec<Value> = Vec::new();
+    for ((row, _, _), standing) in pairs.iter().zip(&standings) {
+        if matches!(standing, Standing::NeedsCases) && !needs_cases.iter().any(|known| known["row"] == row.id.as_str()) {
+            let cells: Vec<Value> = cases::row_waiting(&loaded, &row.id)
+                .iter()
+                .map(|cell| json!({"col": cell.col, "step": cell.step, "next": cell.next}))
+                .collect();
+            needs_cases.push(json!({"row": row.id, "rowName": row.name, "cells": cells}));
+        }
+    }
     // A cell is done for whoever comes after it when it is N/A or proved and fresh.
     let done: HashSet<(&str, &str)> = pairs
         .iter()
@@ -3565,10 +3849,12 @@ pub fn next_batch(connection: &Connection, project: &str, slug: &str, prints: &P
         "claimable": claimable, "taken": taken, "left": left, "takenInGrid": taken_in_grid, "naPending": na_pending,
         "needsCheck": needs_check, "needsCheckInGrid": needs_check_in_grid,
         "waiting": waiting, "waitingInGrid": waiting_in_grid,
+        "needsCases": needs_cases, "needsCasesInGrid": needs_cases_in_grid,
+        "needsOrder": needs_order, "needsOrderInGrid": needs_order_in_grid,
         "create": create,
         // Finished only when every cell is proved or N/A: none free, claimed,
         // waiting on a check or on the owner's N/A answer.
-        "finished": left == 0 && taken_in_grid == 0 && needs_check_in_grid == 0 && na_pending == 0,
+        "finished": left == 0 && taken_in_grid == 0 && needs_check_in_grid == 0 && needs_cases_in_grid == 0 && needs_order_in_grid == 0 && na_pending == 0,
     }))
 }
 
@@ -3920,3 +4206,7 @@ mod unlocked_tests;
 mod note_tests;
 #[cfg(test)]
 mod step_tests;
+#[cfg(test)]
+mod case_tests;
+#[cfg(test)]
+mod order_tests;

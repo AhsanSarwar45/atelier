@@ -72,7 +72,7 @@ pub fn found(id: &str, paths: &[&str]) -> search::Found {
 
 pub fn template(name: &str, command: &str, files: &[&str]) -> Value {
     json!({"name": name, "command": command, "kind": "test", "given": "the {row} pass", "when": "it runs", "then": "it works",
-        "red": "FAILED|panicked", "files": files})
+        "files": files})
 }
 
 /// A grid approved before checks existed: columns gpu and perf with no
@@ -92,6 +92,22 @@ pub fn grid_without_checks(store: &Db, slug: &str) {
     draft.search = Some(Ok(search::Run { rows: vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])], head: Some("h1".into()) }));
     grids::apply(store.connection(), &draft).unwrap();
     grids::apply(store.connection(), &request("approve", "owner", None, slug)).unwrap();
+    approve_cases(store, slug);
+}
+
+/// Marks every cell of grid `slug` still at the cases steps as reviewed
+/// with its row's cases approved, for tests of the steps after cases.
+pub fn approve_cases(store: &Db, slug: &str) {
+    // Rows and columns with no order get their drawn place.
+    store.connection().execute_batch(&format!(
+        "UPDATE grid_row SET order_seq = rowid, order_reason = 'set by the test' WHERE project_id = 'p' AND slug = '{slug}' AND order_seq IS NULL;
+         UPDATE grid_column SET order_seq = position, order_reason = 'set by the test' WHERE project_id = 'p' AND slug = '{slug}' AND order_seq IS NULL;"
+    )).unwrap();
+    store.connection().execute(
+        "UPDATE grid_cell SET case_step = 'reviewed', cases_approved = 1, step = 'approved', next = 'atelier grid next ' || slug
+         WHERE project_id = 'p' AND slug = ?1 AND step IN ('order', 'cases', 'reviewed')",
+        rusqlite::params![slug],
+    ).unwrap();
 }
 
 pub fn apply(store: &Db, request: &Request) -> Result<Outcome, TaskError> {
@@ -184,8 +200,12 @@ pub fn hold(store: &Db, slug: &str, row: &str, col: &str) -> i64 {
         .collect();
     let mut red = Gate::default();
     for (index, check) in checks.iter().enumerate() {
-        let run = Run { command: check["command"].as_str().unwrap_or_default().into(), exit: 101, output: "test FAILED".into(),
-            output_tail: "test FAILED".into(), ..Default::default() };
+        let output = match check["case"].as_str() {
+            Some(case) => format!("CASE {case} FAIL - -"),
+            None => "test FAILED".into(),
+        };
+        let run = Run { command: check["command"].as_str().unwrap_or_default().into(), exit: 101, output: output.clone(),
+            output_tail: output, ..Default::default() };
         red.runs.entry(format!("c{index}")).or_default().insert(check["name"].as_str().unwrap_or_default().into(), run);
     }
     let payload = json!({"type": "chore", "title": "Cell", "why": "Coverage", "plan": {"steps": steps},
@@ -202,7 +222,7 @@ pub fn prove_held(store: &Db, slug: &str, row: &str, col: &str, print: &str) {
     let number = hold(store, slug, row, col);
     let mut prove = on(request("prove", "agent", Some("s1"), slug), row, col);
     prove.payload = json!({"summary": "s"});
-    prove.checks = vec![grids::proof::CheckResult { name: col.into(), exit: 0, ms: 1, tail: String::new() }];
+    prove.checks = vec![grids::proof::CheckResult { name: col.into(), exit: 0, ms: 1, tail: format!("CASE {slug}/{row}/{col}/{col} PASS - -") }];
     prove.fingerprint = Some(print.into());
     apply(store, &prove).unwrap();
     ask(store, "cancel", Some(number), json!({"reason": "proved"}), None).unwrap();
