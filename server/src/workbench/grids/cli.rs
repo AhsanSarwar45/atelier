@@ -32,7 +32,7 @@ usage: atelier grid <command>
                                   approved grid by naming only the change; after puts a column right after another;
                                   the owner approves it, and kept cells keep their proofs
   checks SLUG                    {columns:[{id,checks}]}: check templates for columns of an approved grid; the owner
-                                  approves only those, and rows, cells and proofs stay as they are
+                                  approves only those; once approved, the proved cells of those columns reopen as gaps
   discover SLUG                   rerun the grid's row search now
   cases SLUG ROW COL              {cases?:[{id,given,when,then,command,red?,covers?,files?,timeout_s?}],dismiss?:{GAP:reason}}:
                                   the cell's cases (replaces the list); covers names the review gap a case answers.

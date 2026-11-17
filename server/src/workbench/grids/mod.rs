@@ -1909,7 +1909,7 @@ fn add_checks(connection: &Connection, request: &Request) -> Result<Outcome, Tas
     Ok(Outcome {
         slug: Some(slug.into()),
         summary: format!(
-            "Asked the owner to approve checks for {} column(s) of grid \"{slug}\" ({}); rows, cells and proofs stay as they are. \
+            "Asked the owner to approve checks for {} column(s) of grid \"{slug}\" ({}); rows stay, and once approved the proved cells of these columns reopen as gaps. \
              Stop here and end your turn; the owner's answer arrives as your next message.",
             ids.len(),
             ids.join(", ")
