@@ -15,9 +15,10 @@
  * the menu taking focus is free to clear the selection before an item is
  * chosen.
  *
- * "Copy message" copies the words as written for a plain paste, and the same
- * words drawn as HTML for a rich one, so a link pastes as a link the way a
- * selection copied with Ctrl+C does (`markdown-html.ts`).
+ * "Copy message" and "Copy selection" copy the way Ctrl+C does: the words as
+ * read for a plain paste, and the words drawn as HTML for a rich one, so a
+ * link pastes as a link. "Copy as Markdown" and "Copy selection as Markdown"
+ * copy the words as written (`markdown-html.ts`).
  *
  * Copying works anywhere a message is drawn. Everything that reaches the chat
  * itself — sending again, the writing box, a link to the message — comes from
@@ -36,12 +37,12 @@ import {
   type ReactNode,
 } from 'react';
 
-import { Copy, Link, Pencil, Quote, RotateCcw, TextSelect } from 'lucide-react';
+import { Copy, FileCode, Link, Pencil, Quote, RotateCcw, TextSelect } from 'lucide-react';
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PointerAnchor } from '@/components/ui/point-anchor';
 import { copyAndSay, copyRichAndSay } from '@/lib/clipboard';
-import { markdownToHtml } from '@/lib/markdown-html';
+import { htmlToMarkdown, markdownToHtml, markdownToPlain } from '@/lib/markdown-html';
 import { imageMarker, pictureId, type DraftPicture } from '@/workbench/composer-attachments';
 import type { TranscriptItem } from '@/workbench/fold';
 import { chipUnder } from '@/workbench/path-chip';
@@ -95,16 +96,44 @@ const HELD_LONG_ENOUGH = 500;
 interface Asked {
   x: number;
   y: number;
-  selected: string;
+  selected: Selected;
 }
 
+/** Text selected in a message, in each form a copy of it can take. */
+interface Selected {
+  /** The words as read; empty when nothing is selected. */
+  text: string;
+  /** The selection as drawn, for a rich paste. */
+  html: string;
+  /** The selection written back as markdown. */
+  markdown: string;
+}
+
+const NOTHING_SELECTED: Selected = { text: '', html: '', markdown: '' };
+
+/** The attributes a selection's HTML keeps: what a link, picture or table means. */
+const KEPT_ATTRIBUTES = new Set(['href', 'src', 'alt', 'title', 'start', 'colspan', 'rowspan']);
+
 /** Text selected inside `box` right now, or nothing. */
-function selectedIn(box: HTMLElement): string {
+function selectedIn(box: HTMLElement): Selected {
   const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return '';
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return NOTHING_SELECTED;
   const range = selection.getRangeAt(0);
-  if (!box.contains(range.commonAncestorContainer)) return '';
-  return selection.toString();
+  if (!box.contains(range.commonAncestorContainer)) return NOTHING_SELECTED;
+  const copied = document.createElement('div');
+  copied.append(range.cloneContents());
+  // A chip stands for what was written (`markdown-body.tsx`, `copyWritten`).
+  // A button, and an icon drawn for looks — a link's globe or site mark — are
+  // the page's, not the message's.
+  copied.querySelectorAll('[data-copy]').forEach((chip) => chip.replaceWith(chip.getAttribute('data-copy') ?? ''));
+  copied.querySelectorAll('button, [aria-hidden="true"]').forEach((drawnForLooks) => drawnForLooks.remove());
+  // What the page styles itself with means nothing in another app's paste.
+  for (const element of copied.querySelectorAll('*')) {
+    for (const { name } of Array.from(element.attributes)) {
+      if (!KEPT_ATTRIBUTES.has(name)) element.removeAttribute(name);
+    }
+  }
+  return { text: selection.toString(), html: copied.innerHTML, markdown: htmlToMarkdown(copied) };
 }
 
 /** A press that something inside the message answers for itself. */
@@ -184,16 +213,35 @@ export function useMessageActions(item: Message): MessageActions {
     menu: asked && (
       <DropdownMenu open modal={false} onOpenChange={(now) => { if (!now) setAsked(null); }}>
         <PointerAnchor at={{ left: asked.x, top: asked.y }} />
-        <DropdownMenuContent align="start" side="bottom" sideOffset={0} className="w-52" data-testid="message-menu">
-          {asked.selected && (
-            <DropdownMenuItem data-testid="message-menu-copy-selection" onSelect={() => copyAndSay(asked.selected, 'Selection copied')}>
-              <TextSelect />
-              Copy selection
-            </DropdownMenuItem>
+        <DropdownMenuContent align="start" side="bottom" sideOffset={0} className="w-64" data-testid="message-menu">
+          {asked.selected.text && (
+            <>
+              <DropdownMenuItem
+                data-testid="message-menu-copy-selection"
+                onSelect={() => copyRichAndSay(asked.selected.text, asked.selected.html, 'Selection copied')}
+              >
+                <TextSelect />
+                Copy selection
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-testid="message-menu-copy-selection-markdown"
+                onSelect={() => copyAndSay(asked.selected.markdown, 'Selection copied as Markdown')}
+              >
+                <FileCode />
+                Copy selection as Markdown
+              </DropdownMenuItem>
+            </>
           )}
-          <DropdownMenuItem data-testid="message-menu-copy" onSelect={() => copyRichAndSay(item.text, markdownToHtml(item.text), 'Message copied')}>
+          <DropdownMenuItem
+            data-testid="message-menu-copy"
+            onSelect={() => copyRichAndSay(markdownToPlain(item.text), markdownToHtml(item.text), 'Message copied')}
+          >
             <Copy />
             Copy message
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="message-menu-copy-markdown" onSelect={() => copyAndSay(item.text, 'Copied as Markdown')}>
+            <FileCode />
+            Copy as Markdown
           </DropdownMenuItem>
           {replies && (
             <>
@@ -206,7 +254,7 @@ export function useMessageActions(item: Message): MessageActions {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               {/* What was selected, when something was; otherwise all of it. */}
-              <DropdownMenuItem data-testid="message-menu-quote" onSelect={() => replies.quote(asked.selected || item.text)}>
+              <DropdownMenuItem data-testid="message-menu-quote" onSelect={() => replies.quote(asked.selected.markdown || item.text)}>
                 <Quote />
                 Quote in reply
               </DropdownMenuItem>

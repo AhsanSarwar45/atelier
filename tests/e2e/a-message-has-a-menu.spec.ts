@@ -120,7 +120,7 @@ test.describe.serial('the message menu', () => {
     });
     expect(copied.html).toContain('<a href="https://linear.app/wq/issue/KEY-2321">KEY-2321</a>');
     expect(copied.html).toContain('<strong>ship</strong>');
-    expect(copied.text).toContain(`read: ${linked}`);
+    expect(copied.text).toContain('read: Finish KEY-2321 and ship it, then say you read this.');
   });
 
   test('a long press on a phone opens the same menu', async ({ browser }) => {
@@ -146,6 +146,65 @@ test.describe.serial('the message menu', () => {
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(`read: ${LINE}`);
     await context.close();
   });
+
+  test('selected words copy as Markdown', async ({ page, context }) => {
+    test.setTimeout(120_000);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openChat(page);
+    const reply = page.getByTestId('assistant-message').filter({ hasText: 'read: Finish KEY-2321' });
+    await expect(reply).toHaveCount(1, { timeout: 60_000 });
+    await reply.locator('p').first().selectText();
+    await reply.click({ button: 'right', position: { x: 4, y: 4 } });
+    await expect(page.getByTestId('message-menu-copy-selection')).toBeVisible();
+    await expect(page.getByTestId('message-menu-copy-selection-markdown')).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${SHOTS}/right-click-selection-copies.png` });
+    await page.getByTestId('message-menu-copy-selection-markdown').click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('[KEY-2321](https://linear.app/wq/issue/KEY-2321) and **ship** it');
+  });
+
+  test('a long press on a phone offers Copy message and Copy as Markdown', async ({ browser }) => {
+    test.setTimeout(120_000);
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const page = await context.newPage();
+    await openChat(page);
+    const reply = page.getByTestId('assistant-message').filter({ hasText: 'read: Finish KEY-2321' });
+    await expect(reply).toHaveCount(1, { timeout: 60_000 });
+    const cdp = await context.newCDPSession(page);
+    const press = async () => {
+      const box = (await reply.boundingBox())!;
+      const at = { x: box.x + 30, y: box.y + 10 };
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] });
+      await page.waitForTimeout(800);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await expect(page.getByTestId('message-menu')).toBeVisible();
+    };
+
+    await page.evaluate(() => navigator.clipboard.writeText(''));
+    await press();
+    await expect(page.getByTestId('message-menu-copy')).toBeVisible();
+    await expect(page.getByTestId('message-menu-copy-markdown')).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${SHOTS}/long-press-copies.png` });
+    await page.getByTestId('message-menu-copy-markdown').tap();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('[KEY-2321](https://linear.app/wq/issue/KEY-2321)');
+
+    await press();
+    await page.getByTestId('message-menu-copy').tap();
+    await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.read())[0]?.types ?? [])).toContain('text/html');
+    const copied = await page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      return {
+        html: await (await item.getType('text/html')).text(),
+        text: await (await item.getType('text/plain')).text(),
+      };
+    });
+    expect(copied.html).toContain('<a href="https://linear.app/wq/issue/KEY-2321">KEY-2321</a>');
+    expect(copied.text).toContain('Finish KEY-2321 and ship it');
+    await context.close();
+  });
+
   test('resend, edit, quote and link', async ({ page, context }) => {
     test.setTimeout(180_000);
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);

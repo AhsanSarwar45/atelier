@@ -46,7 +46,7 @@ it('copies the message as it was written', async () => {
   fireEvent.contextMenu(screen.getByTestId('assistant-message'), { clientX: 20, clientY: 20 });
   await waitFor(() => expect(screen.queryByTestId('message-menu')).not.toBeNull());
   expect(screen.queryByTestId('message-menu-copy-selection')).toBeNull();
-  fireEvent.click(screen.getByTestId('message-menu-copy'));
+  fireEvent.click(screen.getByTestId('message-menu-copy-markdown'));
   await waitFor(() => expect(written).toHaveBeenCalledWith('The **fix** is in.'));
 });
 

@@ -1,7 +1,7 @@
 /**
  * "Copy message" gives a rich paste the same thing a selection and Ctrl+C do:
  * the message drawn as HTML, so a link pastes as a link, beside the words as
- * they were written for a plain paste.
+ * read for a plain paste.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -32,7 +32,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it('copies a message with its links as HTML and its words as written', async () => {
+it('copies a message with its links as HTML and its words as read', async () => {
   const item: TranscriptItem = { kind: 'message', id: 'r', role: 'assistant', text: WRITTEN, images: [], done: true, parentId: null };
   render(<TranscriptRow item={item} sessionId="chat-1" mentions={PLAINLY} onLook={() => {}} />);
   fireEvent.contextMenu(screen.getByTestId('assistant-message'), { clientX: 20, clientY: 20 });
@@ -44,7 +44,7 @@ it('copies a message with its links as HTML and its words as written', async () 
   console.log(`html=${html}`);
   expect(html).toContain('<a href="https://linear.app/wq/issue/KEY-2321/grade-appeals">KEY-2321</a>');
   expect(html).toContain('<strong>Assistant</strong>');
-  expect(plain).toBe(WRITTEN);
+  expect(plain).toBe('- KEY-2321 - Finish the Assistant link');
 });
 
 it('never carries raw HTML written in a message onto the clipboard as markup', async () => {
