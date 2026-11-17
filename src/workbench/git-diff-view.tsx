@@ -34,7 +34,7 @@ import { cn } from '@/lib/utils';
 import { languageOf } from '@/workbench/colouring';
 import { CommitDetails } from '@/workbench/commit-details';
 import { DiffTable } from '@/workbench/diff-table';
-import { gitSaid, STATUS_LOOK, under } from '@/workbench/git-view';
+import { gitSaid, notARepository, STATUS_LOOK, under } from '@/workbench/git-view';
 import { hunksToRows } from '@/workbench/line-diff';
 import { usePathActions } from '@/workbench/path-menu';
 import { PathChip } from '@/workbench/path-chip';
@@ -289,6 +289,8 @@ export function GitDiffView({
   const { chips, menu } = usePathActions();
   const [files, setFiles] = useState<GitDiffFile[] | null>(null);
   const [fault, setFault] = useState<string | null>(null);
+  /** The folder has no repository, so there is no diff to draw at all. */
+  const [noRepository, setNoRepository] = useState(false);
   /** Who made the commit being shown, when the pane is showing one. */
   const [made, setMade] = useState<GitCommitDetail | null>(null);
   /**
@@ -321,8 +323,15 @@ export function GitDiffView({
         setFiles((before) => sameAgain(before, changed));
         setMade(answer ? answer.commit : null);
         setFault(null);
+        setNoRepository(false);
       } catch (trouble) {
         if (signal?.aborted) return;
+        // git's words for a missing repository are its whole usage text.
+        if (notARepository(trouble)) {
+          setNoRepository(true);
+          setFault(null);
+          return;
+        }
         setFault(gitSaid(trouble));
       }
     },
@@ -338,6 +347,7 @@ export function GitDiffView({
     setFiles(null);
     setMade(null);
     setFault(null);
+    setNoRepository(false);
   }, [path, commit]);
 
   useEffect(() => {
@@ -447,6 +457,11 @@ export function GitDiffView({
             {fault}
           </Panel>
         </div>
+      )}
+      {noRepository && (
+        <p data-testid="git-diff-no-repository" className="p-6 text-center text-[12px] text-muted-foreground">
+          Not a git repository
+        </p>
       )}
       {/* The first read says nothing at all. It takes a moment on a large
           repository, and a spinner that flashes and goes is more movement than

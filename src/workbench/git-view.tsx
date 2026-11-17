@@ -133,7 +133,7 @@ function wantsAKey(trouble: unknown): boolean {
 }
 
 /** Whether the read failed because the folder has no repository at all. */
-function notARepository(trouble: unknown): boolean {
+export function notARepository(trouble: unknown): boolean {
   return (
     trouble instanceof ApiError
     && (trouble.body as { notARepository?: boolean } | undefined)?.notARepository === true

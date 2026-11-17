@@ -2398,7 +2398,9 @@ pub async fn diff(GitQuery(params): GitQuery<PathParams>) -> Answer {
 
     let mut args = vec!["diff", base];
     args.extend_from_slice(PATCH_SWITCHES);
-    let patch = spoke_or_refused(run_git(&repo, &args).await?)?;
+    // Outside a repository `git diff` answers with its whole usage text; the
+    // mark lets the pane say so in a line instead.
+    let patch = read_or_not_a_repository(&repo, run_git(&repo, &args).await?).await?;
     let mut files = read_unified_patch(&String::from_utf8_lossy(&patch.stdout));
 
     // Untracked and conflicted files both need `git status` to be found at

@@ -2812,6 +2812,19 @@ async fn worktrees_and_branches_of_a_plain_folder_carry_the_mark() {
     }
 }
 
+/// A chat opened in a plain folder asks for its uncommitted changes like any
+/// other. `git diff HEAD` outside a repository prints its whole usage text, so
+/// the answer must carry the mark for the pane to say so in a line instead.
+#[tokio::test]
+async fn the_diff_of_a_plain_folder_carries_the_mark() {
+    let dir = a_plain_folder();
+
+    let (code, body) = diff_of(&dir).await;
+
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["notARepository"], true, "{body}");
+}
+
 #[tokio::test]
 async fn a_repository_never_carries_the_mark() {
     let dir = a_repo();
