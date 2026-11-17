@@ -328,9 +328,16 @@ pub fn cell_text(slug: &str, value: &Value) -> String {
         cell["state"].as_str().unwrap_or("").replace('_', " "),
         if cell["stale"] == true { " (stale)" } else { "" }
     );
+    if let Some(step) = cell["step"].as_str() {
+        let _ = writeln!(out, "Step: {step}. Next: `{}`", cell["next"].as_str().unwrap_or(""));
+    }
+    if let Some(after) = cell["after"].as_array().filter(|after| !after.is_empty()) {
+        let _ = writeln!(out, "After: {}", strings(&Value::Array(after.clone())).join(", "));
+    }
     let _ = writeln!(out, "Proof rule: {}", value["column"]["proofRule"].as_str().unwrap_or(""));
     let _ = writeln!(out, "Covers: {}", strings(&value["row"]["paths"]).join(", "));
-    let checks = value["checks"].as_array().cloned().unwrap_or_default();
+    // The route resolves the checks onto the cell.
+    let checks = cell["checks"].as_array().cloned().unwrap_or_default();
     if checks.is_empty() {
         let _ = writeln!(out, "Checks: none yet (needs a check)");
     } else {

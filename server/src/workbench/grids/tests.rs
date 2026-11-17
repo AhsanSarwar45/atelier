@@ -104,7 +104,31 @@ pub(super) fn proof_payload() -> Value {
     json!({"summary": "glare matches the reference"})
 }
 
+/// Proves a cell the way an agent must: a cell no started task of this chat
+/// holds is first claimed by a new task, started, and that task is
+/// cancelled after the proof, which keeps the proof and frees the chat.
 fn prove(store: &Store, session: &str, slug: &str, row: &str, col: &str, print: &str) -> Result<Outcome, TaskError> {
+    let cell = state(store, slug, row, col);
+    if cell.step == "work" || cell.claimed_task.is_some() {
+        return prove_held(store, session, slug, row, col, print);
+    }
+    let number = task_create(store, session, json!([{"grid": slug, "row": row, "col": col}]), Prints::new())?.task.number;
+    task(store, Some(session), "agent", "start", number, json!({}))?;
+    let proved = prove_held(store, session, slug, row, col, print);
+    task(store, Some(session), "agent", "cancel", number, json!({"reason": "proved"}))?;
+    proved
+}
+
+/// Claims a cell for a new task of this chat and starts it, so the cell is
+/// at step work.
+pub(super) fn hold(store: &Store, session: &str, slug: &str, row: &str, col: &str) -> i64 {
+    let number = task_create(store, session, json!([{"grid": slug, "row": row, "col": col}]), Prints::new()).unwrap().task.number;
+    task(store, Some(session), "agent", "start", number, json!({})).unwrap();
+    number
+}
+
+/// Proves a cell as it stands, with no claim made for it.
+fn prove_held(store: &Store, session: &str, slug: &str, row: &str, col: &str, print: &str) -> Result<Outcome, TaskError> {
     let mut asked = on(request("prove", "agent", Some(session), slug), row, col);
     asked.payload = proof_payload();
     asked.checks = passing();
@@ -384,6 +408,7 @@ fn a_failing_or_bad_row_search_changes_nothing() {
 fn prove_needs_a_passing_check_budgets_met_and_existing_commits() {
     let (_d, store) = store();
     camera(&store);
+    hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = proof_payload();
     asked.checks = vec![proof::CheckResult { name: "unit".into(), exit: 3, ms: 1, tail: "assertion failed".into() }];
@@ -415,6 +440,7 @@ async fn prove_is_refused_while_the_covered_paths_are_dirty() {
     assert!(proof::dirty(repo.path(), &["other/".into()]).await.unwrap().is_empty());
     let (_d, store) = store();
     camera(&store);
+    hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = proof_payload();
     asked.dirty = dirty;
@@ -531,6 +557,9 @@ fn a_task_claims_its_cells_and_a_second_claim_is_refused() {
     task_create(&store, "s3", cell, stale).unwrap();
     // Only the chat holding the claiming task proves it.
     assert!(refused(prove(&store, "s2", "camera", "glare", "gpu", "f1")).contains("only the chat holding that task"));
+    // And only once that task is started.
+    assert!(refused(prove(&store, "s1", "camera", "glare", "gpu", "f1")).contains(&format!("at step red; prove needs step work. Next: `atelier task start {number}`")));
+    task(&store, Some("s1"), "agent", "start", number, json!({})).unwrap();
     prove(&store, "s1", "camera", "glare", "gpu", "f1").unwrap();
     // The task card lists its cells.
     let json = tasks::to_json(&store, &tasks::get(store.connection(), "p", number).unwrap().unwrap());
@@ -977,6 +1006,7 @@ fn a_cell_without_checks_needs_one_is_listed_apart_and_cannot_be_claimed() {
 fn prove_runs_the_cells_approved_checks_and_refuses_the_agents_own() {
     let (_d, store) = store();
     camera(&store);
+    hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = json!({"summary": "s", "checks": [{"name": "mine", "command": "true"}]});
     asked.checks = passing();
@@ -1010,6 +1040,7 @@ fn approval_records_the_check_files_and_a_changed_one_is_named_on_the_proof() {
     let grid = load(store.connection(), "p", "camera").unwrap().unwrap().grid;
     assert_eq!(grid.hashes.unwrap()["files"]["tests/glare_gpu.rs"], "a1", "the hashes are stored with the grid");
 
+    hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = proof_payload();
     asked.checks = passing();
@@ -1037,16 +1068,22 @@ fn a_grid_from_before_checks_keeps_working_with_the_agents_own_checks() {
     apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert!(loaded.grid.hashes.is_none());
-    // A cell proved before checks gives its own; verify re-runs what it stored.
+    // A cell with no check is never claimed, so it never reaches step work
+    // and is not proved now.
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]});
     asked.checks = passing();
     asked.fingerprint = Some("f1".into());
-    assert!(refused(apply(store.connection(), &{ let mut bare = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
-        bare.payload = proof_payload(); bare })).contains("checks"));
-    apply(store.connection(), &asked).unwrap();
+    assert!(refused(apply(store.connection(), &asked)).contains("is at step open; prove needs step work"));
+    // A proof made before checks, with the agent's own, is kept; verify
+    // re-runs what it stored.
+    let mut cell = state(&store, "camera", "glare", "gpu");
+    cell.state = "proved".into();
+    cell.fingerprint = Some("f1".into());
+    cell.proof = Some(json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]}));
+    save_cell(store.connection(), "p", "camera", &cell).unwrap();
     let cell = state(&store, "camera", "glare", "gpu");
-    assert_eq!((cell.state.as_str(), cell.proof.unwrap()["checks"][0]["command"].clone()), ("proved", json!("cargo test glare")));
+    assert_eq!((cell.step.as_str(), cell.proof.unwrap()["checks"][0]["command"].clone()), ("proved", json!("cargo test glare")));
     let (approved, _) = approved_for(store.connection(), &on(request("verify", "owner", None, "camera"), "glare", "gpu")).unwrap();
     assert!(approved.is_empty(), "verify falls back to the proof's stored checks");
     let mut verify = on(request("verify", "owner", None, "camera"), "glare", "gpu");

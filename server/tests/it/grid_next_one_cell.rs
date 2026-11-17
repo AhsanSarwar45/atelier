@@ -22,11 +22,7 @@ fn grid_with_checks(store: &Db) {
 }
 
 fn prove(store: &Db, row: &str, col: &str) {
-    let mut prove = on(request("prove", "agent", Some("s1"), "camera"), row, col);
-    prove.payload = json!({"summary": "s"});
-    prove.checks = vec![grids::proof::CheckResult { name: col.into(), exit: 0, ms: 1, tail: String::new() }];
-    prove.fingerprint = Some("f".into());
-    apply(store, &prove).unwrap();
+    prove_held(store, "camera", row, col, "f");
 }
 
 fn order(store: &Db, payload: Value) -> Result<grids::Outcome, atelier::workbench::tasks::TaskError> {

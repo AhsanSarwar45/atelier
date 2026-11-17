@@ -1384,6 +1384,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             "Created #{number} ({}): {} — todo. Start it with `atelier task start {number}`.",
             task.kind, task.title
         );
+        let steps = super::grids::step_lines(connection, &request.project, number)?;
         summary.push_str(&skills_to_read(&request.types, &task.kind));
         if !draft.cells.is_empty() {
             summary.push_str(&format!(
@@ -1392,6 +1393,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                 if draft.cells.len() == 1 { "" } else { "s" }
             ));
         }
+        summary.push_str(&steps);
         return Ok(Outcome { task, summary, grids, detail: json!({}) });
     }
     if action == "propose" || action == "answer_proposal" {
@@ -1443,6 +1445,8 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
                 ));
             }
             one_in_progress(connection, session, &task)?;
+            // A cell waits until the cells it comes after are proved or N/A.
+            super::grids::check_task_prerequisites(connection, &request.project, number, None)?;
             // A task with checks starts only when every check is red.
             let payload = if gate::gated(&task) { gate::start(&mut task, request.gate.as_ref())? } else { json!({}) };
             task.status = "in_progress".into();
@@ -1479,6 +1483,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             }
             status_is(&task, &["in_progress"], "check")?;
             let item = payload_text(&request.payload, "item", "the plan item's id (atelier task check N ITEM)")?.trim().to_string();
+            super::grids::check_task_prerequisites(connection, &request.project, number, Some(&item))?;
             if gate::gated(&task) {
                 if request.payload.get("entry").is_some_and(|entry| !entry.is_null()) {
                     return refuse(format!(
@@ -1717,6 +1722,9 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
         other => other.into(),
     })?;
     append_event(connection, &task.project_id, number, now, kind, session.as_deref(), actor, &payload)?;
+    // The task's status moves the steps of the cells it claims.
+    super::grids::refresh_task_steps(connection, &task.project_id, number)?;
+    let summary = if kind == "started" { summary + &super::grids::step_lines(connection, &task.project_id, number)? } else { summary };
     Ok(Outcome { task, summary, grids, detail: widget_detail(&payload) })
 }
 

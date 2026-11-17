@@ -19,13 +19,14 @@ fn approving_a_new_draft_records_the_row_search_it_ran() {
 #[test]
 fn a_cell_shown_alone_prints_its_checks() {
     let value = json!({
-        "cell": {"row": "glare", "col": "gpu", "state": "gap"},
+        "cell": {"row": "glare", "col": "gpu", "state": "gap", "step": "open", "next": "atelier grid next camera",
+            "checks": [{"name": "gpu", "kind": "test", "command": "cargo test gpu_glare"}], "needsCheck": false},
         "row": {"name": "Glare", "paths": ["camera/glare.rs"]},
         "column": {"name": "Runs on the GPU", "proofRule": "a GPU test"},
-        "checks": [{"name": "gpu", "kind": "test", "command": "cargo test gpu_glare"}],
-        "needsCheck": false, "notes": [], "events": [],
+        "notes": [], "events": [],
     });
     let text = cli::cell_text("camera", &value);
     assert!(text.contains("Checks:"), "the cell shows no checks: {text}");
     assert!(text.contains("cargo test gpu_glare"), "the cell's check command is missing: {text}");
+    assert!(text.contains("Step: open. Next: `atelier grid next camera`"), "the cell's step is missing: {text}");
 }

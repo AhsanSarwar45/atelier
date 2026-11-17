@@ -24,11 +24,7 @@ fn live_rows(store: &Db, slug: &str) -> Vec<String> {
 }
 
 fn prove_glare_perf(store: &Db) {
-    let mut prove = on(request("prove", "agent", Some("s1"), "camera"), "glare", "perf");
-    prove.payload = json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]});
-    prove.checks = vec![grids::proof::CheckResult { name: "unit".into(), exit: 0, ms: 5, tail: String::new() }];
-    prove.fingerprint = Some("f1".into());
-    apply(store, &prove).unwrap();
+    old_proof(store, "camera", "glare", "perf", "f1");
 }
 
 #[test]

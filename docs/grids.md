@@ -333,7 +333,7 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
 |---|---|---|---|---|
 | — | grid approved, row added, column added | `unchecked` | app | |
 | `unchecked`, `gap`, stale `proved` | task created with this cell | `in_progress` | agent (no `@task` needed for an approved grid), or owner (Create task) | another open task claims it; fresh `proved`; `na`, `na_pending`; row missing or column retired; it needs a check; a check does not go red |
-| any but `na`, `na_pending` | `prove` | `proved` | agent | claimed by a task held by another chat; a check fails; a benchmark misses its budget; a commit is missing; covered paths are dirty |
+| any but `na`, `na_pending` | `prove` | `proved` | agent | the cell is not at step work; a prerequisite is not proved or N/A; claimed by a task held by another chat; a check fails; a benchmark misses its budget; a commit is missing; covered paths are dirty |
 | `in_progress` | claiming task done, cell listed with a reason | `gap` (reason) | app | |
 | `in_progress` | claiming task cancelled | `claimed_from` | app | |
 | `proved` | re-check fails | `gap` | app | |
@@ -345,6 +345,25 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
 | `na` | reopen | `gap` (reason) | owner | |
 | `proved` | owner reopen (reason) | `gap` | owner | |
 
+- Every cell also stores its **step**, open → red → work → proved (or
+  `na`), and the one command that moves it on (`next`):
+
+  | step | when | next |
+  |---|---|---|
+  | open | not claimed (unchecked, gap, stale) | `atelier grid next SLUG` |
+  | red | claimed by a task not yet started | `atelier task start N` |
+  | work | claimed by a started (or blocked) task | `atelier grid prove SLUG ROW COL` |
+  | proved | proved | `atelier task check N ROW.COL` while claimed, else `atelier grid next SLUG` |
+  | na | `na` or `na_pending` | `atelier grid next SLUG` |
+
+  The app sets the step on every change; a database from before steps gets
+  them filled in once, and its proofs are kept. `grid prove` is refused
+  unless the cell is at step work (or proved and still held by its started
+  task): `camera.glare.gpu is at step open; prove needs step work. Next:
+  \`atelier grid next camera\``. `grid show SLUG ROW COL` prints
+  `Step: STEP. Next: COMMAND`, `task create` and `task start` print one
+  line per claimed cell with its step and next command, and so does
+  `grid prove`.
 - A claim (`claimed_task`) is held until the task ends, separate from the
   state. A cell proved during its task stays claimed until the task is done
   or cancelled, so nobody else can claim it in that time.
@@ -507,13 +526,19 @@ atelier grid template set NAME   {columns: [{id, name, proof_rule, checks}]}
   check) and exits 3; only a grid whose every cell is proved or N/A gets
   `No gaps left in camera. Every cell is proved or N/A.`
 - **Order.** `atelier grid order SLUG` takes
-  `{"rows": [{"id": ROW, "after": [ROW…]}], "columns": [{"id": COLUMN, "after": [COLUMN…]}]}`
+  `{"rows": [{"id": ROW, "after": [ROW…]}], "columns": [{"id": COLUMN, "after": [COLUMN…]}], "cells":[{"row": ROW, "col": COLUMN, "after": [[ROW, COLUMN]…]}]}`
   on stdin or `--input FILE`. A column's `"after"` holds back its cell in
   each row until that row's cells in the named columns are proved or N/A
   (glare's GPU cell waits for glare's iris cell); a row's `"after"` does
-  the same down each column. Each id given replaces its list, so
+  the same down each column. A cell's `"after"` names cells in any row
+  that must be proved or N/A first (sunstar's GPU cell waits for glare's
+  perf cell). Each id given replaces its list, so
   `"after": []` clears it; ids not given keep theirs. Unknown ids and
-  cycles are refused, and nothing changes. The owner or any agent may set
+  cycles (over rows, columns and cells together) are refused, and nothing
+  changes. A prerequisite counts as done when it is N/A, or proved and not
+  stale. `task create`, `task start`, `grid prove` and `task check` refuse a
+  cell whose prerequisites are not done:
+  `camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A. Next: \`atelier grid next camera\``. The owner or any agent may set
   it at any time; each change is a grid event of kind `order`.
 - **The work-through loop.** `grid next` → `task create` with those cells →
   `task start` (the cells' checks go red) → `grid prove` each cell, which
@@ -611,7 +636,7 @@ non-zero and name the field that is wrong.
 atelier grid list [--rows]                   grids with % proved and open counts; --rows adds every owned row id
 atelier grid show SLUG [ROW COL]             the matrix as text, or one cell with proof and history
 atelier grid next SLUG [--row ROW | --col COL] [--batch N]  the next ready cell (or N), and the task create payload for it
-atelier grid order SLUG                      {rows?:[{id,after}],columns?:[{id,after}]}  what must be proved or N/A first
+atelier grid order SLUG                      {rows?:[{id,after}],columns?:[{id,after}],cells?:[{row,col,after:[[row,col]]}]}  what must be proved or N/A first
 atelier grid template list
 atelier grid template set NAME               {columns:[{id,name,proof_rule}]}
 atelier grid draft                           {slug,title,area,template?,row_search,columns,rows}
@@ -764,7 +789,9 @@ a grid may be drafted without `@matrix`, that every column needs check
 templates with `{row}` (a cell may add or override) and a cell without one
 shows "Needs a check" and cannot be claimed, the command list above, the
 work-through loop (`grid next` → `task create`, no `@task` needed →
-`task start` → prove → `task check` → `task done` → repeat), "`grid prove`
+`task start` → prove → `task check` → `task done` → repeat), the cell
+steps open → red → work → proved with the `Step:` line and cell
+prerequisites in `grid order` (`"cells":[{"row":…}]`), "`grid prove`
 runs the approved checks; commit the covered code first", "a task with `cells` must end with
 proof, N/A or a reason for every cell", "leave cells another task claims
 alone", and "never pass cells outside an `@audit` request; reopen any cell that no longer meets its requirement". The

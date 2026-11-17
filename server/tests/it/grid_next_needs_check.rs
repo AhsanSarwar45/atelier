@@ -25,11 +25,7 @@ fn next_on_a_finished_grid_says_so() {
     let (_d, store) = store();
     grid_without_checks(&store, "camera");
     for (row, col) in [("glare", "gpu"), ("glare", "perf"), ("sunstar", "gpu"), ("sunstar", "perf")] {
-        let mut prove = on(request("prove", "agent", Some("s1"), "camera"), row, col);
-        prove.payload = serde_json::json!({"summary": "s", "checks": [{"name": "unit", "command": "true"}]});
-        prove.checks = vec![atelier::workbench::grids::proof::CheckResult { name: "unit".into(), exit: 0, ms: 1, tail: String::new() }];
-        prove.fingerprint = Some("f".into());
-        apply(&store, &prove).unwrap();
+        old_proof(&store, "camera", row, col, "f");
     }
     let next = next_cells(store.connection(), "p", "camera", &Prints::new(), &Scope::First).unwrap();
     assert_eq!(next["finished"], true, "{next}");

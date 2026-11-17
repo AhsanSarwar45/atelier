@@ -23,11 +23,7 @@ fn checks_attach_to_the_columns_of_an_approved_grid_and_keep_its_history() {
     let (_d, store) = store();
     grid_without_checks(&store, "camera");
     // History from before checks: a proved cell.
-    let mut prove = on(request("prove", "agent", Some("s1"), "camera"), "glare", "perf");
-    prove.payload = json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]});
-    prove.checks = vec![atelier::workbench::grids::proof::CheckResult { name: "unit".into(), exit: 0, ms: 5, tail: String::new() }];
-    prove.fingerprint = Some("f1".into());
-    apply(&store, &prove).unwrap();
+    old_proof(&store, "camera", "glare", "perf", "f1");
     let before = load(store.connection(), "p", "camera").unwrap().unwrap();
     let rows_before: Vec<String> = before.rows.iter().map(|row| row.id.clone()).collect();
 
@@ -61,11 +57,7 @@ fn new_column_checks_reopen_the_cells_proved_under_the_old_ones() {
     let (_d, store) = store();
     grid_without_checks(&store, "camera");
     for col in ["gpu", "perf"] {
-        let mut prove = on(request("prove", "agent", Some("s1"), "camera"), "glare", col);
-        prove.payload = json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]});
-        prove.checks = vec![atelier::workbench::grids::proof::CheckResult { name: "unit".into(), exit: 0, ms: 5, tail: String::new() }];
-        prove.fingerprint = Some("f1".into());
-        apply(&store, &prove).unwrap();
+        old_proof(&store, "camera", "glare", col, "f1");
     }
     add_checks(&store, "camera", gpu_checks()).unwrap();
     let approved = apply(&store, &request("approve", "owner", None, "camera")).unwrap();
