@@ -84,7 +84,7 @@ test.describe.serial('the message menu', () => {
     await page.screenshot({ path: `${SHOTS}/right-click.png` });
     await page.getByTestId('message-menu-copy').click();
     await expect(menu).toHaveCount(0);
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(`read: ${LINE}`);
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(`read: ${LINE}`);
 
     // Selected words are offered on their own.
     await reply.locator('p').first().selectText();
@@ -93,7 +93,34 @@ test.describe.serial('the message menu', () => {
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${SHOTS}/right-click-with-selection.png` });
     await page.getByTestId('message-menu-copy-selection').click();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(`read: ${LINE}`);
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(`read: ${LINE}`);
+  });
+
+  test('Copy message keeps its links for a rich paste', async ({ page, context }) => {
+    test.setTimeout(180_000);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openChat(page);
+    const linked = 'Finish [KEY-2321](https://linear.app/wq/issue/KEY-2321) and **ship** it, then say you read this.';
+    await page.getByTestId('composer').fill(linked);
+    await page.getByTestId('send-button').click();
+    const reply = page.getByTestId('assistant-message').filter({ hasText: 'read: Finish KEY-2321' });
+    await expect(reply).toHaveCount(1, { timeout: 60_000 });
+
+    await reply.click({ button: 'right', position: { x: 4, y: 4 } });
+    await page.getByTestId('message-menu-copy').click();
+    await expect(page.getByTestId('message-menu')).toHaveCount(0);
+    // The write is asynchronous, so the clipboard is read once it holds HTML.
+    await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.read())[0]?.types ?? [])).toContain('text/html');
+    const copied = await page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      return {
+        html: await (await item.getType('text/html')).text(),
+        text: await (await item.getType('text/plain')).text(),
+      };
+    });
+    expect(copied.html).toContain('<a href="https://linear.app/wq/issue/KEY-2321">KEY-2321</a>');
+    expect(copied.html).toContain('<strong>ship</strong>');
+    expect(copied.text).toContain(`read: ${linked}`);
   });
 
   test('a long press on a phone opens the same menu', async ({ browser }) => {
@@ -116,7 +143,7 @@ test.describe.serial('the message menu', () => {
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${SHOTS}/long-press.png` });
     await page.getByTestId('message-menu-copy').tap();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(`read: ${LINE}`);
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(`read: ${LINE}`);
     await context.close();
   });
   test('resend, edit, quote and link', async ({ page, context }) => {

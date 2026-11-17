@@ -15,6 +15,10 @@
  * the menu taking focus is free to clear the selection before an item is
  * chosen.
  *
+ * "Copy message" copies the words as written for a plain paste, and the same
+ * words drawn as HTML for a rich one, so a link pastes as a link the way a
+ * selection copied with Ctrl+C does (`markdown-html.ts`).
+ *
  * Copying works anywhere a message is drawn. Everything that reaches the chat
  * itself — sending again, the writing box, a link to the message — comes from
  * `MessageReplies`, which only the chat's own conversation provides, so a
@@ -36,7 +40,8 @@ import { Copy, Link, Pencil, Quote, RotateCcw, TextSelect } from 'lucide-react';
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PointerAnchor } from '@/components/ui/point-anchor';
-import { copyAndSay } from '@/lib/clipboard';
+import { copyAndSay, copyRichAndSay } from '@/lib/clipboard';
+import { markdownToHtml } from '@/lib/markdown-html';
 import { imageMarker, pictureId, type DraftPicture } from '@/workbench/composer-attachments';
 import type { TranscriptItem } from '@/workbench/fold';
 import { chipUnder } from '@/workbench/path-chip';
@@ -186,7 +191,7 @@ export function useMessageActions(item: Message): MessageActions {
               Copy selection
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem data-testid="message-menu-copy" onSelect={() => copyAndSay(item.text, 'Message copied')}>
+          <DropdownMenuItem data-testid="message-menu-copy" onSelect={() => copyRichAndSay(item.text, markdownToHtml(item.text), 'Message copied')}>
             <Copy />
             Copy message
           </DropdownMenuItem>

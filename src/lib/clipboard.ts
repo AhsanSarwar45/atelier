@@ -28,7 +28,29 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-function copyByCommand(text: string): boolean {
+/**
+ * Put `text` on the clipboard with `html` beside it, the way a copied
+ * selection goes: a rich paste takes the HTML, a plain one the text.
+ */
+export async function copyRich(text: string, html: string): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  // Over plain http there is no clipboard API, and the copy command carries both.
+  if (!navigator.clipboard) return copyByCommand(text, html);
+  if (!navigator.clipboard.write || typeof ClipboardItem === 'undefined') return copyText(text);
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+      }),
+    ]);
+    return true;
+  } catch {
+    return copyText(text);
+  }
+}
+
+function copyByCommand(text: string, html?: string): boolean {
   const holder = document.createElement('span');
   holder.textContent = text;
   holder.setAttribute('aria-hidden', 'true');
@@ -45,6 +67,7 @@ function copyByCommand(text: string): boolean {
   // given: no styling, and no line breaks the browser invents on the way.
   const fill = (event: ClipboardEvent) => {
     event.clipboardData?.setData('text/plain', text);
+    if (html !== undefined) event.clipboardData?.setData('text/html', html);
     event.preventDefault();
     event.stopImmediatePropagation();
   };
@@ -75,6 +98,13 @@ function copyByCommand(text: string): boolean {
 /** Copy, and say so, since nothing on screen moves; or say the browser refused. */
 export function copyAndSay(text: string, said: string): void {
   void copyText(text).then((copied) => {
+    toast(copied ? { title: said } : COPY_REFUSED);
+  });
+}
+
+/** `copyAndSay`, with the HTML a rich paste takes. */
+export function copyRichAndSay(text: string, html: string, said: string): void {
+  void copyRich(text, html).then((copied) => {
     toast(copied ? { title: said } : COPY_REFUSED);
   });
 }
