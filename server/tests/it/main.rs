@@ -27,6 +27,7 @@ mod grid_next_exit;
 mod grid_next_needs_check;
 mod grid_next_one_cell;
 mod proof_dependencies;
+mod worktree_proofs;
 mod proposal_changes;
 mod carried_folders_reach_the_build;
 mod retired_hooks_allow;

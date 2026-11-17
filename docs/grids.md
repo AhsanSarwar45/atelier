@@ -163,8 +163,10 @@ is recursive and bounded, and only committed files count.
 
 - **Checkout.** Every git question about a grid is asked in the project's
   folder (`local_path`, else `path`, as for tasks), at that folder's `HEAD`.
-  Proof given in another worktree counts once its commits reach that
-  folder's HEAD, which matches how the Merged badge reads merges.
+  A proof whose commit (`last_check.head`) that folder's HEAD lacks, made in
+  a worktree on a branch not landed yet, is judged in the worktree of the
+  same repository whose HEAD has the commit, at that worktree's HEAD. Once
+  the branch lands, the project's folder has the commit and judges it again.
 - **Fingerprint** = sha256 of the sorted output of
   `git ls-tree -r HEAD -- <paths…>`, that is, the path and blob id of every
   committed file under the covered paths. Only committed content counts. A
@@ -367,7 +369,7 @@ done:
 
 **Re-check** (`atelier grid verify SLUG [ROW COL]`, the cell's **Re-check**
 button, the grid's **Re-check stale**) runs a cell's checks again in the
-project folder and stores `last_check`. All passing gives `check_passed`, and
+checkout the proof is judged in (see Checkout above) and stores `last_check`. All passing gives `check_passed`, and
 if the cell was stale the fingerprint is taken again, which makes it fresh:
 the checks pass on the current code. One failing gives `check_failed`, and the
 cell becomes `gap` with reason `check "<name>" failed on re-check (exit N)`.

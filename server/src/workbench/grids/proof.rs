@@ -359,6 +359,45 @@ pub async fn head(folder: &Path) -> Option<String> {
     git(folder, &["rev-parse", "--verify", "HEAD^{commit}"]).await.map(|sha| sha.trim().to_string())
 }
 
+/// Whether `commit` is `head` or one of its ancestors. Both are commits, so
+/// the answer never changes and is kept.
+async fn has(folder: &Path, head: &str, commit: &str) -> bool {
+    static KNOWN: OnceLock<Mutex<HashMap<(String, String), bool>>> = OnceLock::new();
+    let key = (head.to_string(), commit.to_string());
+    if let Some(found) = KNOWN.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return *found;
+    }
+    let found = git(folder, &["merge-base", "--is-ancestor", commit, head]).await.is_some();
+    let mut known = KNOWN.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if known.len() > 20_000 {
+        known.clear();
+    }
+    known.insert(key, found);
+    found
+}
+
+/// The checkout to judge a proof made at `commit` in: `folder` when its HEAD
+/// has the commit, else the first worktree of the same repository whose HEAD
+/// does (a branch main does not have yet), else `folder`.
+pub async fn checkout_for(folder: &Path, commit: &str) -> PathBuf {
+    let Some(main) = head(folder).await else { return folder.to_path_buf() };
+    if has(folder, &main, commit).await {
+        return folder.to_path_buf();
+    }
+    let Some(list) = git(folder, &["worktree", "list", "--porcelain"]).await else { return folder.to_path_buf() };
+    for path in list.lines().filter_map(|line| line.strip_prefix("worktree ")).map(PathBuf::from) {
+        if !path.is_dir() {
+            continue;
+        }
+        if let Some(theirs) = head(&path).await {
+            if has(&path, &theirs, commit).await {
+                return path;
+            }
+        }
+    }
+    folder.to_path_buf()
+}
+
 /// The top of the working tree `folder` is in.
 pub async fn toplevel(folder: &Path) -> Option<PathBuf> {
     git(folder, &["rev-parse", "--show-toplevel"]).await.map(|path| PathBuf::from(path.trim()))

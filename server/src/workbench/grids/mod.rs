@@ -759,15 +759,67 @@ pub fn load(connection: &Connection, project: &str, slug: &str) -> rusqlite::Res
 /* ----------------------------------------------------- staleness, counts */
 
 /// The fingerprint of each row's covered code now, in the project's folder,
-/// by (grid slug, row id). A row missing here is taken as unchanged.
+/// by (grid slug, row id). A cell proved in a worktree whose commit the
+/// project's folder does not have yet has its own entry, by (grid slug,
+/// `cell_key`), taken in that worktree. A row missing here is taken as
+/// unchanged.
 pub type Prints = HashMap<(String, String), String>;
+
+/// The key of one cell's own print; row ids have no '/'.
+pub fn cell_key(row: &str, col: &str) -> String {
+    format!("{row}/{col}")
+}
+
+/// The print a cell is judged by: its own, else its row's.
+pub fn print_for<'a>(slug: &str, row: &str, col: &str, prints: &'a Prints) -> Option<&'a String> {
+    prints.get(&(slug.to_string(), cell_key(row, col))).or_else(|| prints.get(&(slug.to_string(), row.to_string())))
+}
 
 pub fn is_stale(slug: &str, cell: &Cell, prints: &Prints) -> bool {
     cell.state == "proved"
-        && match (prints.get(&(slug.to_string(), cell.row.clone())), &cell.fingerprint) {
+        && match (print_for(slug, &cell.row, &cell.col, prints), &cell.fingerprint) {
             (Some(now), Some(then)) => now != then,
             _ => false,
         }
+}
+
+/// The commit a cell's proof was last checked at.
+pub fn checked_at(cell: &Cell) -> Option<&str> {
+    cell.last_check.as_ref().and_then(|check| check["head"].as_str())
+}
+
+/// The prints of every row of these grids in `folder` at its HEAD, and of
+/// each proved cell whose commit `folder` lacks, in the worktree that has it.
+pub async fn prints_at(folder: &std::path::Path, loaded: &[Loaded]) -> (Prints, Option<String>) {
+    let mut prints = Prints::new();
+    let Some(head) = proof::head(folder).await else { return (prints, None) };
+    // By commit: the other checkout that has it and its HEAD, or None for `folder`.
+    let mut elsewhere: HashMap<String, Option<(std::path::PathBuf, String)>> = HashMap::new();
+    for grid in loaded.iter().filter(|grid| grid.grid.status == "approved") {
+        let slug = &grid.grid.slug;
+        let coverage: HashMap<String, Vec<String>> = grid.coverage().into_iter().collect();
+        for (row, paths) in &coverage {
+            if let Some(print) = proof::fingerprint(folder, &head, paths).await {
+                prints.insert((slug.clone(), row.clone()), print);
+            }
+        }
+        for cell in grid.cells.iter().filter(|cell| cell.state == "proved") {
+            let (Some(commit), Some(paths)) = (checked_at(cell), coverage.get(&cell.row)) else { continue };
+            if !elsewhere.contains_key(commit) {
+                let checkout = proof::checkout_for(folder, commit).await;
+                let other = match checkout.as_path() == folder {
+                    true => None,
+                    false => proof::head(&checkout).await.map(|theirs| (checkout, theirs)),
+                };
+                elsewhere.insert(commit.to_string(), other);
+            }
+            let Some((checkout, theirs)) = &elsewhere[commit] else { continue };
+            if let Some(print) = proof::fingerprint(checkout, theirs, paths).await {
+                prints.insert((slug.clone(), cell_key(&cell.row, &cell.col)), print);
+            }
+        }
+    }
+    (prints, Some(head))
 }
 
 /// The cells that count: those of live feature and combination rows in live

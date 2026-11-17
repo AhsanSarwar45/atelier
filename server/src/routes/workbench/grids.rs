@@ -47,22 +47,13 @@ fn folder_path(state: &WorkbenchState, project: &str) -> Option<PathBuf> {
     project_folder(state, project).map(PathBuf::from).filter(|path| path.is_dir())
 }
 
-/// Fingerprints of every row of these grids in `folder` at its HEAD.
+/// Fingerprints of every row of these grids in `folder` at its HEAD, and of
+/// cells proved in a worktree ahead of it, taken there.
 async fn prints_of(folder: Option<&std::path::Path>, loaded: &[Loaded]) -> (Prints, Option<String>) {
-    let mut prints = Prints::new();
-    let Some(folder) = folder else { return (prints, None) };
-    let Some(head) = proof::head(folder).await else { return (prints, None) };
-    for grid in loaded {
-        if grid.grid.status != "approved" {
-            continue;
-        }
-        for (row, paths) in grid.coverage() {
-            if let Some(print) = proof::fingerprint(folder, &head, &paths).await {
-                prints.insert((grid.grid.slug.clone(), row), print);
-            }
-        }
+    match folder {
+        Some(folder) => grids::prints_at(folder, loaded).await,
+        None => (Prints::new(), None),
     }
-    (prints, Some(head))
 }
 
 async fn load_all(state: &WorkbenchState, project: &str, slugs: Option<Vec<String>>) -> Result<Vec<Loaded>, String> {
@@ -670,7 +661,14 @@ async fn verify_one(state: &WorkbenchState, base: &Request, row: &str, col: &str
     let grid = loaded.first().ok_or_else(|| format!("there is no grid \"{slug}\" in this project"))?;
     let cell = grid.cell(row, col).ok_or_else(|| format!("there is no cell {slug}.{row}.{col}"))?;
     let folder = folder_path(state, &project).ok_or_else(|| "the project's folder does not exist".to_string())?;
-    let (prints, head) = prints_of(Some(&folder), &loaded).await;
+    let (prints, _) = prints_of(Some(&folder), &loaded).await;
+    // A proof made in a worktree on a branch the project's folder lacks is
+    // re-checked there.
+    let folder = match grids::checked_at(cell) {
+        Some(commit) => proof::checkout_for(&folder, commit).await,
+        None => folder,
+    };
+    let head = proof::head(&folder).await;
     // The cell's approved checks; a cell proved before checks re-runs its proof's own.
     let approved = grid.cell_checks(row, col);
     let checks = cell.proof.as_ref().map(proof::stored_checks).unwrap_or_default();
@@ -679,7 +677,7 @@ async fn verify_one(state: &WorkbenchState, base: &Request, row: &str, col: &str
         (true, true) if !checks.is_empty() => proof::run_checks(&folder, &checks).await,
         _ => Vec::new(),
     };
-    let fingerprint = prints.get(&(slug.clone(), row.to_string())).cloned();
+    let fingerprint = grids::print_for(&slug, row, col, &prints).cloned();
     apply(state, Request {
         action: "verify".into(),
         actor: base.actor.clone(),
