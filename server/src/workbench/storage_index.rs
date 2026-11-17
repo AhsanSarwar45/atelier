@@ -101,15 +101,34 @@ impl Indexed {
         {
             return true;
         }
-        let kind = Kind::of(asset);
-        self.refs.iter().any(|r| {
-            r.asset == asset
-                && !gone.contains(&r.session_id)
-                && self
-                    .cleared
-                    .get(&(r.session_id.clone(), kind))
-                    .map_or(true, |through| r.last_seq > *through)
-        })
+        self.refs
+            .iter()
+            .any(|r| r.asset == asset && !gone.contains(&r.session_id) && self.still_shows(r))
+    }
+
+    /// Every file `in_use` would say is in use, found in one pass, for
+    /// checking many files at once: asking `in_use` of each file in a large
+    /// store reads every chat's names once per file.
+    pub fn shown<'a>(&'a self, gone: &HashSet<String>) -> HashSet<&'a str> {
+        let refs = self
+            .refs
+            .iter()
+            .filter(|r| !gone.contains(&r.session_id) && self.still_shows(r))
+            .map(|r| r.asset.as_str());
+        let archived = self
+            .archived
+            .iter()
+            .filter(|(id, _)| !gone.contains(*id))
+            .flat_map(|(_, assets)| assets.iter().map(String::as_str));
+        self.elsewhere.iter().map(String::as_str).chain(archived).chain(refs).collect()
+    }
+
+    /// Whether this chat still shows the file it names: not when the chat's
+    /// files of that kind were cleared through an event at or after this one.
+    fn still_shows(&self, r: &AssetRef) -> bool {
+        self.cleared
+            .get(&(r.session_id.clone(), Kind::of(&r.asset)))
+            .is_none_or(|through| r.last_seq > *through)
     }
 }
 
@@ -558,12 +577,7 @@ impl Holders {
         let shown: HashSet<&str> = indexed
             .refs
             .iter()
-            .filter(|r| {
-                indexed
-                    .cleared
-                    .get(&(r.session_id.clone(), Kind::of(&r.asset)))
-                    .map_or(true, |through| r.last_seq > *through)
-            })
+            .filter(|r| indexed.still_shows(r))
             .map(|r| r.asset.as_str())
             .chain(indexed.archived.values().flatten().map(String::as_str))
             .collect();
@@ -797,6 +811,29 @@ mod tests {
         // A file of the other kind is not covered by an images mark.
         indexed.refs.push(AssetRef { asset: PDF.into(), session_id: "a".into(), last_seq: 1 });
         assert!(indexed.in_use(PDF, &none));
+    }
+
+    #[test]
+    fn the_files_shown_are_exactly_those_in_use_whichever_chats_are_gone() {
+        let name = |n: usize, ext: &str| format!("{n:064x}.{ext}");
+        let mut indexed = Indexed::default();
+        for (n, session, seq) in [(1, "a", 5), (1, "b", 9), (2, "a", 3), (3, "b", 2), (4, "a", 7)] {
+            for ext in ["png", "pdf"] {
+                indexed.refs.push(AssetRef { asset: name(n, ext), session_id: session.into(), last_seq: seq });
+            }
+        }
+        indexed.cleared.insert(("a".into(), Kind::Images), 5);
+        indexed.cleared.insert(("b".into(), Kind::Files), 8);
+        indexed.archived.insert("kept".into(), vec![name(5, "png"), name(3, "pdf")]);
+        indexed.elsewhere.insert(name(6, "png"));
+        let every: Vec<String> = (1..=7).flat_map(|n| [name(n, "png"), name(n, "pdf")]).collect();
+        for gone in [vec![], vec!["a"], vec!["b"], vec!["kept"], vec!["a", "b", "kept"]] {
+            let gone: HashSet<String> = gone.into_iter().map(String::from).collect();
+            let shown = indexed.shown(&gone);
+            for asset in &every {
+                assert_eq!(shown.contains(asset.as_str()), indexed.in_use(asset, &gone), "{asset} without {gone:?}");
+            }
+        }
     }
 
     #[test]

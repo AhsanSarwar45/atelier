@@ -102,6 +102,42 @@ const REF_TYPES: &[&str] = &[
     "plan.proposed",
 ];
 
+/// `REF_TYPES` as an SQL list.
+fn ref_types_sql() -> String {
+    REF_TYPES
+        .iter()
+        .map(|kind| format!("'{kind}'"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Where the writer's background fill of older chats' id rows has got to
+/// (`Store::backfill_step`). It starts empty each time the database opens.
+#[derive(Debug, Default)]
+pub struct Backfill {
+    /// The chats left to fill, listed on the first slice.
+    chats: Option<std::collections::VecDeque<String>>,
+    /// The chat being filled and the newest seq whose rows are written.
+    current: Option<(String, i64)>,
+    /// How many chats this fill has marked filled.
+    filled: usize,
+}
+
+impl Backfill {
+    fn done(&self) -> bool {
+        self.current.is_none() && self.chats.as_ref().is_some_and(|chats| chats.is_empty())
+    }
+
+    /// Leave the chat a slice failed on, or the listing, rather than retry
+    /// it for ever: such a chat is still read through a window when opened,
+    /// and filled when a call's details are asked for.
+    pub fn skip(&mut self) {
+        if self.current.take().is_none() {
+            self.chats.get_or_insert_with(Default::default);
+        }
+    }
+}
+
 /// The ids one event is filed under: `m:` a message, `t:` a call, `a:` a
 /// helper, `p:` the helper's call that owns it. The same types the page
 /// queries gather by each id.
@@ -295,11 +331,9 @@ pub struct Store {
     /// the count of them they were folded from (`projected_agents`).
     agents_folded: std::cell::RefCell<HashMap<String, ((i64, i64), Vec<Value>)>>,
     /// A reader beside the writer (`open_reader`): it may write nothing but
-    /// a chat's id rows, and those only in `ensure_event_refs`.
+    /// a chat's id rows, in `ensure_event_refs`, and its own temporary table
+    /// of a page's ids (`load_ref_window`).
     reader: bool,
-    /// Chats whose id rows the writer found missing and left for a reader to
-    /// fill (`take_unfilled`), so no append waits for a whole chat's JSON.
-    unfilled: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 /// What has already been said about one chat, and to whom (`session_notice`).
@@ -552,6 +586,17 @@ const PROJECTION_HEAD_SQL: &str = r#"SELECT
      (SELECT COALESCE(MAX(seq), 0) FROM event
        WHERE type = 'transcript.reset' AND session_id = ?1)"#;
 
+/// What every connection, the writer and each reader, reads the file with.
+///
+/// SQLite's own default is a 2 MB page cache, too small to hold even the
+/// index pages one busy chat's reads walk. 16 MB held one chat's, but the
+/// database is 19 GB and the chat list's and a big chat's index pages were
+/// still read again each time. Each connection keeps 64 MB of its own (four
+/// connections, so 256 MB at most, and only as it fills), and maps the first
+/// 512 MB of the file, so the pages read most are served from the kernel's
+/// page cache, shared by every connection and given back under pressure,
+/// rather than copied into each connection's own memory.
+const CONNECTION_PRAGMAS: &str = "PRAGMA cache_size = -65536; PRAGMA mmap_size = 536870912;";
 
 impl Store {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
@@ -561,15 +606,13 @@ impl Store {
         }
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(10))?;
-        connection.execute_batch(
-            "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA cache_size = -16384;",
-        )?;
+        connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
+        connection.execute_batch(CONNECTION_PRAGMAS)?;
         migrate(&mut connection)?;
         Ok(Self {
             connection,
             agents_folded: Default::default(),
             reader: false,
-            unfilled: Default::default(),
         })
     }
 
@@ -583,16 +626,12 @@ impl Store {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         connection.busy_timeout(Duration::from_secs(10))?;
-        // SQLite's own default is a 2 MB page cache, too small to hold even
-        // the index pages one busy chat's reads walk, so every repeat read
-        // fetched them again: about 5 MB a beat on a big chat. 16 MB holds
-        // them; more measured no better (bw-xeeqg.7).
-        connection.execute_batch("PRAGMA query_only = 1; PRAGMA cache_size = -16384;")?;
+        connection.execute_batch("PRAGMA query_only = 1;")?;
+        connection.execute_batch(CONNECTION_PRAGMAS)?;
         Ok(Self {
             connection,
             agents_folded: Default::default(),
             reader: true,
-            unfilled: Default::default(),
         })
     }
 
@@ -614,12 +653,6 @@ impl Store {
         let result = work();
         self.connection.execute_batch("PRAGMA query_only = 1;")?;
         result
-    }
-
-    /// Chats the writer skipped pruning for because their id rows were not
-    /// filled yet. Each is named once per process; a reader fills it.
-    pub fn take_unfilled(&self) -> Vec<String> {
-        self.unfilled.borrow_mut().drain().collect()
     }
 
     /// The last positional migration understood by this build.
@@ -1489,10 +1522,10 @@ fn held_in_its_project(
         // Found by id, not by reading the JSON of every earlier report
         // (bw-0xeav.1). Until a chat's older ids are filled the writer leaves
         // the old reports for later rather than reading the whole chat with
-        // every send and stop waiting: a reader fills it, and the next report
-        // prunes everything before it.
+        // every send and stop waiting: the background fill
+        // (`backfill_event_refs`) gets to it, and the next report prunes
+        // everything before it.
         if !self.reader && !self.event_refs_ready(session_id)? {
-            self.unfilled.borrow_mut().insert(session_id.to_string());
             return Ok(0);
         }
         self.ensure_event_refs(session_id)?;
@@ -1552,11 +1585,7 @@ fn held_in_its_project(
             "SELECT seq, type, json_extract(json,'$.messageId'), json_extract(json,'$.toolCallId'),
                     json_extract(json,'$.agentId'), json_extract(json,'$.parentToolCallId')
                FROM event WHERE session_id=?1 AND type IN ({})",
-            REF_TYPES
-                .iter()
-                .map(|kind| format!("'{kind}'"))
-                .collect::<Vec<_>>()
-                .join(",")
+            ref_types_sql()
         ))?;
         let rows = statement
             .query_map([session_id], |row| {
@@ -1603,6 +1632,135 @@ fn held_in_its_project(
             }
             filled
         })
+    }
+
+    /// The chats that have events but no `event_ref_filled` row, in id order.
+    ///
+    /// Found by seeking the event key one chat at a time, so the list costs
+    /// one index probe a chat and never reads an event.
+    fn unfilled_chats(&self) -> rusqlite::Result<Vec<String>> {
+        let mut chats = Vec::new();
+        let mut next: Option<String> =
+            self.connection
+                .query_row("SELECT MIN(session_id) FROM event", [], |row| row.get(0))?;
+        let mut after = self
+            .connection
+            .prepare("SELECT MIN(session_id) FROM event WHERE session_id > ?1")?;
+        while let Some(chat) = next {
+            next = after.query_row([&chat], |row| row.get(0))?;
+            if !self.event_refs_ready(&chat)? {
+                chats.push(chat);
+            }
+        }
+        Ok(chats)
+    }
+
+    /// One slice of the background fill: list the chats left to fill, or file
+    /// the next run of one chat's events by id, for about `budget` at most.
+    /// Returns whether anything is left.
+    ///
+    /// A chat is read a run at a time in seq order and each run is written in
+    /// its own short transaction, so the writer can answer a send between any
+    /// two runs even while it fills a chat of gigabytes. An event appended
+    /// meanwhile brings its own rows, which the run reaching it ignores.
+    pub fn backfill_step(&self, fill: &mut Backfill, budget: Duration) -> rusqlite::Result<bool> {
+        let Some(chats) = fill.chats.as_mut() else {
+            fill.chats = Some(self.unfilled_chats()?.into());
+            return Ok(!fill.done());
+        };
+        let (session_id, after) = match fill.current.take() {
+            Some(current) => current,
+            None => match chats.pop_front() {
+                Some(chat) => (chat, 0),
+                None => return Ok(false),
+            },
+        };
+        // A reader may have filled it meanwhile, for a call's details.
+        if self.event_refs_ready(&session_id)? {
+            return Ok(!fill.done());
+        }
+        let started = std::time::Instant::now();
+        let mut statement = self.connection.prepare_cached(&format!(
+            "SELECT seq, type, json_extract(json,'$.messageId'), json_extract(json,'$.toolCallId'),
+                    json_extract(json,'$.agentId'), json_extract(json,'$.parentToolCallId')
+               FROM event WHERE session_id=?1 AND seq>?2 AND +type IN ({})
+              ORDER BY seq",
+            ref_types_sql()
+        ))?;
+        let mut rows = statement.query(params![session_id, after])?;
+        let mut run = Vec::new();
+        let mut finished = true;
+        while let Some(row) = rows.next()? {
+            run.push((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ));
+            if started.elapsed() >= budget {
+                finished = false;
+                break;
+            }
+        }
+        drop(rows);
+        drop(statement);
+        let last = run.last().map(|row| row.0).unwrap_or(after);
+        let owns_transaction = self.connection.is_autocommit();
+        if owns_transaction {
+            self.connection.execute_batch("BEGIN IMMEDIATE")?;
+        }
+        let written = (|| {
+            for (seq, kind, message, tool, agent, parent) in &run {
+                let refs = event_refs(
+                    kind,
+                    message.as_deref(),
+                    tool.as_deref(),
+                    agent.as_deref(),
+                    parent.as_deref(),
+                );
+                self.remember_event_refs(&session_id, *seq, kind, &refs)?;
+            }
+            // A chat deleted while it was being filled gets no mark.
+            if finished {
+                self.connection
+                    .prepare_cached(
+                        "INSERT OR IGNORE INTO event_ref_filled (session_id)
+                           SELECT ?1 WHERE EXISTS(SELECT 1 FROM event WHERE session_id=?1)",
+                    )?
+                    .execute([&session_id])
+                    .map(|marked| fill.filled += marked)
+            } else {
+                Ok(())
+            }
+        })();
+        if owns_transaction {
+            match &written {
+                Ok(()) => self.connection.execute_batch("COMMIT")?,
+                Err(_) => {
+                    let _ = self.connection.execute_batch("ROLLBACK");
+                }
+            }
+        }
+        written?;
+        if !finished {
+            fill.current = Some((session_id, last));
+        }
+        Ok(!fill.done())
+    }
+
+    /// Fill the id rows of up to `max_chats` chats an older build left
+    /// without them, each exactly as `ensure_event_refs` would, and say how
+    /// many were filled: 0 once none are left. The writer runs the same fill
+    /// a slice at a time between its commands (`backfill_step`).
+    pub fn backfill_event_refs(&self, max_chats: usize) -> rusqlite::Result<usize> {
+        let mut fill = Backfill {
+            chats: Some(self.unfilled_chats()?.into_iter().take(max_chats).collect()),
+            ..Backfill::default()
+        };
+        while self.backfill_step(&mut fill, Duration::from_millis(50))? {}
+        Ok(fill.filled)
     }
 
     /// Group a replay import into one SQLite commit. The chat actor remains
@@ -2946,7 +3104,24 @@ fn held_in_its_project(
 
     fn agents_by_ids(&self, session_id: &str, ids: &[String]) -> rusqlite::Result<Vec<Value>> {
         if ids.is_empty() { return Ok(Vec::new()); }
-        self.ensure_event_refs(session_id)?;
+        // A chat not filled yet is not filled here, on its first open (see
+        // `event_transcript_items`): its helpers' rows come off the type
+        // index, the same rows `agent_states` has just read, and their JSON
+        // says whose they are.
+        if !self.event_refs_ready(session_id)? {
+            let mut statement = self.connection.prepare(
+                r#"SELECT json FROM event INDEXED BY event_by_type
+                   WHERE type IN ('agent.started','agent.finished','agent.identified','agent.relayed','agent.progress')
+                     AND session_id=?1
+                     AND seq>COALESCE((SELECT MAX(seq) FROM event WHERE session_id=?1 AND type='transcript.reset'),0)
+                     AND json_extract(json,'$.agentId') IN (SELECT value FROM json_each(?2))
+                   ORDER BY seq"#,
+            )?;
+            let events = statement.query_map(params![session_id, serde_json::to_string(ids).map_err(json_error)?], |row| row.get::<_, String>(0))?
+                .map(|row| serde_json::from_str::<Event>(&row?).map_err(json_error))
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            return Ok(fold_all(&events).agents().to_vec());
+        }
         let refs = ids.iter().map(|id| format!("a:{id}")).collect::<Vec<_>>();
         let mut statement = self.connection.prepare(
             r#"WITH picked(seq) AS (
@@ -2974,7 +3149,6 @@ fn held_in_its_project(
 
     /// The cursor is the agent's first start sequence, stable across new events.
     pub fn finished_agents(&self, session_id: &str, after: Option<i64>, limit: usize) -> rusqlite::Result<Value> {
-        self.ensure_event_refs(session_id)?;
         self.begin_read()?;
         let result = (|| {
             let rows = self.agent_states(session_id)?;
@@ -3028,13 +3202,19 @@ fn held_in_its_project(
     /// Read a cold conversation newest-first without constructing its complete
     /// durable projection. Negative cursors are opaque event anchors used only
     /// by this fallback; the browser already treats cursors as opaque numbers.
+    ///
+    /// A chat an older build left without id rows is not filled here: that
+    /// read the whole chat's JSON, 15 seconds on the first open of a 2 GB
+    /// chat. Its newest events are filed by id into a temporary table
+    /// instead, a window that widens only until the page is full, and the
+    /// page is read from that the same way; the writer's background fill
+    /// (`backfill_step`) gives the chat its own rows later.
     fn event_transcript_items(
         &self,
         session_id: &str,
         before: Option<i64>,
         limit: usize,
     ) -> rusqlite::Result<TranscriptItemPage> {
-        self.ensure_event_refs(session_id)?;
         let newest_seq: i64 = self.connection.query_row(
             "SELECT COALESCE(MAX(seq),0) FROM event WHERE session_id=?1",
             [session_id],
@@ -3049,14 +3229,87 @@ fn held_in_its_project(
             params![session_id, ceiling],
             |row| row.get(0),
         )?;
+        let filled = self.event_refs_ready(session_id)?;
+        let mut span = PAGE_REF_WINDOW;
+        let (refs, items, anchors) = loop {
+            let refs = if filled {
+                RefRows::FILLED.above(reset_seq)
+            } else {
+                let above = ceiling.saturating_sub(span).max(reset_seq);
+                self.load_ref_window(session_id, above, ceiling)?;
+                RefRows::WINDOW.above(above)
+            };
+            let (items, anchors, full) =
+                self.event_page_items(session_id, ceiling, reset_seq, limit, &refs)?;
+            if full || refs.above <= reset_seq {
+                break (refs, items, anchors);
+            }
+            span = span.saturating_mul(4);
+        };
+        let oldest_anchor = items
+            .iter()
+            .filter(|item| item_counts_toward_page(item))
+            .filter_map(item_key)
+            .filter_map(|key| anchors.get(&key).copied())
+            .min();
+        let has_older = match oldest_anchor {
+            // Each check stops at the first match, read through an index.
+            Some(cursor) if cursor > reset_seq => {
+                self.connection.query_row(
+                    &format!(
+                        r#"SELECT EXISTS(SELECT 1 FROM {table} AS start INDEXED BY {by_seq}
+                        WHERE start.session_id=?1 AND start.seq>?2 AND start.seq<?3
+                          AND start.type IN ('message.started','thinking.delta','tool.started')
+                          AND NOT EXISTS(SELECT 1 FROM {table} AS parent INDEXED BY {by_seq}
+                            WHERE parent.session_id=?1 AND parent.seq=start.seq
+                              AND parent.ref>='p:' AND parent.ref<'p;'))"#,
+                        table = refs.table,
+                        by_seq = refs.by_seq
+                    ),
+                    params![session_id, refs.above, cursor],
+                    |row| row.get::<_, bool>(0),
+                )? || (refs.above > reset_seq
+                    // Below the window nothing is filed by id; the chat's
+                    // own starts are told from a helper's by their JSON.
+                    && self.connection.query_row(
+                        r#"SELECT EXISTS(SELECT 1 FROM event INDEXED BY event_by_type
+                            WHERE type IN ('message.started','thinking.delta','tool.started')
+                              AND session_id=?1 AND seq>?2 AND seq<=?3
+                              AND json_extract(json,'$.parentToolCallId') IS NULL)"#,
+                        params![session_id, reset_seq, refs.above],
+                        |row| row.get::<_, bool>(0),
+                    )?)
+                    || !self.newest_rare_anchors(session_id, cursor, reset_seq, 1)?.is_empty()
+            }
+            _ => false,
+        };
+        Ok(TranscriptItemPage {
+            items,
+            cursor: oldest_anchor.filter(|_| has_older).map(|seq| -seq),
+            has_older,
+            newest_seq,
+        })
+    }
+
+    /// The newest `limit` of a chat's own rows below `ceiling`, read through
+    /// the id rows `refs` names, with when each began; and whether the page
+    /// is full, which it may not be when `refs` is only a window.
+    fn event_page_items(
+        &self,
+        session_id: &str,
+        ceiling: i64,
+        reset_seq: i64,
+        limit: usize,
+        refs: &RefRows,
+    ) -> rusqlite::Result<(Vec<Value>, HashMap<String, i64>, bool)> {
         let wanted = limit.saturating_add(8);
         let mut candidate_count = wanted;
-        let (items, anchors) = loop {
+        loop {
             // Walk the chat's ids newest first and stop once enough of its
             // own messages and calls have started. Seeking `event_ref` by id
             // prefix instead read every id row the chat ever stored, which
             // took seconds on a long chat from a cold disk (bw-yg67a.1).
-            let walk = self.walk_newest_refs(session_id, ceiling, reset_seq, candidate_count, limit)?;
+            let walk = self.walk_newest_refs(session_id, ceiling, refs, candidate_count, limit)?;
             let mut starts = walk.roots.values().copied().collect::<Vec<_>>();
             // A rare row older than the walk cannot outrank the starts it found.
             starts.extend(self.newest_rare_anchors(
@@ -3069,8 +3322,8 @@ fn held_in_its_project(
             let cutoff = starts
                 .get(candidate_count.saturating_sub(1))
                 .copied()
-                .unwrap_or_else(|| reset_seq.saturating_add(1));
-            let mut refs = Vec::new();
+                .unwrap_or_else(|| refs.above.saturating_add(1));
+            let mut wanted_refs = Vec::new();
             let mut tools = Vec::new();
             for (key, seq) in &walk.roots {
                 if *seq < cutoff {
@@ -3078,22 +3331,22 @@ fn held_in_its_project(
                 }
                 let (kind, id) = key.split_once(':').unwrap_or(("", key));
                 if kind == "tool" {
-                    refs.push(format!("t:{id}"));
+                    wanted_refs.push(format!("t:{id}"));
                     tools.push(id.to_string());
                 } else {
-                    refs.push(format!("m:{id}"));
+                    wanted_refs.push(format!("m:{id}"));
                 }
             }
-            refs.extend(walk.child_messages.iter().map(|id| format!("m:{id}")));
-            refs.extend(walk.child_tools.iter().map(|id| format!("t:{id}")));
+            wanted_refs.extend(walk.child_messages.iter().map(|id| format!("m:{id}")));
+            wanted_refs.extend(walk.child_tools.iter().map(|id| format!("t:{id}")));
             tools.extend(walk.child_tools.iter().cloned());
-            refs.sort_unstable();
-            refs.dedup();
+            wanted_refs.sort_unstable();
+            wanted_refs.dedup();
 
             // Read only the chosen messages, calls and helpers by id, plus the
             // rare kinds newer than the cutoff. A helper starts after its call,
             // so it lies inside the walked window.
-            let mut statement = self.connection.prepare(
+            let mut statement = self.connection.prepare(&format!(
                 r#"WITH
                selected_agents(id) AS (
                  SELECT DISTINCT json_extract(json,'$.agentId') FROM event INDEXED BY event_by_type
@@ -3108,7 +3361,7 @@ fn held_in_its_project(
                  UNION SELECT 'a:' || id FROM selected_agents
                ),
                picked(seq) AS (
-                 SELECT seq FROM event_ref
+                 SELECT seq FROM {table}
                  WHERE session_id=?1 AND ref IN (SELECT ref FROM wanted) AND seq>?7 AND seq<?3
                  UNION
                  SELECT seq FROM event INDEXED BY event_by_type
@@ -3122,14 +3375,15 @@ fn held_in_its_project(
                CROSS JOIN event ON event.session_id=?1 AND event.seq=picked.seq
                WHERE NOT(event.type='note' AND json_extract(event.json,'$.rank')='detail')
                ORDER BY event.seq"#,
-            )?;
+                table = refs.table
+            ))?;
             let rows = statement
                 .query_map(
                     params![
                         session_id,
                         cutoff,
                         ceiling,
-                        serde_json::to_string(&refs).map_err(json_error)?,
+                        serde_json::to_string(&wanted_refs).map_err(json_error)?,
                         serde_json::to_string(&tools).map_err(json_error)?,
                         walk.floor,
                         reset_seq
@@ -3154,41 +3408,68 @@ fn held_in_its_project(
                 .iter()
                 .filter(|item| item_counts_toward_page(item))
                 .count();
-            if primary_count >= limit || cutoff <= reset_seq.saturating_add(1) {
-                break (items, anchors);
+            if primary_count >= limit || cutoff <= refs.above.saturating_add(1) {
+                return Ok((items, anchors, primary_count >= limit));
             }
             // Retractions and identity refinements can make creation anchors
             // disappear during folding. Walking a little further back is cheap
             // and guarantees a full page.
             candidate_count = candidate_count.saturating_add(wanted);
-        };
-        let oldest_anchor = items
-            .iter()
-            .filter(|item| item_counts_toward_page(item))
-            .filter_map(item_key)
-            .filter_map(|key| anchors.get(&key).copied())
-            .min();
-        let has_older = match oldest_anchor {
-            // Both checks stop at the first match, read through an index.
-            Some(cursor) if cursor > reset_seq => {
-                self.connection.query_row(
-                    r#"SELECT EXISTS(SELECT 1 FROM event_ref AS start INDEXED BY event_ref_by_seq
-                        WHERE start.session_id=?1 AND start.seq>?2 AND start.seq<?3
-                          AND start.type IN ('message.started','thinking.delta','tool.started')
-                          AND NOT EXISTS(SELECT 1 FROM event_ref AS parent INDEXED BY event_ref_by_seq
-                            WHERE parent.session_id=?1 AND parent.seq=start.seq
-                              AND parent.ref>='p:' AND parent.ref<'p;'))"#,
-                    params![session_id, reset_seq, cursor],
-                    |row| row.get::<_, bool>(0),
-                )? || !self.newest_rare_anchors(session_id, cursor, reset_seq, 1)?.is_empty()
+        }
+    }
+
+    /// File the events of one stretch of a chat, `above < seq < ceiling`, by
+    /// id into this connection's own temporary table, the way
+    /// `ensure_event_refs` files the whole chat into `event_ref`. Only the
+    /// stretch's own events are read, and nothing is written to the
+    /// database, so a reader does it as well as the writer.
+    fn load_ref_window(&self, session_id: &str, above: i64, ceiling: i64) -> rusqlite::Result<()> {
+        let mut statement = self.connection.prepare_cached(&format!(
+            "SELECT seq, type, json_extract(json,'$.messageId'), json_extract(json,'$.toolCallId'),
+                    json_extract(json,'$.agentId'), json_extract(json,'$.parentToolCallId')
+               FROM event WHERE session_id=?1 AND seq>?2 AND seq<?3 AND +type IN ({})",
+            ref_types_sql()
+        ))?;
+        let rows = statement
+            .query_map(params![session_id, above, ceiling], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(statement);
+        self.allow_writes(|| {
+            self.connection.execute_batch(
+                "CREATE TEMP TABLE IF NOT EXISTS page_ref (
+                   session_id TEXT NOT NULL,
+                   ref TEXT NOT NULL,
+                   seq INTEGER NOT NULL,
+                   type TEXT NOT NULL,
+                   PRIMARY KEY (session_id, ref, seq)
+                 ) WITHOUT ROWID;
+                 CREATE INDEX IF NOT EXISTS temp.page_ref_by_seq ON page_ref(session_id, seq, type);
+                 DELETE FROM temp.page_ref;",
+            )?;
+            let mut insert = self.connection.prepare_cached(
+                "INSERT OR IGNORE INTO temp.page_ref (session_id, ref, seq, type) VALUES (?1,?2,?3,?4)",
+            )?;
+            for (seq, kind, message, tool, agent, parent) in rows {
+                for reference in event_refs(
+                    &kind,
+                    message.as_deref(),
+                    tool.as_deref(),
+                    agent.as_deref(),
+                    parent.as_deref(),
+                ) {
+                    insert.execute(params![session_id, reference, seq, kind])?;
+                }
             }
-            _ => false,
-        };
-        Ok(TranscriptItemPage {
-            items,
-            cursor: oldest_anchor.filter(|_| has_older).map(|seq| -seq),
-            has_older,
-            newest_seq,
+            Ok(())
         })
     }
 
@@ -3200,7 +3481,7 @@ fn held_in_its_project(
         &self,
         session_id: &str,
         ceiling: i64,
-        reset_seq: i64,
+        refs: &RefRows,
         roots: usize,
         tail: usize,
     ) -> rusqlite::Result<RefWalk> {
@@ -3208,13 +3489,14 @@ fn held_in_its_project(
             roots: HashMap::new(),
             child_messages: Vec::new(),
             child_tools: Vec::new(),
-            floor: reset_seq.saturating_add(1),
+            floor: refs.above.saturating_add(1),
         };
-        let mut statement = self.connection.prepare_cached(
-            "SELECT seq, ref, type FROM event_ref INDEXED BY event_ref_by_seq
+        let mut statement = self.connection.prepare_cached(&format!(
+            "SELECT seq, ref, type FROM {} INDEXED BY {}
              WHERE session_id=?1 AND seq<?2 AND seq>?3 ORDER BY seq DESC",
-        )?;
-        let mut rows = statement.query(params![session_id, ceiling, reset_seq])?;
+            refs.table, refs.by_seq
+        ))?;
+        let mut rows = statement.query(params![session_id, ceiling, refs.above])?;
         let mut group: Vec<(String, String)> = Vec::new();
         let mut group_seq = None;
         let finish = |walk: &mut RefWalk, seq: i64, group: &mut Vec<(String, String)>| {
@@ -3255,8 +3537,9 @@ fn held_in_its_project(
         if let Some(seq) = group_seq {
             finish(&mut walk, seq, &mut group);
         }
-        // The walk reached the reset, so nothing older can belong to the page.
-        walk.floor = reset_seq.saturating_add(1);
+        // The walk reached the reset, or the bottom of the window, so nothing
+        // older that these rows know of can belong to the page.
+        walk.floor = refs.above.saturating_add(1);
         Ok(walk)
     }
 
@@ -3498,6 +3781,29 @@ fn item_key(item: &Value) -> Option<String> {
         item["id"].as_str()?
     ))
 }
+
+/// Where a page reads a chat's id rows from: the chat's own in `event_ref`,
+/// or, for a chat not yet filled, the window `load_ref_window` filed. Rows
+/// are known for every seq above `above`.
+struct RefRows {
+    table: &'static str,
+    by_seq: &'static str,
+    above: i64,
+}
+
+impl RefRows {
+    const FILLED: RefRows = RefRows { table: "event_ref", by_seq: "event_ref_by_seq", above: 0 };
+    const WINDOW: RefRows = RefRows { table: "temp.page_ref", by_seq: "page_ref_by_seq", above: 0 };
+
+    fn above(self, above: i64) -> RefRows {
+        RefRows { above, ..self }
+    }
+}
+
+/// How many of a chat's newest seqs an unfilled chat's first page files by
+/// id; widened fourfold until the page is full. A turn is tens of events, so
+/// this is usually one pass.
+const PAGE_REF_WINDOW: i64 = 512;
 
 /// What a backward walk over a chat's ids found: when each of its own
 /// messages and calls started, the newest ids a helper's calls own, and the
@@ -5908,7 +6214,10 @@ mod tests {
             "the older mark is gone, so the chat is filled again"
         );
         assert_eq!(store.transcript_items("chat", None, 20).unwrap().items, page.items);
+        assert_eq!(parents(&store).len(), 0, "opening the chat does not fill it");
+        assert_eq!(store.backfill_event_refs(10).unwrap(), 1);
         assert_eq!(parents(&store).len(), 2, "filling again adds the parent ids");
+        assert_eq!(store.transcript_items("chat", None, 20).unwrap().items, page.items);
     }
 
     #[test]
@@ -5951,6 +6260,10 @@ mod tests {
             .connection()
             .execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_filled;")
             .unwrap();
+        assert_eq!(store.transcript_items("chat", None, 20).unwrap().items, page.items);
+        // Reading the page filled nothing; the background fill does, and
+        // pruning by id resumes.
+        assert_eq!(store.backfill_event_refs(10).unwrap(), 1);
         assert_eq!(store.transcript_items("chat", None, 20).unwrap().items, page.items);
         append(json!({"type":"tool.progress","sessionId":"chat","seq":48,"at":"now","toolCallId":"new","output":"three"}));
         assert_eq!(progress(&store), vec![48]);
@@ -7029,7 +7342,7 @@ mod tests {
         assert!(!plan.contains("TEMP B-TREE"), "{plan}");
         for connection in [&store.connection, &reader.connection] {
             let pages: i64 = connection.query_row("PRAGMA cache_size", [], |row| row.get(0)).unwrap();
-            assert_eq!(pages, -16384);
+            assert_eq!(pages, -65536);
         }
     }
 
@@ -7267,5 +7580,110 @@ mod tests {
             .map(Result::unwrap)
             .collect();
         found
+    }
+
+    /// Every chat an older build stored without id rows is filled by the
+    /// background job, a few chats at a time, and ends with exactly the rows
+    /// the per-chat fill gives it. Until now only opening a chat filled it,
+    /// which on a 2 GB chat made the first open take 15 seconds.
+    #[test]
+    fn a_background_job_fills_the_id_rows_of_every_chat_an_older_build_left() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let chats = ["one", "two", "three", "four", "five"];
+        for (index, chat) in chats.iter().enumerate() {
+            store
+                .create_session(&session(chat, "claude", None, "2026-11-18T00:00:00Z"))
+                .unwrap();
+            let mut seq = 0;
+            let mut append = |body: Value| {
+                seq += 1;
+                let mut object = body.as_object().unwrap().clone();
+                object.insert("sessionId".into(), json!(chat));
+                object.insert("seq".into(), json!(seq));
+                object.insert("at".into(), json!("now"));
+                assert!(store
+                    .append_event(&serde_json::from_value(Value::Object(object)).unwrap())
+                    .unwrap());
+            };
+            for turn in 0..=index {
+                let message = format!("m-{turn}");
+                let call = format!("t-{turn}");
+                append(json!({"type":"message.started","messageId":message,"role":"assistant"}));
+                append(json!({"type":"text.delta","messageId":message,"text":"hi"}));
+                append(json!({"type":"message.completed","messageId":message}));
+                append(json!({"type":"tool.started","toolCallId":call,"name":"Agent"}));
+                append(json!({"type":"agent.started","agentId":format!("a-{turn}"),"toolCallId":call}));
+                append(json!({"type":"message.started","messageId":format!("c-{turn}"),"role":"assistant","parentToolCallId":call}));
+                append(json!({"type":"tool.completed","toolCallId":call,"output":"done"}));
+            }
+        }
+        let rows = |store: &Store| -> Vec<(String, String, i64, String)> {
+            store
+                .connection()
+                .prepare("SELECT session_id, ref, seq, type FROM event_ref ORDER BY 1,2,3")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let filled = |store: &Store| -> i64 {
+            store
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM (SELECT DISTINCT session_id FROM event) e
+                       JOIN event_ref_filled f ON f.session_id = e.session_id",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        // What the per-chat fill gives every chat.
+        store.connection().execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_filled;").unwrap();
+        for chat in chats {
+            store.ensure_event_refs(chat).unwrap();
+        }
+        let expected = rows(&store);
+        assert!(!expected.is_empty());
+        assert_eq!(filled(&store), chats.len() as i64);
+
+        // As an older build left them.
+        store.connection().execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_filled;").unwrap();
+        let first = store.backfill_event_refs(1).unwrap();
+        assert_eq!(first, 1, "one batch of one chat filled {first} chats");
+        assert_eq!(filled(&store), 1, "one batch of one chat left another count filled");
+        let mut batches = 1;
+        while store.backfill_event_refs(2).unwrap() > 0 {
+            batches += 1;
+            assert!(batches <= chats.len(), "the background fill never finished");
+        }
+        assert_eq!(filled(&store), chats.len() as i64, "a chat was left unfilled");
+        assert_eq!(rows(&store), expected, "the background fill made other id rows");
+        assert_eq!(store.backfill_event_refs(10).unwrap(), 0, "nothing was left to fill");
+    }
+
+    /// Every connection maps the file and keeps a large page cache: the
+    /// database is 19 GB and 16 MB of cache per connection meant the index
+    /// pages of the chat list and of a big chat were read again every time.
+    #[test]
+    fn a_connection_maps_the_database_and_keeps_a_large_cache() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let writer = Store::open(&path).unwrap();
+        let reader = Store::open_reader(&path).unwrap();
+        for (name, store) in [("writer", &writer), ("reader", &reader)] {
+            let connection = store.connection();
+            let mmap: i64 = connection.query_row("PRAGMA mmap_size", [], |row| row.get(0)).unwrap();
+            let cache: i64 = connection.query_row("PRAGMA cache_size", [], |row| row.get(0)).unwrap();
+            let page: i64 = connection.query_row("PRAGMA page_size", [], |row| row.get(0)).unwrap();
+            let cache_bytes = if cache < 0 { -cache * 1024 } else { cache * page };
+            println!("{name}: mmap_size={mmap} cache_size={cache} cache_bytes={cache_bytes}");
+            assert!(mmap > 0, "the {name} does not map the file: mmap_size={mmap}");
+            assert!(
+                cache_bytes >= 64 * 1024 * 1024,
+                "the {name}'s page cache is {cache_bytes} bytes, under 64 MB"
+            );
+        }
     }
 }

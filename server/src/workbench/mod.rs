@@ -17,6 +17,7 @@ pub mod cli;
 pub mod disk_usage;
 pub mod docker;
 pub mod codex;
+pub mod codex_sweep;
 pub mod extensions;
 pub mod external;
 pub mod handback;

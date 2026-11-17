@@ -340,11 +340,26 @@ async fn one_shot_request(
     method: &str,
     params: Value,
 ) -> Result<Value, String> {
+    one_shot_call(brand, model, capability, method, params)
+        .await?
+        .map_err(|error| error.to_string())
+}
+
+/// One request to a provider started for it, with the provider's refusal
+/// still whole: its code and data say what it was, which text no longer can.
+/// The outer error is this app's own: no adapter to start.
+async fn one_shot_call(
+    brand: &str,
+    model: Option<&str>,
+    capability: Option<&str>,
+    method: &str,
+    params: Value,
+) -> Result<Result<Value, agent_client_protocol::Error>, String> {
     let config = adapter::launch_config(brand, model, None)
         .ok_or_else(|| format!("bundled {brand} ACP adapter is incomplete or unavailable"))?;
     let capability = capability.map(str::to_string);
     let method = method.to_string();
-    agent_client_protocol::Client
+    Ok(agent_client_protocol::Client
         .builder()
         .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
             let initialized = connection.send_request(initialize_request(false)?).block_task().await?;
@@ -369,8 +384,7 @@ async fn one_shot_request(
                 .block_task()
                 .await
         })
-        .await
-        .map_err(|error| error.to_string())
+        .await)
 }
 
 pub async fn authenticate(brand: &str, method_id: &str) -> Result<Value, String> {
@@ -400,14 +414,34 @@ pub async fn delete_session(session: &Session) -> Result<Value, String> {
         .external_id
         .as_deref()
         .ok_or_else(|| "saved session has no provider id".to_string())?;
-    one_shot_request(
+    let outcome = one_shot_call(
         &session.brand,
         session.model.as_deref(),
         Some("/agentCapabilities/sessionCapabilities/delete"),
         "session/delete",
         json!({"sessionId":external_id}),
     )
-    .await
+    .await?;
+    provider_delete_outcome(outcome, external_id).map(|()| Value::Null)
+}
+
+/// What a provider's answer to `session/delete` means for the chat's delete.
+///
+/// A provider is free to forget a session on its own: Claude prunes its
+/// transcripts after `cleanupPeriodDays`, and then answers a delete with
+/// "Session … not found in any project directory". Nothing of it is left to
+/// delete, so the delete is done; refusing it kept the app's copy for good
+/// and stalled every cleanup on the same chats. Read as a forgotten session
+/// is read everywhere else (`remote_session_is_gone`).
+fn provider_delete_outcome(
+    outcome: Result<Value, agent_client_protocol::Error>,
+    remote_id: &str,
+) -> Result<(), String> {
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(error) if remote_session_is_gone(&error, remote_id) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 pub async fn fork_session(session: &Session) -> Result<Value, String> {
@@ -4048,6 +4082,27 @@ mod tests {
         assert!(!gone(agent_client_protocol::Error::internal_error()));
         assert!(!gone(agent_client_protocol::Error::internal_error()
             .data("the model is overloaded, try again")));
+    }
+
+    /// A chat is deleted from its provider first. A provider that already
+    /// forgot it (Claude prunes its own transcripts after
+    /// `cleanupPeriodDays`) has nothing left to delete: that is a delete
+    /// done, not a refusal that keeps the app's copy for good.
+    #[test]
+    fn a_provider_record_already_gone_counts_as_deleted() {
+        let id = "08d617f5-db23-428c-973e-6cea7f9e8671";
+        // What the bundled Claude adapter answered, measured.
+        let claude = agent_client_protocol::Error::internal_error().data(serde_json::json!({
+            "details": format!("Session {id} not found in any project directory")
+        }));
+        assert!(provider_delete_outcome(Err(claude), id).is_ok());
+        assert!(provider_delete_outcome(Err(agent_client_protocol::Error::resource_not_found(None)), id).is_ok());
+        assert!(provider_delete_outcome(Ok(serde_json::json!({})), id).is_ok());
+
+        // Anything else still stops the delete, so no provider record is left
+        // behind without its chat.
+        assert!(provider_delete_outcome(Err(agent_client_protocol::Error::auth_required()), id).is_err());
+        assert!(provider_delete_outcome(Err(agent_client_protocol::Error::internal_error()), id).is_err());
     }
 
     /// A refusal is drawn in the chat, so it is written for the reader.

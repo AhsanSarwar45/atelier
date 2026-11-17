@@ -2643,8 +2643,23 @@ impl WorkbenchRegistry {
                     .ok_or_else(|| format!("no session {session_id}"))?;
                 // A chat its provider never named has no provider record to
                 // delete; only the app's own copy is left to remove.
-                if session.external_id.is_some() {
+                if let Some(external_id) = session.external_id.clone() {
                     super::acp::client::delete_session(&session).await?;
+                    // Codex's delete only archives the thread; its rows,
+                    // rollout and pictures stay unless removed here. The chat
+                    // is gone either way, so a failure is only logged.
+                    if session.brand == "codex" {
+                        let home = self.account_dir("codex", session.profile.as_deref());
+                        let forgotten = tokio::task::spawn_blocking(move || {
+                            super::codex_sweep::forget_thread(&home, &external_id)
+                        })
+                        .await
+                        .map_err(|error| error.to_string())
+                        .and_then(|forgotten| forgotten);
+                        if let Err(error) = forgotten {
+                            tracing::warn!(%error, session_id, "Codex thread not removed");
+                        }
+                    }
                 }
                 self.database.delete_session(session_id.to_string()).await?;
                 Ok(json!({"ok":true}))

@@ -549,33 +549,52 @@ impl Cleaner {
         let before = self.disk_bytes();
         let mut report = RunReport {
             at: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            remaining: (plan.delete.len() + plan.archive.len()).saturating_sub(CHATS_PER_RUN),
             ..RunReport::default()
         };
-        let mut budget = CHATS_PER_RUN;
         let fail = |report: &mut RunReport, error: String| {
             report.failed += 1;
             report.error.get_or_insert(error);
         };
-        for id in plan.delete.iter().take(budget) {
-            match delete_chat(registry, id).await {
-                Ok(()) => report.chats += 1,
-                Err(error) => fail(&mut report, error),
+        // Only a chat cleared counts against the run's number. A chat that
+        // can't be cleared is passed over, not counted: when the oldest ones
+        // all failed, every run tried the same ones again and cleared none.
+        // Attempts are bounded too, so a provider that refuses everything
+        // costs a run no more than twice its number.
+        let chats = plan.delete.iter().map(|id| (id, true)).chain(plan.archive.iter().map(|id| (id, false)));
+        let mut attempted = 0;
+        for (id, delete) in chats {
+            if report.chats + report.archived >= CHATS_PER_RUN || attempted >= 2 * CHATS_PER_RUN {
+                break;
+            }
+            attempted += 1;
+            let cleared = if delete {
+                delete_chat(registry, id).await
+            } else {
+                self.archive_chat(registry, id).await
+            };
+            match (cleared, delete) {
+                (Ok(()), true) => report.chats += 1,
+                (Ok(()), false) => report.archived += 1,
+                (Err(error), _) => fail(&mut report, error),
             }
         }
-        budget = budget.saturating_sub(plan.delete.len());
-        for id in plan.archive.iter().take(budget) {
-            match self.archive_chat(registry, id).await {
-                Ok(()) => report.archived += 1,
-                Err(error) => fail(&mut report, error),
-            }
-        }
+        report.remaining = (plan.delete.len() + plan.archive.len()).saturating_sub(attempted);
         for id in &plan.drop {
             match self.delete_archive(registry, id).await {
                 Ok(()) => report.chats += 1,
                 Err(error) => fail(&mut report, error),
             }
         }
+        // Threads Codex's own agents began are no chat of the app's, so no
+        // rule ever matches them; they go at the age the youngest rule that
+        // removes chats names, and never without such a rule.
+        let youngest = rules.iter().filter(|rule| rule.enabled && rule.delete.removes()).map(Rule::days).min();
+        let codex_bytes = match youngest {
+            Some(days) => {
+                super::codex_sweep::sweep_every_home(registry, Duration::from_secs(u64::from(days) * 86_400)).await
+            }
+            None => 0,
+        };
         for id in &plan.trim {
             let id = id.clone();
             let trimmed = registry
@@ -604,7 +623,9 @@ impl Cleaner {
         report.images = images + swept_images;
         report.files = files + swept_files;
         self.reclaim(registry).await;
-        report.bytes = before.saturating_sub(self.disk_bytes());
+        // The Codex homes are not among what `disk_bytes` measures; what the
+        // sweep gave back is measured on their own files and added here.
+        report.bytes = before.saturating_sub(self.disk_bytes()) + codex_bytes;
         let text = serde_json::to_string(&report).map_err(|e| e.to_string())?;
         self.settings
             .set_setting(LAST_RUN, Some(&text))
@@ -794,11 +815,24 @@ impl Cleaner {
             // provider's record; only the archive goes.
             let reopened = registry
                 .database()
-                .session_by_external_id(external)
+                .session_by_external_id(external.clone())
                 .await?
                 .is_some_and(|live| live.brand == session.brand);
             if !reopened {
                 super::acp::client::delete_session(&session).await?;
+                // As a person's delete does: Codex's own delete leaves the
+                // thread's rows and files, and the archive goes either way.
+                if session.brand == "codex" {
+                    let home = super::codex_sweep::home_for(registry, session.profile.as_deref());
+                    let thread = external.clone();
+                    let forgotten = tokio::task::spawn_blocking(move || super::codex_sweep::forget_thread(&home, &thread))
+                        .await
+                        .map_err(|error| error.to_string())
+                        .and_then(|forgotten| forgotten);
+                    if let Err(error) = forgotten {
+                        tracing::warn!(%error, id, "Codex thread not removed");
+                    }
+                }
             }
         }
         let assets: HashSet<String> = chat_store::archived_chats(&self.archive)
@@ -931,6 +965,8 @@ fn record_bytes(path: &Path) -> u64 {
 
 fn unused_files(media: &Path, indexed: &Indexed) -> Vec<(String, u64)> {
     let now = std::time::SystemTime::now();
+    // Found once: a store holds tens of thousands of files.
+    let shown = indexed.shown(&HashSet::new());
     std::fs::read_dir(media)
         .into_iter()
         .flatten()
@@ -938,9 +974,13 @@ fn unused_files(media: &Path, indexed: &Indexed) -> Vec<(String, u64)> {
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().to_string();
             super::storage_index::stored_file(media, &name)?;
+            // Before its size and age are read, which most files never need.
+            if shown.contains(name.as_str()) {
+                return None;
+            }
             let meta = entry.metadata().ok().filter(|m| m.is_file())?;
             let age = meta.modified().ok().and_then(|at| now.duration_since(at).ok())?;
-            (age >= UNUSED_AFTER && !indexed.in_use(&name, &HashSet::new())).then_some((name, meta.len()))
+            (age >= UNUSED_AFTER).then_some((name, meta.len()))
         })
         .collect()
 }
@@ -1294,6 +1334,33 @@ mod tests {
         assert!(database.get_session("d".into()).await.unwrap().is_some());
     }
 
+    /// A run takes the oldest chats first, so many at a time. A chat that
+    /// can't be deleted must not use up that number: when the oldest ones all
+    /// failed, every run tried the same ones again and nothing was cleared.
+    #[tokio::test]
+    async fn chats_that_cannot_be_deleted_do_not_hold_up_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let (database, registry, chats_db, media) = stage(dir.path());
+        // A provider this app no longer has: its chats' records can't be
+        // deleted, wherever the test runs.
+        for n in 0..CHATS_PER_RUN {
+            let mut stuck = saved(dir.path(), &format!("stuck-{n}"), Some(&format!("thread-{n}")));
+            stuck.brand = "retired-provider".into();
+            database.create_session(stuck).await.unwrap();
+        }
+        let mut free = saved(dir.path(), "free", None);
+        free.last_active_at = "2026-01-03T00:00:00.000Z".into();
+        database.create_session(free).await.unwrap();
+        let cleaner = cleaner(dir.path(), &chats_db, &media);
+        save_rules(&cleaner.settings, &[rule("old", 30, Target::Chats, None)]).unwrap();
+
+        let report = cleaner.run(&registry).await.unwrap();
+
+        assert!(database.get_session("free".into()).await.unwrap().is_none(), "{report:?}");
+        assert_eq!(report.chats, 1, "{report:?}");
+        assert_eq!(report.failed, CHATS_PER_RUN, "{report:?}");
+    }
+
     #[tokio::test]
     async fn chats_archived_restored_and_deleted_by_hand_keep_and_free_the_right_files() {
         let dir = tempfile::tempdir().unwrap();
@@ -1351,5 +1418,112 @@ mod tests {
         let shrunk = cleaner.compact(&registry).await.unwrap();
         assert!(shrunk["after"].as_u64() < shrunk["before"].as_u64(), "{shrunk}");
         assert!(cleaner.index.reclaims());
+    }
+
+    /// A stored file name from a number, in the form the store uses.
+    fn asset_named(n: usize, ext: &str) -> String {
+        format!("{n:064x}.{ext}")
+    }
+
+    fn put_old(media: &Path, name: &str, days_old: u64) {
+        let path = media.join(name);
+        std::fs::write(&path, b"stored").unwrap();
+        let at = SystemTime::now() - Duration::from_secs(days_old * 86_400);
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(at).unwrap();
+    }
+
+    #[test]
+    fn unused_files_are_exactly_the_old_stored_files_nothing_shows() {
+        let dir = tempfile::tempdir().unwrap();
+        let media = dir.path();
+        let shown = asset_named(1, "png");
+        let unnamed = asset_named(2, "png");
+        let archived_only = asset_named(3, "pdf");
+        let cleared_only = asset_named(4, "png");
+        let elsewhere_only = asset_named(5, "jpg");
+        let young_unnamed = asset_named(6, "png");
+        let pdf_where_images_cleared = asset_named(7, "pdf");
+        let cleared_here_shown_there = asset_named(8, "webp");
+        let named_again_after_clear = asset_named(9, "gif");
+        for name in [
+            &shown,
+            &unnamed,
+            &archived_only,
+            &cleared_only,
+            &elsewhere_only,
+            &pdf_where_images_cleared,
+            &cleared_here_shown_there,
+            &named_again_after_clear,
+        ] {
+            put_old(media, name, 30);
+        }
+        put_old(media, &young_unnamed, 1);
+        // Not a stored file's name, or not a file: never counted.
+        put_old(media, "notes.txt", 30);
+        std::fs::create_dir_all(media.join(asset_named(10, "png"))).unwrap();
+
+        let missing = asset_named(11, "png");
+        let mut indexed = refs(&[
+            (shown.as_str(), "live", 5),
+            (cleared_only.as_str(), "cleared", 3),
+            (pdf_where_images_cleared.as_str(), "cleared", 3),
+            (cleared_here_shown_there.as_str(), "cleared", 2),
+            (cleared_here_shown_there.as_str(), "live", 1),
+            (named_again_after_clear.as_str(), "cleared", 9),
+            // Names a file the store does not hold.
+            (missing.as_str(), "live", 2),
+        ]);
+        indexed.cleared.insert(("cleared".into(), Kind::Images), 4);
+        indexed.archived.insert("kept".into(), vec![archived_only.clone()]);
+        indexed.elsewhere.insert(elsewhere_only.clone());
+
+        let mut found: Vec<(String, u64)> = unused_files(media, &indexed);
+        found.sort();
+        let mut expected = vec![(unnamed.clone(), 6), (cleared_only.clone(), 6)];
+        expected.sort();
+        assert_eq!(found, expected);
+    }
+
+    /// Run alone: `cargo test --lib -- --ignored --exact
+    /// workbench::cleanup::tests::bench_unused_files_over_twenty_thousand_stored_files`.
+    #[test]
+    #[ignore]
+    fn bench_unused_files_over_twenty_thousand_stored_files() {
+        const FILES: usize = 20_000;
+        const SHOWN: usize = 15_000;
+        const ARCHIVED: usize = 300;
+        const CHATS: usize = 3_000;
+        const BUDGET_MS: f64 = 100.0;
+        let ext = |n: usize| if n % 3 == 0 { "pdf" } else { "png" };
+        let dir = tempfile::tempdir().unwrap();
+        let media = dir.path();
+        for n in 0..FILES {
+            put_old(media, &asset_named(n, ext(n)), 30);
+        }
+        // Each of the first 15,000 files is named by two chats (30,000 refs),
+        // archived chats name the next 3,000, and nothing names the rest.
+        let mut indexed = Indexed::default();
+        for n in 0..SHOWN {
+            for copy in 0..2 {
+                let session = format!("chat-{}", (n * 2 + copy) % CHATS);
+                indexed.refs.push(AssetRef {
+                    asset: asset_named(n, ext(n)),
+                    session_id: session.clone(),
+                    last_seq: (n % 50) as i64 + 10,
+                });
+                indexed.chats.entry(session).or_insert((0, 60));
+            }
+        }
+        for chat in 0..ARCHIVED {
+            indexed.cleared.insert((format!("chat-{chat}"), Kind::Images), 5);
+            let assets = (0..10).map(|k| SHOWN + chat * 10 + k).map(|n| asset_named(n, ext(n))).collect();
+            indexed.archived.insert(format!("archived-{chat}"), assets);
+        }
+        let started = std::time::Instant::now();
+        let unused = unused_files(media, &indexed);
+        let ms = started.elapsed().as_secs_f64() * 1000.0;
+        println!("unused_ms={ms:.1}");
+        assert_eq!(unused.len(), FILES - SHOWN - ARCHIVED * 10);
+        assert!(ms <= BUDGET_MS, "unused_files took {ms:.1} ms, budget {BUDGET_MS} ms");
     }
 }

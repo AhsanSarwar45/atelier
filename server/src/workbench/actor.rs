@@ -6,7 +6,7 @@
 
 use super::protocol::{Event, EventKind};
 use super::store::{
-    Notice, SearchHit, Session, SessionActivity, SessionPatch, Spend, Store, TokenStats,
+    Backfill, Notice, SearchHit, Session, SessionActivity, SessionPatch, Spend, Store, TokenStats,
     TranscriptItemPage,
 };
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,10 @@ type ReadJob = Box<dyn FnOnce(&Store, &LiveMenus) + Send>;
 /// status write queued behind them and the whole app stood still (bw-0xeav.3).
 /// SQLite in WAL mode lets these read while the writer writes.
 const READERS: usize = 3;
+
+/// The longest the writer spends on one slice of the background fill of
+/// older chats' id rows before it looks for a command again.
+const BACKFILL_SLICE: std::time::Duration = std::time::Duration::from_millis(20);
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,7 +102,6 @@ enum Command {
     StillDriving(Reply<Vec<String>>),
     SessionStatus(String, Reply<Option<serde_json::Value>>),
     SessionActivity(String, Reply<SessionActivity>),
-    SessionActivities(Reply<HashMap<String, SessionActivity>>),
     NoteSummaryRun(String, String, String, i64, Reply<()>),
     SummaryRuns(String, usize, Reply<Vec<i64>>),
     SteeringMenu(String, Reply<serde_json::Value>),
@@ -142,8 +145,8 @@ impl Drop for Owner {
         if let Some(worker) = self.worker.lock().unwrap().take() {
             let _ = worker.join();
         }
-        // The writer held the other sender; with both gone every reader
-        // finishes the read it is on and stops.
+        // With the one sender gone every reader finishes the read it is on
+        // and stops.
         self.reads.lock().unwrap().take();
         for reader in self.readers.lock().unwrap().drain(..) {
             let _ = reader.join();
@@ -186,7 +189,6 @@ impl ChatDb {
                     .map_err(|error| error.to_string())?,
             );
         }
-        let worker_reads = reads.clone();
         let worker_menus = live_menus.clone();
         let (commands, receiver) = mpsc::unbounded_channel();
         let (global, _) = broadcast::channel(1024);
@@ -200,7 +202,7 @@ impl ChatDb {
         let worker = thread::Builder::new()
             .name("atelier-chat-db".to_string())
             .spawn(move || {
-                run(store, receiver, worker_global, worker_sessions, worker_menus, worker_reads);
+                run(store, receiver, worker_global, worker_sessions, worker_menus);
                 #[cfg(test)]
                 worker_stopped.store(true, std::sync::atomic::Ordering::SeqCst);
             })
@@ -576,8 +578,16 @@ impl ChatDb {
         self.request(|reply| Command::SessionStatus(session_id, reply))
             .await
     }
+    /// On a reader: the list's query reads every chat's newest state, and a
+    /// send or a stop made meanwhile must not wait for it.
     pub async fn session_activities(&self) -> Result<HashMap<String, SessionActivity>, String> {
-        self.request(Command::SessionActivities).await
+        self.read(|store, _| {
+            store.begin_read()?;
+            let activities = store.session_activities();
+            let _ = store.end_read();
+            activities
+        })
+        .await
     }
     pub async fn token_stats(&self, session_id: String) -> Result<TokenStats, String> {
         self.read(move |store, _| store.token_stats(&session_id)).await
@@ -1310,14 +1320,38 @@ fn run(
     global: broadcast::Sender<StoreUpdate>,
     sessions: Arc<Mutex<HashMap<String, broadcast::Sender<SessionUpdate>>>>,
     shared_menus: LiveMenus,
-    reads: std::sync::mpsc::Sender<ReadJob>,
 ) {
     let mut agent_lifecycles: HashMap<String, super::lifecycle::AgentLifecycle> = HashMap::new();
     // Provider catalogues describe the installed provider right now. They are
     // broadcast and replayed while this process is alive, and never restored
     // from a chat's durable history; only the provider's own last menu is
     // (`Store::provider_catalogue`).
-    while let Some(command) = commands.blocking_recv() {
+    // Chats an older build stored without id rows are filled here, a short
+    // slice at a time whenever no command is waiting, so opening one never
+    // has to (`Store::backfill_step`).
+    let mut backfill = Some(Backfill::default());
+    loop {
+        let command = match backfill.as_mut() {
+            Some(fill) => match commands.try_recv() {
+                Ok(command) => command,
+                Err(mpsc::error::TryRecvError::Disconnected) => break,
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    match store.backfill_step(fill, BACKFILL_SLICE) {
+                        Ok(true) => {}
+                        Ok(false) => backfill = None,
+                        Err(error) => {
+                            tracing::warn!(%error, "could not file an older chat's events by id");
+                            fill.skip();
+                        }
+                    }
+                    continue;
+                }
+            },
+            None => match commands.blocking_recv() {
+                Some(command) => command,
+                None => break,
+            },
+        };
         // Held for one command at a time; a reader copies it and lets go.
         let mut live_menus = shared_menus.lock().unwrap();
         // Checked here, in the writer, so nothing lands between the check and
@@ -1574,7 +1608,6 @@ fn run(
             Command::SessionActivity(session_id, reply) => {
                 respond(reply, store.session_activity(&session_id))
             }
-            Command::SessionActivities(reply) => respond(reply, store.session_activities()),
             Command::NoteSummaryRun(project, session_id, at, ms, reply) => respond(
                 reply,
                 store.note_summary_run(&project, &session_id, &at, ms),
@@ -1670,22 +1703,15 @@ fn run(
             Command::AppendIfStateAt(..) => unreachable!("made an append above"),
         }
         drop(live_menus);
-        for session_id in store.take_unfilled() {
-            let _ = reads.send(Box::new(move |reader, _| {
-                if let Err(error) = reader.ensure_event_refs(&session_id) {
-                    tracing::warn!(session_id, %error, "could not file a chat's events by id");
-                }
-            }));
-        }
     }
 }
 
-/// One self-consistent cold-chat read on a reader. The chat's ids are filled
-/// first, then the history, page and helpers are read in one read
-/// transaction, so an append lands wholly before or wholly after the page's
-/// `newest_seq`, which the stream uses as its watermark.
+/// One self-consistent cold-chat read on a reader. The history, page and
+/// helpers are read in one read transaction, so an append lands wholly before
+/// or wholly after the page's `newest_seq`, which the stream uses as its
+/// watermark. A chat whose id rows are not filled yet is read without filling
+/// them; the writer's background fill does that.
 fn snapshot(store: &Store, menus: &LiveMenus, session_id: &str) -> rusqlite::Result<SnapshotParts> {
-    store.ensure_event_refs(session_id)?;
     let menus = menus.lock().unwrap().clone();
     store.begin_read()?;
     let result = (|| {
@@ -2247,14 +2273,16 @@ mod tests {
         }
     }
 
-    /// A chat stored before its events were filed by id is filed by a reader,
-    /// not by the writer on its next progress report, and pruning resumes.
+    /// A chat stored before its events were filed by id is filled by the
+    /// writer's background job, with nothing asked of the database, and
+    /// pruning resumes.
     ///
-    /// Filing the owner's busiest chat reads about a gigabyte once; on the
-    /// writer that would have held every send and stop for ten seconds
+    /// Filing the owner's busiest chat reads about a gigabyte once; done at
+    /// once on the writer that would have held every send and stop for ten
+    /// seconds, and done when the chat was opened it made the open take 15
     /// (bw-0xeav.3).
     #[tokio::test]
-    async fn a_chat_filed_before_the_id_rows_is_filled_beside_the_writer() {
+    async fn a_chat_filed_before_the_id_rows_is_filled_in_the_background() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("workbench.db");
         let progress = |seq: i64, output: &str| -> Event {
@@ -2283,24 +2311,25 @@ mod tests {
             database
                 .read(|store, _| {
                     store.connection().query_row(
-                        "SELECT COUNT(*), (SELECT COUNT(*) FROM event_ref_filled) FROM event WHERE type='tool.progress'",
+                        "SELECT COUNT(*), (SELECT COUNT(*) FROM event_ref_filled),
+                                (SELECT COUNT(*) FROM event_ref)
+                           FROM event WHERE type='tool.progress'",
                         [],
-                        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
                     )
                 })
                 .await
                 .unwrap()
         };
-        database.append(progress(0, "two")).await.unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut seen = reports(database.clone()).await;
         while seen.1 == 0 && std::time::Instant::now() < deadline {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             seen = reports(database.clone()).await;
         }
-        assert_eq!(seen, (2, 1), "the old report was pruned by the writer, or the chat was never filled");
-        database.append(progress(0, "three")).await.unwrap();
-        assert_eq!(reports(database.clone()).await, (1, 1));
+        assert_eq!(seen, (1, 1, 2), "the chat was never filled (reports, filled, id rows)");
+        database.append(progress(0, "two")).await.unwrap();
+        assert_eq!(reports(database.clone()).await, (1, 1, 2), "the old report was not pruned");
     }
 
     #[tokio::test]
@@ -2655,5 +2684,164 @@ mod tests {
         let database = ChatDb::open(&path).unwrap();
         let late:Event=serde_json::from_value(json!({"type":"agent.started","sessionId":"chat","seq":0,"at":"later","agentId":"a","toolCallId":"t","kind":"helper","what":"Late","agentType":null,"model":null})).unwrap();
         assert!(database.append(late).await.unwrap().is_none());
+    }
+
+    /// A chat as an older build left it: `turns` turns, each with a tool call
+    /// whose output is `output_bytes` long, and no id rows.
+    fn unfilled_big_chat(path: &std::path::Path, chat: &str, turns: usize, output_bytes: usize) {
+        let store = Store::open(path).unwrap();
+        let output = "x".repeat(output_bytes);
+        let mut seq = 0;
+        store.begin_event_batch().unwrap();
+        let mut append = |body: serde_json::Value| {
+            seq += 1;
+            let mut object = body.as_object().unwrap().clone();
+            object.insert("sessionId".into(), json!(chat));
+            object.insert("seq".into(), json!(seq));
+            object.insert("at".into(), json!("2026-11-18T00:00:00Z"));
+            assert!(store
+                .append_event(&serde_json::from_value(serde_json::Value::Object(object)).unwrap())
+                .unwrap());
+        };
+        for turn in 0..turns {
+            for (role, id) in [("user", format!("ask-{turn}")), ("assistant", format!("say-{turn}"))] {
+                append(json!({"type":"message.started","messageId":id,"role":role}));
+                append(json!({"type":"text.delta","messageId":id,"text":format!("turn {turn}")}));
+                append(json!({"type":"message.completed","messageId":id}));
+            }
+            let call = format!("call-{turn}");
+            append(json!({"type":"tool.started","toolCallId":call,"name":"Bash","input":{"command":"ls"}}));
+            append(json!({"type":"tool.completed","toolCallId":call,"status":"completed","output":output}));
+        }
+        store.commit_event_batch().unwrap();
+        store
+            .connection()
+            .execute_batch("DELETE FROM event_ref; DELETE FROM event_ref_filled;")
+            .unwrap();
+    }
+
+    fn id_rows(store: &Store, chat: &str) -> (i64, i64) {
+        store
+            .connection()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM event_ref WHERE session_id=?1),
+                        (SELECT COUNT(*) FROM event_ref_filled WHERE session_id=?1)",
+                [chat],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    }
+
+    /// Opening a chat an older build left without id rows shows its newest
+    /// page and does not fill the whole chat's id rows first: on the owner's
+    /// data that fill made the first open of a chat take 15 seconds. Filling
+    /// is the background job's (`Store::backfill_event_refs`).
+    #[test]
+    fn opening_a_chat_left_without_id_rows_does_not_fill_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        unfilled_big_chat(&path, "old", 200, 64);
+        let reader = Store::open_reader(&path).unwrap();
+        let menus: LiveMenus = Default::default();
+        assert_eq!(id_rows(&reader, "old"), (0, 0));
+        let parts = snapshot(&reader, &menus, "old").unwrap();
+        assert!(
+            parts.page.items.iter().any(|item| item["id"] == "call-199"),
+            "the newest call is not on the first page"
+        );
+        let page = reader.transcript_items("old", None, 40).unwrap();
+        assert!(!page.items.is_empty());
+        assert_eq!(
+            id_rows(&reader, "old"),
+            (0, 0),
+            "opening the chat filled its id rows (rows, filled mark)"
+        );
+    }
+
+    /// Benchmark: the first open (snapshot) of a big chat with no id rows.
+    /// One measured run; prints `open_ms=`.
+    #[test]
+    #[ignore]
+    fn bench_first_open_of_an_unfilled_big_chat() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        unfilled_big_chat(&path, "big", 4_000, 16 * 1024);
+        let reader = Store::open_reader(&path).unwrap();
+        let menus: LiveMenus = Default::default();
+        let started = std::time::Instant::now();
+        let parts = snapshot(&reader, &menus, "big").unwrap();
+        let took = started.elapsed();
+        assert!(!parts.page.items.is_empty());
+        println!("open_ms={:.1}", took.as_secs_f64() * 1000.0);
+    }
+
+    /// Thousands of chats, each still thinking after a long run of states, so
+    /// the chat list's activity query has real work to do.
+    fn many_busy_chats(path: &std::path::Path, chats: usize, states: usize) {
+        let store = Store::open(path).unwrap();
+        let detail = "d".repeat(512);
+        store.begin_event_batch().unwrap();
+        for chat in 0..chats {
+            for seq in 1..=states {
+                let event: Event = serde_json::from_value(json!({
+                    "type":"session.state","sessionId":format!("chat-{chat}"),"seq":seq,
+                    "at":format!("2026-11-18T00:{:02}:00Z", seq % 60),
+                    "state":"thinking","label":"Thinking","detail":detail
+                }))
+                .unwrap();
+                assert!(store.append_event(&event).unwrap());
+            }
+        }
+        store.commit_event_batch().unwrap();
+    }
+
+    /// The chat list's activity query runs beside the writer: a send made
+    /// while the list is being read comes back in a fraction of the list's
+    /// time. It ran
+    /// on the writer, so creating a chat, sending and stopping queued behind
+    /// a GROUP BY over every chat's states.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_send_made_while_the_chat_list_is_read_does_not_wait_for_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        many_busy_chats(&path, 6_000, 30);
+        let database = ChatDb::open(&path).unwrap();
+        let said = |id: &str| -> Event {
+            serde_json::from_value(json!({
+                "type":"message.started","sessionId":"fresh","seq":0,"at":"now",
+                "messageId":id,"role":"user"
+            }))
+            .unwrap()
+        };
+        // The writer's first write may pay for work an open leaves it; pay
+        // it before the timed send.
+        let first = std::time::Instant::now();
+        assert!(database.append(said("m0")).await.unwrap().is_some());
+        println!("first_append_ms={:.1}", first.elapsed().as_secs_f64() * 1000.0);
+        // Warm the cache so the timed run is the query, not the disk.
+        let warm = std::time::Instant::now();
+        let activities = database.session_activities().await.unwrap();
+        let list_ms = warm.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(activities.len(), 6_000);
+
+        let listing = database.clone();
+        let list = tokio::spawn(async move { listing.session_activities().await.unwrap() });
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let submitted = std::time::Instant::now();
+        assert!(database.append(said("m1")).await.unwrap().is_some());
+        let append_ms = submitted.elapsed().as_secs_f64() * 1000.0;
+        list.await.unwrap();
+        println!("list_ms={list_ms:.1} append_ms={append_ms:.1}");
+        assert!(
+            list_ms > 50.0,
+            "the list took only {list_ms:.1} ms, too fast to show anything waiting on it"
+        );
+        // When the send queues behind the list both replies leave within
+        // microseconds of each other, so which future wakes first says
+        // nothing; how long the send took does.
+        assert!(
+            append_ms < list_ms / 4.0,
+            "the send waited {append_ms:.1} ms for the chat list ({list_ms:.1} ms) to be read"
+        );
     }
 }
