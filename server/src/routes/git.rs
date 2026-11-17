@@ -170,6 +170,9 @@ pub struct Refused {
     /// Set only when the folder has no repository at all. The panel reads it
     /// to offer to make one instead of drawing controls that cannot work.
     not_a_repository: bool,
+    /// Set only when the folder itself is gone, as a chat's worktree is once
+    /// it is deleted. The panel offers to bring it back instead.
+    folder_missing: bool,
 }
 
 impl Refused {
@@ -185,6 +188,7 @@ impl Refused {
             said: said.into(),
             a_key_could_fix_it: false,
             not_a_repository: false,
+            folder_missing: false,
         }
     }
 
@@ -196,6 +200,7 @@ impl Refused {
             said: said.into(),
             a_key_could_fix_it: false,
             not_a_repository: true,
+            folder_missing: false,
         }
     }
 
@@ -207,6 +212,7 @@ impl Refused {
             said: said.into(),
             a_key_could_fix_it: true,
             not_a_repository: false,
+            folder_missing: false,
         }
     }
 }
@@ -221,6 +227,9 @@ impl IntoResponse for Refused {
         }
         if self.not_a_repository {
             body["notARepository"] = serde_json::Value::Bool(true);
+        }
+        if self.folder_missing {
+            body["folderMissing"] = serde_json::Value::Bool(true);
         }
         (self.code, Json(body)).into_response()
     }
@@ -324,10 +333,10 @@ pub(crate) fn checked_repo(path: &str) -> Result<PathBuf, Refused> {
     }
 
     if !repo.exists() {
-        return Err(Refused::new(
-            StatusCode::BAD_REQUEST,
-            format!("Repository path does not exist: {}", path),
-        ));
+        return Err(Refused {
+            folder_missing: true,
+            ..Refused::new(StatusCode::NOT_FOUND, format!("Folder does not exist: {}", path))
+        });
     }
 
     if !repo.is_dir() {
@@ -3700,6 +3709,21 @@ mod tests {
             "the reader should get ssh's own words back: {}",
             String::from_utf8_lossy(&answered.stderr)
         );
+    }
+
+    /// A chat's worktree deleted from under it is a folder that is gone, not
+    /// an error to print: the panel is told so by a flag, the way it is told
+    /// about a folder that is no repository, and offers to bring it back.
+    #[tokio::test]
+    async fn a_folder_that_was_deleted_is_marked_as_missing() {
+        let dir = a_scratch_repository_under_home();
+        let gone = dir.path().join("a-worktree-that-was-deleted");
+
+        let refused = checked_repo(&gone.to_string_lossy()).expect_err("a folder that is not there");
+        let (_, said) = answered(refused).await;
+
+        assert_eq!(said["folderMissing"], true, "no folderMissing flag in {said}");
+        assert!(said.get("notARepository").is_none(), "a missing folder was called no repository: {said}");
     }
 }
 

@@ -90,6 +90,7 @@ import {
   type GitDeed,
 } from '@/workbench/git-deeds';
 import { usePathActions } from '@/workbench/path-menu';
+import { FOLDER_FIXED, WorktreeMissing } from '@/workbench/worktree-missing';
 import { CommitLog } from '@/workbench/commit-log';
 import { SplitColumn } from '@/workbench/split-column';
 import { readRepositoryStatus } from '@/workbench/repository-status';
@@ -129,6 +130,14 @@ function wantsAKey(trouble: unknown): boolean {
   return (
     trouble instanceof ApiError
     && (trouble.body as { needsPassphrase?: boolean } | undefined)?.needsPassphrase === true
+  );
+}
+
+/** Whether the read failed because the folder itself is gone. */
+export function folderMissing(trouble: unknown): boolean {
+  return (
+    trouble instanceof ApiError
+    && (trouble.body as { folderMissing?: boolean } | undefined)?.folderMissing === true
   );
 }
 
@@ -589,6 +598,11 @@ export interface GitViewProps {
    * is why this is a flag and not an unmount.
    */
   shown?: boolean;
+  /**
+   * The chat this panel reads for. Given, a folder that is gone (the chat's
+   * worktree was deleted) offers to make it again or move the chat.
+   */
+  sessionId?: string;
 }
 
 /**
@@ -606,6 +620,7 @@ export function GitView({
   onShowWorkingTree,
   openCommit,
   shown = true,
+  sessionId = '',
 }: GitViewProps) {
   // The rail's file names are file chips, answered by the one set of handlers
   // every other file chip in the app is answered by (bw-g3o3.9).
@@ -626,6 +641,8 @@ export function GitView({
    * with the way to make one, and none of the controls that need a repository.
    */
   const [noRepository, setNoRepository] = useState(false);
+  /** Whether the folder itself is gone, as a deleted worktree is. */
+  const [gone, setGone] = useState(false);
   const [reading, setReading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [fault, setFault] = useState<string | null>(null);
@@ -744,6 +761,7 @@ export function GitView({
         const head = await log;
         if (signal?.aborted) return;
         setNoRepository(false);
+        setGone(false);
         setStatus(state);
         setLastCommit(head.commits[0] ?? null);
         if (faultFrom.current !== 'an operation') {
@@ -752,6 +770,16 @@ export function GitView({
         }
       } catch (trouble) {
         if (signal?.aborted) return;
+        if (folderMissing(trouble)) {
+          setGone(true);
+          setStatus(null);
+          setLastCommit(null);
+          if (faultFrom.current !== 'an operation') {
+            setFault(null);
+            faultFrom.current = null;
+          }
+          return;
+        }
         if (notARepository(trouble)) {
           // Not a failure to read about: there is nothing to read yet.
           setNoRepository(true);
@@ -778,6 +806,13 @@ export function GitView({
     void read(stop.signal);
     return () => stop.abort();
   }, [read, shown]);
+
+  // The worktree made again from the chat box comes back here too.
+  useEffect(() => {
+    const again = () => void read();
+    window.addEventListener(FOLDER_FIXED, again);
+    return () => window.removeEventListener(FOLDER_FIXED, again);
+  }, [read]);
 
   /**
    * What this checkout could move to, read again whenever it moves — a branch
@@ -994,6 +1029,10 @@ export function GitView({
         No project folder
       </p>
     );
+  }
+
+  if (gone) {
+    return <WorktreeMissing sessionId={sessionId} cwd={path} className="min-h-0 flex-1 justify-center" />;
   }
 
   if (noRepository) {

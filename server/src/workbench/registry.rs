@@ -2552,6 +2552,16 @@ impl WorkbenchRegistry {
                 self.move_chat(&session, &target).await?;
                 Ok(json!({"ok":true,"cwd":target.display().to_string()}))
             }
+            CommandKind::SessionRestoreFolder => {
+                let session_id = Self::field(command, "sessionId")?;
+                let branch = Self::field(command, "branch")?;
+                let session = self.database.get_session(session_id.to_string()).await?.ok_or_else(|| format!("no session {session_id}"))?;
+                let folder = Path::new(&session.cwd);
+                super::worktrees::recreate(Path::new(&session.project_path), folder, branch).await?;
+                let name = folder.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_else(|| session.cwd.clone());
+                super::provider::append_notice(&self.database, session_id, &format!("Recreated {name}")).await?;
+                Ok(json!({"ok":true,"cwd":session.cwd}))
+            }
             CommandKind::WorktreesList => self.list_worktrees(Path::new(Self::field(command, "projectPath")?)).await,
             CommandKind::WorktreeDelete => {
                 let project = Path::new(Self::field(command, "projectPath")?);

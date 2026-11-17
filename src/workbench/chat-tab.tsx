@@ -130,6 +130,7 @@ import { ModelIcon } from '@/workbench/model-icon';
 import { useSteadyCallback } from '@/hooks/use-steady-callback';
 import { MemoryBadge } from '@/workbench/memory-badge';
 import { WorktreeBadge } from '@/workbench/worktree-badge';
+import { FOLDER_FIXED, WorktreeMissing } from '@/workbench/worktree-missing';
 import { WorkflowStageChip, useWorkflowStage } from '@/workbench/workflow-stage-chip';
 import { ChipRow } from '@/workbench/status-chips';
 import { DEFAULT_PANEL_WIDTH, ResizeDivider, rememberedPanelWidth } from '@/workbench/resize-divider';
@@ -1567,6 +1568,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [movedCount, setMovedCount] = useState(0);
   const factsRead = useSessionFactsRead(reading, movedCount);
   const facts = factsRead?.facts ?? null;
+  // A deleted worktree made again, or the chat moved off it, from either the
+  // chat box or the Git tab: the folder is read again.
+  useEffect(() => {
+    const again = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === sessionId) setMovedCount((count) => count + 1);
+    };
+    window.addEventListener(FOLDER_FIXED, again);
+    return () => window.removeEventListener(FOLDER_FIXED, again);
+  }, [sessionId]);
   const workflowStage = useWorkflowStage(reading);
   // The chat's checklist is the tasks it holds; the project's whole list is
   // read so a task card in the transcript can show any task's status live.
@@ -3878,7 +3888,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             it (waiting-bar.tsx). */}
         <WaitingBar items={waitingHere} tasks={liveTasks} />
         {heldList}
-        {ownership.kind === 'elsewhere' ? (
+        {/* Nothing can run in a folder that is gone: the way to bring it back
+            stands where the box was, as it does in the Git tab. */}
+        {facts?.folderMissing && sessionId ? (
+          <WorktreeMissing sessionId={sessionId} cwd={facts.cwd} className="mx-auto w-full max-w-[110ch]" />
+        ) : ownership.kind === 'elsewhere' ? (
           <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-4 py-3 text-xs text-info">
             {heldLine(state)}
           </p>

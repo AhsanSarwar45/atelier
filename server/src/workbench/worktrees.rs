@@ -57,6 +57,49 @@ pub async fn containing(project: &Path, folder: &Path) -> Result<Option<Worktree
     Ok(found)
 }
 
+/// The branch a deleted worktree at `folder` most likely had.
+///
+/// Nothing records a chat's branch, but a worktree made here is named after
+/// its branch with each `/` written as `-` (`feature/x` lives in `feature-x`),
+/// so the local branch whose name gives the folder's name is the one.
+pub async fn branch_for_folder(project: &Path, folder: &Path) -> Option<String> {
+    let name = folder.file_name()?.to_string_lossy().to_string();
+    let listed = git(project, &["for-each-ref", "--format=%(refname:short)", "refs/heads"]).await.ok()?;
+    let branches: Vec<&str> = listed.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    branches
+        .iter()
+        .find(|branch| **branch == name)
+        .or_else(|| branches.iter().find(|branch| branch.replace(['/', '\\'], "-") == name))
+        .map(|branch| branch.to_string())
+}
+
+/// Make the worktree at `folder` again, on `branch`.
+///
+/// A folder removed by hand is still listed by git and would refuse the add,
+/// so stale entries are pruned first. A branch deleted with its worktree is
+/// made again from the project's current commit.
+pub async fn recreate(project: &Path, folder: &Path, branch: &str) -> Result<(), String> {
+    let branch = branch.trim();
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err(format!("{branch:?} is not a branch name"));
+    }
+    if folder.exists() {
+        return Err(format!("{} already exists", folder.display()));
+    }
+    git(project, &["worktree", "prune"]).await?;
+    if let Some(parent) = folder.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("Cannot make {}: {error}", parent.display()))?;
+    }
+    let place = folder.display().to_string();
+    let known = git(project, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")]).await.is_ok();
+    if known {
+        git(project, &["worktree", "add", &place, branch]).await?;
+    } else {
+        git(project, &["worktree", "add", "-b", branch, &place]).await?;
+    }
+    Ok(())
+}
+
 pub fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }

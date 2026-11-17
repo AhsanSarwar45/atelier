@@ -412,6 +412,7 @@ export function ChatRightRail({
             <GitView
               key={gitPath ?? ''}
               path={gitPath}
+              sessionId={sessionId}
               shown={open}
               diffOpen={diffOpen}
               onFlipDiff={onFlipDiff}

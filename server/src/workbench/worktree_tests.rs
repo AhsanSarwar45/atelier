@@ -307,3 +307,90 @@ async fn the_project_folder_and_a_worktree_with_a_working_chat_are_not_deleted()
     assert!(refused.is_err(), "a worktree was deleted under a working chat: {refused:?}");
     assert!(project.tree.exists());
 }
+
+/// What `git rev-parse --abbrev-ref HEAD` says in `at`.
+fn branch_in(at: &Path) -> String {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(at)
+        .output()
+        .expect("git is on the path");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+#[tokio::test]
+async fn a_chat_whose_worktree_was_deleted_gets_it_back_on_its_branch() {
+    let project = a_project();
+    let (database, registry) = a_registry(&project).await;
+    database.create_session(a_chat("chat-1", &project, &project.tree, "idle")).await.unwrap();
+    git(&project.repo, &["worktree", "remove", "--force", project.tree.to_str().unwrap()]);
+    assert!(!project.tree.exists());
+
+    registry
+        .execute(&command(json!({"type":"session.restoreFolder","sessionId":"chat-1","branch":"feature"})))
+        .await
+        .expect("the worktree was not recreated");
+
+    assert!(project.tree.join("README.md").exists(), "no checkout at {}", project.tree.display());
+    assert_eq!(branch_in(&project.tree), "feature");
+    assert_eq!(cwd_of(&database, "chat-1").await, project.tree.display().to_string());
+}
+
+#[tokio::test]
+async fn a_worktree_git_still_lists_is_recreated_after_its_folder_was_removed_by_hand() {
+    let project = a_project();
+    let (database, registry) = a_registry(&project).await;
+    database.create_session(a_chat("chat-1", &project, &project.tree, "idle")).await.unwrap();
+    // Deleted the way a file manager or `rm -rf` does: git still lists it.
+    std::fs::remove_dir_all(&project.tree).unwrap();
+
+    registry
+        .execute(&command(json!({"type":"session.restoreFolder","sessionId":"chat-1","branch":"feature"})))
+        .await
+        .expect("a stale worktree entry stopped the recreate");
+
+    assert_eq!(branch_in(&project.tree), "feature");
+}
+
+#[tokio::test]
+async fn a_worktree_whose_branch_was_deleted_too_is_recreated_on_a_new_branch() {
+    let project = a_project();
+    let (database, registry) = a_registry(&project).await;
+    database.create_session(a_chat("chat-1", &project, &project.tree, "idle")).await.unwrap();
+    git(&project.repo, &["worktree", "remove", "--force", project.tree.to_str().unwrap()]);
+    git(&project.repo, &["branch", "-D", "feature"]);
+
+    registry
+        .execute(&command(json!({"type":"session.restoreFolder","sessionId":"chat-1","branch":"feature"})))
+        .await
+        .expect("a branch that no longer exists was not made again");
+
+    assert_eq!(branch_in(&project.tree), "feature");
+}
+
+#[tokio::test]
+async fn a_folder_that_still_exists_is_not_recreated() {
+    let project = a_project();
+    let (database, registry) = a_registry(&project).await;
+    database.create_session(a_chat("chat-1", &project, &project.tree, "idle")).await.unwrap();
+
+    let refused = registry
+        .execute(&command(json!({"type":"session.restoreFolder","sessionId":"chat-1","branch":"feature"})))
+        .await;
+
+    assert!(refused.is_err(), "a folder that exists was recreated: {refused:?}");
+}
+
+#[tokio::test]
+async fn the_branch_of_a_deleted_worktree_is_guessed_from_its_folder_name() {
+    let project = a_project();
+    git(&project.repo, &["worktree", "add", "-q", "-b", "fix/key-1-a-fix", "../fix-key-1-a-fix"]);
+    let gone = project.root.join("fix-key-1-a-fix");
+    git(&project.repo, &["worktree", "remove", "--force", gone.to_str().unwrap()]);
+
+    let guessed = super::worktrees::branch_for_folder(&project.repo, &gone).await;
+
+    assert_eq!(guessed.as_deref(), Some("fix/key-1-a-fix"));
+    let none = super::worktrees::branch_for_folder(&project.repo, &project.root.join("no-such-branch")).await;
+    assert_eq!(none, None);
+}

@@ -2743,6 +2743,18 @@ async fn session(
         .as_ref()
         .map(|it| it.folder.clone())
         .or_else(|| folder_of(&cwd));
+    // A worktree deleted from under the chat: the screen offers to make it
+    // again on the branch it most likely had.
+    let folder_missing = !std::path::Path::new(&cwd).exists();
+    let restore_branch = if folder_missing {
+        crate::workbench::worktrees::branch_for_folder(
+            std::path::Path::new(&found.project_path),
+            std::path::Path::new(&cwd),
+        )
+        .await
+    } else {
+        None
+    };
     let holds = state.provider_holds().await;
     let held = found
         .external_id
@@ -2756,6 +2768,8 @@ async fn session(
         "branch": checkout.as_ref().and_then(|it| it.branch.clone()).map(Value::from)
             .or_else(|| known.as_ref().map(|row| row["branch"].clone()))
             .unwrap_or(Value::Null),
+        "projectPath": found.project_path,
+        "folderMissing": folder_missing, "restoreBranch": restore_branch,
     })))
 }
 

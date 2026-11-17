@@ -1472,6 +1472,12 @@ export interface SessionFacts {
   cwd: string | null;
   folder: string | null;
   branch: string | null;
+  /** The project the chat belongs to. */
+  projectPath?: string;
+  /** The chat's folder is gone, as a worktree deleted from under it is. */
+  folderMissing?: boolean;
+  /** The branch that folder most likely had, to make it again on. */
+  restoreBranch?: string | null;
 }
 
 /**

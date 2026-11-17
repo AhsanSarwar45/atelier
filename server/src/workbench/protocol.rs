@@ -108,6 +108,7 @@ wire_kinds!(CommandKind {
     SessionOpen => "session.open",
     SessionResume => "session.resume",
     SessionMove => "session.move",
+    SessionRestoreFolder => "session.restoreFolder",
     WorktreesList => "worktrees.list",
     WorktreeDelete => "worktree.delete",
 });
