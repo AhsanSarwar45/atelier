@@ -510,11 +510,10 @@ for features that interact (share energy, a buffer or a pass). Ids are lower-cas
 3. Run `atelier grid list --rows` to see which features other grids already own; add those as reference rows \
 (`{\"id\", \"name\", \"kind\": \"reference\", \"ref\": {\"grid\", \"row\"}}`), not new rows.
 4. Run `atelier grid draft` with `{slug, title, area, template?, row_search: {command, watch: [path prefixes]}, columns, rows}` \
-on stdin, then stop and end your turn. The owner approves or discards the draft on its card; their answer, or \
-the changes they want (draft again with the same slug), arrives as your next message.
-5. Once it is approved, work through it: `atelier grid next SLUG` prints the next free cells and a ready \
-`atelier task create` payload (no @task needed for cells of an approved grid). Create it, start it, prove each cell and tick its item \
-at once (`atelier task check N ROW.COL`), finish with `atelier task done N`, and repeat until no gaps are left.";
+on stdin. The grid is live at once; to change it, draft again with the same slug or use `atelier grid change`.
+5. Work through it: `atelier grid order SLUG`, then cases and review for each cell, then `atelier grid next SLUG` prints \
+the ready cells, each with its `atelier grid prove` command. Make a cell's checks pass, commit, and prove it; repeat \
+until no gaps are left.";
 
 /// What a bare `@audit SLUG` asks of the agent.
 fn audit_entry(slugs: &[String]) -> String {
@@ -532,7 +531,7 @@ with what is missing. Finish with `atelier grid audit {slug} --done`. You may no
 }
 
 /// What a bare `@task` asks of the agent.
-const NEW_TASK: &str = "@task — The owner asks you to create a task from this message. Pick the type, give a reason for each type in `decisions`, draft the plan and run `atelier task create` (`atelier task types TYPE` prints the payload); do not ask for confirmation first. A task for cells of an approved grid needs no @task: `atelier grid next SLUG` prints its payload.";
+const NEW_TASK: &str = "@task — The owner asks you to create a task from this message. Pick the type, give a reason for each type in `decisions`, draft the plan and run `atelier task create` (`atelier task types TYPE` prints the payload); do not ask for confirmation first.";
 
 fn task_entry(id: &str, task: Option<&serde_json::Value>) -> String {
     if id.is_empty() {
@@ -803,7 +802,7 @@ mod tests {
         assert_eq!(find("@grid:camera.glare.").iter().map(|f| f.id.as_str()).collect::<Vec<_>>(), ["camera"]);
         assert!(find("@grid:camera+x @grid:Camera").is_empty());
         let block = block(&find("@matrix camera"), &Looked::default(), &Snapshot::default()).unwrap();
-        for want in ["atelier grid template list", "atelier grid list --rows", "atelier grid draft", "stop and end your turn"] {
+        for want in ["atelier grid template list", "atelier grid list --rows", "atelier grid draft", "live at once", "atelier grid next"] {
             assert!(block.contains(want), "{want} missing from {block}");
         }
         let looked = Looked { audit_slugs: vec!["camera".into()], ..Default::default() };

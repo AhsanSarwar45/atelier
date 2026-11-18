@@ -83,7 +83,7 @@ async fn the_checkout_for_a_branch_commit_is_its_worktree() {
     assert_eq!(proof::checkout_for(&main, &on_main).await.canonicalize().unwrap(), main.canonicalize().unwrap());
 }
 
-/// An approved grid "cam" with column gpu and row glare covering cam/glare.rs.
+/// A live grid "cam" with column gpu and row glare covering cam/glare.rs.
 fn grid_with_cam_rows(store: &Db) {
     owner_says(store, "s1", "@matrix the cam area");
     let mut draft = request("draft", "agent", Some("s1"), "");
@@ -95,6 +95,5 @@ fn grid_with_cam_rows(store: &Db) {
     });
     draft.search = Some(Ok(atelier::workbench::grids::search::Run { rows: vec![found("glare", &["cam/glare.rs"])], head: Some("h1".into()) }));
     apply(store, &draft).unwrap();
-    apply(store, &request("approve", "owner", None, "cam")).unwrap();
     approve_cases(store, "cam");
 }

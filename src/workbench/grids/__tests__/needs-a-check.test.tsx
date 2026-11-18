@@ -65,8 +65,8 @@ describe('cells that need a check', () => {
     render(<GridHeatmap rows={orderRows(detail.rows)} columns={detail.columns.filter((c) => !c.retired)} cells={detail.cells}
       selection={null} onSelect={vi.fn()} onOpenCell={vi.fn()} />);
     const marked = screen.getAllByTestId('grid-cell').filter((el) => el.dataset.needsCheck === 'yes').map((el) => `${el.dataset.row}.${el.dataset.col}`);
-    // A stale or in-progress cell keeps its mark; both.gpu is n/a and tonemap a reference.
-    expect(marked.sort()).toEqual(['fog.gpu', 'glare.gpu', 'sunstar.gpu']);
+    // A stale cell keeps its mark; sunstar.gpu is proved, both.gpu n/a and tonemap a reference.
+    expect(marked.sort()).toEqual(['fog.gpu', 'glare.gpu']);
     expect(screen.getAllByTestId('grid-cell').find((el) => el.dataset.row === 'fog' && el.dataset.col === 'gpu')!.getAttribute('aria-label')).toContain('needs a check');
     render(<Legend />);
     expect(screen.getByTestId('grid-legend-needs-check').textContent).toContain('Needs a check');
@@ -79,7 +79,7 @@ describe('cells that need a check', () => {
 
   it('leaves them out of Create task and says how many', async () => {
     const detail = checkedDetail();
-    detail.cells = detail.cells.map((c) => (c.row === 'sunstar' && c.col === 'gpu' ? { ...c, state: 'gap', claimedTask: null } : c));
+    detail.cells = detail.cells.map((c) => (c.row === 'sunstar' && c.col === 'gpu' ? { ...c, state: 'gap' } : c));
     get.mockReset().mockResolvedValue(detail);
     render(<GridsView projectId="p1" grid="camera" cell={null} onShow={vi.fn()} onOpenChat={vi.fn()} onOpenTask={vi.fn()} />);
     fireEvent.click((await screen.findAllByTestId('grid-row-name')).find((el) => el.textContent === 'Sunstar')!);

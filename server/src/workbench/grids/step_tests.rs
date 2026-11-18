@@ -1,9 +1,9 @@
-//! Cell steps: every cell stores where it is (open → red → work → proved,
-//! or N/A), every reply names the step and the one command that moves it
-//! on, and the server refuses anything out of order with that same step and
-//! command. A cell may also wait on named cells in any row
-//! (`grid order` `cells`), and every command that claims, starts, proves or
-//! ticks it refuses while those are not proved or N/A.
+//! Cell steps: every cell stores where it is (order → cases → reviewed →
+//! proved, or N/A), every reply names the step and the one command that
+//! moves it on, and the server refuses anything out of order with that same
+//! step and command. A cell may also wait on named cells in any row
+//! (`grid order` `cells`): `grid next` holds it back and `grid prove`
+//! refuses while those are not proved or N/A. Tasks only reference cells.
 
 use super::*;
 use crate::workbench::store::Store;
@@ -13,7 +13,7 @@ fn store() -> (tempfile::TempDir, Store) {
     let directory = tempfile::tempdir().unwrap();
     let store = Store::open(&directory.path().join("workbench.db")).unwrap();
     store.open_message("s1", "m0", "user", "2026-01-01T00:00:00Z").unwrap();
-    store.grow_message("s1", "m0", "@matrix the camera area").unwrap();
+    store.grow_message("s1", "m0", "@task the camera cells").unwrap();
     (directory, store)
 }
 
@@ -49,10 +49,6 @@ fn camera(store: &Store) {
     });
     draft.search = Some(Ok(search::Run { rows: vec![found("glare"), found("sunstar")], head: Some("h1".into()) }));
     apply(store.connection(), &draft).unwrap();
-    let mut approve = request("approve");
-    approve.actor = "owner".into();
-    approve.session = None;
-    apply(store.connection(), &approve).unwrap();
     super::approve_all_cases(store.connection(), "p", "camera");
 }
 
@@ -136,22 +132,23 @@ fn task(store: &Store, action: &str, number: i64, payload: Value) -> Result<task
 }
 
 fn handed(next: &Value) -> Vec<String> {
-    next["create"]["cells"]
+    next["cells"]
         .as_array()
         .map(|cells| cells.iter().map(|c| format!("{}.{}", c["row"].as_str().unwrap(), c["col"].as_str().unwrap())).collect())
         .unwrap_or_default()
 }
 
-/// Rule 1: each cell's step is stored, and moves approved → red → work → proved.
+/// Rule 1: each cell's step is stored, and moves reviewed → proved; a task
+/// that references the cell does not move it.
 #[test]
 fn a_cell_stores_its_step_as_it_moves() {
     let (_d, store) = store();
     camera(&store);
     assert_eq!(step(&store, "glare", "gpu"), "reviewed");
     let number = create(&store, &[("glare", "gpu")]).unwrap().task.number;
-    assert_eq!(step(&store, "glare", "gpu"), "red", "a claimed cell waits for its task to start");
+    assert_eq!(step(&store, "glare", "gpu"), "reviewed", "a task does not claim its cells");
     task(&store, "start", number, json!({})).unwrap();
-    assert_eq!(step(&store, "glare", "gpu"), "work", "a started task's cell is being worked");
+    assert_eq!(step(&store, "glare", "gpu"), "reviewed", "nor does starting it");
     prove(&store, "glare", "gpu").unwrap();
     assert_eq!(step(&store, "glare", "gpu"), "proved");
 }
@@ -163,17 +160,10 @@ fn every_reply_names_the_cells_step_and_next_command() {
     camera(&store);
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     let shown = cell_json(loaded.cell("glare", "gpu").unwrap(), false, true);
-    assert_eq!((shown["step"].as_str(), shown["next"].as_str()), (Some("reviewed"), Some("atelier grid next camera")), "grid show: {shown}");
-    let created = create(&store, &[("glare", "gpu")]).unwrap();
-    let number = created.task.number;
-    let wanted = format!("camera.glare.gpu: step red, next `atelier task start {number}`");
-    assert!(created.summary.contains(&wanted), "task create says {:?}, not {wanted:?}", created.summary);
-    let started = task(&store, "start", number, json!({})).unwrap();
-    let wanted = "camera.glare.gpu: step work, next `atelier grid prove camera glare gpu`";
-    assert!(started.summary.contains(wanted), "task start says {:?}, not {wanted:?}", started.summary);
+    assert_eq!((shown["step"].as_str(), shown["next"].as_str()), (Some("reviewed"), Some("atelier grid prove camera glare gpu")), "grid show: {shown}");
     let proved = prove(&store, "glare", "gpu").unwrap();
-    let wanted = format!("camera.glare.gpu: step proved, next `atelier task check {number} glare.gpu`");
-    assert!(proved.summary.contains(&wanted), "grid prove says {:?}, not {wanted:?}", proved.summary);
+    let wanted = "camera.glare.gpu: step proved, next `atelier grid next camera`";
+    assert!(proved.summary.contains(wanted), "grid prove says {:?}, not {wanted:?}", proved.summary);
 }
 
 /// A cell is proved when its checks pass; no task has to hold it.
@@ -207,18 +197,6 @@ fn a_reopened_cell_is_proved_again_by_running_its_checks() {
     assert_eq!(step(&store, "glare", "gpu"), "proved");
 }
 
-/// A cell this chat's task claims but has not started is proved too: passing
-/// checks are what prove it.
-#[test]
-fn a_cell_claimed_by_a_task_not_started_is_proved_by_its_checks() {
-    let (_d, store) = store();
-    camera(&store);
-    create(&store, &[("glare", "gpu")]).unwrap();
-    assert_eq!(step(&store, "glare", "gpu"), "red");
-    prove(&store, "glare", "gpu").unwrap();
-    assert_eq!(step(&store, "glare", "gpu"), "proved");
-}
-
 /// Rule 5: `grid order` takes cell prerequisites in any row, and `grid next` holds the cell back.
 #[test]
 fn order_takes_cell_prerequisites_and_next_holds_the_cell_back() {
@@ -246,33 +224,16 @@ fn order_refuses_unknown_cells_and_cycles_in_cell_prerequisites() {
     assert!(message.contains("cycle"), "atelier grid order camera (cycle) said: {message}");
 }
 
-/// Rule 5: `task create` refuses a cell whose prerequisites are not proved or N/A.
+/// A task may reference a cell whose prerequisites are not done: tasks
+/// never gate cells, and cells never gate tasks.
 #[test]
-fn task_create_refuses_a_cell_whose_prerequisites_are_not_done() {
+fn a_task_may_reference_a_cell_whose_prerequisites_are_not_done() {
     let (_d, store) = store();
     camera(&store);
     order(&store, json!({"cells": [{"row": "sunstar", "col": "gpu", "after": [["glare", "perf"]]}]})).unwrap();
-    let message = refused(create(&store, &[("sunstar", "gpu")]));
-    assert!(
-        message.contains("camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A. Next: `atelier grid next camera`"),
-        "atelier task create (cells sunstar.gpu) said: {message}"
-    );
-    assert_eq!(step(&store, "sunstar", "gpu"), "reviewed", "a refused create claims nothing");
-}
-
-/// Rule 5: `task start` refuses a task holding a cell whose prerequisites are not done.
-#[test]
-fn task_start_refuses_a_cell_whose_prerequisites_are_not_done() {
-    let (_d, store) = store();
-    camera(&store);
     let number = create(&store, &[("sunstar", "gpu")]).unwrap().task.number;
-    order(&store, json!({"cells": [{"row": "sunstar", "col": "gpu", "after": [["glare", "perf"]]}]})).unwrap();
-    let message = refused(task(&store, "start", number, json!({})));
-    assert!(
-        message.contains("camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A"),
-        "atelier task start {number} said: {message}"
-    );
-    assert_eq!(step(&store, "sunstar", "gpu"), "red", "a refused start leaves the cell at red");
+    task(&store, "start", number, json!({})).unwrap();
+    assert_eq!(step(&store, "sunstar", "gpu"), "reviewed");
 }
 
 /// Rule 5: `grid prove` refuses a cell whose prerequisites are not done.
@@ -280,28 +241,12 @@ fn task_start_refuses_a_cell_whose_prerequisites_are_not_done() {
 fn prove_refuses_a_cell_whose_prerequisites_are_not_done() {
     let (_d, store) = store();
     camera(&store);
-    let number = create(&store, &[("sunstar", "gpu")]).unwrap().task.number;
-    task(&store, "start", number, json!({})).unwrap();
     order(&store, json!({"cells": [{"row": "sunstar", "col": "gpu", "after": [["glare", "perf"]]}]})).unwrap();
     let message = refused(prove(&store, "sunstar", "gpu"));
     assert!(
         message.contains("camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A"),
         "atelier grid prove camera sunstar gpu said: {message}"
     );
-    assert_eq!(step(&store, "sunstar", "gpu"), "work");
+    assert_eq!(step(&store, "sunstar", "gpu"), "reviewed");
 }
 
-/// Rule 5: `task check` refuses a cell's item while the cell's prerequisites are not done.
-#[test]
-fn task_check_refuses_a_cell_item_whose_prerequisites_are_not_done() {
-    let (_d, store) = store();
-    camera(&store);
-    let number = create(&store, &[("sunstar", "gpu")]).unwrap().task.number;
-    task(&store, "start", number, json!({})).unwrap();
-    order(&store, json!({"cells": [{"row": "sunstar", "col": "gpu", "after": [["glare", "perf"]]}]})).unwrap();
-    let message = refused(task(&store, "check", number, json!({"item": "sunstar.gpu"})));
-    assert!(
-        message.contains("camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A"),
-        "atelier task check {number} sunstar.gpu said: {message}"
-    );
-}

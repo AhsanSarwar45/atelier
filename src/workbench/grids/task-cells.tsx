@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The grid cells a task claimed, on its card (docs/grids.md, "Claims"): each
+ * The grid cells a task references, on its card (docs/grids.md): each
  * one's live state, opening the cell when clicked. A task's JSON carries its
  * cells; they are read again whenever the project's grids change, since a
  * proof moves a cell without moving the task.
@@ -12,7 +12,6 @@ import { Grid3x3 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { gridBadge, ReferenceBadge } from '@/components/reference-badge';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { addressWith } from '@/lib/address';
 import { tasks as tasksApi } from '@/lib/api';
@@ -74,13 +73,11 @@ function stateCounts(cells: TaskCell[]): string {
   return [...counts].map(([label, n]) => `${n} ${label.toLowerCase()}`).join(' · ');
 }
 
-/** A task's cells, kept current. Nothing when it claimed none. */
+/** A task's cells, kept current. Nothing when it references none. */
 export function TaskCells({ task }: { task: Pick<Task, 'projectId' | 'number' | 'status' | 'updatedAt' | 'cells' | 'claimShape'> }) {
   const [cells, setCells] = useState<TaskCell[]>(task.cells ?? []);
   const { projectId, number } = task;
   const claims = (task.cells ?? []).length > 0;
-  // A finished task has let go of every cell; saying so on each is noise.
-  const finished = task.status === 'done' || task.status === 'cancelled';
 
   // The task moved: take its cells as it hands them over.
   useEffect(() => { setCells(task.cells ?? []); }, [task.cells, task.updatedAt]);
@@ -128,7 +125,6 @@ export function TaskCells({ task }: { task: Pick<Task, 'projectId' | 'number' | 
               <CellSquare look={state ?? 'unchecked'} />
               <ReferenceBadge reference={gridBadge(`${cell.grid}.${cell.row}.${cell.col}`)} projectId={projectId} size="xs" testId="task-cell-open" />
               <span className="text-muted-foreground">{state ? STATE_LABEL[state] : 'Removed'}</span>
-              {!cell.claimed && state && !finished && <Badge variant="outline" size="sm"><span>Released</span></Badge>}
               {cell.reason && <span className="basis-full pl-5 text-muted-foreground">{cell.reason}</span>}
             </li>
           );
@@ -138,7 +134,7 @@ export function TaskCells({ task }: { task: Pick<Task, 'projectId' | 'number' | 
   );
 }
 
-/** The cells a proposed task would claim. */
+/** The cells a proposed task would reference. */
 export function ProposalCells({ proposal }: { proposal: Pick<TaskProposal, 'projectId' | 'cells'> }) {
   const cells = proposal.cells ?? [];
   if (cells.length === 0) return null;

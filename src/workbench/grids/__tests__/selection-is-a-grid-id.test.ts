@@ -42,7 +42,7 @@ describe('a selection as an @grid: id', () => {
   });
 });
 
-describe('which selected cells can be claimed', () => {
+describe('which selected cells can go in a task', () => {
   it('says why each other cell cannot', () => {
     const detail = makeDetail();
     const live = detail.rows.filter((row) => !row.removed);
@@ -53,10 +53,10 @@ describe('which selected cells can be claimed', () => {
       'glare.cpu': 'Proved',
       // A stale proof can be proved again.
       'glare.gpu': null,
-      'both.cpu': 'N/A pending',
+      'both.cpu': 'N/A',
       'both.gpu': 'N/A',
       'sunstar.cpu': null,
-      'sunstar.gpu': 'Claimed by #7',
+      'sunstar.gpu': 'Proved',
       'tonemap.cpu': 'Read-only: owned by the colour grid',
       'tonemap.gpu': 'Read-only: owned by the colour grid',
       'fog.cpu': 'Row missing',

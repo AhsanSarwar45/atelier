@@ -33,7 +33,7 @@ const cell = (row: string, col: string) =>
 describe('the heatmap', () => {
   it('draws each state in its own colour, and a stale proof hatched', () => {
     draw();
-    const looks = { 'glare.cpu': 'proved', 'glare.gpu': 'stale', 'sunstar.cpu': 'gap', 'sunstar.gpu': 'in_progress', 'both.cpu': 'na_pending', 'both.gpu': 'na', 'fog.cpu': 'unchecked' } as const;
+    const looks = { 'glare.cpu': 'proved', 'glare.gpu': 'stale', 'sunstar.cpu': 'gap', 'both.gpu': 'na', 'fog.cpu': 'unchecked' } as const;
     for (const [at, look] of Object.entries(looks)) {
       const [row, col] = at.split('.') as [string, string];
       const drawn = cell(row, col);

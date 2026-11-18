@@ -21,20 +21,16 @@ import { grids as gridsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { CellDetailPanel, failure } from '@/workbench/grids/cell-detail';
 import { cellCount, CreateTaskButton } from '@/workbench/grids/create-task';
-import { DraftActions, DraftView } from '@/workbench/grids/grid-card';
 import { GridHeatmap, Legend, orderRows } from '@/workbench/grids/grid-heatmap';
 import { ALL_GAPS, selectedCells, type Selection } from '@/workbench/grids/selection';
-import { NEEDS_CHECK_LABEL, draftColumns, draftContent, draftDiff, type GridDetail, type GridSummary, type GridTemplate } from '@/workbench/grids/types';
+import { NEEDS_CHECK_LABEL, draftColumns, type GridDetail, type GridSummary, type GridTemplate } from '@/workbench/grids/types';
 import { useGrid, useGrids } from '@/workbench/grids/use-grids';
 
-/** Drafts first, then the rest by lowest percent proved; discarded grids are left out. */
+/** Live grids by lowest percent proved; grids an older build discarded are left out. */
 export function orderGrids(grids: GridSummary[]): GridSummary[] {
   return grids
     .filter((grid) => grid.status !== 'discarded')
     .sort((a, b) => {
-      const da = a.status === 'draft' ? 0 : 1;
-      const db = b.status === 'draft' ? 0 : 1;
-      if (da !== db) return da - db;
       const pa = a.percent ?? -1;
       const pb = b.percent ?? -1;
       if (pa !== pb) return pa - pb;
@@ -70,13 +66,10 @@ function GridListRow({ grid, onOpen }: { grid: GridSummary; onOpen: () => void }
       <Grid3x3 aria-hidden className="size-4 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 break-words text-sm sm:truncate">{grid.title || grid.slug}</span>
       <div className="flex w-full flex-wrap items-center gap-1.5 empty:hidden sm:w-auto sm:shrink-0">
-        {grid.status === 'draft' && <Badge variant="secondary" appearance="light" size="sm"><span>Draft</span></Badge>}
-        {grid.pending && <Badge variant="warning" appearance="light" size="sm" data-testid="grid-awaiting"><span>Awaiting approval</span></Badge>}
         <Count n={grid.counts?.gap ?? 0} label="gap" tone="destructive" testId="grid-gaps" />
         <Count n={grid.counts?.stale ?? 0} label="stale" tone="warning" testId="grid-stale" />
-        <Count n={grid.counts?.naPending ?? 0} label="N/A pending" tone="warning" testId="grid-na-pending" />
       </div>
-      {grid.status === 'approved' && <GridProgress grid={grid} className="w-full sm:w-48" />}
+      <GridProgress grid={grid} className="w-full sm:w-48" />
     </Row>
   );
 }
@@ -92,7 +85,6 @@ function Templates({ templates }: { templates: GridTemplate[] }) {
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium">{template.name}</span>
               <span className="text-xs text-muted-foreground">{`${template.columns.length} columns`}</span>
-              {template.pending && <Badge variant="warning" appearance="light" size="sm"><span>Change awaiting approval</span></Badge>}
             </div>
             <p className="text-xs text-muted-foreground">{draftColumns(template.columns).map((c) => c.name).join(' · ')}</p>
           </div>
@@ -198,8 +190,8 @@ function GridToolbar({ detail, onDone, onAllGaps }: { detail: GridDetail; onDone
 }
 
 /**
- * "N cells (M claimable) · Create task · M cells", with the cells that cannot
- * be claimed and why. All gaps reads "All gaps · N cells".
+ * "N cells (M open) · Create task · M cells", with the cells that cannot go
+ * in a task and why. All gaps reads "All gaps · N cells".
  */
 function SelectionBar({ detail, selection, projectId, onOpenChat, onCreated, onClear }: {
   detail: GridDetail;
@@ -211,7 +203,7 @@ function SelectionBar({ detail, selection, projectId, onOpenChat, onCreated, onC
 }) {
   const drawn = orderRows(detail.rows).map((d) => d.row);
   const cells = selectedCells(selection, drawn, detail.columns.filter((c) => !c.retired), detail.cells);
-  const claimable = cells.filter((c) => !c.blocker).length;
+  const open = cells.filter((c) => !c.blocker).length;
   const blocked = cells.filter((c) => c.blocker);
   // Cells with no check are left out of the task; say how many.
   const unchecked = cells.filter((c) => c.blocker === NEEDS_CHECK_LABEL).length;
@@ -225,10 +217,10 @@ function SelectionBar({ detail, selection, projectId, onOpenChat, onCreated, onC
         {blocked.length > 0 && (
           <Popover>
             <PopoverTrigger asChild>
-              <Button type="button" size="xs" variant="ghost" data-testid="grid-selection-claimable" className="text-muted-foreground">{`(${claimable} claimable)`}</Button>
+              <Button type="button" size="xs" variant="ghost" data-testid="grid-selection-open" className="text-muted-foreground">{`(${open} open)`}</Button>
             </PopoverTrigger>
             <PopoverContent align="start" className="max-h-72 w-80 overflow-y-auto" data-testid="grid-selection-blocked">
-              <p className="mb-1 text-xs font-medium">Not claimable</p>
+              <p className="mb-1 text-xs font-medium">Left out</p>
               <ul className="space-y-0.5 text-xs">
                 {blocked.map((c) => (
                   <li key={`${c.row.id}.${c.column.id}`}>
@@ -250,8 +242,8 @@ function SelectionBar({ detail, selection, projectId, onOpenChat, onCreated, onC
           <CreateTaskButton
             projectId={projectId}
             cells={{ slug: detail.grid.slug, rows: selection.rows, cols: selection.cols, onlyGaps: !!selection.onlyGaps }}
-            label={claimable ? `Create task · ${cellCount(claimable)}` : 'Create task'}
-            disabled={!claimable}
+            label={open ? `Create task · ${cellCount(open)}` : 'Create task'}
+            disabled={!open}
             size="xs"
             onCreated={onCreated}
             onOpenChat={onOpenChat}
@@ -282,7 +274,6 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onOpenTask }: {
   const retired = detail?.columns.filter((c) => c.retired).length ?? 0;
 
   const grid = detail?.grid;
-  const draft = grid?.pending ? draftContent(grid.pending, grid) : null;
   const main = (
     <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', cell && 'hidden md:flex')}>
       <div className="space-y-2 border-b border-border/60 px-4 py-2">
@@ -292,10 +283,9 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onOpenTask }: {
             Grids
           </Button>
           <h2 className="min-w-0 flex-1 text-sm font-semibold sm:truncate" data-testid="grid-title">{grid?.title || slug}</h2>
-          {grid?.status === 'draft' && <Badge variant="secondary" appearance="light" size="sm"><span>Draft</span></Badge>}
-          {grid?.status === 'approved' && <GridProgress grid={grid} className="w-full sm:w-56" />}
+          {grid && <GridProgress grid={grid} className="w-full sm:w-56" />}
         </div>
-        {grid?.status === 'approved' && detail && <GridToolbar detail={detail} onDone={refetch} onAllGaps={() => setSelection(ALL_GAPS)} />}
+        {detail && <GridToolbar detail={detail} onDone={refetch} onAllGaps={() => setSelection(ALL_GAPS)} />}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         {error && !detail ? (
@@ -304,14 +294,7 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onOpenTask }: {
           <div className="flex justify-center p-6"><Spinner className="size-5 text-muted-foreground" /></div>
         ) : (
           <>
-            {draft && (
-              <Panel tone="attention" inset="md" className="space-y-3" data-testid="grid-pending">
-                <p className="text-sm font-medium">{grid.status === 'draft' ? 'Draft awaiting approval' : 'Edit awaiting approval'}</p>
-                <DraftView draft={draft} diff={grid.status === 'approved' ? draftDiff(draft, detail, grid.pending) : null} />
-                <DraftActions projectId={projectId} slug={slug} onDone={refetch} />
-              </Panel>
-            )}
-            {grid.status === 'approved' && (
+            {(
               <>
                 {grid.area && <p className="text-xs text-muted-foreground">{grid.area}</p>}
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -330,7 +313,6 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onOpenTask }: {
                     cells={detail.cells}
                     selection={selection}
                     onSelect={setSelection}
-                    onOpenTask={onOpenTask}
                     onOpenCell={(row, column) => {
                       setSelection(null);
                       // A reference row's cells are the owner grid's; its detail is there.
@@ -346,13 +328,12 @@ function GridScreen({ projectId, slug, cell, onShow, onOpenChat, onOpenTask }: {
           </>
         )}
       </div>
-      {detail && chosen && grid?.status === 'approved' && (
+      {detail && chosen && (
         <SelectionBar
           detail={detail}
           selection={chosen}
           projectId={projectId}
           onOpenChat={onOpenChat}
-          // The task holds its cells now: show them claimed.
           onCreated={() => { setSelection(null); refetch(); }}
           onClear={() => setSelection(null)}
         />

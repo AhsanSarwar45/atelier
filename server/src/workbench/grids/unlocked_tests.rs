@@ -2,7 +2,7 @@
 //! "Proof"): a cell whose check file changed since approval still proves,
 //! and its proof names the changed file for the owner.
 
-use super::tests::{draft, hold, draft_payload, found, on, owner_says, passing, proof_payload, request, state, store};
+use super::tests::{draft_payload, found, on, owner_says, passing, proof_payload, request, state, store};
 use super::*;
 
 #[test]
@@ -11,13 +11,14 @@ fn a_changed_check_file_does_not_refuse_prove_and_the_proof_names_it() {
     owner_says(&store, "s1", "@matrix the camera area");
     let mut payload = draft_payload("camera");
     payload["columns"][0]["checks"][0]["files"] = json!(["tests/{row}_gpu.rs"]);
-    draft(&store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
-    let mut approve = request("approve", "owner", None, "camera");
-    approve.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a1", "tests/sunstar_gpu.rs": "b1", "tests/common.rs": "c1"}}));
-    apply(store.connection(), &approve).unwrap();
+    let mut asked = request("draft", "agent", Some("s1"), "");
+    asked.slug = None;
+    asked.payload = payload;
+    asked.search = super::tests::ran(vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]);
+    asked.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a1", "tests/sunstar_gpu.rs": "b1", "tests/common.rs": "c1"}}));
+    apply(store.connection(), &asked).unwrap();
     super::approve_all_cases(store.connection(), "p", "camera");
 
-    hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = proof_payload();
     asked.checks = passing();

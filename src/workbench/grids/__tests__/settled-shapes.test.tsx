@@ -3,8 +3,7 @@
  * task's card lists its cells with their states and rereads them when grids
  * change, a proposal names the cells it asks for, Re-check stale asks for the
  * stale cells only and says what failed, a cell's Re-check says why it
- * reopened, and the template card has no grid, starts open and names the
- * template in `slug`.
+ * reopened, and the template card has no grid and says what the change did.
  */
 import { act as react, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,19 +66,19 @@ beforeEach(() => {
 
 describe("a task's cells", () => {
   const cells = [
-    { grid: 'camera', row: 'glare', col: 'gpu', state: 'in_progress', claimed: true, reason: null },
-    { grid: 'camera', row: 'sunstar', col: 'gpu', state: 'gap', claimed: false, reason: 'Checks failed' },
+    { grid: 'camera', row: 'glare', col: 'gpu', state: 'unchecked', reason: null },
+    { grid: 'camera', row: 'sunstar', col: 'gpu', state: 'gap', reason: 'Checks failed' },
   ];
 
   it('are listed on the card with their states, and open the cell', () => {
     render(<TaskCard task={makeTask({ status: 'in_progress', cells })} />);
     const listed = screen.getAllByTestId('task-cell');
     expect(listed.map((el) => [el.dataset.cell, el.dataset.state])).toEqual([
-      ['camera.glare.gpu', 'in_progress'],
+      ['camera.glare.gpu', 'unchecked'],
       ['camera.sunstar.gpu', 'gap'],
     ]);
-    expect(listed[0]!.textContent).toContain('In progress');
-    expect(listed[1]!.textContent).toContain('Released');
+    expect(listed[0]!.textContent).toContain('Unchecked');
+    expect(listed[1]!.textContent).not.toContain('Released');
     expect(listed[1]!.textContent).toContain('Checks failed');
     fireEvent.click(within(listed[0]!).getByTestId('task-cell-open'));
     expect(push.mock.calls[0]![0]).toContain('grid=camera');
@@ -89,7 +88,7 @@ describe("a task's cells", () => {
   it('are read again when the grids change', async () => {
     taskGet.mockResolvedValue({ task: makeTask({ cells: [{ ...cells[0]!, state: 'proved' }] }), events: [] });
     render(<TaskCard task={makeTask({ status: 'in_progress', cells: [cells[0]!] })} />);
-    expect(screen.getByTestId('task-cell').dataset.state).toBe('in_progress');
+    expect(screen.getByTestId('task-cell').dataset.state).toBe('unchecked');
     react(() => { for (const frame of [...frames]) frame(JSON.stringify({ type: 'grids.changed', projectId: 'p1', slug: 'camera' })); });
     await waitFor(() => expect(screen.getByTestId('task-cell').dataset.state).toBe('proved'));
   });
@@ -137,20 +136,23 @@ describe('the template card', () => {
     template: {
       name: 'renderer',
       projectId: 'p1',
-      columns: [{ id: 'cpu', name: 'CPU', proof_rule: 'A CPU test' }],
-      pending: { columns: [{ id: 'cpu', name: 'CPU', proof_rule: 'A CPU test' }, { id: 'gpu', name: 'GPU', proof_rule: 'A GPU test' }] },
+      columns: [{ id: 'cpu', name: 'CPU', proof_rule: 'A CPU test' }, { id: 'gpu', name: 'GPU', proof_rule: 'A GPU test' }],
       updatedAt: 1,
       change: { added: ['gpu'], removed: [], changed: [], affects: ['camera'], clashes: [] },
     },
   };
 
-  it('has no grid, starts open, and approves by the template name', async () => {
+  it('has no grid, starts folded, and says what the change did, with nothing to approve', () => {
     expect(widget(template as unknown as Record<string, unknown>)).not.toBeNull();
-    gridList.mockResolvedValue({ projectId: 'p1', grids: [], templates: [template.template] });
     render(<GridCard widget={template} />);
-    expect(screen.getByTestId('grid-card-toggle').getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId('grid-card-label').textContent).toBe('Template changed');
+    expect(screen.getByTestId('grid-card-what').textContent).toBe('renderer');
+    expect(screen.getByTestId('grid-card-toggle').getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(screen.getByTestId('grid-card-toggle'));
+    const more = screen.getByTestId('grid-template');
+    expect(more.textContent).toContain('Columns added: gpu');
     expect(screen.getByTestId('grid-template-affected').textContent).toContain('camera');
-    fireEvent.click(screen.getByTestId('grid-template-approve'));
-    await waitFor(() => expect(gridAct).toHaveBeenCalledWith('approve_template', { projectId: 'p1', slug: 'renderer' }));
+    expect(screen.queryByRole('button', { name: /approve|reject/i })).toBeNull();
+    expect(gridAct).not.toHaveBeenCalled();
   });
 });

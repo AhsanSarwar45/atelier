@@ -7,7 +7,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 
-import { ArrowLeft, Check, ExternalLink, GitMerge, X } from 'lucide-react';
+import { ArrowLeft, Check, GitMerge, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -57,9 +57,8 @@ export function withinBudget(b: Pick<Benchmark, 'value' | 'budget' | 'lower_is_b
 }
 
 /**
- * The owner's buttons for one cell: Approve N/A and Reject (with a note) while
- * N/A waits on him, Reopen (with a reason) for a proved or N/A cell, and
- * Re-check for a cell with proof.
+ * The owner's buttons for one cell: Reopen (with a reason) for a proved or N/A
+ * cell, and Re-check for a cell with proof.
  */
 export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = true, onDone, extra }: {
   projectId: string;
@@ -67,22 +66,21 @@ export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = tr
   row: string;
   col: string;
   cell: Pick<CellFull, 'state' | 'proof'> & { proofSummary?: string | null };
-  /** Offer Re-check: the detail panel does, the N/A card does not. */
+  /** Offer Re-check. */
   recheck?: boolean;
   onDone?: () => void;
-  /** More buttons for the same row, after these (the N/A card's Open grid). */
+  /** More buttons for the same row, after these. */
   extra?: ReactNode;
 }) {
   const [busy, setBusy] = useState<GridOwnerAction | null>(null);
-  const [asking, setAsking] = useState<'reject_na' | 'reopen' | null>(null);
+  const [asking, setAsking] = useState<'reopen' | null>(null);
   const [words, setWords] = useState('');
   const [error, setError] = useState<string | null>(null);
   // A re-check that ran and failed reopens the cell; say why.
   const [checkFailed, setCheckFailed] = useState<string | null>(null);
-  const naPending = cell.state === 'na_pending';
   const reopens = cell.state === 'proved' || cell.state === 'na';
   const hasProof = !!cell.proof || !!cell.proofSummary;
-  if (!naPending && !reopens && !(recheck && hasProof)) return null;
+  if (!reopens && !(recheck && hasProof)) return null;
 
   const act = async (action: GridOwnerAction, payload?: Record<string, unknown>) => {
     setBusy(action);
@@ -109,32 +107,26 @@ export function CellOwnerActions({ projectId, slug, row, col, cell, recheck = tr
           onSubmit={(e) => {
             e.preventDefault();
             if (!words.trim()) return;
-            void act(asking, asking === 'reject_na' ? { note: words.trim() } : { reason: words.trim() });
+            void act(asking, { reason: words.trim() });
           }}
         >
           <Textarea
             autoFocus
             rows={2}
-            aria-label={asking === 'reject_na' ? 'Note' : 'Reason'}
-            placeholder={asking === 'reject_na' ? 'Why it applies' : 'Reason'}
+            aria-label="Reason"
+            placeholder="Reason"
             value={words}
             onChange={(e) => setWords(e.target.value)}
           />
           <div className="flex gap-2">
-            <Button type="submit" size="sm" variant={asking === 'reject_na' ? 'primary' : 'destructive'} disabled={!words.trim()} loading={busy === asking}>
-              {asking === 'reject_na' ? 'Reject' : 'Reopen'}
+            <Button type="submit" size="sm" variant="destructive" disabled={!words.trim()} loading={busy === asking}>
+              Reopen
             </Button>
             <Button type="button" size="sm" variant="ghost" onClick={() => { setAsking(null); setWords(''); }}>Back</Button>
           </div>
         </form>
       ) : (
         <div className="flex flex-wrap gap-2">
-          {naPending && (
-            <>
-              <Button type="button" size="sm" data-testid="cell-approve-na" onClick={() => void act('approve_na')} loading={busy === 'approve_na'} disabled={busy !== null}>Approve N/A</Button>
-              <Button type="button" size="sm" variant="outline" data-testid="cell-reject-na" onClick={() => setAsking('reject_na')} disabled={busy !== null}>Reject</Button>
-            </>
-          )}
           {recheck && hasProof && (
             <Button type="button" size="sm" variant="outline" data-testid="cell-recheck" onClick={() => void act('verify')} loading={busy === 'verify'} disabled={busy !== null}>Re-check</Button>
           )}
@@ -155,7 +147,7 @@ const EVENT_LABEL: Record<string, string> = {
   proved: 'Proved', check_passed: 'Re-check passed', check_failed: 'Re-check failed', gap: 'Left open',
   na_asked: 'N/A asked', na_approved: 'N/A approved', na_rejected: 'N/A rejected',
   audit_passed: 'Audit passed', reopened: 'Reopened', row_missing: 'Row missing', row_back: 'Row back',
-  column_retired: 'Column retired',
+  column_retired: 'Column retired', na_set: 'Marked N/A', checks_changed: 'Checks changed',
 };
 
 /** The words an event carries worth showing. */
@@ -302,12 +294,7 @@ export function ProofView({ cell }: { cell: Pick<CellFull, 'proof' | 'lastCheck'
 }
 
 /** The detail panel: reads the cell, and again whenever the project's grids change. */
-/** Who holds a claimed cell: `Task #14 · Glare fixes`, or `Task #14` when the chat is not known. */
-export function claimLine(task: number, chat: { title: string | null } | null | undefined): string {
-  return chat?.title ? `Task #${task} · ${chat.title}` : `Task #${task}`;
-}
-
-export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, onOpenTask, onOpenChat, onCreated }: {
+export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, onOpenChat, onCreated }: {
   projectId: string;
   slug: string;
   row: string;
@@ -316,7 +303,7 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
   gridName?: string;
   /** Back to the grid. */
   onClose: () => void;
-  /** Opens the task that claims the cell. */
+  /** Opens a task. */
   onOpenTask?: (task: number) => void;
   /** Opens the chat a task made here went to. */
   onOpenChat?: (sessionId: string) => void;
@@ -346,8 +333,8 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
   }), [projectId]);
 
   const cell = detail?.cell;
-  // A cell no task holds and that still needs work can be given to one.
-  const claimable = !!detail && !!cell && !cell.claimedTask && blocker(cell, detail.row, detail.column) === null;
+  // A cell that still needs work can be listed in a new task.
+  const open = !!detail && !!cell && blocker(cell, detail.row, detail.column) === null;
   return (
     <div data-testid="cell-detail" data-row={row} data-col={col} className="flex min-h-0 flex-1 flex-col">
       <div className="space-y-1 border-b border-border/60 px-4 py-2">
@@ -375,17 +362,11 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
             <section className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <CellStateChip cell={cell} />
-                {cell.stale && <span className="text-xs text-muted-foreground">The covered code changed since it was proved</span>}
-                {cell.claimedTask ? (
-                  onOpenTask ? (
-                    <Button type="button" size="xs" variant="ghost" data-testid="cell-claimed" className="min-w-0 max-w-full" onClick={() => onOpenTask(cell.claimedTask!)}>
-                      <span className="truncate">{claimLine(cell.claimedTask, cell.claimedChat)}</span>
-                      <ExternalLink aria-hidden />
-                    </Button>
-                  ) : (
-                    <span data-testid="cell-claimed" className="text-xs text-muted-foreground">{claimLine(cell.claimedTask, cell.claimedChat)}</span>
-                  )
-                ) : null}
+                {cell.stale && (
+                  <span className="text-xs text-muted-foreground" data-testid="cell-stale-why">
+                    {cell.checksChanged ? 'Its checks changed since it was proved' : 'The covered code changed since it was proved'}
+                  </span>
+                )}
                 {cell.auditedAt ? <span className="text-xs text-muted-foreground">{`Audited ${when(cell.auditedAt)}`}</span> : null}
               </div>
               {detail.column.proofRule && (
@@ -395,17 +376,17 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
                 <Panel tone="attention" inset="sm" data-testid="cell-needs-check" className="space-y-0.5">
                   <div className="text-sm font-medium">{NEEDS_CHECK_LABEL}</div>
                   <div className="text-xs text-muted-foreground">
-                    {`No check proves this cell, so no task can take it. Add one to the ${detail.column.name} column or to this cell in a grid edit, and approve it.`}
+                    {`No check proves this cell, so it cannot be proved. Add one to the ${detail.column.name} column or to this cell.`}
                   </div>
                 </Panel>
               )}
               {cell.reason && (
-                <Panel tone={cell.state === 'na_pending' || cell.state === 'na' ? 'attention' : 'danger'} inset="sm" data-testid="cell-reason">
+                <Panel tone={cell.state === 'na' ? 'attention' : 'danger'} inset="sm" data-testid="cell-reason">
                   <div className="whitespace-pre-wrap break-words text-sm">{cell.reason}</div>
                 </Panel>
               )}
               <CellOwnerActions projectId={projectId} slug={slug} row={row} col={col} cell={cell} onDone={() => setRound((n) => n + 1)} />
-              {claimable && (
+              {open && (
                 <div className="flex">
                   <CreateTaskButton
                     projectId={projectId}
@@ -420,7 +401,7 @@ export function CellDetailPanel({ projectId, slug, row, col, gridName, onClose, 
             </section>
             {(cell.checks?.length ?? 0) > 0 && (
               <section className="space-y-1" data-testid="cell-checks">
-                <Label>Approved checks</Label>
+                <Label>Checks</Label>
                 <CheckList checks={(cell.checks ?? []).map(readCheck)} />
               </section>
             )}

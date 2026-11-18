@@ -34,7 +34,7 @@ vi.mock('next/navigation', () => ({
 
 const glare: ClaimShape = { grid: 'camera', kind: 'row', id: 'glare', name: 'Glare', count: 5 };
 const cells: TaskCell[] = ['cpu', 'gpu', 'perf', 'docs', 'truth'].map((col, i) => ({
-  grid: 'camera', row: 'glare', col, state: i === 0 ? 'proved' : 'in_progress', claimed: true, reason: null,
+  grid: 'camera', row: 'glare', col, state: i === 0 ? 'proved' : 'unchecked', reason: null,
 }));
 const claiming = (over: Partial<Task> = {}) => makeTask({ number: 14, title: 'Cover glare', cells, claimShape: glare, ...over });
 
@@ -51,7 +51,7 @@ describe('a claim shape', () => {
     render(<TaskCard task={claiming()} />);
     const section = screen.getByTestId('task-cells');
     expect(within(section).getByTestId('task-claim-shape').textContent).toBe('Glare row · 5 cells');
-    expect(within(section).getByTestId('task-claim-states').textContent).toBe('1 proved · 4 in progress');
+    expect(within(section).getByTestId('task-claim-states').textContent).toBe('1 proved · 4 unchecked');
     expect(within(section).queryAllByTestId('task-cell')).toHaveLength(0);
   });
 

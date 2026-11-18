@@ -1,14 +1,14 @@
 /**
  * Selecting cells and pressing Create task (docs/grids.md, "Work on cells"):
  * a row or column name, or All gaps, brings the selection bar; it counts the
- * cells and the claimable ones and lists why the rest cannot be claimed; and
+ * cells and the open ones and lists why the rest are left out; and
  * Create task makes the task in a new chat or the chat picked, then opens it.
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GridsView from '@/workbench/grids/grids-view';
-import { makeClaimedRowDetail, makeDetail } from '@/workbench/grids/__tests__/fixtures';
+import { makeDetail } from '@/workbench/grids/__tests__/fixtures';
 import { makeTask } from '@/workbench/tasks/__tests__/fixtures';
 
 const get = vi.fn();
@@ -40,10 +40,10 @@ beforeEach(() => {
   createForCells.mockReset().mockResolvedValue({ task: makeTask({ number: 12, sessionId: 'new-chat' }), sessionId: 'new-chat' });
 });
 
-function draw(onOpenTask = vi.fn()) {
+function draw() {
   const onOpenChat = vi.fn();
-  render(<GridsView projectId="p1" grid="camera" cell={null} onShow={vi.fn()} onOpenChat={onOpenChat} onOpenTask={onOpenTask} />);
-  return { onOpenChat, onOpenTask };
+  render(<GridsView projectId="p1" grid="camera" cell={null} onShow={vi.fn()} onOpenChat={onOpenChat} />);
+  return { onOpenChat };
 }
 
 const column = async (id: string) => (await screen.findAllByTestId('grid-column')).find((el) => el.dataset.col === id)!;
@@ -61,19 +61,21 @@ describe('Create task from a grid selection', () => {
     expect(within(bar).getByTestId('grid-selection-count').textContent).toBe('5 cells');
   });
 
-  it('counts the cells and the claimable ones, and says why the rest cannot be claimed', async () => {
+  it('counts the cells and the open ones, and says why the rest are left out', async () => {
     draw();
     fireEvent.click(await column('gpu'));
     const bar = screen.getByTestId('grid-selection');
     expect(within(bar).getByTestId('grid-selection-count').textContent).toBe('5 cells');
-    expect(within(bar).getByTestId('grid-selection-claimable').textContent).toBe('(1 claimable)');
+    expect(within(bar).getByTestId('grid-selection-open').textContent).toBe('(1 open)');
     expect(within(bar).getByTestId('grid-create-task').textContent).toBe('Create task · 1 cell');
     // The column's proof rule, since one column is selected.
     expect(bar.textContent).toContain('Proof for gpu');
-    fireEvent.click(within(bar).getByTestId('grid-selection-claimable'));
+    fireEvent.click(within(bar).getByTestId('grid-selection-open'));
     const blocked = await screen.findByTestId('grid-selection-blocked');
+    expect(blocked.textContent).toContain('Left out');
     expect(blocked.textContent).toContain('sunstar.gpu');
-    expect(blocked.textContent).toContain('Claimed by #7');
+    expect(blocked.textContent).toContain('Proved');
+    expect(blocked.textContent).toContain('N/A');
     expect(blocked.textContent).toContain('Read-only: owned by the colour grid');
   });
 
@@ -87,7 +89,7 @@ describe('Create task from a grid selection', () => {
     fireEvent.click(within(menu).getByTestId('create-task-new-chat'));
     await waitFor(() => expect(onOpenChat).toHaveBeenCalledWith('new-chat'));
     expect(createForCells).toHaveBeenCalledWith('p1', { slug: 'camera', rows: ['glare'], cols: '*', onlyGaps: false }, 'new');
-    // The grid is read again so its cells show claimed, and the selection goes.
+    // The grid is read again, and the selection goes.
     expect(get).toHaveBeenCalledTimes(2);
     expect(screen.queryByTestId('grid-selection')).toBeNull();
   });
@@ -103,13 +105,13 @@ describe('Create task from a grid selection', () => {
   });
 
   it("shows the server's refusal in the menu and opens nothing", async () => {
-    createForCells.mockRejectedValue(new Error('API error: 400 camera.sunstar.cpu is claimed by #14 in chat "Glare GPU"'));
+    createForCells.mockRejectedValue(new Error('API error: 400 camera.sunstar.cpu has no reviewed cases'));
     const { onOpenChat } = draw();
     fireEvent.click(await column('cpu'));
     fireEvent.click(screen.getByTestId('grid-create-task'));
     fireEvent.click(await screen.findByTestId('create-task-new-chat'));
     const error = await screen.findByTestId('create-task-error');
-    expect(error.textContent).toBe('Couldn\'t create task. camera.sunstar.cpu is claimed by #14 in chat "Glare GPU"');
+    expect(error.textContent).toBe('Couldn\'t create task. camera.sunstar.cpu has no reviewed cases');
     expect(onOpenChat).not.toHaveBeenCalled();
   });
 
@@ -127,7 +129,7 @@ describe('Create task from a grid selection', () => {
     expect(createForCells).toHaveBeenCalledWith('p1', { slug: 'camera', rows: '*', cols: '*', onlyGaps: true }, 'new');
   });
 
-  it('cannot create a task with nothing claimable', async () => {
+  it('cannot create a task with nothing open', async () => {
     draw();
     const both = (await screen.findAllByTestId('grid-cell')).find((el) => el.dataset.row === 'both' && el.dataset.col === 'gpu')!;
     fireEvent.click(both, { ctrlKey: true });
@@ -152,17 +154,5 @@ describe('Create task from a grid selection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     expect(screen.queryByTestId('grid-selection')).toBeNull();
     expect(onShow).not.toHaveBeenCalledWith({ grid: 'camera', cell: null });
-  });
-
-  it('links a row one task claims whole to that task', async () => {
-    get.mockResolvedValue(makeClaimedRowDetail());
-    const { onOpenTask } = draw();
-    await screen.findAllByTestId('grid-row-name');
-    const claims = screen.getAllByTestId('grid-claim');
-    // The glare row only: no column is claimed whole.
-    expect(claims.map((el) => el.textContent)).toEqual(['#9']);
-    expect(claims[0]!.closest('tr')!.dataset.row).toBe('glare');
-    fireEvent.click(claims[0]!);
-    expect(onOpenTask).toHaveBeenCalledWith(9);
   });
 });

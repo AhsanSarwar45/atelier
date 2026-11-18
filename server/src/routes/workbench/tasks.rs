@@ -478,13 +478,12 @@ pub(super) async fn act(
         let payload = request.payload;
         let now = chrono::Utc::now().timestamp_millis();
         let asked_project = project.clone();
-        let prints = prints_for(&state, &project, cell_grids(&payload)).await;
         let gate = draft_gate(&state, &project, cwd.as_deref(), &payload["type"], &payload["plan"]).await;
         let types = type_catalog(&state, &project)?;
         let outcome = state
             .database()
             .write_tasks(move |store| {
-                tasks::propose(store, &asked_project, &session, &payload, &prints, gate.as_ref(), now, &types)
+                tasks::propose(store, &asked_project, &session, &payload, gate.as_ref(), now, &types)
                     .map(|(proposal, summary)| (tasks::proposal_json(&proposal), summary))
             })
             .await
@@ -527,8 +526,6 @@ pub(super) async fn act(
             .read_tasks(move |store| tasks::get_proposal(store.connection(), &asked, id))
             .await
             .map_err(failed)?;
-        let named = found.as_ref().map(|p| p.cells.clone()).unwrap_or(Value::Null);
-        let prints = prints_for(&state, &project, cell_grids(&json!({"cells": named}))).await;
         // Create task approves the checks: lock their files as they are now.
         let gate = match found.as_ref().filter(|_| choice == "create") {
             Some(proposal) => {
@@ -541,7 +538,7 @@ pub(super) async fn act(
         let outcome = state
             .database()
             .write_tasks(move |store| {
-                tasks::answer_proposal(store, &answered, id, &choice, &prints, gate.as_ref(), now).map(|(proposal, task, grids)| {
+                tasks::answer_proposal(store, &answered, id, &choice, gate.as_ref(), now).map(|(proposal, task, grids)| {
                     let prompt = tasks::answer_prompt(&proposal);
                     (tasks::proposal_json(&proposal), task.map(|task| tasks::to_json(store, &task)), prompt, proposal.session_id, grids)
                 })
@@ -604,7 +601,6 @@ pub(super) async fn act(
     let actor = request.actor.clone();
     let by_workflow = request.by_workflow;
     let note = payload["note"].as_str().unwrap_or_default().to_string();
-    let prints = if request.action == "create" { prints_for(&state, &project, cell_grids(&payload)).await } else { Default::default() };
     if request.action == "done" && request.actor == "agent" {
         // Refuse a malformed payload before the checks run, which can take minutes.
         let first = Request {
@@ -639,7 +635,6 @@ pub(super) async fn act(
         missing_commits: missing,
         cwd,
         visual_files: visual,
-        prints,
         gate,
         types,
         now: chrono::Utc::now().timestamp_millis(),
@@ -846,18 +841,6 @@ fn refused_or<T>(outcome: Result<T, TaskError>) -> Result<T, ApiError> {
     }
 }
 
-/// The grids a payload's `cells` name.
-fn cell_grids(payload: &Value) -> Vec<String> {
-    let mut grids: Vec<String> = payload["cells"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|cell| cell["grid"].as_str().map(str::to_string))
-        .collect();
-    grids.sort();
-    grids.dedup();
-    grids
-}
 
 /// Tell every screen the project's tasks changed.
 pub(super) fn announce(state: &WorkbenchState, project: &Value, number: &Value) {
@@ -984,14 +967,11 @@ mod tests {
             of: Vec::new(),
         };
         draft.search = Some(Ok(search::Run { rows: vec![found("glare"), found("sunstar")], head: Some("h1".into()) }));
-        let mut approve = request("approve", "owner");
-        approve.slug = Some("camera".into());
         let project_id = project.clone();
         state
             .database()
             .write_tasks(move |store| {
                 grids::apply(store.connection(), &draft).unwrap();
-                grids::apply(store.connection(), &approve).unwrap();
                 grids::approve_all_cases(store.connection(), &project_id, "camera");
             })
             .await

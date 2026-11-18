@@ -1,5 +1,5 @@
 //! The grid watcher (docs/grids.md, "Row search"): every 60 s, for each
-//! project with approved grids, read HEAD in the project's folder, and when it
+//! project with live grids, read HEAD in the project's folder, and when it
 //! has moved since a grid's last discovery, rerun the row search of each grid
 //! whose `watch` covers a changed path.
 //!

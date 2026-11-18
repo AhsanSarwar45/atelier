@@ -18,8 +18,6 @@ import { ChevronDown, ChevronRight, Hand } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
-import { CellOwnerActions } from '@/workbench/grids/cell-detail';
-import { DraftActions, useOpenGrid } from '@/workbench/grids/grid-card';
 import { openTaskDetail } from '@/workbench/tasks/open-task';
 import { ProposalActions, TaskOwnerActions } from '@/workbench/tasks/task-card';
 import type { Task } from '@/workbench/tasks/types';
@@ -69,15 +67,6 @@ function OpenButton({ onClick }: { onClick: () => void }) {
   return <Button type="button" size="sm" variant="ghost" data-testid="waiting-open" onClick={onClick}>Open</Button>;
 }
 
-/** Opens the item's grid, or its cell, in the Tasks tab's Grids view. */
-function OpenGridButton({ item }: { item: Waiting }) {
-  const open = useOpenGrid(
-    item.grid ? { projectId: item.projectId, slug: item.grid } : null,
-    item.row && item.col ? { row: item.row, col: item.col } : undefined,
-  );
-  return open ? <OpenButton onClick={open} /> : null;
-}
-
 function WaitingLine({ item, task, onOpenTask }: { item: Waiting; task: Task | undefined; onOpenTask: (number: number) => void }) {
   const openTask = item.task !== null ? <OpenButton onClick={() => onOpenTask(item.task!)} /> : null;
   let actions: ReactNode = null;
@@ -100,25 +89,6 @@ function WaitingLine({ item, task, onOpenTask }: { item: Waiting; task: Task | u
     case 'proposal':
       actions = item.proposal !== null && (
         <ProposalActions projectId={item.projectId} id={item.proposal} onAnswered={refreshWaiting} />
-      );
-      break;
-    case 'grid_draft':
-      actions = item.grid && (
-        <DraftActions projectId={item.projectId} slug={item.grid} approveOnly onDone={refreshWaiting} extra={<OpenGridButton item={item} />} />
-      );
-      break;
-    case 'na':
-      actions = item.grid && item.row && item.col && (
-        <CellOwnerActions
-          projectId={item.projectId}
-          slug={item.grid}
-          row={item.row}
-          col={item.col}
-          cell={{ state: 'na_pending', proof: null }}
-          recheck={false}
-          onDone={refreshWaiting}
-          extra={<OpenGridButton item={item} />}
-        />
       );
       break;
   }

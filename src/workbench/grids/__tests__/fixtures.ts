@@ -13,10 +13,9 @@ export function makeGrid(over: Partial<GridSummary> = {}): GridSummary {
     createdBy: 's1',
     approvedAt: 1,
     updatedAt: 1,
-    pending: null,
     discovery: null,
     percent: 25,
-    counts: { counted: 8, proved: 2, stale: 1, gap: 1, unchecked: 2, inProgress: 1, naPending: 1, na: 0 },
+    counts: { counted: 8, proved: 2, stale: 1, gap: 1, unchecked: 2, na: 1 },
     ...over,
   };
 }
@@ -31,7 +30,7 @@ export function makeRow(id: string, over: Partial<GridRow> = {}): GridRow {
 
 export function makeCell(row: string, col: string, over: Partial<GridCell> = {}): GridCell {
   return {
-    row, col, state: 'unchecked', stale: false, claimedTask: null, reason: null,
+    row, col, state: 'unchecked', stale: false, reason: null,
     provedBy: null, provedAt: null, auditedAt: null, lastCheck: null, proofSummary: null,
     ...over,
   };
@@ -57,8 +56,8 @@ export function makeDetail(over: Partial<GridDetail> = {}): GridDetail {
     makeCell('glare', 'gpu', { state: 'proved', stale: true }),
     makeCell('glare', 'old', { state: 'gap' }),
     makeCell('sunstar', 'cpu', { state: 'gap', reason: 'No test' }),
-    makeCell('sunstar', 'gpu', { state: 'in_progress', claimedTask: 7 }),
-    makeCell('both', 'cpu', { state: 'na_pending', reason: 'No combined path on CPU' }),
+    makeCell('sunstar', 'gpu', { state: 'proved', proofSummary: 'Sunstar kernel matches' }),
+    makeCell('both', 'cpu', { state: 'na', reason: 'No combined path on CPU' }),
     makeCell('both', 'gpu', { state: 'na', reason: 'Never combined' }),
     makeCell('tonemap', 'cpu', { state: 'proved', ref: true }),
     makeCell('tonemap', 'gpu', { state: 'unchecked', ref: true }),
@@ -91,17 +90,5 @@ export function makeCellDetail(over: Partial<CellDetail['cell']> = {}): CellDeta
       { seq: 1, at: Date.now() - 120_000, kind: 'claimed', row: 'glare', col: 'gpu', sessionId: 's1', actor: 'agent', payload: { task: 7 } },
       { seq: 2, at: Date.now() - 60_000, kind: 'proved', row: 'glare', col: 'gpu', sessionId: 's1', actor: 'agent', payload: {} },
     ],
-  };
-}
-
-/** The camera grid with task #9 claiming the whole glare row, from the chat "Glare fixes". */
-export function makeClaimedRowDetail(): GridDetail {
-  const detail = makeDetail();
-  const claimedChat = { id: 's2', title: 'Glare fixes' };
-  return {
-    ...detail,
-    cells: detail.cells.map((cell) => (cell.row === 'glare' && cell.col !== 'old'
-      ? { ...cell, state: 'in_progress', stale: false, claimedTask: 9, claimedChat }
-      : cell)),
   };
 }

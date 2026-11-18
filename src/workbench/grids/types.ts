@@ -2,14 +2,12 @@
  * Coverage grids as the server hands them over (docs/grids.md, "HTTP").
  *
  * Read loosely, like tasks: a field the server leaves out is drawn as missing
- * rather than taken as a broken grid. The draft a grid is waiting on
- * (`pending`) is the agent's payload as the server stored it, so it is read in
- * either spelling, `row_search` or `rowSearch`.
+ * rather than taken as a broken grid.
  */
 
 import type { Note } from '@/workbench/notes';
 
-export const CELL_STATES = ['unchecked', 'gap', 'in_progress', 'proved', 'na_pending', 'na'] as const;
+export const CELL_STATES = ['unchecked', 'gap', 'proved', 'na'] as const;
 export type CellState = (typeof CELL_STATES)[number];
 
 export type GridStatus = 'draft' | 'approved' | 'discarded';
@@ -33,8 +31,6 @@ export interface GridCounts {
   stale: number;
   gap: number;
   unchecked: number;
-  inProgress: number;
-  naPending: number;
   na: number;
 }
 
@@ -49,10 +45,8 @@ export interface GridSummary {
   createdBy?: string | null;
   approvedAt: number | null;
   updatedAt: number;
-  /** A draft waiting for the owner: a new grid's content, or an edit to an approved one. */
-  pending: Record<string, unknown> | null;
   discovery: Discovery | null;
-  /** Proved and fresh over counted cells, rounded down. Null until approved. */
+  /** Proved and fresh over counted cells, rounded down. Null with no counted cells. */
   percent: number | null;
   counts: GridCounts;
 }
@@ -62,8 +56,6 @@ export interface TemplateColumn { id: string; name: string; proof_rule?: string;
 export interface GridTemplate {
   name: string;
   columns: TemplateColumn[];
-  /** A change waiting for the owner. */
-  pending: Record<string, unknown> | null;
   updatedAt: number;
 }
 
@@ -103,26 +95,25 @@ export interface GridCell {
   col: string;
   state: CellState;
   stale: boolean;
-  claimedTask: number | null;
+  /** Its checks changed since the proof, so the proof is stale until re-checked. */
+  checksChanged?: boolean;
   reason: string | null;
   provedBy: string | null;
   provedAt: number | null;
   auditedAt: number | null;
   lastCheck: LastCheckBrief | null;
   proofSummary: string | null;
-  /** The chat holding the claiming task, when the server says (absent on older servers). */
-  claimedChat?: { id: string; title: string | null } | null;
   /** A reference row's cell: the owner grid's, read-only here. */
   ref?: boolean;
   /** The cell's resolved checks: its column's templates with `{row}` filled in, then its own. */
   checks?: Array<Record<string, unknown>>;
-  /** Whether it has no checks at all, so it cannot be claimed or proved. */
+  /** Whether it has no checks at all, so it cannot be proved. */
   needsCheck?: boolean;
-  /** Where the cell is: order, cases, reviewed, red, work, proved or na. */
+  /** Where the cell is: order, cases, reviewed, proved or na. */
   step?: string | null;
   /** The next allowed command for the cell. */
   next?: string | null;
-  /** Whether its cases are not reviewed, so it cannot be claimed or re-proved. */
+  /** Whether its cases are not reviewed, so it cannot be proved. */
   needsCases?: boolean;
   /** The cell's own cases: one scenario of its row each. */
   cases?: GridCase[];
@@ -193,8 +184,7 @@ export interface GridsList {
 }
 
 export type GridOwnerAction =
-  | 'approve' | 'discard' | 'approve_na' | 'reject_na' | 'reopen' | 'verify' | 'discover'
-  | 'approve_template' | 'reject_template' | 'note';
+  'reopen' | 'verify' | 'discover' | 'note';
 
 export type GridWidgetEvent = 'draft' | 'template' | 'prove' | 'na' | 'audit' | 'reopen' | 'pass' | 'discover';
 
@@ -204,12 +194,12 @@ export interface AuditSummary {
   cells?: Array<{ row: string; col: string; reason?: string | null }>;
 }
 
-/** What a pending template change does, as the server works it out. */
+/** What a template change did, as the server works it out. */
 export interface TemplateChange {
   added: string[];
   removed: string[];
   changed: string[];
-  /** The approved grids that use the template. */
+  /** The grids that use the template. */
   affects: string[];
   /** Grids whose own column already has an id the change adds. */
   clashes: Array<{ grid: string; column: string }>;
@@ -223,7 +213,7 @@ export interface GridWidget {
   /** The grid the change is about. A template card has none. */
   grid?: GridSummary;
   cell?: Partial<CellFull> & { row: string; col: string };
-  /** A template change: the template, and what approving it does. */
+  /** A template change: the template, and what it changed. */
   template?: GridTemplate & { projectId?: string; change?: TemplateChange | null };
   audit?: AuditSummary;
 }
@@ -246,9 +236,7 @@ export interface GridActionAnswer {
 export const STATE_LABEL: Record<CellState, string> = {
   unchecked: 'Unchecked',
   gap: 'Gap',
-  in_progress: 'In progress',
   proved: 'Proved',
-  na_pending: 'N/A pending',
   na: 'N/A',
 };
 
@@ -262,13 +250,13 @@ export const LOOK_LABEL: Record<CellLook, string> = { ...STATE_LABEL, stale: 'St
 
 /**
  * Whether a cell waits on a check before it can be worked on: it has none,
- * and it still needs work (unchecked, a gap, in progress, or a stale proof).
+ * and it still needs work (unchecked, a gap, or a stale proof).
  * A fresh proof or an N/A needs nothing more.
  */
 export function needsACheck(cell: Pick<GridCell, 'state' | 'stale' | 'needsCheck' | 'ref'> | undefined): boolean {
   if (!cell || cell.needsCheck !== true || cell.ref) return false;
   const look = cellLook(cell);
-  return look === 'unchecked' || look === 'gap' || look === 'in_progress' || look === 'stale';
+  return look === 'unchecked' || look === 'gap' || look === 'stale';
 }
 
 export const NEEDS_CHECK_LABEL = 'Needs a check';

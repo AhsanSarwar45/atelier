@@ -45,7 +45,6 @@ fn camera(store: &Store) {
     });
     draft.search = Some(Ok(search::Run { rows: vec![found("glare"), found("sunstar")], head: Some("h1".into()) }));
     apply(store.connection(), &draft).unwrap();
-    apply(store.connection(), &request("approve", "owner", Some("camera"))).unwrap();
     super::approve_all_cases(store.connection(), "p", "camera");
 }
 
@@ -70,7 +69,7 @@ fn next(store: &Store) -> Value {
 }
 
 fn cell<'a>(value: &'a Value, row: &str, col: &str) -> &'a Value {
-    value["claimable"].as_array().unwrap().iter().find(|cell| cell["row"] == row && cell["col"] == col).unwrap()
+    value["cells"].as_array().unwrap().iter().find(|cell| cell["row"] == row && cell["col"] == col).unwrap()
 }
 
 fn texts(cell: &Value) -> Vec<(String, String)> {

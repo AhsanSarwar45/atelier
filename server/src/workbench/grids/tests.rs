@@ -80,11 +80,9 @@ pub(super) fn draft(store: &Store, session: &str, payload: Value, rows: Vec<sear
     apply(store.connection(), &asked)
 }
 
-/// An approved grid `slug` with rows glare and sunstar (or those given) and columns gpu and perf.
+/// A live grid `slug` with rows glare and sunstar (or those given) and columns gpu and perf.
 fn approved(store: &Store, session: &str, slug: &str, rows: Vec<search::Found>) {
-    owner_says(store, session, &format!("@matrix the {slug} area"));
     draft(store, session, draft_payload(slug), rows).unwrap();
-    apply(store.connection(), &request("approve", "owner", None, slug)).unwrap();
     super::approve_all_cases(store.connection(), "p", slug);
 }
 
@@ -105,31 +103,8 @@ pub(super) fn proof_payload() -> Value {
     json!({"summary": "glare matches the reference"})
 }
 
-/// Proves a cell the way an agent must: a cell no started task of this chat
-/// holds is first claimed by a new task, started, and that task is
-/// cancelled after the proof, which keeps the proof and frees the chat.
+/// Proves a cell as it stands: no task is needed.
 fn prove(store: &Store, session: &str, slug: &str, row: &str, col: &str, print: &str) -> Result<Outcome, TaskError> {
-    let cell = state(store, slug, row, col);
-    if cell.step == "work" || cell.claimed_task.is_some() {
-        return prove_held(store, session, slug, row, col, print);
-    }
-    let number = task_create(store, session, json!([{"grid": slug, "row": row, "col": col}]), Prints::new())?.task.number;
-    task(store, Some(session), "agent", "start", number, json!({}))?;
-    let proved = prove_held(store, session, slug, row, col, print);
-    task(store, Some(session), "agent", "cancel", number, json!({"reason": "proved"}))?;
-    proved
-}
-
-/// Claims a cell for a new task of this chat and starts it, so the cell is
-/// at step work.
-pub(super) fn hold(store: &Store, session: &str, slug: &str, row: &str, col: &str) -> i64 {
-    let number = task_create(store, session, json!([{"grid": slug, "row": row, "col": col}]), Prints::new()).unwrap().task.number;
-    task(store, Some(session), "agent", "start", number, json!({})).unwrap();
-    number
-}
-
-/// Proves a cell as it stands, with no claim made for it.
-fn prove_held(store: &Store, session: &str, slug: &str, row: &str, col: &str, print: &str) -> Result<Outcome, TaskError> {
     let mut asked = on(request("prove", "agent", Some(session), slug), row, col);
     asked.payload = proof_payload();
     asked.checks = passing();
@@ -138,7 +113,7 @@ fn prove_held(store: &Store, session: &str, slug: &str, row: &str, col: &str, pr
     apply(store.connection(), &asked)
 }
 
-fn task_create(store: &Store, session: &str, cells: Value, prints: Prints) -> Result<tasks::Outcome, TaskError> {
+fn task_create(store: &Store, session: &str, cells: Value) -> Result<tasks::Outcome, TaskError> {
     owner_says(store, session, "@task do these cells");
     let plan = cell_plan(store, &cells);
     tasks::apply(store, &tasks::Request { types: Default::default(),
@@ -152,7 +127,6 @@ fn task_create(store: &Store, session: &str, cells: Value, prints: Prints) -> Re
         missing_commits: Default::default(),
         cwd: Some("/repo".into()),
         visual_files: Vec::new(),
-        prints,
         now: 2,
     })
 }
@@ -170,7 +144,6 @@ fn task(store: &Store, session: Option<&str>, actor: &str, action: &str, number:
         missing_commits: Default::default(),
         cwd: Some("/repo".into()),
         visual_files: Vec::new(),
-        prints: Default::default(),
         now: 3,
     })
 }
@@ -186,8 +159,13 @@ fn task_refused<T>(result: Result<T, TaskError>) -> String {
 /// `grid next` gives them.
 fn cell_plan(store: &Store, cells: &Value) -> Value {
     let picked = parse_cells(Some(cells), false).unwrap_or_default();
-    let approved = approved_cell_checks(store.connection(), "p", &picked).unwrap_or_default();
-    let mut steps: Vec<Value> = approved
+    let mut checks = Vec::new();
+    for cell in &picked {
+        if let Some(loaded) = load(store.connection(), "p", &cell.grid).unwrap() {
+            checks.extend(loaded.cell_checks(&cell.row, &cell.col));
+        }
+    }
+    let mut steps: Vec<Value> = checks
         .iter()
         .enumerate()
         .map(|(index, check)| json!({"id": format!("c{index}"), "text": "Prove the cell", "checks": [check]}))
@@ -208,17 +186,17 @@ fn chore_done(cells: Value) -> Value {
 #[test]
 fn a_draft_is_what_the_row_search_prints_plus_manual_rows() {
     let (_d, store) = store();
-    owner_says(&store, "s1", "@matrix the camera");
     let mut payload = draft_payload("camera");
     payload["rows"] = json!([
         {"id": "glare_x_sunstar", "name": "Glare × sunstar", "kind": "combination", "of": ["glare", "sunstar"]},
     ]);
     let outcome = draft(&store, "s1", payload.clone(), vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
     assert_eq!(outcome.widget, Some("draft"));
-    let grid = get_grid(store.connection(), "p", "camera").unwrap().unwrap();
-    assert_eq!(grid.status, "draft");
-    let pending = grid.pending.unwrap();
-    let ids: Vec<_> = pending["rows"].as_array().unwrap().iter().map(|r| (r["id"].as_str().unwrap().to_string(), r["source"].as_str().unwrap().to_string())).collect();
+    // The draft is live at once: no owner approves it.
+    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
+    assert_eq!(loaded.grid.status, "approved");
+    assert!(loaded.grid.pending.is_none());
+    let ids: Vec<_> = loaded.rows.iter().map(|r| (r.id.clone(), r.source.clone())).collect();
     assert_eq!(ids, [("glare".into(), "search".into()), ("sunstar".into(), "search".into()), ("glare_x_sunstar".into(), "manual".into())]);
     // A manual id the search also prints is refused, and so is a failed search.
     payload["rows"] = json!([{"id": "glare", "name": "Glare"}]);
@@ -237,31 +215,22 @@ fn a_draft_is_what_the_row_search_prints_plus_manual_rows() {
 }
 
 #[test]
-fn a_new_grid_may_be_drafted_without_matrix_but_not_over_another_chats_draft() {
+fn any_chat_drafts_or_redrafts_a_grid_with_no_matrix() {
     let (_d, store) = store();
     owner_says(&store, "s1", "make a grid of the camera please");
     draft(&store, "s1", draft_payload("camera"), vec![found("glare", &[])]).unwrap();
-    // Redrafting its own draft is fine; another chat may not take it, and is told what to do.
-    owner_says(&store, "s1", "add sunstar too");
     draft(&store, "s1", draft_payload("camera"), vec![found("glare", &[]), found("sunstar", &[])]).unwrap();
-    let refusal = refused(draft(&store, "s2", draft_payload("camera"), vec![found("glare", &[])]));
-    assert!(refusal.contains("draft by another chat") && refusal.contains("Pick another slug"), "{refusal}");
-    assert!(may_draft(store.connection(), "p", "s2", "camera").is_err());
-    // A discarded draft's slug can be drafted again, by any chat.
-    apply(store.connection(), &request("discard", "owner", None, "camera")).unwrap();
-    assert_eq!(get_grid(store.connection(), "p", "camera").unwrap().unwrap().status, "discarded");
-    draft(&store, "s2", draft_payload("camera"), vec![found("glare", &[])]).unwrap();
+    // Another chat may edit it too: the grid is the project's.
+    draft(&store, "s2", draft_payload("camera"), vec![found("glare", &[]), found("sunstar", &[])]).unwrap();
+    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
+    assert_eq!((loaded.grid.status.as_str(), loaded.rows.len()), ("approved", 2));
 }
 
 #[test]
-fn approving_writes_rows_columns_and_unchecked_cells() {
+fn a_draft_writes_rows_columns_and_unchecked_cells_at_once() {
     let (_d, store) = store();
-    owner_says(&store, "s1", "@matrix camera");
-    draft(&store, "s1", draft_payload("camera"), vec![found("glare", &["camera/glare.rs"]), found("sunstar", &[])]).unwrap();
-    let outcome = apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
-    assert_eq!(outcome.tell[0].0, "s1");
-    assert!(outcome.tell[0].1.contains("Owner approved grid \"camera\" (2 rows × 2 columns)"), "{}", outcome.tell[0].1);
-    assert!(outcome.tell[0].1.contains("Run `atelier grid next camera`") && outcome.tell[0].1.contains("press Create task"), "{}", outcome.tell[0].1);
+    let outcome = draft(&store, "s1", draft_payload("camera"), vec![found("glare", &["camera/glare.rs"]), found("sunstar", &[])]).unwrap();
+    assert!(outcome.summary.contains("Created grid \"camera\" (2 rows × 2 columns); it is live"), "{}", outcome.summary);
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert_eq!(loaded.grid.status, "approved");
     assert!(loaded.grid.pending.is_none());
@@ -271,7 +240,6 @@ fn approving_writes_rows_columns_and_unchecked_cells() {
     assert!(loaded.cells.iter().all(|cell| cell.state == "unchecked"));
     let summary = summary(&loaded, &Prints::new());
     assert_eq!((summary["percent"].as_i64(), summary["counts"]["counted"].as_i64()), (Some(0), Some(4)));
-    assert!(refused(apply(store.connection(), &request("approve", "owner", None, "camera"))).contains("no draft waiting"));
 }
 
 #[test]
@@ -285,11 +253,10 @@ fn a_feature_belongs_to_one_grid_and_a_reference_reads_the_owners_cells() {
     payload["rows"] = json!([{"id": "glare", "name": "Glare", "kind": "reference", "ref": {"grid": "camera", "row": "glare"}}]);
     draft(&store, "s2", payload.clone(), vec![found("bokeh", &[])]).unwrap();
     payload["rows"] = json!([{"id": "glare", "name": "Glare", "kind": "reference", "ref": {"grid": "camera", "row": "nope"}}]);
-    assert!(refused(draft(&store, "s2", payload, vec![found("bokeh", &[])])).contains("not a row of an approved grid"));
+    assert!(refused(draft(&store, "s2", payload, vec![found("bokeh", &[])])).contains("not a row of a live grid"));
     let mut payload = draft_payload("lens");
     payload["rows"] = json!([{"id": "glare", "name": "Glare", "kind": "reference", "ref": {"grid": "camera", "row": "glare"}}]);
     draft(&store, "s2", payload, vec![found("bokeh", &[])]).unwrap();
-    apply(store.connection(), &request("approve", "owner", None, "lens")).unwrap();
     super::approve_all_cases(store.connection(), "p", "lens");
     let lens = load(store.connection(), "p", "lens").unwrap().unwrap();
     // The reference row has no cells of its own and does not count.
@@ -301,26 +268,16 @@ fn a_feature_belongs_to_one_grid_and_a_reference_reads_the_owners_cells() {
 }
 
 #[test]
-fn an_edit_to_an_approved_grid_waits_for_the_owner() {
+fn an_edit_to_a_live_grid_applies_at_once() {
     let (_d, store) = store();
     camera(&store);
     let mut payload = draft_payload("camera");
     payload["columns"] = json!([{"id": "gpu", "name": "Runs on the GPU", "proof_rule": "a GPU test"}]);
-    // No @matrix needed for an edit of an approved grid.
-    owner_says(&store, "s1", "drop perf and add ghosts");
-    draft(&store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("ghosts", &[])]).unwrap();
-    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
-    let pending = loaded.grid.pending.clone().unwrap();
-    assert_eq!(pending["edit"], true);
-    assert_eq!(pending["diff"]["rowsAdded"], json!(["ghosts"]));
-    assert_eq!(pending["diff"]["rowsMissing"], json!(["sunstar"]));
-    assert_eq!(pending["diff"]["columnsRetired"], json!(["perf"]));
-    // The live grid is unchanged until approval.
-    assert_eq!(loaded.cells.len(), 4);
-    assert!(loaded.rows.iter().all(|r| r.missing_since.is_none()));
-    apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
+    let outcome = draft(&store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("ghosts", &[])]).unwrap();
+    assert!(outcome.summary.starts_with("Updated grid \"camera\""), "{}", outcome.summary);
     super::approve_all_cases(store.connection(), "p", "camera");
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
+    assert!(loaded.grid.pending.is_none());
     assert!(loaded.column("perf").unwrap().retired_at.is_some());
     assert!(loaded.row("sunstar").unwrap().missing_since.is_some());
     assert_eq!(state(&store, "camera", "ghosts", "gpu").state, "unchecked");
@@ -336,14 +293,10 @@ fn a_template_change_adds_unchecked_cells_and_retires_removed_columns() {
     let outcome = apply(store.connection(), &set).unwrap();
     assert_eq!(outcome.widget, Some("template"));
     assert_eq!(outcome.template.as_ref().unwrap()["projectId"], "p");
-    // Not usable until approved.
-    owner_says(&store, "s1", "@matrix camera");
+    // Usable at once.
     let mut payload = draft_payload("camera");
     payload["template"] = json!("physics");
-    assert!(refused(draft(&store, "s1", payload.clone(), vec![found("glare", &[])])).contains("no approved columns"));
-    apply(store.connection(), &request("approve_template", "owner", None, "physics")).unwrap();
     draft(&store, "s1", payload, vec![found("glare", &[])]).unwrap();
-    apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
     super::approve_all_cases(store.connection(), "p", "camera");
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert!(loaded.column("energy").unwrap().from_template);
@@ -354,12 +307,7 @@ fn a_template_change_adds_unchecked_cells_and_retires_removed_columns() {
         {"id": "gpu", "name": "GPU", "proof_rule": "x"},
     ]});
     let outcome = apply(store.connection(), &set).unwrap();
-    let change = &outcome.template.unwrap()["change"];
-    assert_eq!(change["affects"], json!(["camera"]));
-    assert_eq!(change["clashes"], json!([{"grid": "camera", "column": "gpu"}]));
-    let outcome = apply(store.connection(), &request("approve_template", "owner", None, "physics")).unwrap();
     assert_eq!(outcome.grids, ["camera"]);
-    assert!(outcome.summary.contains("@audit camera"), "{}", outcome.summary);
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert!(loaded.column("energy").unwrap().retired_at.is_some());
     assert_eq!(state(&store, "camera", "glare", "momentum").state, "unchecked");
@@ -412,7 +360,6 @@ fn a_failing_or_bad_row_search_changes_nothing() {
 fn prove_needs_a_passing_check_budgets_met_and_existing_commits() {
     let (_d, store) = store();
     camera(&store);
-    hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = proof_payload();
     asked.checks = vec![proof::CheckResult { name: "unit".into(), exit: 3, ms: 1, tail: "assertion failed".into() }];
@@ -444,7 +391,6 @@ async fn prove_is_refused_while_the_covered_paths_are_dirty() {
     assert!(proof::dirty(repo.path(), &["other/".into()]).await.unwrap().is_empty());
     let (_d, store) = store();
     camera(&store);
-    hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = proof_payload();
     asked.dirty = dirty;
@@ -518,7 +464,6 @@ fn percent_counts_fresh_proof_over_live_cells_without_na() {
     let mut na = on(request("na", "agent", Some("s1"), "camera"), "ghosts", "perf");
     na.payload = json!({"reason": "no perf budget for ghosts"});
     apply(store.connection(), &na).unwrap();
-    apply(store.connection(), &on(request("approve_na", "owner", None, "camera"), "ghosts", "perf")).unwrap();
     let mut prints = Prints::new();
     prints.insert(("camera".into(), "glare".into()), "f1".into());
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
@@ -529,95 +474,59 @@ fn percent_counts_fresh_proof_over_live_cells_without_na() {
     prints.insert(("camera".into(), "glare".into()), "f2".into());
     let c = counts(&loaded, &prints);
     assert_eq!((c["stale"].as_i64(), percent(&loaded, &c)), (Some(2), Some(0)));
-    // A draft has no percent.
-    owner_says(&store, "s1", "@matrix lens");
-    draft(&store, "s1", draft_payload("lens"), vec![found("bokeh", &[])]).unwrap();
-    let lens = load(store.connection(), "p", "lens").unwrap().unwrap();
-    assert_eq!(summary(&lens, &Prints::new())["percent"], Value::Null);
 }
 
 #[test]
-fn a_task_claims_its_cells_and_a_second_claim_is_refused() {
+fn a_task_references_its_cells_without_claiming_them() {
     let (_d, store) = store();
     camera(&store);
-    store.connection().execute("INSERT INTO session (id, brand, project_id, project_path, cwd, permission_mode, title, state, origin, created_at, last_active_at)
-        VALUES ('s1', 'claude', 'p', '/p', '/p', 'default', 'Glare GPU', 'idle', 'app', '2026', '2026')", []).ok();
     let cells = json!([{"grid": "camera", "row": "glare", "col": "gpu"}, {"grid": "camera", "row": "sunstar", "col": "gpu"}]);
-    let outcome = task_create(&store, "s1", cells, Prints::new()).unwrap();
+    let outcome = task_create(&store, "s1", cells).unwrap();
     let number = outcome.task.number;
     assert_eq!(outcome.grids, ["camera"]);
     let cell = state(&store, "camera", "glare", "gpu");
-    assert_eq!((cell.state.as_str(), cell.claimed_task, cell.claimed_from.as_deref()), ("in_progress", Some(number), Some("unchecked")));
-    let refusal = task_refused(task_create(&store, "s2", json!([{"grid": "camera", "row": "glare", "col": "gpu"}]), Prints::new()));
-    assert!(refusal.starts_with(&format!("camera.glare.gpu is claimed by #{number} in chat")), "{refusal}");
-    // Nothing of the refused create was written.
-    assert!(tasks::get(store.connection(), "p", number + 1).unwrap().is_none());
-    // A fresh proof is not claimable; a stale one is.
-    prove(&store, "s3", "camera", "glare", "perf", "f1").unwrap();
-    let fresh: Prints = HashMap::from([(("camera".to_string(), "glare".to_string()), "f1".to_string())]);
-    let cell = json!([{"grid": "camera", "row": "glare", "col": "perf"}]);
-    assert!(task_refused(task_create(&store, "s3", cell.clone(), fresh)).contains("fresh"));
-    let stale: Prints = HashMap::from([(("camera".to_string(), "glare".to_string()), "f2".to_string())]);
-    task_create(&store, "s3", cell, stale).unwrap();
-    // Only the chat holding the claiming task proves it.
-    assert!(refused(prove(&store, "s2", "camera", "glare", "gpu", "f1")).contains("only the chat holding that task"));
-    task(&store, Some("s1"), "agent", "start", number, json!({})).unwrap();
-    prove(&store, "s1", "camera", "glare", "gpu", "f1").unwrap();
-    // The task card lists its cells.
+    assert_eq!((cell.state.as_str(), cell.claimed_task), ("unchecked", None));
+    // Another chat's task may reference the same cell, and any chat proves it.
+    task_create(&store, "s2", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap();
+    prove(&store, "s3", "camera", "glare", "gpu", "f1").unwrap();
+    assert_eq!(state(&store, "camera", "glare", "gpu").state, "proved");
+    // A cell that is not in a grid is refused.
+    assert!(task_refused(task_create(&store, "s1", json!([{"grid": "camera", "row": "nope", "col": "gpu"}]))).contains("nope"));
+    // The task card lists its cells with their states now.
     let json = tasks::to_json(&store, &tasks::get(store.connection(), "p", number).unwrap().unwrap());
     assert_eq!(json["cells"].as_array().unwrap().len(), 2);
-    // And the reconnect section names them.
-    let section = tasks::open_section(store.connection(), "s1").unwrap();
-    assert!(section.contains(&format!("Cells claimed by your tasks: #{number} → camera.glare.gpu [proved], camera.sunstar.gpu [in_progress]")), "{section}");
 }
 
 #[test]
-fn task_done_needs_proof_or_a_reason_for_every_claimed_cell() {
+fn task_done_needs_nothing_of_its_cells_and_leaves_them_as_they_are() {
     let (_d, store) = store();
     camera(&store);
     let cells = json!([{"grid": "camera", "row": "glare", "col": "gpu"}, {"grid": "camera", "row": "sunstar", "col": "gpu"}]);
-    let number = task_create(&store, "s1", cells, Prints::new()).unwrap().task.number;
+    let number = task_create(&store, "s1", cells).unwrap().task.number;
     task(&store, Some("s1"), "agent", "start", number, json!({})).unwrap();
     prove(&store, "s1", "camera", "glare", "gpu", "f1").unwrap();
-    let refusal = task_refused(task(&store, Some("s1"), "agent", "done", number, chore_done(json!([]))));
-    assert!(refusal.contains("camera.sunstar.gpu is still in progress"), "{refusal}");
-    let refusal = task_refused(task(&store, Some("s1"), "agent", "done", number,
-        chore_done(json!([{"grid": "camera", "row": "sunstar", "col": "gpu"}]))));
-    assert!(refusal.contains("needs a reason"), "{refusal}");
     let refusal = task_refused(task(&store, Some("s1"), "agent", "done", number,
         chore_done(json!([{"grid": "camera", "row": "glare", "col": "perf", "reason": "x"}]))));
-    assert!(refusal.contains("does not claim"), "{refusal}");
-    let outcome = task(&store, Some("s1"), "agent", "done", number,
-        chore_done(json!([{"grid": "camera", "row": "sunstar", "col": "gpu", "reason": "no GPU path yet"}]))).unwrap();
-    assert_eq!(outcome.grids, ["camera"]);
-    let gap = state(&store, "camera", "sunstar", "gpu");
-    assert_eq!((gap.state.as_str(), gap.reason.as_deref(), gap.claimed_task), ("gap", Some("no GPU path yet"), None));
-    let proved = state(&store, "camera", "glare", "gpu");
-    assert_eq!((proved.state.as_str(), proved.claimed_task), ("proved", None));
-    assert_eq!(outcome.task.result.unwrap()["cells"][0]["reason"], "no GPU path yet");
+    assert!(refusal.contains("does not reference"), "{refusal}");
+    task(&store, Some("s1"), "agent", "done", number, chore_done(json!([]))).unwrap();
+    assert_eq!(state(&store, "camera", "sunstar", "gpu").state, "unchecked");
+    assert_eq!(state(&store, "camera", "glare", "gpu").state, "proved");
 }
 
 #[test]
-fn cancel_restores_the_cells_it_claimed() {
+fn cancel_leaves_its_cells_as_they_are() {
     let (_d, store) = store();
     camera(&store);
-    let mut asked = on(request("verify", "owner", None, "camera"), "sunstar", "gpu");
     prove(&store, "s1", "camera", "sunstar", "gpu", "f1").unwrap();
-    asked.checks = vec![proof::CheckResult { name: "unit".into(), exit: 1, ms: 1, tail: String::new() }];
-    apply(store.connection(), &asked).unwrap();
     let cells = json!([{"grid": "camera", "row": "glare", "col": "gpu"}, {"grid": "camera", "row": "sunstar", "col": "gpu"}]);
-    let number = task_create(&store, "s1", cells, Prints::new()).unwrap().task.number;
+    let number = task_create(&store, "s1", cells).unwrap().task.number;
     task(&store, Some("s1"), "agent", "cancel", number, json!({"reason": "not now"})).unwrap();
-    let glare = state(&store, "camera", "glare", "gpu");
-    let sunstar = state(&store, "camera", "sunstar", "gpu");
-    assert_eq!((glare.state.as_str(), glare.claimed_task), ("unchecked", None));
-    assert_eq!((sunstar.state.as_str(), sunstar.claimed_task), ("gap", None));
-    // Free again for another task.
-    task_create(&store, "s2", json!([{"grid": "camera", "row": "glare", "col": "gpu"}]), Prints::new()).unwrap();
+    assert_eq!(state(&store, "camera", "glare", "gpu").state, "unchecked");
+    assert_eq!(state(&store, "camera", "sunstar", "gpu").state, "proved");
 }
 
 #[test]
-fn na_waits_for_the_owner() {
+fn na_applies_at_once_and_reopen_undoes_it() {
     let (_d, store) = store();
     camera(&store);
     let mut na = on(request("na", "agent", Some("s1"), "camera"), "glare", "perf");
@@ -625,21 +534,9 @@ fn na_waits_for_the_owner() {
     na.payload = json!({"reason": "glare has no perf budget"});
     let outcome = apply(store.connection(), &na).unwrap();
     assert_eq!(outcome.widget, Some("na"));
-    assert_eq!(state(&store, "camera", "glare", "perf").state, "na_pending");
-    assert!(tasks::open_section(store.connection(), "s1").unwrap().contains("N/A awaiting the owner: camera.glare.perf"));
-    // Only the owner moves it to N/A.
-    assert!(refused(apply(store.connection(), &on(request("approve_na", "agent", Some("s1"), "camera"), "glare", "perf"))).contains("not an agent action"));
-    let mut reject = on(request("reject_na", "owner", None, "camera"), "glare", "perf");
-    reject.payload = json!({"note": "it has one: 1 ms"});
-    let outcome = apply(store.connection(), &reject).unwrap();
-    assert_eq!(outcome.tell, [("s1".to_string(), outcome.summary.clone())]);
     let cell = state(&store, "camera", "glare", "perf");
-    assert_eq!((cell.state.as_str(), cell.reason.as_deref()), ("gap", Some("it has one: 1 ms")));
-    apply(store.connection(), &na).unwrap();
-    let outcome = apply(store.connection(), &on(request("approve_na", "owner", None, "camera"), "glare", "perf")).unwrap();
-    assert_eq!(outcome.tell[0].0, "s1");
-    assert_eq!(state(&store, "camera", "glare", "perf").state, "na");
-    // The owner may reopen an N/A cell.
+    assert_eq!((cell.state.as_str(), cell.reason.as_deref()), ("na", Some("glare has no perf budget")));
+    // The owner, or any agent, may reopen an N/A cell.
     let mut reopen = on(request("reopen", "owner", None, "camera"), "glare", "perf");
     reopen.payload = json!({"reason": "it applies after all"});
     apply(store.connection(), &reopen).unwrap();
@@ -665,17 +562,12 @@ fn an_audit_verdict_from_the_proving_chat_is_refused() {
 }
 
 #[test]
-fn audit_passes_need_the_owners_audit() {
+fn any_other_chat_passes_or_reopens_cells_in_an_audit() {
     let (_d, store) = store();
     camera(&store);
     prove(&store, "s1", "camera", "glare", "gpu", "f1").unwrap();
     prove(&store, "s1", "camera", "sunstar", "gpu", "f1").unwrap();
-    owner_says(&store, "s9", "please look at the camera grid");
     let pass = on(request("pass", "agent", Some("s9"), "camera"), "sunstar", "gpu");
-    assert!(refused(apply(store.connection(), &pass)).contains("@audit camera"));
-    owner_says(&store, "s9", "@audit lens");
-    assert!(refused(apply(store.connection(), &pass)).contains("@audit camera"));
-    owner_says(&store, "s9", "@audit camera");
     let mut reopen = on(request("reopen", "agent", Some("s9"), "camera"), "glare", "gpu");
     reopen.payload = json!({"reason": "the check compares the kernel with itself"});
     let outcome = apply(store.connection(), &reopen).unwrap();
@@ -745,107 +637,73 @@ fn agent_create(store: &Store, session: &str, cells: Value) -> Result<tasks::Out
         missing_commits: Default::default(),
         cwd: Some("/repo".into()),
         visual_files: Vec::new(),
-        prints: Prints::new(),
         now: 2,
     })
 }
 
 #[test]
-fn an_agent_creates_a_task_for_approved_grid_cells_without_task() {
+fn a_task_with_cells_still_needs_task() {
     let (_d, store) = store();
     camera(&store);
     owner_says(&store, "s1", "keep going on the camera grid");
-    let outcome = agent_create(&store, "s1", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap();
-    assert_eq!(state(&store, "camera", "glare", "gpu").claimed_task, Some(outcome.task.number));
-    // A task with no cells still needs @task.
+    assert!(task_refused(agent_create(&store, "s1", json!([{"grid": "camera", "row": "glare", "col": "gpu"}]))).contains("no @task"));
     assert!(task_refused(agent_create(&store, "s1", json!([]))).contains("no @task"));
-    // So do cells of a grid still waiting for the owner.
-    owner_says(&store, "s2", "draft the lens grid");
-    draft(&store, "s2", draft_payload("lens"), vec![found("bokeh", &[])]).unwrap();
-    let refusal = task_refused(agent_create(&store, "s2", json!([{"grid": "lens", "row": "bokeh", "col": "gpu"}])));
-    assert!(refusal.contains("no @task") && refusal.contains("approved grids"), "{refusal}");
-    // And a mix of an approved and a draft grid.
-    let refusal = task_refused(agent_create(&store, "s2", json!([
-        {"grid": "camera", "row": "sunstar", "col": "gpu"}, {"grid": "lens", "row": "bokeh", "col": "gpu"}
-    ])));
-    assert!(refusal.contains("no @task"), "{refusal}");
-    assert!(all_in_approved(store.connection(), "p", &parse_cells(Some(&json!([{"grid": "camera", "row": "glare", "col": "perf"}])), false).unwrap()).unwrap());
+    owner_says(&store, "s1", "@task the glare cell");
+    let outcome = agent_create(&store, "s1", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap();
+    assert_eq!(outcome.grids, ["camera"]);
 }
 
 #[test]
-fn next_lists_one_row_and_names_the_chats_holding_taken_cells() {
+fn next_lists_one_row_of_ready_cells_with_their_prove_commands() {
     let (_d, store) = store();
     camera(&store);
-    chat(&store, "s1", "Glare GPU");
     let none = Prints::new();
-    // A batch of two from the first row with free cells: glare, both columns.
+    // A batch of two from the first row with ready cells: glare, both columns.
     let next = next_batch(store.connection(), "p", "camera", &none, &Scope::First, 2).unwrap();
     assert_eq!(next["scope"], json!({"kind": "row", "id": "glare", "name": "GLARE"}));
-    assert_eq!(next["claimable"].as_array().unwrap().len(), 2);
+    assert_eq!(next["cells"].as_array().unwrap().len(), 2);
     assert_eq!(next["left"], 4);
-    assert_eq!(next["claimable"][0]["proofRule"], "a GPU test");
-    let create = &next["create"];
-    assert_eq!(create["type"], "general");
-    assert_eq!(create["title"], "camera: GLARE row");
-    assert_eq!(create["plan"]["done_when"][0]["id"], "glare.gpu");
-    assert_eq!(create["plan"]["done_when"][0]["text"], "GLARE × Runs on the GPU: a GPU test");
-    // The cell's check, its column's template filled in for the row.
-    assert_eq!(create["plan"]["done_when"][0]["checks"][0]["command"], "cargo test glare_on_gpu");
-    assert_eq!(create["cells"].as_array().unwrap().len(), 2);
-    // The payload is one an agent can create without @task.
-    owner_says(&store, "s1", "next");
-    let created = tasks::apply(&store, &tasks::Request { types: Default::default(),
-        gate: None,
-        action: "create".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(), number: None,
-        payload: tasks::decided(json!({"type": "general", "title": "x", "why": "y", "cells": [create["cells"][0]],
-            "plan": {"outcome": create["plan"]["outcome"], "done_when": [create["plan"]["done_when"][0]]}})),
-        missing_commits: Default::default(), cwd: None, visual_files: Vec::new(), prints: Prints::new(), now: 2,
-    }).unwrap();
-    let number = created.task.number;
-    // Glare still has a free cell; its taken one names the task and chat.
+    assert_eq!(next["cells"][0]["proofRule"], "a GPU test");
+    assert_eq!(next["cells"][0]["next"], "atelier grid prove camera glare gpu");
+    assert!(next.get("create").is_none() && next.get("taken").is_none());
+    // A task referencing a cell does not take it out of next.
+    owner_says(&store, "s1", "@task glare gpu");
+    agent_create(&store, "s1", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap();
     let next = next_batch(store.connection(), "p", "camera", &none, &Scope::Row("glare".into()), 2).unwrap();
-    assert_eq!(next["scope"]["id"], "glare");
-    assert_eq!(next["claimable"].as_array().unwrap().len(), 1);
-    assert_eq!(next["taken"], json!([{"row": "glare", "col": "gpu", "task": number, "chat": {"id": "s1", "title": "Glare GPU"}}]));
-    assert_eq!(next["left"], 3);
+    assert_eq!((next["cells"].as_array().unwrap().len(), next["left"].as_i64()), (2, Some(4)));
     // A column scope, and a fully worked row moves on to the next.
     let next = next_cells(store.connection(), "p", "camera", &none, &Scope::Col("gpu".into())).unwrap();
-    assert_eq!(next["claimable"][0]["row"], "sunstar");
+    assert_eq!(next["cells"][0]["row"], "glare");
     prove(&store, "s3", "camera", "glare", "perf", "f1").unwrap();
+    prove(&store, "s3", "camera", "glare", "gpu", "f1").unwrap();
     let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
     assert_eq!(next["scope"]["id"], "sunstar");
     assert!(task_refused(next_cells(store.connection(), "p", "camera", &none, &Scope::Row("nope".into()))).contains("no row \"nope\""));
-    // With every cell settled or taken, there is no scope, and the text says so.
     for col in ["gpu", "perf"] {
         prove(&store, "s3", "camera", "sunstar", col, "f1").unwrap();
     }
     let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
     assert!(next["scope"].is_null());
-    assert_eq!((next["left"].as_i64(), next["takenInGrid"].as_i64()), (Some(0), Some(1)));
-    assert!(cli::next_text(&next).starts_with("No free cells left in camera: 1 is claimed"), "{}", cli::next_text(&next));
-    task(&store, Some("s1"), "agent", "cancel", number, json!({"reason": "done elsewhere"})).unwrap();
-    prove(&store, "s3", "camera", "glare", "gpu", "f1").unwrap();
-    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
     assert_eq!(cli::next_text(&next), "No gaps left in camera. Every cell is proved or N/A.\n");
 }
 
 #[test]
-fn the_owner_creates_a_task_from_a_selection_and_its_cells_are_claimed() {
+fn the_owner_creates_a_task_from_a_selection() {
     let (_d, store) = store();
     camera(&store);
     chat(&store, "s1", "Glare GPU");
     chat(&store, "s2", "Camera work");
     let none = Prints::new();
-    // glare.perf is proved, sunstar.gpu is claimed by another task: a row pick keeps the rest.
+    // glare.perf is proved; sunstar.gpu is referenced by another task, which takes nothing.
     prove(&store, "s3", "camera", "glare", "perf", "f1").unwrap();
+    owner_says(&store, "s1", "@task sunstar gpu");
     let held = agent_create(&store, "s1", json!([{"grid": "camera", "row": "sunstar", "col": "gpu"}])).unwrap().task.number;
     let pick = Pick::parse(&json!({"slug": "camera", "rows": ["glare"], "cols": "*", "onlyGaps": false})).unwrap();
     let (task, grids, prompt) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 5, &Default::default()).unwrap();
     assert_eq!(grids, ["camera"]);
     assert_eq!((task.status.as_str(), task.session_id.as_deref(), task.kind.as_str()), ("todo", Some("s2"), "general"));
     assert_eq!(task.title, "camera: GLARE × Runs on the GPU");
-    let cell = state(&store, "camera", "glare", "gpu");
-    assert_eq!((cell.state.as_str(), cell.claimed_task), ("in_progress", Some(task.number)));
+    assert_eq!(state(&store, "camera", "glare", "gpu").state, "unchecked");
     assert!(prompt.starts_with(&format!("The owner created task #{} from the camera grid (GLARE × Runs on the GPU).", task.number)), "{prompt}");
     assert!(prompt.contains(&format!("`atelier task start {}`", task.number)), "{prompt}");
     // The card's shape: the whole glare row, since its other cell is proved.
@@ -859,21 +717,17 @@ fn the_owner_creates_a_task_from_a_selection_and_its_cells_are_claimed() {
     assert_eq!(task.title, "camera: SUNSTAR × Within budget");
     assert!(prompt.contains("(SUNSTAR × Within budget)"), "{prompt}");
     // Nothing left to pick is refused and writes nothing.
+    for (row, col) in [("glare", "gpu"), ("sunstar", "gpu"), ("sunstar", "perf")] {
+        prove(&store, "s3", "camera", row, col, "f1").unwrap();
+    }
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*", "onlyGaps": false})).unwrap();
     let refusal = task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 7, &Default::default()));
-    assert!(refusal.contains("none of the selected cells needs a task"), "{refusal}");
+    assert!(refusal.contains("none of the selected cells needs work"), "{refusal}");
     assert!(tasks::get(store.connection(), "p", task.number + 1).unwrap().is_none());
     // Bad picks.
     assert!(Pick::parse(&json!({"slug": "camera", "rows": ["Bad Id"]})).unwrap_err().contains("not a valid id"));
     let pick = Pick::parse(&json!({"slug": "camera", "rows": ["nope"], "cols": "*"})).unwrap();
     assert!(task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 8, &Default::default())).contains("no row \"nope\""));
-    // A claimed cell in the grid's detail names its chat.
-    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
-    let mut cells: Vec<Value> = loaded.cells.iter().map(|cell| cell_json(cell, false, false)).collect();
-    with_claim_chats(store.connection(), "p", &mut cells).unwrap();
-    let sunstar = cells.iter().find(|c| c["row"] == "sunstar" && c["col"] == "gpu").unwrap();
-    assert_eq!(sunstar["claimedChat"], json!({"id": "s1", "title": "Glare GPU"}));
-    assert!(cells.iter().find(|c| c["row"] == "glare" && c["col"] == "perf").unwrap().get("claimedChat").is_none());
 }
 
 #[test]
@@ -888,7 +742,10 @@ fn a_task_for_several_rows_of_every_open_cell_is_the_whole_grid_and_a_row_pick_i
     assert_eq!(task.title, "camera: SUNSTAR row");
     assert!(prompt.contains("(SUNSTAR row, 2 gaps)"), "{prompt}");
     assert_eq!(task.plan["done_when"].as_array().unwrap().len(), 2);
-    // Every open cell left is the glare row: titled by that row, as its card is.
+    // With sunstar proved, every open cell left is the glare row: titled by that row, as its card is.
+    for col in ["gpu", "perf"] {
+        prove(&store, "s3", "camera", "sunstar", col, "f1").unwrap();
+    }
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*"})).unwrap();
     let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 6, &Default::default()).unwrap();
     assert_eq!(task.title, "camera: GLARE row");
@@ -909,39 +766,17 @@ fn a_whole_grid_is_titled_without_a_count_and_an_irregular_pick_keeps_it() {
 }
 
 #[test]
-fn part_of_a_row_and_an_irregular_pick_keep_their_count() {
+fn an_irregular_pick_keeps_its_count() {
     let (_d, store) = store();
-    camera(&store);
+    camera_with_cell_checks(&store);
     chat(&store, "s2", "Camera work");
     let none = Prints::new();
-    // glare.gpu is held by another task, so the glare row is not whole.
-    agent_create(&store, "s2", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap();
-    let next = next_cells(store.connection(), "p", "camera", &none, &Scope::First).unwrap();
-    assert_eq!(next["create"]["title"], "camera: GLARE × Within budget");
-    // The three cells left, over two rows and columns, are no shape.
+    // sunstar.perf has no check, so it is not picked and is still open: the
+    // three cells picked, over two rows and columns, are no shape.
     let pick = Pick::parse(&json!({"slug": "camera", "rows": "*", "cols": "*", "onlyGaps": true})).unwrap();
     let (task, _, _) = tasks::create_from_pick(&store, "p", "s2", &pick, &none, None, 6, &Default::default()).unwrap();
     assert_eq!(task.title, "camera: 3 gaps");
     assert!(tasks::to_json(&store, &task)["claimShape"].is_null());
-}
-
-#[test]
-fn refusals_say_what_to_do() {
-    let (_d, store) = store();
-    camera(&store);
-    chat(&store, "s1", "Glare GPU");
-    let number = agent_create(&store, "s1", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])).unwrap().task.number;
-    let refusal = task_refused(agent_create(&store, "s2", json!([{"grid": "camera", "row": "glare", "col": "gpu"}])));
-    assert_eq!(refusal, format!(
-        "camera.glare.gpu is claimed by #{number} in chat \"Glare GPU\": pick another cell, or run `atelier grid next camera` for free ones"
-    ));
-    let refusal = refused(prove(&store, "s2", "camera", "glare", "gpu", "f1"));
-    assert!(refusal.contains("`atelier grid next camera`") && refusal.contains(&format!("`atelier task take {number}`")), "{refusal}");
-    prove(&store, "s3", "camera", "sunstar", "gpu", "f1").unwrap();
-    let fresh: Prints = HashMap::from([(("camera".to_string(), "sunstar".to_string()), "f1".to_string())]);
-    let cells = parse_cells(Some(&json!([{"grid": "camera", "row": "sunstar", "col": "gpu"}])), false).unwrap();
-    let refusal = unclaimable(store.connection(), "p", &cells[0], &fresh).unwrap().unwrap();
-    assert!(refusal.contains("nothing to do") && refusal.contains("atelier grid next camera"), "{refusal}");
 }
 
 fn template(name: &str, command: &str) -> Value {
@@ -960,7 +795,6 @@ fn camera_with_cell_checks(store: &Store) {
         {"row": "sunstar", "col": "gpu", "checks": [template("gpu-own", "cargo test sunstar_gpu_by_hand")], "override": true},
     ]);
     draft(store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
-    apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
     super::approve_all_cases(store.connection(), "p", "camera");
 }
 
@@ -988,7 +822,7 @@ fn column_check_templates_fill_in_the_row_and_a_cell_adds_or_overrides() {
 }
 
 #[test]
-fn a_cell_without_checks_needs_one_is_listed_apart_and_cannot_be_claimed() {
+fn a_cell_without_checks_needs_one_and_is_listed_apart() {
     let (_d, store) = store();
     camera_with_cell_checks(&store);
     let next = next_cells(store.connection(), "p", "camera", &Prints::new(), &Scope::Row("sunstar".into())).unwrap();
@@ -996,10 +830,8 @@ fn a_cell_without_checks_needs_one_is_listed_apart_and_cannot_be_claimed() {
         .map(|c| format!("{}.{}", c["row"].as_str().unwrap(), c["col"].as_str().unwrap())).collect();
     assert_eq!(needing, ["sunstar.perf"]);
     assert_eq!(next["needsCheckInGrid"], 1);
-    assert!(next["claimable"].as_array().unwrap().iter().all(|c| !(c["row"] == "sunstar" && c["col"] == "perf")));
-    let refusal = task_refused(agent_create(&store, "s2", json!([{"grid": "camera", "row": "sunstar", "col": "perf"}])));
-    assert!(refusal.contains("camera.sunstar.perf has no check. Add one to the column or cell and get it approved"), "{refusal}");
-    // The owner's pick of only that cell is refused the same way.
+    assert!(next["cells"].as_array().unwrap().iter().all(|c| !(c["row"] == "sunstar" && c["col"] == "perf")));
+    // The owner's pick of only that cell is refused.
     let pick = Pick::parse(&json!({"slug": "camera", "rows": ["sunstar"], "cols": ["perf"], "onlyGaps": false})).unwrap();
     let refusal = task_refused(tasks::create_from_pick(&store, "p", "s2", &pick, &Prints::new(), None, 5, &Default::default()));
     assert!(refusal.contains("camera.sunstar.perf has no check"), "{refusal}");
@@ -1009,13 +841,12 @@ fn a_cell_without_checks_needs_one_is_listed_apart_and_cannot_be_claimed() {
 fn prove_runs_the_cells_approved_checks_and_refuses_the_agents_own() {
     let (_d, store) = store();
     camera(&store);
-    hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = json!({"summary": "s", "checks": [{"name": "mine", "command": "true"}]});
     asked.checks = passing();
     asked.fingerprint = Some("f1".into());
     let refusal = refused(apply(store.connection(), &asked));
-    assert!(refusal.contains("camera.glare.gpu has checks the owner approved, so prove runs those and takes no checks"), "{refusal}");
+    assert!(refusal.contains("camera.glare.gpu has its checks, so prove runs those and takes no checks"), "{refusal}");
     let (approved, _) = approved_for(store.connection(), &asked).unwrap();
     assert_eq!(approved[0]["command"], "cargo test glare_on_gpu");
     // The route runs the approved ones; their results stand for the proof.
@@ -1029,22 +860,21 @@ fn prove_runs_the_cells_approved_checks_and_refuses_the_agents_own() {
 }
 
 #[test]
-fn approval_records_the_check_files_and_a_changed_one_is_named_on_the_proof() {
+fn a_draft_records_the_check_files_and_a_changed_one_is_named_on_the_proof() {
     let (_d, store) = store();
-    owner_says(&store, "s1", "@matrix the camera area");
     let mut payload = draft_payload("camera");
     payload["columns"][0]["checks"][0]["files"] = json!(["tests/{row}_gpu.rs"]);
-    draft(&store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
-    let pending = load(store.connection(), "p", "camera").unwrap().unwrap().grid.pending.clone().unwrap();
-    assert_eq!(pending_check_files(&pending), ["tests/glare_gpu.rs", "tests/sunstar_gpu.rs"]);
-    let mut approve = request("approve", "owner", None, "camera");
-    approve.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a1", "tests/sunstar_gpu.rs": "b1"}}));
-    apply(store.connection(), &approve).unwrap();
+    let mut asked = request("draft", "agent", Some("s1"), "");
+    asked.slug = None;
+    asked.payload = payload;
+    asked.search = ran(vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]);
+    asked.hashes = Some(json!({"files": {"tests/glare_gpu.rs": "a1", "tests/sunstar_gpu.rs": "b1"}}));
+    apply(store.connection(), &asked).unwrap();
     super::approve_all_cases(store.connection(), "p", "camera");
-    let grid = load(store.connection(), "p", "camera").unwrap().unwrap().grid;
-    assert_eq!(grid.hashes.unwrap()["files"]["tests/glare_gpu.rs"], "a1", "the hashes are stored with the grid");
+    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
+    assert_eq!(owned_check_files(&loaded), ["tests/glare_gpu.rs", "tests/sunstar_gpu.rs"]);
+    assert_eq!(loaded.grid.hashes.unwrap()["files"]["tests/glare_gpu.rs"], "a1", "the hashes are stored with the grid");
 
-    hold(&store, "s1", "camera", "glare", "gpu");
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = proof_payload();
     asked.checks = passing();
@@ -1069,7 +899,6 @@ fn a_grid_from_before_checks_keeps_working_with_the_agents_own_checks() {
         column.as_object_mut().unwrap().remove("checks");
     }
     draft(&store, "s1", payload, vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])]).unwrap();
-    apply(store.connection(), &request("approve", "owner", None, "camera")).unwrap();
     super::approve_all_cases(store.connection(), "p", "camera");
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert!(loaded.grid.hashes.is_none());

@@ -8,7 +8,6 @@
 
 use super::*;
 use crate::workbench::store::Store;
-use crate::workbench::tasks;
 
 fn store() -> (tempfile::TempDir, Store) {
     let directory = tempfile::tempdir().unwrap();
@@ -65,10 +64,6 @@ fn draft(store: &Store, gpu: &str) -> Result<Outcome, TaskError> {
 /// perf, each column with one check that varies only by `{row}`.
 fn camera(store: &Store) {
     draft(store, "atelier case camera/{row}/gpu/gpu -- cargo test {row}_gpu").unwrap();
-    let mut approve = request("approve");
-    approve.actor = "owner".into();
-    approve.session = None;
-    apply(store.connection(), &approve).unwrap();
     let why = "it shares the pass the others build on";
     let mut order = request("order");
     order.payload = json!({
@@ -133,36 +128,8 @@ fn next(store: &Store, row: &str, col: &str) -> String {
     cell_value(store, row, col, "next").unwrap_or_default()
 }
 
-fn payload(store: &Store, cells: &[(&str, &str)]) -> Value {
-    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
-    let picked: Vec<(String, String)> = cells.iter().map(|(row, col)| (row.to_string(), col.to_string())).collect();
-    let label = Label { name: None, count: picked.len(), noun: "cell", shaped: false };
-    task_payload(&loaded, &picked, &label)
-}
-
-/// `atelier task propose` for these cells: answered by its own route, not
-/// by `tasks::apply`.
-fn propose(store: &Store, cells: &[(&str, &str)]) -> Result<(), TaskError> {
-    let payload = tasks::decided(payload(store, cells));
-    tasks::propose(store, "p", "s1", &payload, &Default::default(), None, 2, &Default::default()).map(|_| ())
-}
-
-fn create(store: &Store, action: &str, cells: &[(&str, &str)]) -> Result<tasks::Outcome, TaskError> {
-    let payload = payload(store, cells);
-    tasks::apply(store, &tasks::Request {
-        action: action.into(),
-        actor: "agent".into(),
-        session: Some("s1".into()),
-        project: "p".into(),
-        payload: tasks::decided(payload),
-        cwd: Some("/repo".into()),
-        now: 2,
-        ..Default::default()
-    })
-}
-
 fn handed(next: &Value) -> Vec<String> {
-    next["create"]["cells"]
+    next["cells"]
         .as_array()
         .map(|cells| cells.iter().map(|c| format!("{}.{}", c["row"].as_str().unwrap(), c["col"].as_str().unwrap())).collect())
         .unwrap_or_default()
@@ -247,7 +214,7 @@ fn a_clean_review_readies_the_cell_with_no_owner_step() {
     cases(&store, "glare", "gpu", json!({"cases": [case("glare", "gpu", "dark-room")]})).unwrap();
     review(&store, "glare", "gpu", &[]).unwrap();
     assert_eq!(step(&store, "glare", "gpu"), "reviewed");
-    assert_eq!(next(&store, "glare", "gpu"), "atelier grid next camera");
+    assert_eq!(next(&store, "glare", "gpu"), "atelier grid prove camera glare gpu");
 }
 
 /// Each gap must be answered, by a new case or a dismissal with a reason,
@@ -285,7 +252,7 @@ fn after_three_rounds_the_answered_cell_is_ready() {
         cases(&store, "glare", "gpu", json!({"dismiss": {format!("r{round}g1"): "not this feature"}})).unwrap();
     }
     assert_eq!(step(&store, "glare", "gpu"), "reviewed");
-    assert_eq!(next(&store, "glare", "gpu"), "atelier grid next camera");
+    assert_eq!(next(&store, "glare", "gpu"), "atelier grid prove camera glare gpu");
     let message = refused(review(&store, "glare", "gpu", &[]));
     assert!(!message.contains("owner"), "{message}");
 }
@@ -304,23 +271,8 @@ fn the_owner_has_no_cases_approval() {
     assert!(message.contains("approve_cases"), "{message}");
 }
 
-/// A reviewed cell is claimed by a task, which moves it to red.
-#[test]
-fn a_reviewed_cell_turns_red_once_claimed() {
-    let (_d, store) = store();
-    camera(&store);
-    reviewed_row(&store, "glare");
-    assert_eq!(step(&store, "glare", "gpu"), "reviewed");
-    assert_eq!(step(&store, "glare", "perf"), "reviewed");
-    assert_eq!(step(&store, "sunstar", "gpu"), "cases");
-    create(&store, "create", &[("glare", "gpu")]).unwrap();
-    assert_eq!(step(&store, "glare", "gpu"), "red");
-}
-
-/// No cell of a row is claimed before every cell of it is reviewed: not by
-/// `grid next`, `task create` or `task propose`. The refusal names the
-/// agent's next command for each waiting cell, never the owner. Once the
-/// last cell's review is clean, the row opens on its own.
+/// `grid next` hands out no cell of a row before every cell of it is
+/// reviewed. Once the last cell's review is clean, the row opens on its own.
 #[test]
 fn a_row_opens_once_every_cell_is_reviewed() {
     let (_d, store) = store();
@@ -328,11 +280,6 @@ fn a_row_opens_once_every_cell_is_reviewed() {
     cases(&store, "glare", "gpu", json!({"cases": [case("glare", "gpu", "dark-room")]})).unwrap();
     review(&store, "glare", "gpu", &[]).unwrap();
     cases(&store, "glare", "perf", json!({"cases": [case("glare", "perf", "dark-room")]})).unwrap();
-    let message = refused(create(&store, "create", &[("glare", "gpu")]));
-    assert!(message.contains("glare.perf") && message.contains("atelier grid review camera glare perf"), "{message}");
-    assert!(!message.contains("owner") && !message.contains("Approve"), "{message}");
-    let message = refused(propose(&store, &[("glare", "gpu")]));
-    assert!(message.contains("glare.perf") && !message.contains("owner"), "{message}");
 
     let next = next_cells(store.connection(), "p", "camera", &Prints::new(), &Scope::First).unwrap();
     assert!(handed(&next).is_empty(), "next hands out a cell of a row not reviewed: {next}");
@@ -351,8 +298,7 @@ fn editing_cases_sends_the_cell_back_to_cases() {
     cases(&store, "glare", "gpu", json!({"cases": [case("glare", "gpu", "dark-room"), case("glare", "gpu", "fog")]})).unwrap();
     assert_eq!(step(&store, "glare", "gpu"), "cases");
     assert_eq!(cell_value(&store, "glare", "gpu", "review"), None, "the old review is cleared");
-    let message = refused(create(&store, "create", &[("glare", "perf")]));
-    assert!(message.contains("atelier grid review camera glare gpu") && !message.contains("owner"), "{message}");
+    assert_eq!(next(&store, "glare", "gpu"), "atelier grid review camera glare gpu");
 }
 
 /// Rule 3: a cell's checks are its column's checks and then its own cases.
@@ -432,9 +378,6 @@ fn a_proof_whose_check_prints_no_case_line_is_refused_as_invalid() {
     let (_d, store) = store();
     camera(&store);
     reviewed_row(&store, "glare");
-    create(&store, "create", &[("glare", "gpu")]).unwrap();
-    store.connection().execute("UPDATE task SET status = 'in_progress' WHERE number = 1", []).unwrap();
-    refresh_steps(store.connection(), "1 = 1", params![]).unwrap();
     let mut prove = on(request("prove"), "glare", "gpu");
     prove.payload = json!({"summary": "done"});
     prove.checks = vec![

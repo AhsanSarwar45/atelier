@@ -8,7 +8,6 @@
 //! moves lives here too, since it needs the live feed.
 
 use super::tasks::{project_folder, store_evidence};
-use super::tell::tell_chat;
 use super::{presentation_directory, ApiError, WorkbenchState};
 use crate::workbench::grids::{self, proof, search, watch, Loaded, Prints, Request};
 use crate::workbench::tasks::{checks, TaskError};
@@ -161,16 +160,6 @@ async fn grid_detail(state: &WorkbenchState, project: &str, slug: &str) -> Resul
             }
         }
     }
-    let asked = project.to_string();
-    let cells = state
-        .database()
-        .read_tasks(move |store| {
-            let mut cells = cells;
-            grids::with_claim_chats(store.connection(), &asked, &mut cells)?;
-            Ok(cells)
-        })
-        .await
-        .map_err(failed)?;
     Ok(json!({
         "grid": grids::summary(&grid, &prints), "head": head,
         "columns": grid.columns.iter().map(grids::column_json).collect::<Vec<_>>(),
@@ -221,17 +210,6 @@ async fn cell_detail(state: &WorkbenchState, project: &str, slug: &str, row: &st
     };
     let mut full = grids::with_checks(grid, row, col, grids::cell_json(cell, grids::is_stale(slug, cell, &prints), true));
     full["merged"] = json!(merged);
-    let asked = project.to_string();
-    let full = state
-        .database()
-        .read_tasks(move |store| {
-            let mut cells = [full];
-            grids::with_claim_chats(store.connection(), &asked, &mut cells)?;
-            let [full] = cells;
-            Ok(full)
-        })
-        .await
-        .map_err(failed)?;
     Ok(json!({
         "cell": full,
         "row": grid.row(row).map(grids::row_json),
@@ -349,20 +327,6 @@ pub(super) async fn act(
     let slugs = |request: &Request| request.slug.iter().cloned().collect::<Vec<_>>();
     match asked.action.as_str() {
         "draft" => {
-            // Gate before running anything: another chat's draft is not
-            // this chat's to replace, so no search runs for it.
-            let slug = request.payload["slug"].as_str().unwrap_or("").to_string();
-            if let Some(session) = session.clone() {
-                if grids::valid_id(&slug) {
-                    let asked_project = project.clone();
-                    let allowed = state
-                        .database()
-                        .read_tasks(move |store| Ok(grids::may_draft(store.connection(), &asked_project, &session, &slug)))
-                        .await
-                        .map_err(failed)?;
-                    refused_or(allowed)?;
-                }
-            }
             let row_search = search::check_row_search(&request.payload["row_search"]).map_err(ApiError::from)?;
             let folder = PathBuf::from(cwd.clone().unwrap_or_default());
             request.search = Some(search::run(&folder, &row_search).await);
@@ -406,23 +370,35 @@ pub(super) async fn act(
         "pass" => {
             request.prints = prints_for(&state, &project, slugs(&request)).await;
         }
-        "approve" => {
-            // Approval locks every cell's check files as they are now in the project.
-            let (asked, slug) = (project.clone(), request.slug.clone().unwrap_or_default());
-            let pending = state
-                .database()
-                .read_tasks(move |store| Ok(grids::get_grid(store.connection(), &asked, &slug)?.and_then(|grid| grid.pending)))
-                .await
-                .map_err(failed)?;
-            if let (Some(pending), Some(folder)) = (pending, folder_path(&state, &project)) {
-                let files = grids::pending_check_files(&pending);
-                request.hashes = Some(json!({"files": checks::hash_files(&folder, &checks::widened(&folder, &files))}));
-            }
-        }
         _ => {}
     }
+    let action = request.action.clone();
     let outcome = apply(&state, request).await?;
+    if matches!(action.as_str(), "draft" | "change" | "checks") {
+        if let Some(slug) = outcome.slug.clone() {
+            lock_check_files(&state, &project, &slug, cwd.as_deref()).await?;
+        }
+    }
     respond(&state, &project, outcome, session).await
+}
+
+/// Hash the files the grid's checks name, as they are in the folder the
+/// change came from, so a proof can tell when one has changed since.
+async fn lock_check_files(state: &WorkbenchState, project: &str, slug: &str, cwd: Option<&str>) -> Result<(), ApiError> {
+    let folder = match cwd.map(PathBuf::from).filter(|folder| folder.is_dir()) {
+        Some(folder) => folder,
+        None => match folder_path(state, project) {
+            Some(folder) => folder,
+            None => return Ok(()),
+        },
+    };
+    let loaded = load_all(state, project, Some(vec![slug.to_string()])).await.map_err(failed)?;
+    let Some(grid) = loaded.first() else { return Ok(()) };
+    let files = grids::owned_check_files(grid);
+    let hashes = json!({"files": checks::hash_files(&folder, &checks::widened(&folder, &files))});
+    let (asked, slug) = (project.to_string(), slug.to_string());
+    let saved = state.database().write_tasks(move |store| grids::set_hashes(store.connection(), &asked, &slug, &hashes)).await.map_err(failed)?;
+    refused_or(saved)
 }
 
 /// The folder a grid's row search runs in: the project's for an approved
@@ -498,11 +474,6 @@ async fn respond(
         }
     }
     announce_grids(state, project, &touched);
-    for (session, text) in outcome.tell.clone() {
-        let telling = state.clone();
-        let from = super::tell::from("grid", super::tell::first_sentence(&text));
-        tokio::spawn(async move { tell_chat(&telling, &session, text, from).await });
-    }
     let grid = match &outcome.slug {
         Some(slug) => Some(grid_detail(state, project, slug).await?),
         None => None,
@@ -581,7 +552,7 @@ fn approved_hashes(folder: &std::path::Path, approved: &[Value]) -> Value {
     json!({"files": checks::hash_files(folder, &checks::widened(folder, &paths))})
 }
 
-/// `prove`: check the shape and the claim, then the covered code (committed,
+/// `prove`: check the shape and the cell's step, then the covered code (committed,
 /// commits present), then run the checks in the chat's folder and take the
 /// fingerprint there. Then the writer.
 async fn prove(
@@ -711,7 +682,7 @@ async fn verify(state: &WorkbenchState, request: Request) -> Result<Json<Value>,
     let grid = loaded
         .first()
         .filter(|g| g.grid.status == "approved")
-        .ok_or_else(|| format!("there is no approved grid \"{slug}\" in this project"))?;
+        .ok_or_else(|| format!("there is no grid \"{slug}\" in this project"))?;
     let (prints, _) = prints_of(folder_path(state, &project).as_deref(), &loaded).await;
     let targets = grids::verify_targets(grid, &prints, stale_only);
     let (mut passed, mut failures) = (0, Vec::new());
@@ -742,7 +713,7 @@ async fn verify(state: &WorkbenchState, request: Request) -> Result<Json<Value>,
         "failed": if failures.is_empty() { Value::Null } else { json!(failures.join("; ")) }})))
 }
 
-/// The watcher's tick: for each project with approved grids, HEAD in the
+/// The watcher's tick: for each project with live grids, HEAD in the
 /// project's folder; each grid due (never discovered, or HEAD moved across a
 /// path it watches) gets its search run, one at a time.
 async fn watch_tick(state: &WorkbenchState) {

@@ -1,6 +1,6 @@
-//! A grid approved before checks existed gets check templates on its columns
-//! without a full re-draft: the agent sends only `columns[].checks`, the owner
-//! approves just those, and rows, columns, cells and their history stay.
+//! A grid made before checks existed gets check templates on its columns
+//! without a full re-draft: the agent sends only `columns[].checks`, they are
+//! live at once, and rows, columns, cells and their history stay.
 
 
 use atelier::workbench::grids::{self, get_cell, load, Prints, Scope};
@@ -19,7 +19,7 @@ fn gpu_checks() -> Value {
 }
 
 #[test]
-fn checks_attach_to_the_columns_of_an_approved_grid_and_keep_its_history() {
+fn checks_attach_to_the_columns_of_a_grid_and_keep_its_history() {
     let (_d, store) = store();
     grid_without_checks(&store, "camera");
     // History from before checks: a proved cell.
@@ -28,12 +28,6 @@ fn checks_attach_to_the_columns_of_an_approved_grid_and_keep_its_history() {
     let rows_before: Vec<String> = before.rows.iter().map(|row| row.id.clone()).collect();
 
     add_checks(&store, "camera", gpu_checks()).unwrap();
-    // Nothing changes until the owner approves.
-    let pending = load(store.connection(), "p", "camera").unwrap().unwrap();
-    assert!(pending.cell_checks("glare", "gpu").is_empty(), "checks wait for the owner");
-    assert_eq!(pending.grid.status, "approved", "the grid stays approved while its checks wait");
-
-    apply(&store, &request("approve", "owner", None, "camera")).unwrap();
     let after = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert_eq!(after.cell_checks("sunstar", "gpu")[0]["command"], "cargo test --test gpu_sunstar");
     assert!(after.cell_checks("glare", "perf").is_empty(), "a column not named keeps no checks");
@@ -47,25 +41,27 @@ fn checks_attach_to_the_columns_of_an_approved_grid_and_keep_its_history() {
     // `grid next` now hands out the gpu cells.
     let next = grids::next_cells(store.connection(), "p", "camera", &Prints::new(), &Scope::First).unwrap();
     assert!(next["left"].as_u64().unwrap() > 0, "{next}");
-    assert!(!next["create"].is_null(), "{next}");
+    assert!(!next["cells"].as_array().unwrap().is_empty(), "{next}");
 }
 
 /// New checks for a column raise the bar for proof: its cells proved under
-/// the old checks are gaps again; other columns keep theirs.
+/// the old checks stay proved but are stale until proved again; other
+/// columns keep theirs.
 #[test]
-fn new_column_checks_reopen_the_cells_proved_under_the_old_ones() {
+fn new_column_checks_make_the_cells_proved_under_the_old_ones_stale() {
     let (_d, store) = store();
     grid_without_checks(&store, "camera");
     for col in ["gpu", "perf"] {
         old_proof(&store, "camera", "glare", col, "f1");
     }
-    add_checks(&store, "camera", gpu_checks()).unwrap();
-    let approved = apply(&store, &request("approve", "owner", None, "camera")).unwrap();
-    assert!(approved.summary.contains("1 cell proved under the old checks is a gap again"), "{}", approved.summary);
+    let set = add_checks(&store, "camera", gpu_checks()).unwrap();
+    assert!(set.summary.contains("1 proved cell is stale until it is proved again"), "{}", set.summary);
     let gpu = get_cell(store.connection(), "p", "camera", "glare", "gpu").unwrap().unwrap();
-    assert_eq!(gpu.state, "gap", "the column's checks changed, so its proof no longer counts");
+    assert_eq!(gpu.state, "proved");
+    assert!(grids::is_stale("camera", &gpu, &Prints::new()), "the column's checks changed, so its proof is stale");
     let perf = get_cell(store.connection(), "p", "camera", "glare", "perf").unwrap().unwrap();
-    assert_eq!(perf.state, "proved", "a column whose checks did not change keeps its proof");
+    assert_eq!(perf.state, "proved");
+    assert!(!grids::is_stale("camera", &perf, &Prints::new()), "a column whose checks did not change keeps its proof fresh");
 }
 
 #[test]
@@ -79,13 +75,7 @@ fn adding_checks_refuses_anything_but_column_checks() {
 }
 
 #[test]
-fn adding_checks_needs_an_approved_grid_and_the_owner_can_reject() {
+fn adding_checks_needs_an_existing_grid() {
     let (_d, store) = store();
     assert!(refused(add_checks(&store, "nope", gpu_checks())).contains("nope"));
-    grid_without_checks(&store, "camera");
-    add_checks(&store, "camera", gpu_checks()).unwrap();
-    apply(&store, &request("discard", "owner", None, "camera")).unwrap();
-    let kept = load(store.connection(), "p", "camera").unwrap().unwrap();
-    assert_eq!(kept.grid.status, "approved", "discarding the checks keeps the approved grid");
-    assert!(kept.cell_checks("glare", "gpu").is_empty());
 }

@@ -1,7 +1,7 @@
 /**
  * What waits on the owner besides a chat's own permission question: a task in
- * review, a task proposal, a plan change, a grid draft and an N/A request
- * (server, `workbench::waiting`).
+ * review, a task proposal and a plan change (server, `workbench::waiting`).
+ * Nothing in a grid waits on the owner.
  *
  * One list for the whole app, read once and kept current from the live feed,
  * so the composer bar, the rail, the project list and the Tasks tab cannot
@@ -17,7 +17,7 @@ import { useSyncExternalStore } from 'react';
 import { request } from '@/lib/api';
 import { onWorkbench } from '@/workbench/live-wire';
 
-export type WaitingKind = 'review' | 'proposal' | 'amend' | 'grid_draft' | 'na';
+export type WaitingKind = 'review' | 'proposal' | 'amend';
 
 /** One thing waiting on the owner, as the server hands it over. */
 export interface Waiting {

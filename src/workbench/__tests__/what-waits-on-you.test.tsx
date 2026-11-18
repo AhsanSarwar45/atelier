@@ -1,6 +1,6 @@
 /**
  * What waits on the owner besides a chat's permission question — a task in
- * review, a proposal, a plan change, a grid draft, an N/A request — said where
+ * review, a proposal, a plan change; nothing in a grid — said where
  * he looks: a bar above the composer with the card's own buttons, a badge on
  * the chat's row, a count on the project and the Tasks tab, and a section at
  * the head of the Tasks list.
@@ -65,8 +65,6 @@ function anItem(over: Partial<Waiting>): Waiting {
 const REVIEW = anItem({});
 const PROPOSAL = anItem({ key: 'proposal:p1:4', kind: 'proposal', task: null, proposal: 4, title: 'Search filters', says: 'Proposal: Search filters', short: 'Proposal waiting' });
 const AMEND = anItem({ key: 'amend:p1:12:5', kind: 'amend', task: 12, says: 'Plan change for #12', short: 'Plan change for #12' });
-const DRAFT = anItem({ key: 'grid_draft:p1:data:9', kind: 'grid_draft', task: null, grid: 'data', title: 'Data coverage', says: 'Grid draft: Data coverage', short: 'Grid draft waiting' });
-const NA = anItem({ key: 'na:p1:io:import:bench:7', kind: 'na', task: null, grid: 'io', row: 'import', col: 'bench', title: 'Import × Benchmark', says: 'N/A request: Import × Benchmark', short: 'N/A request waiting' });
 
 const TASKS = new Map([
   [11, makeTask({ number: 11, status: 'review', sessionId: 's1' })],
@@ -132,28 +130,6 @@ describe('the bar above the composer', () => {
     expect(within(amend).queryByRole('button', { name: 'Reject change' })).toBeNull();
   });
 
-  it('approves a grid draft, leaving Discard to the card, and opens the grid', async () => {
-    await aBar([DRAFT]);
-    const draft = line('grid_draft');
-    expect(draft).toHaveTextContent('Grid draft: Data coverage');
-    expect(within(draft).queryByRole('button', { name: 'Discard' })).toBeNull();
-    fireEvent.click(within(draft).getByRole('button', { name: 'Approve' }));
-    await waitFor(() => expect(gridAct).toHaveBeenCalledWith('approve', { projectId: 'p1', slug: 'data' }));
-    fireEvent.click(within(draft).getByTestId('waiting-open'));
-    expect(push.mock.calls[0]![0]).toContain('view=grids');
-    expect(push.mock.calls[0]![0]).toContain('grid=data');
-  });
-
-  it('answers an N/A request with Approve N/A and Reject', async () => {
-    await aBar([NA]);
-    const na = line('na');
-    expect(na).toHaveTextContent('N/A request: Import × Benchmark');
-    expect(within(na).getByRole('button', { name: 'Reject' })).toBeInTheDocument();
-    fireEvent.click(within(na).getByRole('button', { name: 'Approve N/A' }));
-    await waitFor(() =>
-      expect(gridAct).toHaveBeenCalledWith('approve_na', { projectId: 'p1', slug: 'io', row: 'import', col: 'bench' }, undefined));
-  });
-
   it('draws nothing when nothing waits', async () => {
     await aBar([]);
     expect(screen.queryByTestId('waiting-bar')).toBeNull();
@@ -209,7 +185,7 @@ describe('the list everything reads', () => {
 
 describe('the Tasks tab', () => {
   it('lists what waits first, under Waiting for you, and each task once', async () => {
-    waiting = [REVIEW, PROPOSAL, DRAFT];
+    waiting = [REVIEW, PROPOSAL, anItem({ ...PROPOSAL, key: 'proposal:p1:5', proposal: 5, title: 'Export', says: 'Proposal: Export' })];
     taskList.mockResolvedValue([
       makeTask({ number: 11, title: 'Tidy settings', status: 'review', sessionId: 's1' }),
       makeTask({ number: 13, title: 'Another review', status: 'review', sessionId: 's1' }),
@@ -223,7 +199,7 @@ describe('the Tasks tab', () => {
     expect(section).toHaveTextContent('3');
     expect(within(section).getAllByTestId('task-row').map((r) => r.getAttribute('data-number'))).toEqual(['11']);
     const others = within(section).getAllByTestId('task-waiting-row');
-    expect(others.map((r) => r.getAttribute('data-kind'))).toEqual(['proposal', 'grid_draft']);
+    expect(others.map((r) => r.getAttribute('data-kind'))).toEqual(['proposal', 'proposal']);
     expect(within(others[0]!).getByRole('button', { name: 'Create task' })).toBeInTheDocument();
 
     // The first thing in the list, and #11 is not also under In review.

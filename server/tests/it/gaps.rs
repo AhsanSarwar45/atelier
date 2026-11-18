@@ -75,8 +75,8 @@ pub fn template(name: &str, command: &str, files: &[&str]) -> Value {
         "files": files})
 }
 
-/// A grid approved before checks existed: columns gpu and perf with no
-/// check templates, rows glare and sunstar.
+/// A grid made before checks existed: columns gpu and perf with no check
+/// templates, rows glare and sunstar.
 pub fn grid_without_checks(store: &Db, slug: &str) {
     owner_says(store, "s1", &format!("@matrix the {slug} area"));
     let mut draft = request("draft", "agent", Some("s1"), "");
@@ -91,12 +91,11 @@ pub fn grid_without_checks(store: &Db, slug: &str) {
     });
     draft.search = Some(Ok(search::Run { rows: vec![found("glare", &["camera/glare.rs"]), found("sunstar", &["camera/sunstar.rs"])], head: Some("h1".into()) }));
     grids::apply(store.connection(), &draft).unwrap();
-    grids::apply(store.connection(), &request("approve", "owner", None, slug)).unwrap();
     approve_cases(store, slug);
 }
 
-/// Marks every cell of grid `slug` still at the cases steps as reviewed
-/// with its row's cases approved, for tests of the steps after cases.
+/// Marks every cell of grid `slug` still at the cases steps as reviewed,
+/// ready to prove, for tests of the steps after cases.
 pub fn approve_cases(store: &Db, slug: &str) {
     // Rows and columns with no order get their drawn place.
     store.connection().execute_batch(&format!(
@@ -104,7 +103,8 @@ pub fn approve_cases(store: &Db, slug: &str) {
          UPDATE grid_column SET order_seq = position, order_reason = 'set by the test' WHERE project_id = 'p' AND slug = '{slug}' AND order_seq IS NULL;"
     )).unwrap();
     store.connection().execute(
-        "UPDATE grid_cell SET case_step = 'reviewed', cases_approved = 1, step = 'approved', next = 'atelier grid next ' || slug
+        "UPDATE grid_cell SET case_step = 'reviewed', cases_approved = 1, step = 'reviewed',
+           next = 'atelier grid prove ' || slug || ' ' || row || ' ' || col
          WHERE project_id = 'p' AND slug = ?1 AND step IN ('order', 'cases', 'reviewed')",
         rusqlite::params![slug],
     ).unwrap();
@@ -187,12 +187,12 @@ pub fn shell_check(name: &str, command: &str, red: &str, files: &[&str]) -> Valu
 
 // ---- cell steps ----
 
-/// Claims a cell with approved checks for a new task of chat s1 and starts
-/// it (every check red), so the cell is at step work and may be proved.
+/// A started task of chat s1 that references a cell, its plan the cell's
+/// checks (every one red). The cell itself does not change.
 pub fn hold(store: &Db, slug: &str, row: &str, col: &str) -> i64 {
     owner_says(store, "s1", "@task prove the cell");
-    let cell = grids::CellRef { grid: slug.into(), row: row.into(), col: col.into(), reason: None };
-    let checks = grids::approved_cell_checks(store.connection(), "p", &[cell]).unwrap();
+    let loaded = grids::load(store.connection(), "p", slug).unwrap().unwrap();
+    let checks = loaded.cell_checks(row, col);
     let steps: Vec<Value> = checks
         .iter()
         .enumerate()
@@ -215,17 +215,13 @@ pub fn hold(store: &Db, slug: &str, row: &str, col: &str) -> i64 {
     number
 }
 
-/// Proves a cell with approved checks the way an agent must: claimed and
-/// started first; the task is cancelled after, which keeps the proof and
-/// frees the chat.
+/// Proves a cell with its checks, from chat s1.
 pub fn prove_held(store: &Db, slug: &str, row: &str, col: &str, print: &str) {
-    let number = hold(store, slug, row, col);
     let mut prove = on(request("prove", "agent", Some("s1"), slug), row, col);
     prove.payload = json!({"summary": "s"});
     prove.checks = vec![grids::proof::CheckResult { name: col.into(), exit: 0, ms: 1, tail: format!("CASE {slug}/{row}/{col}/{col} PASS - -") }];
     prove.fingerprint = Some(print.into());
     apply(store, &prove).unwrap();
-    ask(store, "cancel", Some(number), json!({"reason": "proved"}), None).unwrap();
 }
 
 /// A proof made before checks existed, with the agent's own check: kept in

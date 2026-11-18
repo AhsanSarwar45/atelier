@@ -8,8 +8,8 @@ use atelier::workbench::grids::{self, cli::{next_exit, next_text}, next_batch, n
 use crate::gaps::*;
 use serde_json::{json, Value};
 
-/// The camera grid (rows glare, sunstar; columns gpu, perf) with an approved
-/// check on both columns, so every cell can be claimed.
+/// The camera grid (rows glare, sunstar; columns gpu, perf) with a live
+/// check on both columns, so every cell can be proved.
 fn grid_with_checks(store: &Db) {
     grid_without_checks(store, "camera");
     let mut asked = request("checks", "agent", Some("s1"), "camera");
@@ -19,7 +19,6 @@ fn grid_with_checks(store: &Db) {
     ]});
     asked.hashes = Some(json!({"files": {}}));
     apply(store, &asked).unwrap();
-    apply(store, &request("approve", "owner", None, "camera")).unwrap();
     approve_cases(store, "camera");
 }
 
@@ -44,7 +43,7 @@ fn gpu_after_perf() -> Value {
 }
 
 fn handed(next: &Value) -> Vec<String> {
-    next["create"]["cells"]
+    next["cells"]
         .as_array()
         .map(|cells| cells.iter().map(|c| format!("{}.{}", c["row"].as_str().unwrap(), c["col"].as_str().unwrap())).collect())
         .unwrap_or_default()
@@ -60,8 +59,7 @@ fn next_hands_out_one_cell_in_drawn_order() {
     grid_with_checks(&store);
     let first = next(&store);
     assert_eq!(handed(&first), ["glare.gpu"], "one cell, the first in drawn order: {first}");
-    assert_eq!(first["claimable"].as_array().map(Vec::len), Some(1), "{first}");
-    assert_eq!(first["create"]["plan"]["done_when"].as_array().map(Vec::len), Some(1), "{first}");
+    assert_eq!(first["cells"][0]["next"], "atelier grid prove camera glare gpu", "{first}");
     prove(&store, "glare", "gpu");
     assert_eq!(handed(&next(&store)), ["glare.perf"], "then the next cell along the row");
     prove(&store, "glare", "perf");
@@ -124,17 +122,16 @@ fn batch_hands_out_up_to_n_ready_cells_in_order() {
 #[test]
 fn next_says_what_cells_wait_for_when_none_is_ready() {
     let (_d, store) = store();
-    grid_with_checks(&store);
-    // Every gpu cell waits for its perf cell, and a task claims each perf
-    // cell as next hands it out, so the only free cells are waiting ones.
+    // Every gpu cell waits for its perf cell, and the perf cells have no
+    // check yet, so the only cells left to prove are waiting ones.
+    grid_without_checks(&store, "camera");
+    let mut asked = request("checks", "agent", Some("s1"), "camera");
+    asked.payload = json!({"columns": [{"id": "gpu", "checks": [template("gpu", "cargo test --test gpu_{row}", &["tests/gpu_{row}.rs"])]}]});
+    apply(&store, &asked).unwrap();
+    approve_cases(&store, "camera");
     order(&store, gpu_after_perf()).unwrap();
-    for expected in ["glare.perf", "sunstar.perf"] {
-        let handing = next(&store);
-        assert_eq!(handed(&handing), [expected], "{handing}");
-        ask(&store, "create", None, handing["create"].clone(), None).unwrap();
-    }
     let blocked = next(&store);
-    assert!(blocked["create"].is_null(), "nothing is ready: {blocked}");
+    assert!(handed(&blocked).is_empty(), "nothing is ready: {blocked}");
     assert_eq!(blocked["finished"], false, "{blocked}");
     assert_eq!(next_exit(&blocked), 3);
     let text = next_text(&blocked);

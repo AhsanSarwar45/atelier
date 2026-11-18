@@ -6,7 +6,6 @@
 
 use super::*;
 use crate::workbench::store::Store;
-use crate::workbench::tasks;
 
 fn store() -> (tempfile::TempDir, Store) {
     let directory = tempfile::tempdir().unwrap();
@@ -58,7 +57,6 @@ fn camera(store: &Store) {
     });
     draft.search = Some(Ok(search::Run { rows: vec![found("glare"), found("sunstar")], head: Some("h1".into()) }));
     apply(store.connection(), &draft).unwrap();
-    apply(store.connection(), &owner("approve")).unwrap();
 }
 
 fn order(store: &Store, payload: Value) -> Result<Outcome, TaskError> {
@@ -85,27 +83,10 @@ fn refused<T>(result: Result<T, TaskError>) -> String {
     }
 }
 
-fn create(store: &Store, cells: &[(&str, &str)]) -> Result<tasks::Outcome, TaskError> {
-    let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
-    let picked: Vec<(String, String)> = cells.iter().map(|(row, col)| (row.to_string(), col.to_string())).collect();
-    let label = Label { name: None, count: picked.len(), noun: "cell", shaped: false };
-    let payload = task_payload(&loaded, &picked, &label);
-    tasks::apply(store, &tasks::Request {
-        action: "create".into(),
-        actor: "agent".into(),
-        session: Some("s1".into()),
-        project: "p".into(),
-        payload: tasks::decided(payload),
-        cwd: Some("/repo".into()),
-        now: 2,
-        ..Default::default()
-    })
-}
-
-/// No order, no work: every cell is at step order, and `grid cases`, `task
-/// create` and `grid next` name `atelier grid order`.
+/// No order, no work: every cell is at step order, and `grid cases` and
+/// `grid next` name `atelier grid order`.
 #[test]
-fn a_grid_without_an_order_refuses_cases_and_claims() {
+fn a_grid_without_an_order_refuses_cases_and_hands_out_nothing() {
     let (_d, store) = store();
     camera(&store);
     assert_eq!(step(&store, "glare", "gpu"), ("order".to_string(), Some("atelier grid order camera".to_string())));
@@ -117,10 +98,8 @@ fn a_grid_without_an_order_refuses_cases_and_claims() {
     assert!(message.contains("no order") && message.contains("`atelier grid order camera`"), "atelier grid cases said: {message}");
     approve_all_cases(store.connection(), "p", "camera");
     clear_order(store.connection(), "p", "camera");
-    let message = refused(create(&store, &[("glare", "gpu")]));
-    assert!(message.contains("no order") && message.contains("`atelier grid order camera`"), "atelier task create said: {message}");
     let next = next_cells(store.connection(), "p", "camera", &Prints::new(), &Scope::First).unwrap();
-    assert!(next["create"].is_null(), "grid next handed out a cell of an unordered grid: {next}");
+    assert!(next["cells"].as_array().unwrap().is_empty(), "grid next handed out a cell of an unordered grid: {next}");
     assert_eq!(next["finished"], false, "{next}");
     let text = cli::next_text(&next);
     assert!(text.contains("atelier grid order camera"), "grid next does not name the order command:\n{text}");
@@ -159,7 +138,7 @@ fn cells_are_handed_out_in_the_written_order() {
     order(&store, json!({"rows": [entry("sunstar", &[]), entry("glare", &[])], "columns": [entry("perf", &[]), entry("gpu", &[])]})).unwrap();
     approve_all_cases(store.connection(), "p", "camera");
     let next = next_batch(store.connection(), "p", "camera", &Prints::new(), &Scope::First, 4).unwrap();
-    let handed: Vec<String> = next["create"]["cells"].as_array().unwrap().iter()
+    let handed: Vec<String> = next["cells"].as_array().unwrap().iter()
         .map(|c| format!("{}.{}", c["row"].as_str().unwrap(), c["col"].as_str().unwrap())).collect();
     assert_eq!(handed, ["sunstar.perf", "sunstar.gpu", "glare.perf", "glare.gpu"], "grid next --batch 4 handed out {handed:?}");
 }
@@ -190,7 +169,6 @@ fn a_row_added_later_waits_for_the_order() {
     let mut change = request("change");
     change.payload = json!({"addRows": [{"id": "bloom", "name": "Bloom", "paths": ["camera/bloom.rs"]}]});
     apply(store.connection(), &change).unwrap();
-    apply(store.connection(), &owner("approve")).unwrap();
     assert_eq!(step(&store, "bloom", "gpu").0, "order");
     assert_eq!(step(&store, "glare", "gpu").0, "cases");
     order(&store, json!({"rows": [entry("glare", &[]), entry("sunstar", &[]), entry("bloom", &[])], "columns": columns})).unwrap();

@@ -2,7 +2,7 @@
 //! one scenario of its row's feature each; Atelier runs a coverage review that
 //! looks for missing scenarios; the agent answers every gap with a case or a
 //! dismissal; no one approves the result. A cell moves cases → reviewed when
-//! its review is finished, and no cell of a row is claimed before every cell
+//! its review is finished, and no cell of a row is proved before every cell
 //! of the row is reviewed.
 
 use super::*;
@@ -55,7 +55,7 @@ pub fn row_waiting<'a>(loaded: &'a Loaded, row: &str) -> Vec<&'a Cell> {
     live_pairs(loaded).into_iter().filter(|(r, _, cell)| r.id == row && needs_cases(cell)).map(|(_, _, cell)| cell).collect()
 }
 
-/// Why no cell of `row` can be claimed yet, or None when every cell of it is reviewed.
+/// Why no cell of `row` can be proved yet, or None when every cell of it is reviewed.
 pub fn unapproved_row(loaded: &Loaded, row: &str) -> Option<String> {
     let waiting = row_waiting(loaded, row);
     if waiting.is_empty() {
@@ -64,7 +64,7 @@ pub fn unapproved_row(loaded: &Loaded, row: &str) -> Option<String> {
     let slug = &loaded.grid.slug;
     let cells: Vec<String> = waiting.iter().map(|cell| format!("{row}.{} (step {}, next `{}`)", cell.col, cell.step, cell.next.as_deref().unwrap_or(""))).collect();
     Some(format!(
-        "Needs cases. No cell of row {row} is claimed until every cell of it is reviewed. Waiting: {}. Grid {slug}",
+        "Needs cases. No cell of row {row} can be proved until every cell of it is reviewed. Waiting: {}. Grid {slug}",
         cells.join(", ")
     ))
 }
@@ -145,17 +145,11 @@ pub fn set(connection: &Connection, request: &Request) -> Result<Outcome, TaskEr
     let at = format!("{slug}.{row}.{col}");
     let again = format!("Fix it and run `atelier grid cases {slug} {row} {col}` again");
     let fail = |message: String| -> TaskError { TaskError::Refused(format!("{message}. {again}")) };
-    if matches!(cell.state.as_str(), "na" | "na_pending") {
-        return refuse(format!("{at} is {}; it needs no cases", cell.state.replace('_', " ")));
+    if cell.state == "na" {
+        return refuse(format!("{at} is N/A; it needs no cases"));
     }
     if let Some(why) = loaded.unordered(&row, &col) {
         return refuse(format!("{at}: {why}"));
-    }
-    if let Some((number, _)) = open_claim(connection, &request.project, &cell)? {
-        return refuse(format!(
-            "{at} is claimed by task #{number} (step {}); its reviewed cases are fixed while a task works it. Finish or cancel #{number} first",
-            cell.step
-        ));
     }
     let object = request.payload.as_object().ok_or_else(|| fail("the payload must be an object: {cases?, dismiss?}".into()))?;
     if let Some(unknown) = object.keys().find(|key| !["cases", "dismiss"].contains(&key.as_str())) {
@@ -450,7 +444,7 @@ pub fn record_review(connection: &Connection, request: &Request) -> Result<Outco
 }
 
 /// A cell whose review is finished (clean, or round 3's gaps answered) is
-/// ready to be claimed; no one approves it.
+/// ready to be proved; no one approves it.
 fn ready(cell: &mut Cell, now: i64) {
     if cell.case_step.as_deref() == Some("reviewed") && cell.cases_approved.is_none() {
         cell.cases_approved = Some(now);

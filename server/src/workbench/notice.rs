@@ -686,8 +686,8 @@ mod tests {
 
     /// Put one of each thing that waits on the owner into the board's task
     /// and grid tables, as the task and grid commands leave them, all held by
-    /// `chat-1`: #1 in review, #2 with a plan change, proposal 1, the draft
-    /// of grid "data", and an N/A request on grid "io"'s import × bench cell.
+    /// `chat-1`: #1 in review, #2 with a plan change, and proposal 1. Grids
+    /// never wait on the owner.
     async fn one_of_each_waiting(board: &ChatDb, project: &str) {
         let project = project.to_string();
         board
@@ -700,19 +700,7 @@ mod tests {
                        VALUES ('{p}', 1, 3, 1000, 'submitted', 'chat-1', 'agent'),
                               ('{p}', 2, 4, 2000, 'amend_proposed', 'chat-1', 'agent');
                      INSERT INTO task_proposal (project_id, id, session_id, type, title, why, plan, status, created_at)
-                       VALUES ('{p}', 1, 'chat-1', 'chore', 'Search filters', 'w', '{{}}', 'pending', 3000);
-                     INSERT INTO grid (project_id, slug, title, area, status, row_search, pending, created_at, updated_at)
-                       VALUES ('{p}', 'data', 'Data', 'a', 'draft', '{{}}',
-                               '{{\"title\":\"Data coverage\",\"draftedBy\":\"chat-1\",\"draftedAt\":4000}}', 4000, 4000),
-                              ('{p}', 'io', 'IO', 'a', 'approved', '{{}}', NULL, 1, 1);
-                     INSERT INTO grid_row (project_id, slug, id, name, kind, source, added_at)
-                       VALUES ('{p}', 'io', 'import', 'Import', 'feature', 'manual', 1);
-                     INSERT INTO grid_column (project_id, slug, id, name, proof_rule, position)
-                       VALUES ('{p}', 'io', 'bench', 'Benchmark', 'r', 0);
-                     INSERT INTO grid_cell (project_id, slug, row, col, state)
-                       VALUES ('{p}', 'io', 'import', 'bench', 'na_pending');
-                     INSERT INTO grid_event (project_id, slug, seq, at, kind, row, col, session_id, actor)
-                       VALUES ('{p}', 'io', 7, 5000, 'na_asked', 'import', 'bench', 'chat-1', 'agent');",
+                       VALUES ('{p}', 1, 'chat-1', 'chore', 'Search filters', 'w', '{{}}', 'pending', 3000);",
                     p = project
                 ))
             })
@@ -737,7 +725,7 @@ mod tests {
         // Newest first, like every other needs-action row.
         assert_eq!(
             said,
-            vec!["N/A request waiting", "Grid draft waiting", "Proposal waiting", "Plan change for #2", "#1 ready for review"]
+            vec!["Proposal waiting", "Plan change for #2", "#1 ready for review"]
         );
         for row in &rows {
             assert!(row.needs_action, "{} was not under needs action", row.says);
@@ -745,8 +733,8 @@ mod tests {
             assert_eq!(row.href, chat_href(&project, "chat-1"));
             assert_eq!(row.item.as_deref(), Some(row.key.as_str()));
         }
-        assert_eq!(rows[4].key, format!("review:{project}:1:3"));
-        assert_eq!(rows[4].at, "1970-01-01T00:00:01+00:00", "a review is timed from when it was handed in");
+        assert_eq!(rows[2].key, format!("review:{project}:1:3"));
+        assert_eq!(rows[2].at, "1970-01-01T00:00:01+00:00", "a review is timed from when it was handed in");
 
         // What the composer bar and the Tasks tab draw, in their longer words.
         let items = board
@@ -760,8 +748,6 @@ mod tests {
                 "#1 is ready for review",
                 "Plan change for #2",
                 "Proposal: Search filters",
-                "Grid draft: Data coverage",
-                "N/A request: Import × Benchmark"
             ]
         );
     }
@@ -819,7 +805,7 @@ mod tests {
 
         let first = waiting_worth_pushing(&board, &projects).await.unwrap();
         let kinds: Vec<&str> = first.iter().map(|row| row.key.split(':').next().unwrap()).collect();
-        assert_eq!(kinds, vec!["review", "amend", "proposal", "grid_draft", "na"]);
+        assert_eq!(kinds, vec!["review", "amend", "proposal"]);
         let note = crate::push::waiting_note(first[0].clone());
         assert_eq!(note.title, "Chat chat-1");
         assert_eq!(note.body, "#1 ready for review");
@@ -833,7 +819,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let second = waiting_worth_pushing(&board, &projects).await.unwrap();
-        assert_eq!(second.len(), 4, "an item the owner read was still pushed");
+        assert_eq!(second.len(), 2, "an item the owner read was still pushed");
         for row in second {
             let key = row.key.clone();
             board

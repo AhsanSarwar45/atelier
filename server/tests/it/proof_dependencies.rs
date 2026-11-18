@@ -49,7 +49,6 @@ fn a_rows_coverage_includes_its_cells_check_files_and_watched_paths() {
     });
     draft.search = Some(Ok(atelier::workbench::grids::search::Run { rows: vec![found("sunstar", &["post/spike.rs"])], head: Some("h1".into()) }));
     apply(&store, &draft).unwrap();
-    apply(&store, &request("approve", "owner", None, "camera")).unwrap();
     approve_cases(&store, "camera");
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     let covered = loaded.covered("sunstar");

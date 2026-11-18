@@ -1,9 +1,9 @@
 /**
  * A cell's detail (docs/grids.md, "Cell detail"): its state, its proof with
  * each check's last result, benchmarks against their budgets, tests and
- * commits with Merged, its history, and the owner's buttons.
+ * commits with Merged, its checks, its history, and the owner's buttons.
  */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CellDetailPanel } from '@/workbench/grids/cell-detail';
@@ -34,10 +34,7 @@ beforeEach(() => {
   act.mockReset().mockResolvedValue({ summary: 'ok' });
 });
 
-const draw = (onOpenTask = vi.fn()) => {
-  render(<CellDetailPanel projectId="p1" slug="camera" row="glare" col="gpu" onClose={vi.fn()} onOpenTask={onOpenTask} />);
-  return { onOpenTask };
-};
+const draw = () => render(<CellDetailPanel projectId="p1" slug="camera" row="glare" col="gpu" onClose={vi.fn()} />);
 
 describe('the cell detail', () => {
   it('heads with the way back to the grid, by name, for a phone', async () => {
@@ -88,39 +85,41 @@ describe('the cell detail', () => {
     await waitFor(() => expect(act).toHaveBeenCalledWith('reopen', { projectId: 'p1', slug: 'camera', row: 'glare', col: 'gpu' }, { reason: 'The fix was reverted' }));
   });
 
-  it('offers Approve N/A and Reject with a note while N/A waits on the owner', async () => {
-    cell.mockResolvedValue(makeCellDetail({ state: 'na_pending', reason: 'No CPU path for glare', proof: null, lastCheck: null }));
+  it('shows an N/A cell with its reason and Reopen, and nothing to approve', async () => {
+    cell.mockResolvedValue(makeCellDetail({ state: 'na', reason: 'No CPU path for glare', proof: null, lastCheck: null }));
     draw();
     expect((await screen.findByTestId('cell-reason')).textContent).toBe('No CPU path for glare');
     expect(screen.queryByTestId('cell-recheck')).toBeNull();
-    expect(screen.queryByTestId('cell-reopen')).toBeNull();
-    fireEvent.click(screen.getByTestId('cell-approve-na'));
-    await waitFor(() => expect(act).toHaveBeenCalledWith('approve_na', { projectId: 'p1', slug: 'camera', row: 'glare', col: 'gpu' }, undefined));
-    await waitFor(() => expect(screen.getByTestId('cell-reject-na')).not.toBeDisabled());
-    fireEvent.click(screen.getByTestId('cell-reject-na'));
-    fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'The CPU path ships' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
-    await waitFor(() => expect(act).toHaveBeenCalledWith('reject_na', { projectId: 'p1', slug: 'camera', row: 'glare', col: 'gpu' }, { note: 'The CPU path ships' }));
-  });
-
-  it('links the task that claims it, with the chat holding it', async () => {
-    cell.mockResolvedValue(makeCellDetail({ state: 'in_progress', claimedTask: 7, claimedChat: { id: 's2', title: 'Glare fixes' }, proof: null, lastCheck: null }));
-    const { onOpenTask } = draw();
-    const claimed = await screen.findByTestId('cell-claimed');
-    expect(claimed.textContent).toBe('Task #7 · Glare fixes');
-    fireEvent.click(claimed);
-    expect(onOpenTask).toHaveBeenCalledWith(7);
-    // A claimed cell is not offered to another task.
+    expect(screen.queryByTestId('cell-approve-na')).toBeNull();
+    expect(screen.queryByTestId('cell-reject-na')).toBeNull();
+    // An N/A cell is not offered to a task.
     expect(screen.queryByTestId('cell-create-task')).toBeNull();
+    fireEvent.click(screen.getByTestId('cell-reopen'));
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'The CPU path ships' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen' }));
+    await waitFor(() => expect(act).toHaveBeenCalledWith('reopen', { projectId: 'p1', slug: 'camera', row: 'glare', col: 'gpu' }, { reason: 'The CPU path ships' }));
   });
 
-  it('names the task alone when the server does not say which chat holds it', async () => {
-    cell.mockResolvedValue(makeCellDetail({ state: 'in_progress', claimedTask: 7, proof: null, lastCheck: null }));
+  it('says why a proof is stale: its code, or its checks, changed', async () => {
+    cell.mockResolvedValue(makeCellDetail({ stale: true }));
     draw();
-    expect((await screen.findByTestId('cell-claimed')).textContent).toBe('Task #7');
+    expect((await screen.findByTestId('cell-stale-why')).textContent).toBe('The covered code changed since it was proved');
+    cleanup();
+    cell.mockResolvedValue(makeCellDetail({ stale: true, checksChanged: true }));
+    draw();
+    expect((await screen.findByTestId('cell-stale-why')).textContent).toBe('Its checks changed since it was proved');
   });
 
-  it('makes a task for an unclaimed gap in the chat picked, and opens it', async () => {
+  it('lists the cell\'s checks under Checks', async () => {
+    cell.mockResolvedValue(makeCellDetail({ checks: [{ name: 'glare ground truth', command: 'cargo test glare_matches_reference' }] }));
+    draw();
+    const checks = await screen.findByTestId('cell-checks');
+    expect(checks.textContent).toContain('Checks');
+    expect(checks.textContent).not.toContain('Approved');
+    expect(checks.textContent).toContain('cargo test glare_matches_reference');
+  });
+
+  it('makes a task for a gap in the chat picked, and opens it', async () => {
     cell.mockResolvedValue(makeCellDetail({ state: 'gap', reason: 'No test', proof: null, lastCheck: null, provedAt: null }));
     createForCells.mockResolvedValue({ task: { projectId: 'p1', number: 15 }, sessionId: 's1' });
     const onOpenChat = vi.fn();

@@ -2,7 +2,6 @@
 //! proposal closes, and the chat's agent is told the note and to propose
 //! again.
 
-use atelier::workbench::grids::Prints;
 use atelier::workbench::tasks::{self, catalog::Catalog};
 use crate::gaps::*;
 use serde_json::{json, Value};
@@ -15,7 +14,7 @@ fn proposed(store: &Db) -> i64 {
     let plan = json!({"symptom": "s", "repro_steps": ["r"], "expected": "e", "actual": "a",
         "checks": [shell_check("repro", "cargo test repro", "FAILED", &[])], "requirements": requirements});
     let payload = decided(json!({"type": "bug", "title": "T", "why": "W", "plan": plan}));
-    let (proposal, _) = tasks::propose(&store.store, "p", "s1", &payload, &Prints::new(), None, 1, &types)
+    let (proposal, _) = tasks::propose(&store.store, "p", "s1", &payload, None, 1, &types)
         .unwrap_or_else(|error| panic!("propose refused: {error:?}"));
     proposal.id
 }
@@ -31,7 +30,7 @@ fn asking_for_changes_tells_the_agent_the_note() {
     assert!(prompt.contains(note), "the agent is not told the note: {prompt}");
     assert!(prompt.contains("atelier task propose"), "the agent is not told to propose again: {prompt}");
     assert!(tasks::pending_proposals(store.connection(), "s1").unwrap().is_empty(), "the proposal still waits");
-    let again = tasks::answer_proposal(&store.store, "p", id, "create", &Prints::new(), None, 3);
+    let again = tasks::answer_proposal(&store.store, "p", id, "create", None, 3);
     assert!(refused(again).contains("already answered"), "a proposal sent back can still be made a task");
 }
 

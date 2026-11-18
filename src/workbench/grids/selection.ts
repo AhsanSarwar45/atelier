@@ -82,7 +82,7 @@ export function rectangle(
 }
 
 /**
- * Why a cell cannot be claimed by a new task, or null when it can
+ * Why a cell cannot be listed in a new task, or null when it can
  * (docs/grids.md, "Cell states": unchecked, gap and stale proved can be).
  */
 export function blocker(cell: GridCell | undefined, row: GridRow | undefined, column: GridColumn | undefined): string | null {
@@ -92,12 +92,9 @@ export function blocker(cell: GridCell | undefined, row: GridRow | undefined, co
   if (row.missing) return 'Row missing';
   if (column.retired) return 'Column retired';
   if (!cell) return 'No cell';
-  if (cell.claimedTask !== null && cell.claimedTask !== undefined) return `Claimed by #${cell.claimedTask}`;
   const look = cellLook(cell);
   if (look === 'proved') return 'Proved';
   if (look === 'na') return 'N/A';
-  if (look === 'na_pending') return 'N/A pending';
-  if (look === 'in_progress') return 'In progress';
   if (needsACheck(cell)) return NEEDS_CHECK_LABEL;
   if (cell.step === 'order') return NEEDS_ORDER_LABEL;
   if (cell.needsCases) return NEEDS_CASES_LABEL;

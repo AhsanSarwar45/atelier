@@ -1,6 +1,6 @@
-//! `grid change`: add or remove a few rows and columns of an approved grid
-//! by naming only the change. The agent never resends the grid; the owner
-//! approves the edit, and every cell that stays keeps its proof.
+//! `grid change`: add or remove a few rows and columns of a grid by naming
+//! only the change. The agent never resends the grid; the change is live at
+//! once, and every cell that stays keeps its proof.
 
 use atelier::workbench::grids::{self, get_cell, load};
 use crate::gaps::*;
@@ -34,9 +34,6 @@ fn a_column_is_added_after_the_one_named_without_resending_the_grid() {
     prove_glare_perf(&store);
     change(&store, "camera", json!({"addColumns": [{"id": "scenes", "name": "Saved scenes", "after": "gpu",
         "checks": [template("scenes", "python scripts/scenes.py {row}", &["scripts/scenes.py"])]}]})).unwrap();
-    assert_eq!(live_columns(&store, "camera"), ["gpu", "perf"], "nothing changes until the owner approves");
-
-    apply(&store, &request("approve", "owner", None, "camera")).unwrap();
     assert_eq!(live_columns(&store, "camera"), ["gpu", "scenes", "perf"], "the new column sits after gpu");
     assert_eq!(live_rows(&store, "camera"), ["glare", "sunstar"], "rows are untouched");
     let after = load(store.connection(), "p", "camera").unwrap().unwrap();
@@ -53,13 +50,12 @@ fn rows_and_columns_are_added_and_removed_by_name() {
         "removeColumns": ["perf"], "removeRows": ["sunstar"],
         "addRows": [{"id": "bloom", "name": "Bloom", "paths": ["camera/bloom.rs"]}],
     })).unwrap();
-    apply(&store, &request("approve", "owner", None, "camera")).unwrap();
     assert_eq!(live_columns(&store, "camera"), ["gpu"]);
     assert_eq!(live_rows(&store, "camera"), ["glare", "bloom"]);
 }
 
 #[test]
-fn a_change_refuses_unknown_ids_and_waits_its_turn() {
+fn a_change_refuses_unknown_ids_and_applies_at_once() {
     let (_d, store) = store();
     assert!(refused(change(&store, "nope", json!({"removeColumns": ["gpu"]}))).contains("nope"));
     grid_without_checks(&store, "camera");
@@ -68,7 +64,10 @@ fn a_change_refuses_unknown_ids_and_waits_its_turn() {
     assert!(refused(change(&store, "camera", json!({"addColumns": [{"id": "x", "name": "X", "after": "lens"}]}))).contains("lens"));
     assert!(refused(change(&store, "camera", json!({}))).contains("addColumns"));
     change(&store, "camera", json!({"removeColumns": ["perf"]})).unwrap();
-    assert!(refused(change(&store, "camera", json!({"removeColumns": ["gpu"]}))).contains("waiting"));
+    // No change waits for another: the next one applies on top.
+    change(&store, "camera", json!({"addRows": [{"id": "bloom", "name": "Bloom"}]})).unwrap();
+    assert_eq!(live_columns(&store, "camera"), ["gpu"]);
+    assert!(refused(change(&store, "camera", json!({"removeColumns": ["perf"]}))).contains("perf"));
 }
 
 #[test]

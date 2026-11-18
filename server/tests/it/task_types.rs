@@ -154,7 +154,7 @@ fn create_is_refused_until_every_type_has_a_reason() {
     blank["docs"] = json!("  ");
     let message = refused(tasks::propose(&store.store, "p", "s1",
         &json!({"type": "feature", "title": "T", "why": "W", "plan": feature_plan(), "decisions": blank}),
-        &atelier::workbench::grids::Prints::new(), None, 1, &types));
+        None, 1, &types));
     assert!(message.contains("docs"), "the blank reason is named: {message}");
 
     let made = ask_with(&store, &types, "create", None,
@@ -244,7 +244,7 @@ fn a_task_of_a_custom_type_is_planned_like_general_and_listed_in_decisions() {
 
 // --- grid: a task the owner makes from grid cells gets the type's items ------
 
-/// The camera grid (rows glare, sunstar; columns gpu, perf) with an approved
+/// The camera grid (rows glare, sunstar; columns gpu, perf) with a live
 /// check on both columns, so every cell can be picked.
 fn grid_with_checks(store: &Db) {
     grid_without_checks(store, "camera");
@@ -255,7 +255,6 @@ fn grid_with_checks(store: &Db) {
     ]});
     asked.hashes = Some(json!({"files": {}}));
     apply(store, &asked).unwrap();
-    apply(store, &request("approve", "owner", None, "camera")).unwrap();
     approve_cases(store, "camera");
 }
 

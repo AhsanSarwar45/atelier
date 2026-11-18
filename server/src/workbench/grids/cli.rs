@@ -16,7 +16,7 @@ usage: atelier grid <command>
   list [--rows]                   grids with % proved and open counts; --rows adds every owned row id
   show SLUG [ROW COL]             the matrix as text, or one cell with proof and history
   next SLUG [--row ROW | --col COL] [--batch N]
-                                  the next cell to work on, in the grid's order, and the task create payload for it;
+                                  the next cells to work on, in the grid's order, each with its prove command;
                                   --batch N hands out up to N ready cells at once
   order SLUG                      {rows:[{id,after,reason}],columns:[{id,after,reason}],cells?:[{row,col,after,reason}]}:
                                   required before any work; lists every row and column in hand-out order, after naming
@@ -24,15 +24,15 @@ usage: atelier grid <command>
                                   after its cell in each column; it may not drop a prerequisite that is not proved or N/A
   template list
   template set NAME               {columns:[{id,name,proof_rule,checks?}]} on stdin or --input FILE
-  draft                           {slug,title,area,template?,row_search,columns,rows,cells?}; the owner approves or discards it
+  draft                           {slug,title,area,template?,row_search,columns,rows,cells?}; the grid is live at once
                                   columns[].checks: check templates ({row} = the row id); cells: [{row,col,checks,override?}]
-                                  an approved grid's slug redrafts it whole; to add or remove a few rows or columns, use change
+                                  an existing grid's slug redrafts it whole; to add or remove a few rows or columns, use change
   change SLUG                     {addColumns?:[{id,name,proof_rule?,checks?,after?}],removeColumns?:[id],
-                                  addRows?:[{id,name,paths?}],removeRows?:[id]}: add or remove rows and columns of an
-                                  approved grid by naming only the change; after puts a column right after another;
-                                  the owner approves it, and kept cells keep their proofs
-  checks SLUG                    {columns:[{id,checks}]}: check templates for columns of an approved grid; the owner
-                                  approves only those; once approved, the proved cells of those columns reopen as gaps
+                                  addRows?:[{id,name,paths?}],removeRows?:[id]}: add or remove rows and columns of a
+                                  grid by naming only the change; after puts a column right after another;
+                                  it applies at once, and kept cells keep their proofs
+  checks SLUG                    {columns:[{id,checks}]}: check templates for columns of a grid; they apply at once,
+                                  and the proved cells of those columns read stale until `verify` or `prove` passes again
   discover SLUG                   rerun the grid's row search now
   cases SLUG ROW COL              {cases?:[{id,given,when,then,command,red?,covers?,files?,timeout_s?}],dismiss?:{GAP:reason}}:
                                   the cell's cases (replaces the list); covers names the review gap a case answers.
@@ -43,7 +43,7 @@ usage: atelier grid <command>
   prove SLUG ROW COL              {summary,commits?,evidence?}: runs the cell's approved checks
                                   (a cell with none, proved before checks: {summary,checks,tests?,commits?,benchmarks?,evidence?})
   verify SLUG [ROW COL]           re-run checks (whole grid: every proved cell)
-  na SLUG ROW COL --reason TEXT   ask the owner to mark a cell N/A
+  na SLUG ROW COL --reason TEXT   mark a cell N/A
   audit SLUG [--done]             proved cells to audit; --done prints the audit summary
   pass SLUG ROW COL [--note TEXT]
   reopen SLUG ROW COL --reason TEXT
@@ -231,15 +231,11 @@ fn summary_line(grid: &Value) -> String {
         None => " -- ".into(),
     };
     let mut line = format!(
-        "{:<20} {percent} {:<9} {}  (open: {} gap, {} stale, {} unchecked, {} in progress, {} N/A pending)",
+        "{:<20} {percent} {}  (open: {} gap, {} stale, {} unchecked)",
         grid["slug"].as_str().unwrap_or(""),
-        grid["status"].as_str().unwrap_or(""),
         grid["title"].as_str().unwrap_or(""),
-        counts["gap"], counts["stale"], counts["unchecked"], counts["inProgress"], counts["naPending"],
+        counts["gap"], counts["stale"], counts["unchecked"],
     );
-    if !grid["pending"].is_null() {
-        line.push_str(" [draft awaiting the owner]");
-    }
     if grid["discovery"]["ok"] == false {
         line.push_str(&format!(" [row search failed: {}]", grid["discovery"]["error"].as_str().unwrap_or("")));
     }
@@ -304,9 +300,6 @@ fn print_matrix(value: &Value) {
             );
             if let Some(reason) = c["reason"].as_str() {
                 line.push_str(&format!(" {reason}"));
-            }
-            if let Some(task) = c["claimedTask"].as_i64() {
-                line.push_str(&format!(" (#{task})"));
             }
             println!("{line}");
         }
@@ -379,9 +372,6 @@ pub fn cell_text(slug: &str, value: &Value) -> String {
     if let Some(reason) = cell["reason"].as_str() {
         let _ = writeln!(out, "Reason: {reason}");
     }
-    if let Some(task) = cell["claimedTask"].as_i64() {
-        let _ = writeln!(out, "Claimed by task #{task}");
-    }
     if !cell["proof"].is_null() {
         let _ = writeln!(out, "Proof (by {}):", cell["provedBy"].as_str().unwrap_or("?"));
         let _ = writeln!(out, "{}", serde_json::to_string_pretty(&cell["proof"]).unwrap_or_default());
@@ -428,10 +418,10 @@ fn note_line(note: &Value) -> String {
 }
 
 /// `grid next`'s exit code: 0 when it hands out cells or the grid is
-/// finished; 3 when nothing can be handed out yet (cells need a check, are
-/// claimed, or wait on the owner).
+/// finished; 3 when nothing can be handed out yet (cells need a check,
+/// cases or order, or wait for other cells).
 pub fn next_exit(value: &Value) -> i32 {
-    if !value["create"].is_null() || value["finished"] == true {
+    if value["cells"].as_array().is_some_and(|cells| !cells.is_empty()) || value["finished"] == true {
         0
     } else {
         3
@@ -465,8 +455,8 @@ fn needs_order_text(value: &Value) -> String {
 }
 
 /// The cells that wait for others to be proved or N/A, and what each waits for.
-/// Rows whose cells cannot be claimed until their cases are reviewed and the
-/// owner approves them, each cell with its step and next command.
+/// Rows whose cells cannot be proved until every cell of the row has reviewed
+/// cases, each cell with its step and next command.
 fn needs_cases_text(value: &Value) -> String {
     let slug = value["grid"].as_str().unwrap_or("");
     let rows = value["needsCases"].as_array().cloned().unwrap_or_default();
@@ -475,7 +465,7 @@ fn needs_cases_text(value: &Value) -> String {
     }
     let total = value["needsCasesInGrid"].as_u64().unwrap_or(0);
     let mut out = format!(
-        "Needs cases: {total} {} in {slug} cannot be claimed until every cell of its row has reviewed cases and the owner approves the row:\n",
+        "Needs cases: {total} {} in {slug} cannot be proved until every cell of its row has reviewed cases:\n",
         if total == 1 { "cell" } else { "cells" }
     );
     for row in &rows {
@@ -502,7 +492,7 @@ fn waiting_text(value: &Value) -> String {
     }
     let waits = if count == 1 { "cell waits" } else { "cells wait" };
     // With a cell handed out the list is noise; say only how many wait.
-    if !value["create"].is_null() {
+    if value["cells"].as_array().is_some_and(|cells| !cells.is_empty()) {
         return format!("{count} {waits} for other cells to be proved or N/A first (`atelier grid order {slug}`).\n");
     }
     let mut out = format!("{count} {waits} for other cells to be proved or N/A first (set with `atelier grid order {slug}`):\n");
@@ -525,41 +515,25 @@ fn waiting_text(value: &Value) -> String {
     out
 }
 
-/// `grid next` as text: the scope, its free cells with their proof rules,
-/// the cells other tasks hold, what is left, and the exact command to run.
+/// `grid next` as text: the scope, its ready cells with their proof rules
+/// and prove commands, what is left, and what holds the rest back.
 pub fn next_text(value: &Value) -> String {
     let slug = value["grid"].as_str().unwrap_or("");
     let left = value["left"].as_u64().unwrap_or(0);
     let mut out = String::new();
-    let claimable = value["claimable"].as_array().cloned().unwrap_or_default();
-    let taken = value["taken"].as_array().cloned().unwrap_or_default();
+    let ready = value["cells"].as_array().cloned().unwrap_or_default();
     let scope = &value["scope"];
     if scope.is_null() {
-        let held = value["takenInGrid"].as_u64().unwrap_or(0);
-        let pending = value["naPending"].as_u64().unwrap_or(0);
         let needing = value["needsCheckInGrid"].as_u64().unwrap_or(0);
-        let waiting = value["waitingInGrid"].as_u64().unwrap_or(0);
-        let needs_cases = value["needsCasesInGrid"].as_u64().unwrap_or(0) + value["needsOrderInGrid"].as_u64().unwrap_or(0);
         if value["finished"] == true {
             out.push_str(&format!("No gaps left in {slug}. Every cell is proved or N/A.\n"));
-        } else if held > 0 && needing == 0 && pending == 0 && waiting == 0 && needs_cases == 0 {
-            out.push_str(&format!(
-                "No free cells left in {slug}: {held} {} claimed by open tasks, and every other cell is proved or N/A.\n",
-                if held == 1 { "is" } else { "are" }
-            ));
         } else {
-            out.push_str(&format!("Nothing to hand out in {slug} yet; the grid is not finished.\n"));
-            if held > 0 {
-                out.push_str(&format!("{held} {} claimed by open tasks.\n", if held == 1 { "cell is" } else { "cells are" }));
-            }
-        }
-        if pending > 0 {
-            out.push_str(&format!("{pending} N/A request(s) wait for the owner's answer.\n"));
+            out.push_str(&format!("Nothing ready in {slug} yet; the grid is not finished.\n"));
         }
         if needing > 0 {
             out.push_str(&format!(
-                "{needing} {} a check before {} can be claimed. Add check templates to their columns with \
-                 `atelier grid checks {slug} --input FILE` ({{\"columns\": [{{\"id\": COLUMN, \"checks\": [ … ]}}]}}); the owner approves them.\n",
+                "{needing} {} a check before {} can be proved. Add check templates to their columns with \
+                 `atelier grid checks {slug} --input FILE` ({{\"columns\": [{{\"id\": COLUMN, \"checks\": [ … ]}}]}}).\n",
                 if needing == 1 { "cell needs" } else { "cells need" },
                 if needing == 1 { "it" } else { "they" }
             ));
@@ -572,11 +546,11 @@ pub fn next_text(value: &Value) -> String {
     let kind = if scope["kind"] == "col" { "column" } else { "row" };
     let (id, name) = (scope["id"].as_str().unwrap_or(""), scope["name"].as_str().unwrap_or(""));
     out.push_str(&format!(
-        "{slug}, {kind} {id} ({name}): {} free cell{}. {left} free in the whole grid.\n",
-        claimable.len(),
-        if claimable.len() == 1 { "" } else { "s" }
+        "{slug}, {kind} {id} ({name}): {} ready cell{}. {left} ready in the whole grid.\n",
+        ready.len(),
+        if ready.len() == 1 { "" } else { "s" }
     ));
-    for cell in &claimable {
+    for cell in &ready {
         let state = if cell["stale"] == true { "stale".to_string() } else { cell["state"].as_str().unwrap_or("").replace('_', " ") };
         out.push_str(&format!(
             "  {slug}.{}.{} [{state}] {} × {}: {}\n",
@@ -595,8 +569,8 @@ pub fn next_text(value: &Value) -> String {
     if needing > 0 {
         let place = if kind == "column" { "column" } else { "row" };
         out.push_str(&format!(
-            "{needing} other {} in this {place} {} a check and cannot be claimed yet; add check templates to their columns with \
-             `atelier grid checks {slug}` for the owner to approve.\n",
+            "{needing} other {} in this {place} {} a check before it can be proved; add check templates to their columns with \
+             `atelier grid checks {slug}`.\n",
             if needing == 1 { "cell" } else { "cells" },
             if needing == 1 { "needs" } else { "need" }
         ));
@@ -604,29 +578,17 @@ pub fn next_text(value: &Value) -> String {
     out.push_str(&needs_order_text(value));
     out.push_str(&needs_cases_text(value));
     out.push_str(&waiting_text(value));
-    if !taken.is_empty() {
-        out.push_str("Taken by other tasks (leave these alone):\n");
-        for cell in &taken {
-            let chat = cell["chat"]["title"].as_str().map(|title| format!(" in chat \"{title}\"")).unwrap_or_else(|| " (unassigned)".into());
-            out.push_str(&format!(
-                "  {slug}.{}.{} — #{}{chat}\n",
-                cell["row"].as_str().unwrap_or(""),
-                cell["col"].as_str().unwrap_or(""),
-                cell["task"]
-            ));
+    if ready.is_empty() {
+        if left > 0 {
+            out.push_str(&format!("\nNothing ready here. Run `atelier grid next {slug}` for the first row with ready cells.\n"));
+        } else {
+            out.push_str(&format!("\nNo ready cells left in {slug}.\n"));
         }
-    }
-    match value.get("create").filter(|create| !create.is_null()) {
-        Some(create) => {
-            let these = if claimable.len() == 1 { "this cell" } else { "these cells" };
-            out.push_str(&format!("\nNext: create a task for {these} (no @task needed for an approved grid), then start it; prove each cell \
-                with `atelier grid prove` and tick its item at once with `atelier task check N ROW.COL`; finish with `atelier task done N`, and run `atelier grid next` again:\n"));
-            out.push_str(&format!("atelier task create <<'JSON'\n{}\nJSON\n", serde_json::to_string(create).unwrap_or_default()));
+    } else {
+        out.push_str("\nNext: make each cell's checks pass, commit, then prove it (a task is optional; one that lists the cell ticks it with `atelier task check N ROW.COL`):\n");
+        for cell in &ready {
+            out.push_str(&format!("{}\n", cell["next"].as_str().unwrap_or("")));
         }
-        None if left > 0 => out.push_str(&format!(
-            "\nNothing free here. Run `atelier grid next {slug}` for the first row with free cells.\n"
-        )),
-        None => out.push_str(&format!("\nNo free cells left in {slug}.\n")),
     }
     out
 }
@@ -761,10 +723,10 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
                 let value = listing(&session).await?;
                 let templates = value["templates"].as_array().cloned().unwrap_or_default();
                 if templates.is_empty() {
-                    println!("No templates in this project. Propose one with `atelier grid template set NAME`.");
+                    println!("No templates in this project. Add one with `atelier grid template set NAME`.");
                 }
                 for template in templates {
-                    println!("{}{}", template["name"].as_str().unwrap_or(""), if template["pending"].is_null() { "" } else { " [change awaiting the owner]" });
+                    println!("{}", template["name"].as_str().unwrap_or(""));
                     for column in template["columns"].as_array().into_iter().flatten() {
                         println!(
                             "  {}: {} — {}",

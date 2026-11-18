@@ -35,9 +35,9 @@ pub fn ensure_schema(connection: &Connection) -> rusqlite::Result<()> {
 #[serde(rename_all = "camelCase")]
 pub struct Waiting {
     /// One occurrence: `review:PROJECT:N:SEQ`, `proposal:PROJECT:ID`,
-    /// `amend:PROJECT:N:SEQ`, `grid_draft:PROJECT:SLUG:AT`, `na:PROJECT:SLUG:ROW:COL:SEQ`.
+    /// `amend:PROJECT:N:SEQ`.
     pub key: String,
-    /// `review`, `proposal`, `amend`, `grid_draft` or `na`.
+    /// `review`, `proposal` or `amend`.
     pub kind: String,
     pub project_id: String,
     /// The chat the answer goes back to, when one does.
@@ -130,66 +130,6 @@ pub fn list(connection: &Connection, project: Option<&str>) -> rusqlite::Result<
             short: "Proposal waiting".into(),
             since: at,
             ..item(&project_id, &Some(session_id), None, &title)
-        });
-    }
-
-    // A draft is a new grid's first draft or an approved grid's edit; either
-    // way its `pending` holds what the owner is asked to approve.
-    let mut statement = connection.prepare(
-        "SELECT project_id, slug, title, pending, updated_at FROM grid
-          WHERE (?1 IS NULL OR project_id = ?1) AND pending IS NOT NULL AND status <> 'discarded'",
-    )?;
-    let drafts: Vec<(String, String, String, Option<String>, i64)> = statement
-        .query_map([project], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))?
-        .collect::<rusqlite::Result<_>>()?;
-    for (project_id, slug, title, pending, updated) in drafts {
-        let pending: serde_json::Value = pending.and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
-        let title = pending["title"].as_str().map(str::to_string).unwrap_or(title);
-        let at = pending["draftedAt"].as_i64().unwrap_or(updated);
-        found.push(Waiting {
-            key: format!("grid_draft:{project_id}:{slug}:{at}"),
-            kind: "grid_draft".into(),
-            grid: Some(slug),
-            says: format!("Grid draft: {title}"),
-            short: "Grid draft waiting".into(),
-            since: at,
-            ..item(&project_id, &pending["draftedBy"].as_str().map(str::to_string), None, &title)
-        });
-    }
-
-    // The chat that asked is the one the answer goes to; a request with no
-    // asker on record goes to the chat whose task claims the cell.
-    let mut statement = connection.prepare(
-        "SELECT c.project_id, c.slug, c.row, c.col,
-                COALESCE(r.name, c.row), COALESCE(k.name, c.col),
-                e.seq, e.at, COALESCE(e.session_id, t.session_id)
-           FROM grid_cell c
-           LEFT JOIN grid_row r ON r.project_id = c.project_id AND r.slug = c.slug AND r.id = c.row
-           LEFT JOIN grid_column k ON k.project_id = c.project_id AND k.slug = c.slug AND k.id = c.col
-           LEFT JOIN grid_event e ON e.project_id = c.project_id AND e.slug = c.slug AND e.seq =
-                (SELECT MAX(seq) FROM grid_event x WHERE x.project_id = c.project_id AND x.slug = c.slug
-                    AND x.row = c.row AND x.col = c.col AND x.kind = 'na_asked')
-           LEFT JOIN task t ON t.project_id = c.project_id AND t.number = c.claimed_task
-          WHERE (?1 IS NULL OR c.project_id = ?1) AND c.state = 'na_pending'",
-    )?;
-    type Asked = (String, String, String, String, String, String, Option<i64>, Option<i64>, Option<String>);
-    let asked: Vec<Asked> = statement
-        .query_map([project], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    for (project_id, slug, row, col, row_name, col_name, seq, at, session_id) in asked {
-        let title = format!("{row_name} × {col_name}");
-        found.push(Waiting {
-            key: format!("na:{project_id}:{slug}:{row}:{col}:{}", seq.unwrap_or(0)),
-            kind: "na".into(),
-            grid: Some(slug),
-            row: Some(row),
-            col: Some(col),
-            says: format!("N/A request: {title}"),
-            short: "N/A request waiting".into(),
-            since: at.unwrap_or(0),
-            ..item(&project_id, &session_id, None, &title)
         });
     }
 

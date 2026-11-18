@@ -13,16 +13,6 @@ pub(crate) fn from(kind: &str, label: impl Into<String>) -> serde_json::Value {
     json!({"kind": kind, "label": label.into()})
 }
 
-/// The first sentence of an answer, as its label when there is no shorter
-/// one to give.
-pub(super) fn first_sentence(text: &str) -> String {
-    let line = text.lines().next().unwrap_or_default();
-    match line.find(". ") {
-        Some(end) => line[..=end].trim_end_matches('.').to_string(),
-        None => line.trim_end_matches('.').to_string(),
-    }
-}
-
 /// Send a line into a chat as the owner's next message: now when the chat is
 /// between turns (waking it if it sleeps), held for the end of the turn when
 /// it is in one — the same queue a message the owner holds waits in. A send

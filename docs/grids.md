@@ -22,26 +22,27 @@ feature at a time they leave gaps. A grid shows the gaps.
 - Rows come from the code. Each grid saves a **row search**: a command that
   lists the area's features. The app runs it again when the area changes, so
   a new feature shows up as a new row without anyone adding it.
-- A grid counts only after the owner approves it. An agent drafts it and the
-  owner approves or discards the draft on a card. A later edit to an approved
-  grid is drafted and approved the same way.
+- Nothing about a grid waits for the owner. A grid is live as soon as an
+  agent drafts it. An edit, a check change, a template change or an N/A
+  applies at once. The owner can still reopen any cell, and any agent can
+  reopen a cell that no longer meets its requirement.
 - **Proved** means there is proof the app can run again. The proof is the
-  cell's approved checks (docs/tasks.md, Checks): column templates written
-  when the grid is drafted and approved with it. They must fail when the
-  cell is claimed and pass when it is proved. The app runs them again on
-  request. A proof also stops counting as soon as the code it covers
-  changes (stale).
-- A cell with no check cannot be worked on. It shows **Needs a check**
-  until an edit gives its column (or the cell) one.
+  cell's checks (docs/tasks.md, Checks): column templates written when the
+  grid is drafted, plus the cell's own. They must pass when the cell is
+  proved, and the app runs them again on request. A proof stops counting as
+  soon as the code it covers changes, or its checks change (stale).
+- A cell with no check cannot be proved. It shows **Needs a check** until an
+  edit gives its column (or the cell) one.
 - A feature has one owner. A row id belongs to one grid in the project.
   Another grid that depends on it adds a reference row, which shows the
   owner's cells read-only. Rows are never copied.
-- Work on cells is done as tasks. A task claims its cells, and a claimed cell
-  cannot be claimed again. When the task is done, every claimed cell has
-  either proof or a reason why it has none.
-- Approving N/A and approving a draft are the owner's decisions. Reviewing
-  proved cells (audit) is done by a different chat from the one that proved
-  them.
+- Tasks and cells are one-way. A task may reference cells, and its plan
+  lists them, but no cell depends on a task. A cell is never held: any chat
+  may prove a ready cell, and many tasks may reference one cell.
+- Cases are reviewed by a fresh agent, not by the owner. Reviewing proved
+  cells (audit) is done by a different chat from the one that proved them.
+- Grid data (checks, cases, cell states)
+  belong to the project, not to a branch. See Branches.
 
 ## Data
 
@@ -62,13 +63,13 @@ CLI argument without quoting. A `.` or a `+` in an id is refused.
 | `project_id`, `slug` | text | the key |
 | `title` | text | ≤ 120 chars |
 | `area` | text | one paragraph: what the area is, ≤ 600 chars |
-| `status` | text | `draft`, `approved`, `discarded` |
+| `status` | text | `approved` for a live grid; `draft` and `discarded` are only left by older builds, and discarded grids are hidden |
 | `template` | text, null | name of a `grid_template` |
 | `row_search` | json | `{command, watch[], timeout_s?}` (see Row search) |
-| `pending` | json, null | a draft waiting for the owner (see Drafting) |
+| `pending` | json, null | always null now; older builds kept unapplied drafts here (see Older databases) |
 | `created_by` | text, null | session that drafted it |
-| `drafted_by` | text, null | session that wrote `pending` |
-| `created_at`, `updated_at`, `approved_at` | integer ms | |
+| `drafted_by` | text, null | session that drafted it last |
+| `created_at`, `updated_at`, `approved_at` | integer ms | `approved_at` is when it went live |
 | `discovery` | json, null | the last run: `{at, head, ok, added[], missing[], back[], skipped[{id, owner}], error?}` |
 
 `grid_column`: `(project_id, slug, id)` is the key. Other columns: `name`,
@@ -82,67 +83,65 @@ CLI argument without quoting. A `.` or a `+` in an id is refused.
 repo-relative files or folders); `of` (json array of row ids, combinations
 only); `ref` (json `{grid, row}`, references only); `source` (`search` or
 `manual`); `added_at`; `missing_since` (null while the row search still
-prints it); `removed_at` (set when an approved edit drops a manual row);
+prints it); `removed_at` (set when an edit drops a manual row);
 `after` (json array of row ids; see Order).
 
 - Ownership index:
   `CREATE UNIQUE INDEX grid_row_owner ON grid_row(project_id, id) WHERE kind <> 'reference' AND removed_at IS NULL`.
-  Draft rows are kept only in `grid.pending` and do not get `grid_row`
-  entries until the draft is approved, so a draft takes no ids away from
-  other grids.
 
 `grid_cell`: `(project_id, slug, row, col)` is the key. Every live feature or
 combination row has one cell per column. Reference rows have no cells.
 
 | column | type | notes |
 |---|---|---|
-| `state` | text | `unchecked`, `gap`, `in_progress`, `proved`, `na_pending`, `na` |
+| `state` | text | `unchecked`, `gap`, `proved`, `na` |
 | `proof` | json, null | see Proof; kept when a cell reopens, until replaced |
 | `fingerprint` | text, null | of the row's covered code when it was proved |
 | `proved_by`, `proved_at` | text, integer | session and time |
 | `last_check` | json, null | `{at, head, passed, results[{name, exit, ms, tail}]}` |
-| `claimed_task` | integer, null | the task number that claims the cell |
-| `claimed_from` | text, null | the state it had before the claim, restored on cancel |
+| `checks_changed` | 0/1 | set on a proved cell when its checks change; cleared by a passing `verify` or `prove` |
 | `reason` | text, null | why it is a gap, why N/A, or why an audit reopened it |
 | `checks` | json, null | the cell's own checks, `{checks: [Check], override?: true}` (see Column checks) |
-| `approved_hashes` | json, null | sha256 of each resolved check's `files` and the harness files, taken when the grid (or its edit) was approved |
+| `approved_hashes` | json, null | sha256 of each resolved check's `files` and the harness files, taken in the chat's folder when the checks were written |
 | `audited_at`, `audited_by` | integer, text, null | the last audit pass |
+| `step`, `next` | text | see Cell states |
+
+The old `claimed_task` and `claimed_from` columns stay in the table and are
+always null.
 
 `grid_event`: `(project_id, slug, seq, at, kind, row, col, session_id,
 actor, payload)`. `row` and `col` are null for events about the whole grid.
 Every change appends a row. A cell's history is its own events. Kinds:
-`drafted`, `approved`, `discarded`, `edit_drafted`, `edit_approved`,
-`edit_discarded`, `discovered`, `row_added`, `row_missing`, `row_back`,
-`column_added`, `column_retired`, `claimed`, `released`, `proved`,
-`check_passed`, `check_failed`, `gap`, `na_asked`, `na_approved`,
-`na_rejected`, `audit_passed`, `reopened`.
+`drafted`, `edited`, `changed`, `checks_set`, `checks_changed`,
+`discovered`, `row_added`, `row_missing`, `row_back`, `column_added`,
+`column_retired`, `order`, `cases`, `reviewed`, `proved`, `check_passed`,
+`check_failed`, `na_set`, `audit_passed`, `reopened`, `note`.
 
 `grid_template`: `(project_id, name)` is the key. Other columns: `columns`
-(json `[{id, name, proof_rule, checks}]`), `pending` (json, null: a change waiting for
-the owner), `updated_at` and `updated_by`.
+(json `[{id, name, proof_rule, checks}]`), `pending` (always null now),
+`updated_at` and `updated_by`.
 
 `grid_task_cell`: `(project_id, task, slug, row, col)`, the key, one row per
-cell a task ever claimed. A claim is released on done or cancel, so this is
-what the task card reads to keep listing its cells afterwards. A proposal's
-cells wait in a `cells` json column added to `task_proposal`.
+cell a task references. It changes nothing about the cell; the task card
+reads it to list its cells. A proposal's cells wait in a `cells` json
+column added to `task_proposal`.
 
 ### Derived, never stored
 
 These are worked out each time a grid is read:
 
 - **stale**: a `proved` cell whose row's fingerprint now differs from the one
-  stored with the proof.
+  stored with the proof, or whose `checks_changed` is set.
 - **missing**: a row with `missing_since` set. **retired**: a column with
   `retired_at` set.
 - **counted cells**: cells of live feature and combination rows (not missing,
   not removed) in live columns, minus cells in state `na`.
 - **percent proved** = `proved and not stale` / `counted`, rounded down.
-  `na_pending` counts as open. Only approved grids have a percent.
 - **resolved checks** of a cell: its column's templates with `{row}`
   replaced by the row id, followed by the cell's own checks; or only the
   cell's own when it has `override: true`.
-- **needs a check**: a cell of an approved grid whose resolved checks are
-  empty (`needsCheck: true`). It cannot be claimed.
+- **needs a check**: a cell whose resolved checks are empty
+  (`needsCheck: true`). It cannot be proved.
 
 ## Covered code and staleness
 
@@ -162,11 +161,8 @@ against the including file's folder, then the repository root. The walk
 is recursive and bounded, and only committed files count.
 
 - **Checkout.** Every git question about a grid is asked in the project's
-  folder (`local_path`, else `path`, as for tasks), at that folder's `HEAD`.
-  A proof whose commit (`last_check.head`) that folder's HEAD lacks, made in
-  a worktree on a branch not landed yet, is judged in the worktree of the
-  same repository whose HEAD has the commit, at that worktree's HEAD. Once
-  the branch lands, the project's folder has the commit and judges it again.
+  folder (`local_path`, else `path`, as for tasks), at that folder's `HEAD`,
+  except for proofs made on a branch the folder lacks (see Branches).
 - **Fingerprint** = sha256 of the sorted output of
   `git ls-tree -r HEAD -- <paths…>`, that is, the path and blob id of every
   committed file under the covered paths. Only committed content counts. A
@@ -180,6 +176,22 @@ is recursive and bounded, and only committed files count.
   `(folder, HEAD sha, paths)`, so a grid read when HEAD has not moved costs no
   git calls. A path that no longer exists contributes nothing, so deleting
   covered code also makes the proof stale.
+
+## Branches
+
+Grid data (checks, cases, cell states)
+belong to the project, not to a branch. There is one grid, whatever branch
+a chat is on.
+
+- `prove` runs in the chat's own checkout: the project's folder, or a
+  worktree.
+- A proof is judged, and re-checked, in the checkout that has its commit
+  (`last_check.head`). A proof made in a worktree on a branch the project's
+  folder lacks is judged in that worktree, at its HEAD. Once the branch is
+  merged, the project's folder has the commit and judges it.
+- One proof per cell: the latest counts, whichever branch it came from.
+- Changed checks make a proof stale on every branch, since the checks are
+  the project's.
 
 ## Row search
 
@@ -201,25 +213,23 @@ is recursive and bounded, and only committed files count.
   valid JSON, uses an invalid id or repeats an id changes nothing. Its error
   is stored in `grid.discovery` and shown on the grid.
 
-**Discovery** is one run of the search applied to the grid:
+**Discovery** is one run of the search applied to the grid, inside one
+write transaction:
 
-- To a draft grid: the rows in `pending` are replaced by the run's rows, and
-  the manual rows are kept.
-- To an approved grid, inside one write transaction:
-  - a new id adds a `search` row with an `unchecked` cell in every live
-    column (`row_added`);
-  - a known id gets its name and paths updated (new paths change the
-    fingerprint, so its proofs go stale on their own);
-  - a `search` row the run no longer prints gets `missing_since`
-    (`row_missing`). Its cells and proof are kept, and it is no longer
-    counted;
-  - a missing id that comes back is cleared (`row_back`);
-  - an id another grid owns is skipped and listed in `discovery.skipped` with
-    its owner. The owner can add it here as a reference row through an edit.
-  - Manual rows are never touched.
+- a new id adds a `search` row with an `unchecked` cell in every live
+  column (`row_added`);
+- a known id gets its name and paths updated (new paths change the
+  fingerprint, so its proofs go stale on their own);
+- a `search` row the run no longer prints gets `missing_since`
+  (`row_missing`). Its cells and proof are kept, and it is no longer
+  counted;
+- a missing id that comes back is cleared (`row_back`);
+- an id another grid owns is skipped and listed in `discovery.skipped` with
+  its owner. An agent can add it here as a reference row through an edit.
+- Manual rows are never touched.
 - **When it runs.** `atelier grid discover SLUG` and the grid's **Discover**
   button run it straight away. The server also runs a grid watcher: one task
-  that wakes every 60 s and, for each project with approved grids, reads
+  that wakes every 60 s and, for each project with grids, reads
   `git rev-parse HEAD` in the project folder. When HEAD has moved since a
   grid's `discovery.head`, it runs `git diff --name-only <old> <new>` and
   reruns the search for each grid whose `watch` matches a changed path. It
@@ -264,34 +274,32 @@ the check, whatever the exit code.
   draft's `cells: [{row, col, checks, override?}]`. Without `override` they
   are added to the column's; with `override: true` they replace them.
 - A drafted column without checks is allowed, but every cell under it
-  shows **Needs a check** until an edit adds them, and cannot be claimed.
+  shows **Needs a check** until an edit adds them, and cannot be proved.
   The draft card names those columns.
-- Approving the grid (or an edit, or a template change) approves every
-  check on it and stores its hashes, as a task's approval does.
-  Nothing is locked: `prove` runs the checks as they are, and a proof made
-  while a recorded check file or a helper beside it differs from approval
-  lists them in `changedCheckFiles` for the owner.
-- Claiming a cell (task create with `cells`, or the owner's Create task)
-  runs its resolved checks at HEAD, and they must go red as at task start;
-  otherwise the claim is refused, naming the cell and check.
-- Grids approved before column checks, and cells proved before them, keep
-  the old rules: `prove` takes its own `checks` in the payload.
-- To add checks to an approved grid without drafting it again, run
+- When checks are written (a draft, an edit, `grid checks`, a template
+  change), the hashes of their files and the harness files are taken in
+  the chat's folder and stored with the grid. Nothing is locked: `prove`
+  runs the checks as they are, and a proof made while a recorded check file
+  or a helper beside it differs lists them in `changedCheckFiles`.
+- Changed checks reopen nothing, but every proved cell whose resolved
+  checks changed (a column's templates, or the cell's own) is marked
+  `checks_changed` (`checks_changed` event). It reads stale until a passing
+  `verify` or `prove` under the new checks.
+- Grids made before column checks, and cells proved before them, keep the
+  old rules: `prove` takes its own `checks` in the payload.
+- To set the checks of some columns without drafting the grid again, run
   `atelier grid checks SLUG --input FILE` with
   `{"columns": [{"id": "docs", "checks": [ … ]}]}`. Only column checks are
-  allowed in this payload. The grid stays approved while the checks wait. The owner
-  approves or discards just those checks on the grid card. Rows, columns,
-  cells, proofs and history are kept, and the new check files' hashes are
-  recorded with the grid's.
-- To add or remove a few rows or columns of an approved grid, run
+  allowed in this payload. They apply at once. Rows, columns, cells, proofs
+  and history are kept.
+- To add or remove a few rows or columns, run
   `atelier grid change SLUG` with only the change:
   `{"addColumns": [{"id": "scenes", "name": "Saved scenes", "after": "first-col",
   "checks": [ … ]}], "removeColumns": ["old"], "addRows": [{"id": "bloom",
   "name": "Bloom", "paths": ["src/bloom.rs"]}], "removeRows": ["gone"]}`.
   Every field is optional, but at least one is needed. `after` puts a new
   column right after the one it names; without it the column goes last.
-  `proof_rule` defaults to "its checks pass". The grid stays approved while
-  the change waits, and the owner approves or discards it on the edit card.
+  `proof_rule` defaults to "its checks pass". The change applies at once.
   Kept cells keep their proofs. A removed row stays removed, even one the
   row search finds. A new row or column has no place in the order, so its
   cells sit at step order until an agent runs `atelier grid order SLUG`
@@ -324,19 +332,17 @@ atelier grid review SLUG ROW COL
   when a review returns no gaps, or once the gaps of its 3rd round are
   answered (no 4th review runs). No one approves cases: the owner has no
   step here, and agents never wait for one.
-- No cell of a row is claimed (`grid next`, `task create`, `task propose`,
-  the owner's Create task) until every cell of the row is reviewed. Such a
-  cell shows **Needs cases**; `grid next` lists those rows with each cell's
-  step and next command, and the refusal names them too.
+- No cell of a row is handed out (`grid next`) or proved until every cell
+  of the row is reviewed. Such a cell shows **Needs cases**; `grid next`
+  lists those rows with each cell's step and next command, and the refusal
+  names them too.
 - Grids from before cases keep their proofs. Every cell without reviewed
-  cases shows "Needs cases" and cannot be claimed or proved again until it
-  goes through cases and review. Cells that waited for the owner's approval
-  under an older build are reviewed now.
+  cases shows "Needs cases" and cannot be proved again until it goes
+  through cases and review.
 
 ## Proof
 
-`prove` runs the cell's approved checks; the payload only says what was
-done:
+`prove` runs the cell's checks; the payload only says what was done:
 
 ```json
 {
@@ -350,12 +356,12 @@ done:
 
 - `summary`: required, ≤ 600 chars.
 - The checks are the cell's resolved checks. Each `command` is run with
-  `sh -c` in the proving chat's folder after the hashes are verified. Exit
+  `sh -c` in the proving chat's checkout (see Branches). Exit
   0 means pass (a benchmark also needs its budget met), and each output
   must hold exactly one `CASE` line for that check, saying `PASS`. Every
   check must pass, or `prove` is refused with the failing check's exit code and the
   last 40 lines of its output. A `checks` list in the payload is refused
-  for a cell with approved checks, and required for a cell under the old
+  for a cell with checks, and required for a cell under the old
   rules (at least one; `timeout_s` defaults to 600, max 3600).
 - `tests`: names, kept for people and auditors. A check should run them.
 - `commits`: each must exist in the proving chat's repository (the same
@@ -370,8 +376,8 @@ done:
 **Re-check** (`atelier grid verify SLUG [ROW COL]`, the cell's **Re-check**
 button, the grid's **Re-check stale**) runs a cell's checks again in the
 checkout the proof is judged in (see Checkout above) and stores `last_check`. All passing gives `check_passed`, and
-if the cell was stale the fingerprint is taken again, which makes it fresh:
-the checks pass on the current code. One failing gives `check_failed`, and the
+if the cell was stale the fingerprint is taken again and `checks_changed`
+is cleared, which makes it fresh: the checks pass on the current code. One failing gives `check_failed`, and the
 cell becomes `gap` with reason `check "<name>" failed on re-check (exit N)`.
 Proof is kept. Only one run per cell happens at a time. Grid-wide re-checks
 go one cell at a time, and each result is announced as it lands.
@@ -384,49 +390,33 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
 
 | from | event | to | who | refused when |
 |---|---|---|---|---|
-| — | grid approved, row added, column added | `unchecked` | app | |
-| `unchecked`, `gap`, stale `proved` | task created with this cell | `in_progress` | agent (no `@task` needed for an approved grid), or owner (Create task) | another open task claims it; fresh `proved`; `na`, `na_pending`; row missing or column retired; it needs a check; a check does not go red |
-| any but `na`, `na_pending` | `prove` | `proved` | agent | the cell is at step order or cases; it has no checks; a prerequisite is not proved or N/A; claimed by a task held by another chat; a check fails; a benchmark misses its budget; a commit is missing; covered paths are dirty |
-| `in_progress` | claiming task done, cell listed with a reason | `gap` (reason) | app | |
-| `in_progress` | claiming task cancelled | `claimed_from` | app | |
+| — | grid drafted, row added, column added | `unchecked` | app | |
+| any but `na` | `prove` | `proved` | any agent, from any chat | the cell is at step order or cases; it has no checks; a prerequisite is not proved or N/A; a check fails; a benchmark misses its budget; a commit is missing; covered paths are dirty |
 | `proved` | re-check fails | `gap` | app | |
-| `proved` | audit reopen | `gap` (reason) | agent in an `@audit` chat, or owner | the agent's chat proved it |
-| `proved` | audit pass | `proved` (audited) | agent in an `@audit` chat | the agent's chat proved it; the cell is stale |
-| `unchecked`, `gap`, `in_progress` | `na --reason` | `na_pending` | agent | no reason |
-| `na_pending` | approve N/A | `na` | owner | |
-| `na_pending` | reject N/A (note) | `gap` (note), or `in_progress` if claimed | owner | |
-| `na` | reopen | `gap` (reason) | owner | |
-| `proved` | owner reopen (reason) | `gap` | owner | |
+| `proved` | audit pass | `proved` (audited) | agent | the agent's chat proved it; the cell is stale |
+| `unchecked`, `gap` | `na --reason` | `na` | agent | no reason |
+| `proved`, `na` | reopen (reason) | `gap` | any agent, or owner | |
 
-- Every cell also stores its **step**, order → cases → reviewed → red → work → proved (or
-  `na`), and the one command that moves it on (`next`). Grids from before
-  cases called the reviewed step open (open → red → work → proved); grids
-  from before the order step have no order, so their unclaimed cells move
-  to step order:
+- Every cell also stores its **step**, order → cases → reviewed → proved
+  (or `na`), and the one command that moves it on (`next`). Grids from
+  before the order step have no order, so their cells move to step order:
 
   | step | when | next |
   |---|---|---|
-  | order | not claimed, and its row or column has no place in the written order | `atelier grid order SLUG` |
+  | order | its row or column has no place in the written order | `atelier grid order SLUG` |
   | cases | no cases, unanswered gaps, or not yet reviewed clean | `atelier grid cases SLUG ROW COL`, or `atelier grid review SLUG ROW COL` once the gaps are answered |
-  | reviewed | the review is finished (no gaps, or round 3's gaps answered); not claimed (unchecked, gap, stale). It is claimed once every cell of its row is reviewed | `atelier grid next SLUG` |
-  | red | claimed by a task not yet started | `atelier task start N` |
-  | work | claimed by a started (or blocked) task | `atelier grid prove SLUG ROW COL` (any reviewed cell may be proved) |
-  | proved | proved | `atelier task check N ROW.COL` while claimed, else `atelier grid next SLUG` |
-  | na | `na` or `na_pending` | `atelier grid next SLUG` |
+  | reviewed | the review is finished (no gaps, or round 3's gaps answered); not proved, or stale | `atelier grid prove SLUG ROW COL` |
+  | proved | proved | `atelier grid next SLUG` |
+  | na | `na` | `atelier grid next SLUG` |
 
   The app sets the step on every change; a database from before steps gets
-  them filled in once, and its proofs are kept. A cell is proved by
-  its passing checks; `grid prove` needs no task. It is refused only for a
-  cell at step order or cases, one marked N/A, one another chat's task
-  holds, or one with no checks. `grid show SLUG ROW COL` prints
-  `Step: STEP. Next: COMMAND`, `task create` and `task start` print one
-  line per claimed cell with its step and next command, and so does
-  `grid prove`.
-- A claim (`claimed_task`) is held until the task ends, separate from the
-  state. A cell proved during its task stays claimed until the task is done
-  or cancelled, so nobody else can claim it in that time.
+  them filled in once, and its proofs are kept. A cell is proved by its
+  passing checks; `grid prove` needs no task and works from any chat. It is
+  refused only for a cell at step order or cases, one marked N/A, or one
+  with no checks. `grid show SLUG ROW COL` prints
+  `Step: STEP. Next: COMMAND`, and so does `grid prove`.
 - Stale is not a state. A stale proved cell is shown and counted as open. It
-  can be re-checked, claimed or proved again.
+  can be re-checked or proved again.
 
 ## Drafting (`@matrix AREA`)
 
@@ -443,8 +433,8 @@ message describes the area. The server adds an entry that tells the agent to:
    name first), and cell checks where a row needs something else.
 3. Run `atelier grid list --rows` to see which features other grids already
    own, and add reference rows for them instead of new rows.
-4. Run `atelier grid draft` and stop. Continue when the owner's answer
-   arrives.
+4. Run `atelier grid draft`. The grid is live at once. Then write its order
+   (`atelier grid order SLUG`) and each cell's cases.
 
 `atelier grid draft` payload:
 
@@ -466,48 +456,35 @@ message describes the area. The server adds an entry that tells the agent to:
 }
 ```
 
-- The server runs `row_search` in the drafting chat's folder. The draft's
+- The server runs `row_search` in the drafting chat's folder. The grid's
   rows are the search's rows plus the manual `rows` from the payload
   (`source: manual`). A manual id that the search also prints is refused.
-  The draft is always exactly what the saved search produces, so the search
+  The rows are always exactly what the saved search produces, so the search
   is proven to rerun.
 - The columns are the template's columns (`from_template`) followed by the
   payload's own. An own column with the same id as a template column is
   refused. Checks are validated as for tasks (a malformed one is refused);
   a `cells` entry for a row or column not in the draft is refused.
-- Refused when: the slug belongs to a grid created by another chat that is
-  still a draft; a feature or combination id is owned by another approved
-  grid (the error names that grid and says to use a reference row); a
-  reference points at a row that does not exist or is itself a reference;
-  `of` names a row not in the draft; there are no columns; there are more
-  than 400 rows or 40 columns.
-- Gating: none for a new slug. An agent may draft a grid without `@matrix`
-  (suggesting one is fine); nothing is live until the owner approves it. The
-  only guard is that another chat's pending draft is not this chat's to
-  replace: the refusal names that chat and says to pick another slug or ask
-  the owner to approve or discard that draft.
-- Where the draft goes: for a new slug, a `grid` row with `status: draft` and
-  `pending` set. For an approved grid, only `pending` is set (an edit). The
-  live rows and cells do not change until the owner approves.
+- Refused when: a feature or combination id is owned by another grid (the
+  error names that grid and says to use a reference row); a reference
+  points at a row that does not exist or is itself a reference; `of` names
+  a row not in the draft; there are no columns; there are more than 400
+  rows or 40 columns.
+- Gating: none. Any chat may draft a grid, with or without `@matrix`
+  (suggesting one is fine), and drafting an existing slug redrafts it
+  whole.
+- Inside one transaction the server writes `grid_column`/`grid_row` and an
+  `unchecked` cell for every new pair, retires dropped columns, sets
+  `removed_at` on dropped manual rows (cells and proof kept), and marks
+  proved cells whose checks changed. Kept cells keep their proofs. The
+  event is `drafted` for a new grid and `edited` for a redraft.
 - The CLI prints a `grid` widget with `event: "draft"`. The **draft card**
   shows the title, area, template, columns (template ones marked), rows
   grouped by kind (combinations show their `of`, references show their
   owner), each column's checks (folded, with weak-check flags) and the
-  columns that have none, the row-search command, and for an edit a diff (rows and columns
-  added, retired or removed). It has **Approve** and **Discard** buttons. The
-  owner asks for changes in chat, and the agent drafts again, which replaces
-  `pending` and the card's content (the card rereads on `grids.changed`).
-- **Approve**: inside one transaction, re-checks ownership (another grid may
-  have taken an id since), writes `grid_column`/`grid_row` and an `unchecked`
-  cell for every new pair, retires dropped columns, sets `removed_at` on
-  dropped manual rows (cells and proof kept), sets `status: approved`, and
-  clears `pending`. **Discard** clears `pending`. A draft that was never
-  approved becomes `discarded`, and its slug can be drafted again.
-- The drafting chat is told the answer with `tell_chat` (the proposal
-  mechanism): `Owner approved grid "camera" (14 rows × 9 columns). Run
-  atelier grid next camera to pick the next gaps, then create a task for
-  them with those cells; or the owner can select cells and press Create
-  task.` or `Owner discarded …`.
+  columns that have none, and the row-search command. It is read-only. The
+  owner asks for changes in chat, and the agent drafts again or runs
+  `grid change`.
 
 ## Templates
 
@@ -516,18 +493,16 @@ atelier grid template list
 atelier grid template set NAME   {columns: [{id, name, proof_rule, checks}]}
 ```
 
-- `set` stores the change in `grid_template.pending` and prints a `grid`
-  widget with `event: "template"` that shows the column diff and lists the
-  approved grids it affects. The owner approves or rejects it on the card. A
-  template change touches every grid that uses it, so it goes through the
-  owner the same way a draft does.
-- On approval, for every approved grid using the template: a new template
-  column becomes a `grid_column` with `from_template = 1` and an `unchecked`
-  cell for every live row (`column_added`); a removed template column is
-  retired in each grid (`column_retired`, proof kept, no longer counted); a
-  renamed column or one with a changed `proof_rule` is updated in place.
-  Existing proofs are not reopened when a rule changes. The card says to
-  `@audit` the grids that are affected.
+- `set` applies at once and prints a `grid` widget with
+  `event: "template"` that shows the column diff and lists the grids it
+  affects.
+- For every grid using the template: a new template column becomes a
+  `grid_column` with `from_template = 1` and an `unchecked` cell for every
+  live row (`column_added`); a removed template column is retired in each
+  grid (`column_retired`, proof kept, no longer counted); a renamed column
+  or one with a changed `proof_rule` is updated in place. Existing proofs
+  are not reopened when a rule changes; changed checks mark proved cells
+  `checks_changed`. The card says to `@audit` the grids that are affected.
 - A grid's own column may not reuse a template column's id. If a template
   adds an id that a grid already has as its own column, the grid keeps its
   own column, and the card lists the clash.
@@ -541,54 +516,41 @@ atelier grid template set NAME   {columns: [{id, name, proof_rule, checks}]}
   `@grid:camera.glare+sunstar.gpu+perf` is a block. Like `@diff`, it has its
   own id scanner in `references.rs` and `references.ts`, with cases added to
   `atelier-references.cases.json`. Its entry lists each cell's row, column,
-  `proof_rule`, state (stale marked), reason, current proof summary and the
-  task claiming it, if any. With a bare `@task` in the same message it adds:
-  "Create one task for these cells and give them as `cells` in the create
-  payload."
-- **Task create** (and propose) takes an optional top-level
-  `cells: [{grid, row, col}]` next to `type, title, why, plan`. Inside the
-  task transaction (both sets of tables are in `workbench.db`), each cell
-  must be claimable (see Cell states), or the whole create is refused and the
-  refusal names the first cell that blocks and why, for example
-  `camera.glare.gpu is claimed by #14 in chat "Glare GPU"`. Claimed cells
-  become `in_progress` with `claimed_task = N` and `claimed_from` set, and
-  get a `claimed` event. A proposal checks the cells when it is made and
-  claims them only when the owner answers **Create task**. If one was taken
-  in the meantime, that answer is refused with the reason. Every refusal
-  says what to do next, for example `camera.glare.gpu is claimed by #14 in
-  chat "Glare GPU": pick another cell, or run atelier grid next camera
-  for free ones`.
-- **No `@task` for approved grids.** An agent's `task create` needs the
-  owner's `@task` unless the payload has `cells` and every one is in an
-  approved grid (`grids::all_in_approved`): approving the grid is the
-  owner's yes to working on it. Cells of a draft grid, or a task with no
-  cells, still need `@task` (or a proposal).
+  `proof_rule`, state (stale marked), reason and current proof summary.
+  With a bare `@task` in the same message it adds: "Create one task for
+  these cells and give them as `cells` in the create payload."
+- **Tasks reference cells.** Task create (and propose) takes an optional
+  top-level `cells: [{grid, row, col}]` next to `type, title, why, plan`.
+  Each cell must exist in a live row and column, or the create is refused
+  and names the cell. The task records them in `grid_task_cell`, and its
+  plan lists them, one `done_when` item per cell with id `ROW.COL`. The
+  cells do not change, and many tasks may reference one cell. A task with
+  `cells` still needs the owner's `@task` like any task (or a proposal, or
+  the owner's grid pick below).
 - **Next cell.** `atelier grid next SLUG [--row ROW | --col COL] [--batch N]`
   (`GET /grids/:project/:slug/next[?row=|?col=][&batch=N]`) hands out one cell at a time:
   the first ready cell in the grid's order, over the whole grid or the row
   or column named. The order is the one an agent wrote with `grid order`
   (rows in their listed order, and in each row the columns in theirs);
-  there is no default. A free cell (unchecked, gap, or stale, and not claimed by an open task) is
-  ready when every cell it comes after is proved or N/A; otherwise it
-  waits, and `next` lists it with what it waits for. `--batch N` hands out
-  up to N ready cells in that order, for cells that are cheap to do
-  together. `next` also lists the cells there other tasks hold, with their
-  task and chat, and how many free cells the whole grid has left. It ends
-  with a ready `atelier task create` payload for the cells handed out:
-  type `general`, title like `camera: Glare × Runs on the GPU` for one
-  cell (a batch that makes a whole row, column or grid is named without a
-  count, `camera: Glare row`; any other batch is a count, `camera: 3
-  cells`), one `done_when` item per cell, id `ROW.COL`, text `<row> ×
-  <column>: <proof rule>`, with the cell's resolved checks as its `checks`.
-  Cells that need a check are not free; `next` lists them apart. When
-  nothing is ready it says why (cells claimed, waiting, or needing a
-  check) and exits 3; only a grid whose every cell is proved or N/A gets
+  there is no default. A free cell (unchecked, gap, or stale) is ready when
+  every cell it comes after is proved or N/A; otherwise it waits, and
+  `next` lists it with what it waits for. `--batch N` hands out up to N
+  ready cells in that order, for cells that are cheap to do together. Each
+  ready cell comes with its proof rule, notes and its
+  `atelier grid prove SLUG ROW COL` command. `next` also says how many free
+  cells the whole grid has left. Cells that need a check, need cases or
+  need order are not free; `next` lists them apart. When nothing is ready
+  it says why (waiting, needing a check, cases or order) and exits 3; only
+  a grid whose every cell is proved or N/A gets
   `No gaps left in camera. Every cell is proved or N/A.`
+- `atelier grid next` never calls a grid finished while cells need a check.
+  It says how many need one and names `atelier grid checks`. Its JSON has
+  `finished: false`.
 - **Order.** A grid has no default order. Before any cell is worked, an
-  agent writes it: no owner approval is involved, but the server refuses
-  `grid cases`, `grid review`, `task create`, `task propose` and `grid next`
-  hands out nothing for a cell whose row or column the order does not yet
-  name (step order, "Needs order" in `grid next`). `atelier grid order SLUG` takes
+  agent writes it: no owner is involved, but the server refuses
+  `grid cases`, `grid review` and `grid prove`, and `grid next` hands out
+  nothing, for a cell whose row or column the order does not yet name
+  (step order, "Needs order" in `grid next`). `atelier grid order SLUG` takes
   `{"rows": [{"id": ROW, "after": [ROW…], "reason": TEXT}], "columns": [{"id": COLUMN, "after": [COLUMN…], "reason": TEXT}], "cells":[{"row": ROW, "col": COLUMN, "after": [[ROW, COLUMN]…], "reason": TEXT}]}`
   on stdin or `--input FILE`. `rows` and `columns` must each list every
   live row and column once, in the order cells are handed out; each entry
@@ -605,53 +567,43 @@ atelier grid template set NAME   {columns: [{id, name, proof_rule, checks}]}
   that must be proved or N/A first (sunstar's GPU cell waits for glare's
   perf cell). Missing, unknown or repeated ids, a missing or one-word
   reason, an `"after"` naming a later entry, and cycles (over rows, columns
-  and cells together) are refused, and nothing changes. A prerequisite counts as done when it is N/A, or proved and not
-  stale. `task create`, `task start`, `grid prove` and `task check` refuse a
-  cell whose prerequisites are not done:
+  and cells together) are refused, and nothing changes. A prerequisite
+  counts as done when it is N/A, or proved and not stale. `grid prove` and
+  `task check` refuse a cell whose prerequisites are not done:
   `camera.sunstar.gpu waits for camera.glare.perf, which is not proved or N/A. Next: \`atelier grid next camera\``. Any agent may rewrite
   the order at any time within those rules; each change is a grid event
   of kind `order`.
-- **The work-through loop.** `grid next` → `task create` with those cells →
-  `task start` (the cells' checks go red) → `grid prove` each cell, which
-  runs its checks, and `task check N ROW.COL` (or N/A, or a reason at
-  `done`) → `task done` → `grid next` again, until no gaps are left.
-- **Owner's Create task.** On the Grids screen the owner selects cells and
+- **The work-through loop.** `grid next` → `grid prove` each cell it hands
+  out, which runs its checks → `grid next` again, until no gaps are left.
+  A task is optional: when one references the cell, tick its item with
+  `atelier task check N ROW.COL` after the proof.
+- **Owner's grid pick.** On the Grids screen the owner selects cells and
   presses Create task, choosing an existing chat or a new one. The server
   keeps the selected cells that need work (with **Only gaps**, only
   unchecked and gap cells, not stale proofs), refuses when none is left,
-  creates a todo task of the shape above held by that chat, claims the
-  cells at once, and tells the chat: `The owner created task #N from the
-  camera grid (Glare row, 5 cells). Start it with atelier task start N
-  and work through its cells: …`. A new chat is started in the project's
-  folder on the provider of the project's latest chat, titled like the
-  task.
-- **Proving** during the task: `atelier grid prove SLUG ROW COL`, run from
-  the chat that holds the claiming task (`take` moves the claim with the
-  task, because the claim belongs to the task number).
-- **Task done** takes a shared field `cells: [{grid, row, col, reason}]`.
-  `done` is refused while a claimed cell is still `in_progress` and has no
-  entry with a reason here. On done, those cells become `gap` with the
-  reason (`gap` event, payload `{task: N}`), and every claim of the task is
-  released. `proved` and `na_pending` cells keep their state. For review
-  types, the release happens when the task enters `review`.
-- **Cancel** releases the claims, and each `in_progress` cell goes back to
-  `claimed_from`.
+  creates a todo task held by that chat that references the cells, and
+  tells the chat: `The owner created task #N from the camera grid (Glare
+  row, 5 cells). …`. This is the owner's yes, so no `@task` is needed. A
+  new chat is started in the project's folder on the provider of the
+  project's latest chat, titled like the task: `camera: Glare row` for a
+  whole row (a whole column or grid is named the same way), or a count,
+  `camera: 3 cells`, for any other pick.
+- **Proving** is `atelier grid prove SLUG ROW COL`, from any chat, once the
+  cell is at step reviewed and its prerequisites are proved or N/A.
+- **Task done** takes a shared field `cells: [{grid, row, col, reason}]`
+  that lists a proof, N/A or reason for each cell the task references.
+  An entry for a cell the task does not reference is refused. Done and
+  cancel leave the cells as they are.
 - The task card lists its cells with live states: task JSON has `cells:
-  [{grid, row, col, state, claimed, reason}]` and `claimShape: {grid, kind:
-  "row"|"col"|"grid", id, name, count}` when its cells are one whole row,
-  one whole column or the whole grid (every other cell there proved or
-  N/A), else null. A proposal's JSON has the `cells` it asked for. The cell
-  detail links to its claiming task, and a claimed cell carries
-  `claimedChat: {id, title}`, the chat holding that task.
+  [{grid, row, col, state, reason}]`. A proposal's JSON has the `cells` it
+  asked for.
 
 ## N/A
 
-`atelier grid na SLUG ROW COL --reason TEXT` sets the cell to `na_pending`
-(`na_asked`) and prints a `grid` widget with `event: "na"`. The reason is
-required, ≤ 600 chars. The owner gives the answer on that card or in the
-cell detail: **Approve N/A** (→ `na`, no longer counted) or **Reject** with a
-note (→ `gap`, or `in_progress` if still claimed). The asking chat is told the
-answer with `tell_chat`. Only the owner can move a cell to `na`.
+`atelier grid na SLUG ROW COL --reason TEXT` marks an unchecked or gap cell
+N/A at once (`na_set`) and prints a `grid` widget with `event: "na"`. The
+reason is required, ≤ 600 chars. An N/A cell is no longer counted.
+`atelier grid reopen` (or **Reopen** in the cell detail) undoes it.
 
 ## Notes
 
@@ -683,12 +635,13 @@ atelier grid pass SLUG ROW COL [--note TEXT]
 atelier grid reopen SLUG ROW COL --reason TEXT
 ```
 
-- `pass` and `reopen` from an agent are refused unless the chat's latest
-  owner message has `@audit SLUG` for this grid, and refused for a cell whose
-  `proved_by` is this chat. This is what makes the audit a separate agent.
-  The owner can start the audit in a fresh chat, but one that has never
-  proved the cell is enough. `pass` on a stale cell is refused ("re-check or
-  re-prove first").
+- `pass` is refused for a cell whose `proved_by` is this chat. This is what
+  makes the audit a separate agent: any chat that has never proved the cell
+  may pass it. `pass` on a stale cell is refused ("re-check or re-prove
+  first").
+- `reopen` may come from any agent, even the chat that proved the cell: the
+  bar for proof changes, and a cell that no longer meets its requirement
+  should be reopened.
 - `pass` sets `audited_at` and `audited_by` (`audit_passed`). `reopen` sets
   the cell to `gap` with the reason (`reopened`), keeps the proof for the
   record, and the reason is shown wherever the cell is.
@@ -706,31 +659,31 @@ non-zero and name the field that is wrong.
 ```
 atelier grid list [--rows]                   grids with % proved and open counts; --rows adds every owned row id
 atelier grid show SLUG [ROW COL]             the matrix as text, or one cell with proof and history
-atelier grid next SLUG [--row ROW | --col COL] [--batch N]  the next ready cell (or N), and the task create payload for it
+atelier grid next SLUG [--row ROW | --col COL] [--batch N]  the next ready cell (or N), each with its prove command
 atelier grid order SLUG                      {rows:[{id,after,reason}],columns:[{id,after,reason}],cells?:[{row,col,after:[[row,col]],reason}]}  the hand-out order and what must be proved or N/A first; required before any work
 atelier grid template list
-atelier grid template set NAME               {columns:[{id,name,proof_rule}]}
-atelier grid draft                           {slug,title,area,template?,row_search,columns,rows}
-atelier grid change SLUG                     {addColumns?,removeColumns?,addRows?,removeRows?}  add or remove rows and columns of an approved grid
+atelier grid template set NAME               {columns:[{id,name,proof_rule,checks?}]}  applies at once
+atelier grid draft                           {slug,title,area,template?,row_search,columns,rows,cells?}  the grid is live at once
+atelier grid change SLUG                     {addColumns?,removeColumns?,addRows?,removeRows?}  add or remove rows and columns; applies at once
+atelier grid checks SLUG                     {columns:[{id,checks}]}  column check templates; apply at once
 atelier grid discover SLUG
 atelier grid cases SLUG ROW COL              {cases?:[{id,given,when,then,command,red?,covers?}],dismiss?:{GAP:reason}}  the cell's cases and gap answers
 atelier grid review SLUG ROW COL             Atelier's coverage review of the cell's cases (3 rounds at most)
-atelier grid prove SLUG ROW COL              {summary,tests?,commits?,benchmarks?,evidence?}  runs the approved checks (old cells: checks in the payload)
+atelier grid prove SLUG ROW COL              {summary,tests?,commits?,benchmarks?,evidence?}  runs the cell's checks (old cells: checks in the payload)
 atelier grid verify SLUG [ROW COL]           re-run checks (whole grid: proved cells)
-atelier grid na SLUG ROW COL --reason TEXT
+atelier grid na SLUG ROW COL --reason TEXT   marks the cell N/A at once
 atelier grid note SLUG [--row ROW] [--col COL] --text TEXT  a note on the grid, a row, a column or a cell
 atelier grid audit SLUG [--done]
 atelier grid pass SLUG ROW COL [--note TEXT]
 atelier grid reopen SLUG ROW COL --reason TEXT
 ```
 
-`next` prints the cell (or batch) it hands out with its proof rule, the
-cells waiting and what each waits for, the cells other tasks hold, and
-what is left, and ends with the exact `atelier task
-create` command to run.
+`next` prints the cell (or batch) it hands out with its proof rule, notes
+and its `atelier grid prove` command, the cells waiting and what each
+waits for, and what is left.
 
 `show` prints one line per row: one character per column (`·` unchecked,
-`✗` gap, `~` in progress, `✓` proved, `s` stale, `?` N/A pending, `-` N/A),
+`✗` gap, `✓` proved, `s` stale, `-` N/A),
 followed by the row name. Under that come a column key and a list of open
 cells with their reasons.
 
@@ -741,34 +694,33 @@ JSON is camelCase.
 - `GET /api/workbench/grids?project=ID` (or `?session=ID`, as for tasks) →
   `{projectId, grids: GridSummary[], templates: Template[]}`, where
   `GridSummary = {projectId, slug, title, area, status, template, rowSearch,
-  createdBy, approvedAt, updatedAt, pending, discovery, percent, counts:
-  {counted, proved, stale, gap, unchecked, inProgress, naPending, na}}` and
-  `Template = {name, columns, pending, updatedAt}`.
+  createdBy, approvedAt, updatedAt, discovery, percent, counts:
+  {counted, proved, stale, gap, unchecked, na}}` and
+  `Template = {name, columns, updatedAt}`.
 - `GET /api/workbench/grids/:project/:slug` → `{grid: GridSummary, head,
   columns: [{id, name, proofRule, position, fromTemplate, retired}], rows:
   [{id, name, kind, paths, of, ref, source, missing, removed}], cells: [{row,
-  col, state, stale, claimedTask, reason, provedBy, provedAt, auditedAt,
-  lastCheck: {at, passed}|null, proofSummary, claimedChat: {id, title}|null,
-  checks: Check[], needsCheck?: true}]}` (`claimedChat` is set on claimed
-  cells; `checks` are the resolved checks; `needsCheck` is set when they
-  are empty). Columns also carry their `checks` templates. A reference row's cells
-  are the owner grid's cells for columns with the same id, marked `ref:
-  true`. Columns that do not match are left out.
+  col, state, stale, checksChanged, step, next, reason, provedBy, provedAt,
+  auditedAt, lastCheck: {at, passed}|null, proofSummary, checks: Check[],
+  needsCheck?: true}]}` (`checks` are the resolved checks; `needsCheck` is
+  set when they are empty). Columns also carry their `checks` templates. A
+  reference row's cells are the owner grid's cells for columns with the
+  same id, marked `ref: true`. Columns that do not match are left out.
 - `GET /api/workbench/grids/:project/:slug/cells/:row/:col` → `{cell (with
   full proof and lastCheck), row, column, events: GridEvent[]}`. When the
   proof lists commits, the cell also has `merged: boolean`: every one of them
   is in the project's base branch.
-- `GET /api/workbench/grids/:project/:slug/next[?row=ROW|?col=COL]` →
-  `{grid, title, scope: {kind: "row"|"col", id, name}|null, claimable:
-  [{row, col, rowName, colName, state, stale, proofRule}], taken: [{row,
-  col, task, chat: {id, title}|null}], left, takenInGrid, naPending,
-  create}`. `scope` is null when the grid has no free cell; `left` counts
-  free cells in the whole grid; `create` is the `task create` payload for
-  the claimable cells, or null. `400 {error}` for a draft grid or an
-  unknown row or column.
+- `GET /api/workbench/grids/:project/:slug/next[?row=ROW|?col=COL][&batch=N]` →
+  `{grid, title, scope: {kind: "row"|"col", id, name}|null, cells: [{row,
+  col, rowName, colName, state, stale, proofRule, notes, next}], left,
+  needsCheck, needsCheckInGrid, waiting, waitingInGrid, needsCases,
+  needsCasesInGrid, needsOrder, needsOrderInGrid, finished}`. Each cell's
+  `next` is its `atelier grid prove` command. `scope` is null when nothing
+  is handed out; `left` counts free cells in the whole grid. `400 {error}`
+  for an unknown grid, row or column.
 - `POST /api/workbench/task` with `{action: "create", actor: "owner",
   project, grid: {slug, rows, cols, onlyGaps}, chat, brand?}`: the owner's
-  Create task. `rows` and `cols` are lists of ids or `"*"`; `chat` is a
+  grid pick. `rows` and `cols` are lists of ids or `"*"`; `chat` is a
   chat id or `"new"` (`brand` picks the new chat's provider). → `{task,
   sessionId}` or `400 {error}` when no selected cell needs work.
 - `POST /api/workbench/grid` with `{action, actor, session?, project?, slug?,
@@ -776,33 +728,45 @@ JSON is camelCase.
   template?, audit?}` or `400 {error}`. `failed` is set when the action ran
   but its checks or search failed (a re-check that reopened a cell, a
   discovery whose search failed; the CLI exits 1). A discovery whose search
-  fails answers `400 {error}` after recording it in `discovery`. Template
-  actions (`template_set`, `approve_template`, `reject_template`) name the
-  template in `slug`. Grid-wide `verify` takes `payload.staleOnly` to re-check
-  only stale cells, and has no widget. Agent actions: `draft discover prove verify na audit_done
-  pass reopen template_set`. Owner actions: `approve discard approve_na
-  reject_na reopen verify discover approve_template reject_template`. Long
-  actions (`prove`, `verify`, `discover`) run their commands before going to
-  the writer.
+  fails answers `400 {error}` after recording it in `discovery`.
+  `template_set` names the template in `slug`. Grid-wide `verify` takes
+  `payload.staleOnly` to re-check only stale cells, and has no widget.
+  Agent actions: `draft checks change discover prove verify na audit_done
+  pass reopen template_set note order cases review`. Owner actions:
+  `reopen verify discover note order`; none of them is an approval. Long
+  actions (`prove`, `verify`, `discover`, `review`) run their commands
+  before going to the writer.
 - Every change sends `{type: "grids.changed", kind: "grids.changed",
-  projectId, slug}` on the `workbench` feed. Claim changes also send
-  `tasks.changed`.
+  projectId, slug}` on the `workbench` feed.
 - Widget: `{type: "grid", event, grid: GridSummary, cell?, template?,
   audit?}`, validated in `media.rs` like `task`. A `template` widget has no
-  `grid`; its `template` is `{name, projectId, columns, pending, updatedAt,
+  `grid`; its `template` is `{name, projectId, columns, updatedAt,
   change: {added, removed, changed, affects: [slug], clashes: [{grid,
   column}]}}`. `event` is one of `draft`,
   `template`, `prove`, `na`, `audit`, `reopen`, `pass`, `discover`.
 
 ## Reconnect
 
-`tasks::open_section` adds grid lines for the chat, when it has any:
+`tasks::open_section` adds a grid line for the chat when its open tasks
+reference cells that are not proved yet:
 
 ```
-Grid drafts awaiting the owner: camera (Renderer camera)
-Cells claimed by your tasks: #14 → camera.glare.gpu [in_progress], camera.glare.perf [proved]
-N/A awaiting the owner: camera.ghosts.presets_grounded
+Cells your tasks reference that are not proved yet: #14 → camera.glare.gpu [gap], camera.glare.perf [unchecked]
 ```
+
+## Older databases
+
+When the app opens a database from an older build, `bring_over` in
+`grids/mod.rs` moves it to these rules once:
+
+- A cell that was `in_progress` goes back to the state it had before its
+  task (or `gap`). Every claim is cleared.
+- A pending N/A request (`na_pending`) becomes `na`.
+- A grid draft, edit or check change that was waiting is applied, so the
+  grid is live. One that no longer applies (for example, a row id another
+  grid now owns) is dropped and logged.
+- A waiting template change is applied to the template and its grids.
+- Cells that waited for their cases to be approved count as reviewed.
 
 ## Front end
 
@@ -811,43 +775,38 @@ N/A awaiting the owner: camera.ghosts.presets_grounded
   grid, and `cell=ROW:COL` also opens that cell's detail. These are added to
   `src/lib/address.ts` like `task=`.
 - **Grids list.** One row per grid: title, a bar with "N/M proved", and chips
-  for gap, stale and N/A pending, plus an **Awaiting approval** chip when
-  `pending` is set. Draft grids come first, then the rest by lowest percent
-  first. Discarded grids are hidden. Templates are listed under the grids,
-  read-only, with any pending change.
+  for gap and stale. Grids are listed by lowest percent first. Templates are
+  listed under the grids, read-only.
 - **Grid view.** A heatmap with rows down the side (combinations indented
   under their first `of` row, references in italics with their owner),
   columns along the top, their names reading upwards and wrapping rather
   than cut (hovering shows the `proof_rule`), and one square per
-  cell coloured by state: unchecked muted, gap destructive, in progress info,
-  proved success, stale success hatched, N/A pending warning outline, N/A
-  dash, needs a check a dotted outline with the tooltip "Needs a check".
-  Missing rows are dimmed and retired columns are hidden behind a
-  "Show retired" toggle. Above the heatmap: discovery status (last run,
-  added/missing counts, error), **Discover**, **Re-check stale**, and the
-  pending-edit banner with Approve/Discard.
+  cell coloured by state: unchecked muted, gap destructive, proved success,
+  stale success hatched, N/A dash, needs a check a dotted outline with the
+  tooltip "Needs a check". Missing rows are dimmed and retired columns are
+  hidden behind a "Show retired" toggle. Above the heatmap: discovery
+  status (last run, added/missing counts, error), **Discover** and
+  **Re-check stale**.
 - **Selection.** Clicking a column header selects that column. Clicking a
   row header selects that row. Clicking a cell opens its detail and outlines
   it; ctrl- or cmd-click selects the cell without opening it. Shift-click or
   drag selects the rectangle from the anchor. A selection is always a row set
   × column set, which is what `@grid:` encodes. The selection bar, shown only
-  for a selection made this way and not for a cell opened, reads "N cells (M
-  claimable) · **New task**".
-  New task uses the Tasks tab's New task flow (new chat or an existing chat)
-  and prefills `@task @grid:SLUG.ROWS.COLS ` through `prefillChat`, with
-  `startTaskIn` given the line. Cells that are not claimable are listed in a
-  tooltip with the reason.
-- **Cell detail panel.** State (and stale or claimed, with a link to the
-  task); reason; the cell's checks and cases (Given/When/Then and command, the
-  column's marked apart from the cell's own), or **Needs a check**; proof: summary, checks with the last result and time,
-  benchmarks as a value/budget/unit table with pass marks, tests, commits
-  (with the Merged badge logic), evidence inline; history from the cell's
-  events; buttons: **Re-check**, **Approve N/A** and **Reject** (with a note)
-  when `na_pending`, and **Reopen** (with a reason) when proved or N/A.
-- **Cards** (widget `grid`): the draft card, the template card and the N/A
-  card carry their owner buttons in the chat. Prove, audit and discover cards
-  are read-only summaries. Every card rereads on `grids.changed`. Draft and
-  N/A cards start open. Others start folded (as in `opensByDefault`).
+  for a selection made this way and not for a cell opened, reads
+  "N cells · **New task**". New task uses the Tasks tab's New task flow (new
+  chat or an existing chat) and prefills `@task @grid:SLUG.ROWS.COLS `
+  through `prefillChat`, with `startTaskIn` given the line.
+- **Cell detail panel.** State (and stale, or checks changed); step and next
+  command; reason; the cell's checks and cases (Given/When/Then and command,
+  the column's marked apart from the cell's own), or **Needs a check**;
+  proof: summary, checks with the last result and time, benchmarks as a
+  value/budget/unit table with pass marks, tests, commits (with the Merged
+  badge logic), evidence inline; history from the cell's events; buttons:
+  **Re-check**, and **Reopen** (with a reason) when proved or N/A.
+- **Cards** (widget `grid`): draft, template, N/A, prove, audit and discover
+  cards are read-only summaries; none carries a button for the owner. Every
+  card rereads on `grids.changed`. Draft cards start open. Others start
+  folded (as in `opensByDefault`).
 - **`@` menu.** Adds "Draft a coverage grid" (`@matrix `), "Audit a grid"
   (`@audit ` then grid slugs offered), and grids by title (`@grid:slug`) in
   `mention.rs`.
@@ -858,30 +817,33 @@ N/A awaiting the owner: camera.ghosts.presets_grounded
 
 The tasks builtin (`machinery/skills/tasks/SKILL.md`, id `atelier-tasks`,
 always on) gets a short **Grids** section: what a grid and a cell are, that
-a grid may be drafted without `@matrix`, that every column needs check
-templates with `{row}` (a cell may add or override) and a cell without one
-shows "Needs a check" and cannot be claimed, the command list above, the
-work-through loop (`grid next` → `task create`, no `@task` needed →
-`task start` → prove → `task check` → `task done` → repeat), the cell
-steps order → cases → reviewed → red → work → proved with the `Step:` line, the
-order an agent must write first (every row and column, each with a reason; no default), cases (`atelier grid cases`,
-`atelier grid review`, no one approving cases, "Needs cases"), the
-`CASE <grid>/<row>/<col>/<case> PASS|FAIL` line and `atelier case`, and cell
-prerequisites in `grid order` (`"cells":[{"row":…}]`), "`grid prove`
-runs the approved checks; commit the covered code first", "a task with `cells` must end with
-proof, N/A or a reason for every cell", "leave cells another task claims
-alone", and "never pass cells outside an `@audit` request; reopen any cell that no longer meets its requirement". The
-step-by-step instructions for drafting and auditing are in the `@matrix` and
-`@audit` reference entries, as `@merge` carries its own steps. That way
-sessions that never touch grids pay for six lines, not a page.
-`session_policy.rs`'s test that every session gets the task rules is
-extended to check for `atelier grid prove`.
+a grid may be drafted without `@matrix` and is live at once, that nothing
+about a grid waits for the owner, that every column needs check templates
+with `{row}` (a cell may add or override) and a cell without one shows
+"Needs a check" and cannot be proved, the command list above, the
+work-through loop (`grid next` → `grid prove` each cell → repeat; a task
+that references a cell ticks it with `task check N ROW.COL`), the cell
+steps order → cases → reviewed → proved with the `Step:` line, the order an
+agent must write first (every row and column, each with a reason; no
+default), cases (`atelier grid cases`, `atelier grid review`, "Needs
+cases"), the `CASE <grid>/<row>/<col>/<case> PASS|FAIL` line and
+`atelier case`, cell prerequisites in `grid order`
+(`"cells":[{"row":…}]`), that grid data
+belong to the project, not to a branch, "`grid prove` runs the cell's checks; commit the covered code
+first", "a task with `cells` ends with proof, N/A or a reason for every
+cell", and "never pass a cell your chat proved; reopen any cell that no
+longer meets its requirement". The step-by-step instructions for drafting
+and auditing are in the `@matrix` and `@audit` reference entries, as
+`@merge` carries its own steps. That way sessions that never touch grids
+pay for a few lines, not a page. `session_policy.rs`'s test that every
+session gets the task rules is extended to check for `atelier grid prove`.
 
 ## Module layout
 
 - `server/src/workbench/grids/mod.rs`: SCHEMA, rows, `apply` (one
-  transaction, one event per change), percent, counts, claim and release
-  helpers called from `tasks::apply_in`.
+  transaction, one event per change), percent, counts, `bring_over`, and
+  the cell links (`link`, `check_done_cells`, `task_cells`) called from
+  `tasks::apply_in`.
 - `server/src/workbench/grids/search.rs`: running the row search and
   validating its output.
 - `server/src/workbench/grids/proof.rs`: proof validation, running checks,
@@ -890,8 +852,7 @@ extended to check for `atelier grid prove`.
   rules; what a tick reads and writes is `watch` in
   `server/src/routes/workbench/grids.rs`.
 - `server/src/workbench/grids/cli.rs`: `atelier grid`.
-- `server/src/routes/workbench/grids.rs`: routes, `announce`, reuse of
-  `tell_chat`, which moves to a shared spot in `routes/workbench`.
+- `server/src/routes/workbench/grids.rs`: routes and `announce`.
 - `src/workbench/grids/`: `types.ts`, `use-grids.ts`, `grids-view.tsx`,
   `grid-heatmap.tsx`, `cell-detail.tsx`, `grid-card.tsx`, `selection.ts`
   (selection ↔ `@grid:` id).
@@ -899,13 +860,13 @@ extended to check for `atelier grid prove`.
 ## Tests
 
 Rust unit tests (`grids/mod.rs` and its siblings, in the style of the tasks
-tests):
+tests), among them:
 
 - `a_draft_is_what_the_row_search_prints_plus_manual_rows`
-- `a_new_grid_may_be_drafted_without_matrix_but_not_over_another_chats_draft`
-- `approving_writes_rows_columns_and_unchecked_cells`
+- `any_chat_drafts_or_redrafts_a_grid_with_no_matrix`
+- `a_draft_writes_rows_columns_and_unchecked_cells_at_once`
 - `a_feature_belongs_to_one_grid_and_a_reference_reads_the_owners_cells`
-- `an_edit_to_an_approved_grid_waits_for_the_owner`
+- `an_edit_to_a_live_grid_applies_at_once`
 - `a_template_change_adds_unchecked_cells_and_retires_removed_columns`
 - `discovery_adds_new_rows_marks_missing_and_skips_owned_ids`
 - `a_failing_or_bad_row_search_changes_nothing`
@@ -914,46 +875,49 @@ tests):
 - `a_commit_to_covered_code_makes_a_proof_stale_and_a_recheck_freshens_it`
 - `a_failed_recheck_reopens_the_cell`
 - `percent_counts_fresh_proof_over_live_cells_without_na`
-- `a_task_claims_its_cells_and_a_second_claim_is_refused`
-- `an_agent_creates_a_task_for_approved_grid_cells_without_task`
-- `next_lists_one_row_and_names_the_chats_holding_taken_cells`
+- `a_task_references_its_cells_without_claiming_them`
+- `task_done_needs_nothing_of_its_cells_and_leaves_them_as_they_are`
+- `cancel_leaves_its_cells_as_they_are`
+- `na_applies_at_once_and_reopen_undoes_it`
+- `a_task_with_cells_still_needs_task`
+- `next_lists_one_row_of_ready_cells_with_their_prove_commands`
 - `the_owner_creates_a_task_from_a_selection_and_its_cells_are_claimed`
-- `a_task_for_several_rows_of_every_open_cell_is_the_whole_grid_and_a_row_pick_is_titled_by_its_row`
-- `refusals_say_what_to_do` (the approval message itself is checked in `approving_writes_rows_columns_and_unchecked_cells`)
-- `task_done_needs_proof_or_a_reason_for_every_claimed_cell`
-- `cancel_restores_the_cells_it_claimed`
-- `na_waits_for_the_owner`
+- `refusals_say_what_to_do`
 - `an_audit_verdict_from_the_proving_chat_is_refused`
-- `audit_verdicts_need_the_owners_audit`
+- `any_other_chat_passes_or_reopens_cells_in_an_audit`
+- `any_agent_reopens_a_proved_cell`
 - `the_grid_widget_is_a_valid_block` (media.rs)
 - reference parsing: `@matrix`, `@audit slug`, `@grid:` ids, shared cases JSON.
 
+Integration tests (`server/tests/it/`): `grid_without_approvals.rs` (a
+drafted grid, a change, new checks, N/A and a template change all apply at
+once; the owner approval actions are gone; any chat proves a cell a task
+references; two tasks may reference one cell; `next` hands out cells with
+no task payload; a database from before is brought over) and
+`grid_branches.rs` (a cell proved on a branch is fresh from main, stays
+fresh after the branch merges, the latest of two proofs counts, and
+changed checks make a proof stale on every branch).
+
 Front end (vitest, `src/workbench/grids/__tests__/`): selection to `@grid:` id
 and back; the heatmap draws each state, with stale hatched; New task prefills
-the composer; the cell detail shows proof, history and the N/A buttons; the
-draft card's Approve and Discard; the list orders and counts; the deep link
-`grid=…&cell=…` opens the cell.
+the composer; the cell detail shows proof and history; the list orders and
+counts; the deep link `grid=…&cell=…` opens the cell.
 
 E2E (`tests/e2e/`, against a test project with a scratch git repo and a
 throwaway grid; never the owner's app on port 3008):
 
-- `a-grid-is-drafted-approved-and-shown.spec.ts`: draft through the HTTP
-  route as an agent (row search is a script in the fixture repo), approve on
-  the card, see the heatmap at 0%.
-- `cells-become-a-task-and-proof-fills-them.spec.ts`: select a column, New
-  task, the prefilled composer; create the task with `cells`, prove one cell,
-  finish with a reason for the other; the heatmap shows proved and gap; a
-  second claim is refused.
-- `a-commit-makes-a-proved-cell-stale.spec.ts`: commit to a covered path and
-  see the hatched cell and the percent drop; Re-check makes it fresh.
-- `a-new-feature-appears-as-a-row.spec.ts`: add a feature file and commit,
-  run discover, and the new row appears with empty cells.
+- `grid-without-approvals.spec.ts`: a grid is live, changed and marked N/A
+  with no owner step.
+- `grid-row-cases.spec.ts`: a row goes through cases and review to ready
+  with no owner step.
+- `grid-card-shows-checks.spec.ts`: the grid card shows checks, names and
+  the row search.
 
 ## Rollout
 
 1. Server: schema, `grids::apply`, row search, proof and fingerprints, CLI,
    routes, `grids.changed`, unit tests.
-2. Task integration: `cells` on create/propose/done/cancel, the grid
+2. Task integration: `cells` on create/propose/done, the grid
    reference kinds (`@grid`, `@matrix`, `@audit`) on both sides, widget
    validation, reconnect lines.
 3. Front end: Grids view, heatmap, selection to task, cell detail, cards,
@@ -965,8 +929,8 @@ throwaway grid; never the owner's app on port 3008):
    first (ground-truth tests, no CPU/GPU duplication, on the GPU where it
    belongs, optimized within budget, physically accurate, energy-conserving
    in combination, not hardcoded to one scenario, presets physically
-   grounded, no coupling or duplication), and the first real grid is
-   approved from its draft card.
+   grounded, no coupling or duplication), and the first real grid is live
+   as soon as the agent drafts it.
 
 ## Criteria map
 
@@ -976,10 +940,10 @@ throwaway grid; never the owner's app on port 3008):
 | templates | Data (`grid_template`); Templates; Drafting (columns) |
 | draft | Drafting (`@matrix AREA`); Row search; Front end (draft card) |
 | proof | Proof; Covered code and staleness; Cell states |
-| na | N/A; Cell states; Front end (cell detail, N/A card) |
+| na | N/A; Cell states; Older databases |
 | discovery | Row search (Discovery, When it runs) |
 | ownership | Principles; Data (ownership index); Drafting refusals; HTTP (reference rows) |
-| work | Work on cells; Cell states (claims); Front end (Selection) |
+| work | Work on cells; Cell states; Branches; Front end (Selection) |
 | audit | Audit (`@audit SLUG`); Cell states |
 | ui | Front end (Tasks tab switch, Grids list, Grid view, Cell detail panel) |
 | corsetta | Rollout, step 5 |

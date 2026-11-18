@@ -21,7 +21,7 @@ branches for a task.
   (revise and propose again). A new proposal replaces a waiting one.
 - `@task TEXT`: pick the type, draft the plan with checks and run `atelier
   task create` without asking. `create` is refused unless the owner's latest
-  message has `@task` or every cell it names is in an approved grid.
+  message has `@task`.
 - `@merge` comes with git's state and the merge steps; follow them exactly.
 - Never create a task to put work off; suggest it as a follow-up instead.
 
@@ -113,8 +113,8 @@ approval.
   never that a mock was called. Mock only external boundaries.
 - Each check fails for the one reason in `red`, which its command prints,
   and runs in under about two minutes.
-- Write the check files before you propose or create; the owner approves
-  their contents.
+- Write the check files before you propose or create; a task's owner
+  approval covers their contents.
 - Nothing is locked: checks run on the files as they are. You may update
   tests your change makes out of date; `task check` and `done` then warn
   you to make sure no check was weakened. A check running fewer tests than
@@ -171,9 +171,10 @@ approval.
 
 A coverage grid lists an area's features (rows) against what each must do
 (columns). A cell is proved, a gap or N/A; a proof goes stale when its
-covered code changes. `@matrix AREA` and `@audit SLUG` come with their own
-steps, `@grid:…` with the cells it names. You may draft a grid without
-`@matrix`; the owner approves it.
+covered code or its checks change. `@matrix AREA` and `@audit SLUG` come
+with their own steps, `@grid:…` with the cells it names. You may draft a
+grid without `@matrix`. Nothing in a grid waits for the owner: a draft,
+change, checks or N/A applies at once.
 
 ```
 atelier grid list|show SLUG [ROW COL]
@@ -196,6 +197,8 @@ A cell without checks shows "Needs a check"; add column templates with
 `CASE <grid>/<row>/<col>/<case> PASS|FAIL <measured> <limit>` (`-` when
 none); wrap a command in `atelier case ID -- COMMAND`. Zero or several
 lines, or another id, make the run invalid; `red` must contain the case id.
+Changing checks makes the proved cells they apply to stale until `verify`
+or `prove` passes again.
 
 **Order.** A grid has no default order. Before anything else, write it
 with `atelier grid order`: every row and column, in working order, each
@@ -207,20 +210,27 @@ with a reason; `after` names only earlier entries. Until then cells show
 missing scenarios as gaps. Answer each with a case (`covers`) or a
 dismissal with a reason, and review again until no gaps (after 3 rounds,
 answering the gaps finishes it). No one approves cases. A row's cells show
-"Needs cases" and cannot be claimed until every cell of it is reviewed. Editing cases restarts review.
+"Needs cases" and cannot be proved until every cell of it is reviewed.
+Editing cases restarts review.
 
-**Steps.** order → cases → reviewed → red → work → proved (or N/A).
+**Steps.** order → cases → reviewed → proved (or N/A).
 `grid show SLUG ROW COL` prints `Step: STEP. Next: COMMAND`; every reply
 names them, and anything out of order is refused.
 
-**The loop.** `atelier grid next SLUG` (first ready cell; `--batch N`
-only for cheap cells) → create the
-task it prints (no `@task`) → start it → commit → `grid prove` (runs the
-approved checks) → `atelier task check N ROW.COL` → `done` → repeat.
+**The loop.** `atelier grid next SLUG` (first ready cells; `--batch N`
+only for cheap cells) → make the cell's checks pass → commit →
+`atelier grid prove SLUG ROW COL` (runs the cell's checks) → repeat. A
+cell needs no task. A task may list cells; then tick each with
+`atelier task check N ROW.COL` once it is proved.
+
+**Branches.** Grid checks, cases and cell states
+belong to the project, not to a branch: every checkout sees the same grid. `prove` runs the checks
+in your own checkout, the project's folder or a worktree. A proof is judged
+in the checkout that has its commit, and in the project's folder once that
+is merged. The latest proof of a cell counts.
 
 - A task with `cells` ends with proof, N/A or a reason for each (`done`
-  takes `"cells":[{"grid","row","col","reason"}]`). Leave others' cells alone.
+  takes `"cells":[{"grid","row","col","reason"}]`).
 - Pass cells only in an `@audit` request; reopen a cell that no longer
-  meets its requirement with `atelier grid reopen`; new column checks
-  reopen that column's proved cells.
+  meets its requirement with `atelier grid reopen`.
 - Leave notes with `atelier grid note`; read those `grid next` prints.
