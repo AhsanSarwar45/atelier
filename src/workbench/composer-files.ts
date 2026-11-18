@@ -62,6 +62,7 @@ import { ICON_FALLBACK, iconUrl } from '@/components/file-icons';
 import { diffBadge, gridBadge, referenceBadgeElement, type Reference } from '@/components/reference-badge';
 import { tabsListVariants, tabsTriggerVariants } from '@/components/ui/tabs';
 import { mention, type FsFoundPath, type MentionOffer, type MentionPlace } from '@/lib/api';
+import { swallowClickAt } from '@/lib/stray-click';
 import { cn } from '@/lib/utils';
 import type { Brand, CommandInfo } from '@/workbench/protocol';
 import { resolvePath } from '@/workbench/paths';
@@ -924,6 +925,9 @@ function slashOpens(feed: CommandFeed) {
  * menu, so it could not be scrolled at all. A scroll ends in `pointercancel`
  * and no `pointerup`, and a lift on another line than the landing is a drag;
  * neither picks.
+ *
+ * The menu closes on the lift, so the click the browser sends after a tap
+ * would land on whatever was behind the line; it is swallowed.
  */
 const tapPicks = ViewPlugin.fromClass(
   class {
@@ -946,6 +950,7 @@ const tapPicks = ViewPlugin.fromClass(
       this.landed = null;
       if (!at) return;
       event.preventDefault();
+      swallowClickAt(event.clientX, event.clientY);
       this.view.dispatch({ effects: setSelectedCompletion(Number(at[1])) });
       acceptCompletion(this.view);
     };
