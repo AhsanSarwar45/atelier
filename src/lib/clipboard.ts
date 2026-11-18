@@ -31,11 +31,17 @@ export async function copyText(text: string): Promise<boolean> {
 /**
  * Put `text` on the clipboard with `html` beside it, the way a copied
  * selection goes: a rich paste takes the HTML, a plain one the text.
+ *
+ * The copy command goes first, because it is the very route a selection
+ * copied with Ctrl+C, or with Copy on a phone, takes: a copy event filled with
+ * both. Chrome on Android put only the text on the clipboard when the HTML came
+ * through the clipboard API, so a pasted message lost its links and bullets.
+ * The API is the fallback, for a browser that refuses the command.
  */
 export async function copyRich(text: string, html: string): Promise<boolean> {
   if (typeof window === 'undefined') return false;
-  // Over plain http there is no clipboard API, and the copy command carries both.
-  if (!navigator.clipboard) return copyByCommand(text, html);
+  if (copyByCommand(text, html)) return true;
+  if (!navigator.clipboard) return false;
   if (!navigator.clipboard.write || typeof ClipboardItem === 'undefined') return copyText(text);
   try {
     await navigator.clipboard.write([
