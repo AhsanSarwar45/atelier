@@ -176,23 +176,47 @@ fn every_reply_names_the_cells_step_and_next_command() {
     assert!(proved.summary.contains(&wanted), "grid prove says {:?}, not {wanted:?}", proved.summary);
 }
 
-/// Rule 1: `grid prove` on a cell no started task holds is refused with its step and the next command.
+/// A cell is proved when its checks pass; no task has to hold it.
 #[test]
-fn prove_is_refused_for_a_cell_no_started_task_holds() {
+fn a_cell_no_task_holds_is_proved_by_its_passing_checks() {
     let (_d, store) = store();
     camera(&store);
-    let message = refused(prove(&store, "glare", "gpu"));
+    let proved = prove(&store, "glare", "gpu").unwrap();
     assert!(
-        message.contains("camera.glare.gpu is at step reviewed; prove needs step work. Next: `atelier grid next camera`"),
-        "atelier grid prove camera glare gpu (unclaimed) said: {message}"
+        proved.summary.contains("camera.glare.gpu: step proved, next `atelier grid next camera`"),
+        "atelier grid prove camera glare gpu (no task) said: {}",
+        proved.summary
     );
-    let number = create(&store, &[("glare", "gpu")]).unwrap().task.number;
-    let message = refused(prove(&store, "glare", "gpu"));
-    assert!(
-        message.contains(&format!("camera.glare.gpu is at step red; prove needs step work. Next: `atelier task start {number}`")),
-        "atelier grid prove camera glare gpu (task not started) said: {message}"
-    );
-    assert_eq!(step(&store, "glare", "gpu"), "red", "a refused prove changes nothing");
+    assert_eq!(step(&store, "glare", "gpu"), "proved");
+}
+
+/// A cell reopened as a gap (its column's checks changed) is proved again by
+/// running its checks, with no task.
+#[test]
+fn a_reopened_cell_is_proved_again_by_running_its_checks() {
+    let (_d, store) = store();
+    camera(&store);
+    prove(&store, "glare", "gpu").unwrap();
+    store
+        .connection()
+        .execute("UPDATE grid_cell SET state = 'gap', reason = 'the column''s checks changed' WHERE slug = 'camera' AND row = 'glare' AND col = 'gpu'", [])
+        .unwrap();
+    super::refresh_steps(store.connection(), "slug = 'camera'", params![]).unwrap();
+    assert_eq!(step(&store, "glare", "gpu"), "reviewed");
+    prove(&store, "glare", "gpu").unwrap();
+    assert_eq!(step(&store, "glare", "gpu"), "proved");
+}
+
+/// A cell this chat's task claims but has not started is proved too: passing
+/// checks are what prove it.
+#[test]
+fn a_cell_claimed_by_a_task_not_started_is_proved_by_its_checks() {
+    let (_d, store) = store();
+    camera(&store);
+    create(&store, &[("glare", "gpu")]).unwrap();
+    assert_eq!(step(&store, "glare", "gpu"), "red");
+    prove(&store, "glare", "gpu").unwrap();
+    assert_eq!(step(&store, "glare", "gpu"), "proved");
 }
 
 /// Rule 5: `grid order` takes cell prerequisites in any row, and `grid next` holds the cell back.

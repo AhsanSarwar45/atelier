@@ -386,7 +386,7 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
 |---|---|---|---|---|
 | — | grid approved, row added, column added | `unchecked` | app | |
 | `unchecked`, `gap`, stale `proved` | task created with this cell | `in_progress` | agent (no `@task` needed for an approved grid), or owner (Create task) | another open task claims it; fresh `proved`; `na`, `na_pending`; row missing or column retired; it needs a check; a check does not go red |
-| any but `na`, `na_pending` | `prove` | `proved` | agent | the cell is not at step work; a prerequisite is not proved or N/A; claimed by a task held by another chat; a check fails; a benchmark misses its budget; a commit is missing; covered paths are dirty |
+| any but `na`, `na_pending` | `prove` | `proved` | agent | the cell is at step order or cases; it has no checks; a prerequisite is not proved or N/A; claimed by a task held by another chat; a check fails; a benchmark misses its budget; a commit is missing; covered paths are dirty |
 | `in_progress` | claiming task done, cell listed with a reason | `gap` (reason) | app | |
 | `in_progress` | claiming task cancelled | `claimed_from` | app | |
 | `proved` | re-check fails | `gap` | app | |
@@ -410,15 +410,15 @@ CLI waits for them, so `prove` uses a 1-hour HTTP timeout.
   | cases | no cases, unanswered gaps, or not yet reviewed clean | `atelier grid cases SLUG ROW COL`, or `atelier grid review SLUG ROW COL` once the gaps are answered |
   | reviewed | the review is finished (no gaps, or round 3's gaps answered); not claimed (unchecked, gap, stale). It is claimed once every cell of its row is reviewed | `atelier grid next SLUG` |
   | red | claimed by a task not yet started | `atelier task start N` |
-  | work | claimed by a started (or blocked) task | `atelier grid prove SLUG ROW COL` |
+  | work | claimed by a started (or blocked) task | `atelier grid prove SLUG ROW COL` (any reviewed cell may be proved) |
   | proved | proved | `atelier task check N ROW.COL` while claimed, else `atelier grid next SLUG` |
   | na | `na` or `na_pending` | `atelier grid next SLUG` |
 
   The app sets the step on every change; a database from before steps gets
-  them filled in once, and its proofs are kept. `grid prove` is refused
-  unless the cell is at step work (or proved and still held by its started
-  task): `camera.glare.gpu is at step approved; prove needs step work. Next:
-  \`atelier grid next camera\``. `grid show SLUG ROW COL` prints
+  them filled in once, and its proofs are kept. A cell is proved by
+  its passing checks; `grid prove` needs no task. It is refused only for a
+  cell at step order or cases, one marked N/A, one another chat's task
+  holds, or one with no checks. `grid show SLUG ROW COL` prints
   `Step: STEP. Next: COMMAND`, `task create` and `task start` print one
   line per claimed cell with its step and next command, and so does
   `grid prove`.

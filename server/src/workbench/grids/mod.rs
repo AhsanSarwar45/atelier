@@ -2380,16 +2380,16 @@ pub fn prove_precheck(connection: &Connection, request: &Request) -> Result<(pro
     }
     if cases::needs_cases(&cell) && open_claim(connection, &request.project, &cell)?.is_none() {
         return refuse(format!(
-            "{at}: Needs cases. It is proved again only after its cases are reviewed and the owner approves row {}'s cases. Step {}; next `atelier grid cases {} {} {}`",
-            cell.row, cell.step, loaded.grid.slug, cell.row, cell.col
+            "{at}: Needs cases. It is proved again only after its cases are reviewed. Step {}; next `atelier grid cases {} {} {}`",
+            cell.step, loaded.grid.slug, cell.row, cell.col
         ));
     }
     claim_is_this_chats(connection, &request.project, &cell, session, &at, "prove")?;
-    // A proved cell its started task still holds may be proved again.
-    let reproof = cell.step == "proved" && cell.claimed_task.is_some();
-    if cell.step != "work" && !reproof {
+    // A cell is proved by its passing checks; no task has to hold it. Only
+    // a cell whose order or cases are not written yet is too early.
+    if matches!(cell.step.as_str(), "order" | "cases") {
         return refuse(format!(
-            "{at} is at step {}; prove needs step work. Next: `{}`",
+            "{at} is at step {}; prove needs its order and reviewed cases first. Next: `{}`",
             cell.step,
             cell.next.clone().unwrap_or_else(|| format!("atelier grid next {}", loaded.grid.slug))
         ));
@@ -2398,6 +2398,9 @@ pub fn prove_precheck(connection: &Connection, request: &Request) -> Result<(pro
         return refuse(why);
     }
     let approved = loaded.cell_checks(&cell.row, &cell.col);
+    if approved.is_empty() && cell.claimed_task.is_none() {
+        return refuse(format!("{at} has no checks, so nothing proves it. Add them with `atelier grid checks {}`", loaded.grid.slug));
+    }
     let proof = if approved.is_empty() {
         // A cell claimed before checks: the agent gives its own.
         proof::check_proof(&request.payload)?

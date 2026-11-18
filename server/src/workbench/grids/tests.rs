@@ -561,8 +561,6 @@ fn a_task_claims_its_cells_and_a_second_claim_is_refused() {
     task_create(&store, "s3", cell, stale).unwrap();
     // Only the chat holding the claiming task proves it.
     assert!(refused(prove(&store, "s2", "camera", "glare", "gpu", "f1")).contains("only the chat holding that task"));
-    // And only once that task is started.
-    assert!(refused(prove(&store, "s1", "camera", "glare", "gpu", "f1")).contains(&format!("at step red; prove needs step work. Next: `atelier task start {number}`")));
     task(&store, Some("s1"), "agent", "start", number, json!({})).unwrap();
     prove(&store, "s1", "camera", "glare", "gpu", "f1").unwrap();
     // The task card lists its cells.
@@ -1075,13 +1073,12 @@ fn a_grid_from_before_checks_keeps_working_with_the_agents_own_checks() {
     super::approve_all_cases(store.connection(), "p", "camera");
     let loaded = load(store.connection(), "p", "camera").unwrap().unwrap();
     assert!(loaded.grid.hashes.is_none());
-    // A cell with no check is never claimed, so it never reaches step work
-    // and is not proved now.
+    // A cell with no check is never claimed, and nothing proves it now.
     let mut asked = on(request("prove", "agent", Some("s1"), "camera"), "glare", "gpu");
     asked.payload = json!({"summary": "s", "checks": [{"name": "unit", "command": "cargo test glare"}]});
     asked.checks = passing();
     asked.fingerprint = Some("f1".into());
-    assert!(refused(apply(store.connection(), &asked)).contains("is at step reviewed; prove needs step work"));
+    assert!(refused(apply(store.connection(), &asked)).contains("camera.glare.gpu has no checks, so nothing proves it"));
     // A proof made before checks, with the agent's own, is kept; verify
     // re-runs what it stored.
     let mut cell = state(&store, "camera", "glare", "gpu");
