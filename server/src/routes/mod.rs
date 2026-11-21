@@ -433,9 +433,20 @@ pub fn find_git() -> Option<PathBuf> {
 /// answer is dropped on the way out, the way every caller reporting a missing
 /// tool drops it: a reader who installs git while Atelier is up is found on
 /// their next click rather than after a restart.
+///
+/// `GIT_OPTIONAL_LOCKS=0` is git's own switch for a program that reads a
+/// repository in the background: a read such as `git status` then never saves
+/// the index as a side effect. The Git panel's watcher reports a saved index
+/// as a change and the panel reads again, so in a repository where every read
+/// saves it (one with `core.fsmonitor` set) the two never stop. Commands that
+/// must write the index, such as `add` and `commit`, are not affected.
 pub fn git_command() -> std::io::Result<Command> {
     match find_git() {
-        Some(git) => Ok(Command::new(git)),
+        Some(git) => {
+            let mut command = Command::new(git);
+            command.env("GIT_OPTIONAL_LOCKS", "0");
+            Ok(command)
+        }
         None => {
             forget_tools();
             Err(std::io::Error::new(
@@ -920,6 +931,46 @@ mod tests {
             "the bare name stays last, because off Windows it is the only one"
         );
         assert_eq!(spellings_of("npm.cmd", &known), vec!["npm.cmd"]);
+    }
+
+    /// A read must not write to the repository it reads. Left alone, `git
+    /// status` saves the index whenever it refreshed an entry, and the Git
+    /// panel's watcher reports a saved index as a change to read again.
+    #[tokio::test]
+    async fn reading_status_leaves_the_index_as_it_was() {
+        let place = tempfile::tempdir().expect("a directory of our own");
+        let at = place.path();
+        for args in [
+            &["init", "-b", "main", "."][..],
+            &["config", "--local", "user.name", "Git Fixture"],
+            &["config", "--local", "user.email", "git@example.invalid"],
+            &["config", "--local", "commit.gpgsign", "false"],
+        ] {
+            assert!(git_output(at, args).await.expect("git runs").status.success());
+        }
+        std::fs::write(at.join("notes.md"), "first\n").unwrap();
+        for args in [&["add", "-A"][..], &["commit", "-m", "the first saved change"]] {
+            assert!(git_output(at, args).await.expect("git runs").status.success());
+        }
+        // Same contents, another time: the index entry is now out of date, which
+        // is what makes a plain `git status` refresh it and save the index.
+        let earlier = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::File::options()
+            .write(true)
+            .open(at.join("notes.md"))
+            .unwrap()
+            .set_modified(earlier)
+            .unwrap();
+        let index = at.join(".git").join("index");
+        let before = std::fs::read(&index).unwrap();
+
+        let read = git_output(at, &["status", "--porcelain=v2"]).await.expect("git runs");
+
+        assert!(read.status.success());
+        assert!(
+            std::fs::read(&index).unwrap() == before,
+            "git status rewrote .git/index"
+        );
     }
 
     #[test]
