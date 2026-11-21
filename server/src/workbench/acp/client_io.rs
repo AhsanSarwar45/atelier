@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::Command;
 use tokio::sync::{mpsc, watch, Mutex};
 
 const DEFAULT_OUTPUT_LIMIT: usize = 1024 * 1024;
@@ -224,7 +223,7 @@ impl ClientIo {
             .unwrap_or(DEFAULT_OUTPUT_LIMIT)
             .clamp(1, MAX_OUTPUT_LIMIT);
         let shown_cwd = cwd.clone();
-        let mut command = Command::new(&request.command);
+        let mut command = crate::launch::command(crate::launch::Purpose::Agent, &request.command);
         command
             .args(&request.args)
             .current_dir(cwd)

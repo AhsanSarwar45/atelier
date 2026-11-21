@@ -93,11 +93,11 @@ fn state_dir(cwd: &Path) -> Result<PathBuf, String> {
     if let Some(dir) = std::env::var_os("ATELIER_CHROME_STATE").filter(|v| !v.is_empty()) {
         return Ok(PathBuf::from(dir));
     }
-    let git = std::process::Command::new("git")
-        .args(["rev-parse", "--absolute-git-dir"])
-        .current_dir(cwd)
-        .stderr(std::process::Stdio::null())
-        .output();
+    let git = crate::routes::git_command_blocking(cwd).and_then(|mut git| {
+        git.args(["rev-parse", "--absolute-git-dir"])
+            .stderr(std::process::Stdio::null())
+            .output()
+    });
     if let Ok(out) = git {
         let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if out.status.success() && !dir.is_empty() {
@@ -281,7 +281,7 @@ async fn ensure_up(state: &State, headless: bool) -> Result<(i32, u16, bool), St
     }
     let executable = super::browser::browser_executable().ok_or("chrome: no Chrome or Chromium found")?;
     let log = std::fs::File::create(state.dir.join("chrome.log")).map_err(|e| e.to_string())?;
-    let mut command = std::process::Command::new(&executable);
+    let mut command = crate::launch::blocking(crate::launch::Purpose::Browser, &executable);
     if headless {
         command.arg("--headless=new");
     } else {
@@ -485,7 +485,7 @@ async fn mcp(state: &State, cwd: &Path, headless: bool) -> Result<i32, String> {
     let me = users.join(std::process::id().to_string());
     std::fs::write(&me, "").map_err(|e| e.to_string())?;
 
-    let mut command = tokio::process::Command::new(&npx);
+    let mut command = crate::launch::command(crate::launch::Purpose::Browser, &npx);
     command
         .args(mcp_command(port, cwd))
         .stdin(std::process::Stdio::piped())

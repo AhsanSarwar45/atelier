@@ -17,10 +17,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn git(at: &Path, args: &[&str]) {
-    let done = std::process::Command::new("git")
+    let done = crate::routes::git_command_blocking(at).unwrap()
         .args(["-c", "user.name=Tester", "-c", "user.email=tester@atelier.test", "-c", "commit.gpgsign=false"])
         .args(args)
-        .current_dir(at)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()
@@ -262,9 +261,8 @@ async fn deleting_a_worktree_moves_its_chats_home_and_keeps_the_branch() {
         project.repo.display().to_string(),
         "the chat was left pointing at a folder that is gone"
     );
-    let branches = std::process::Command::new("git")
+    let branches = crate::routes::git_command_blocking(&project.repo).unwrap()
         .args(["branch", "--list", "feature"])
-        .current_dir(&project.repo)
         .output()
         .unwrap();
     assert!(String::from_utf8_lossy(&branches.stdout).contains("feature"), "the branch went with the worktree");
@@ -310,9 +308,8 @@ async fn the_project_folder_and_a_worktree_with_a_working_chat_are_not_deleted()
 
 /// What `git rev-parse --abbrev-ref HEAD` says in `at`.
 fn branch_in(at: &Path) -> String {
-    let out = std::process::Command::new("git")
+    let out = crate::routes::git_command_blocking(at).unwrap()
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(at)
         .output()
         .expect("git is on the path");
     String::from_utf8_lossy(&out.stdout).trim().to_string()

@@ -127,7 +127,7 @@ export function useRepositoryReads(path: string | null, read: () => Promise<void
     // very thing they are coming back to look at. So what is held about this
     // repository goes, and the readers share the run that replaces it.
     const backAgain = () => {
-      repositoryMayHaveMoved(path);
+      repositoryMayHaveMoved(path, { askAnew: true });
       lookAgain();
     };
     const woken = () => {

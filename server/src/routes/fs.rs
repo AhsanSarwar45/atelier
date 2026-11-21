@@ -1243,7 +1243,7 @@ fn reveal_commands(path: &std::path::Path) -> Vec<std::process::Command> {
 
     #[cfg(target_os = "macos")]
     {
-        let mut finder = std::process::Command::new("open");
+        let mut finder = crate::launch::blocking(crate::launch::Purpose::Desktop, "open");
         finder.arg("-R").arg(path);
         commands.push(finder);
     }
@@ -1252,7 +1252,7 @@ fn reveal_commands(path: &std::path::Path) -> Vec<std::process::Command> {
     {
         // `/select,<path>` is a single argument: Explorer splits at the comma
         // itself, and passing the two apart opens the reader's home instead.
-        let mut explorer = std::process::Command::new("explorer");
+        let mut explorer = crate::launch::blocking(crate::launch::Purpose::Desktop, "explorer");
         explorer.arg(format!("/select,{}", path.display()));
         commands.push(explorer);
     }
@@ -1265,7 +1265,7 @@ fn reveal_commands(path: &std::path::Path) -> Vec<std::process::Command> {
         // this list having to know its name. `gdbus` and `dbus-send` ship with
         // glib and dbus respectively, and a machine usually has one or other.
         if let Ok(uri) = reqwest::Url::from_file_path(path) {
-            let mut gdbus = std::process::Command::new("gdbus");
+            let mut gdbus = crate::launch::blocking(crate::launch::Purpose::Desktop, "gdbus");
             gdbus
                 .args([
                     "call",
@@ -1281,7 +1281,7 @@ fn reveal_commands(path: &std::path::Path) -> Vec<std::process::Command> {
                 .arg("\"\"");
             commands.push(gdbus);
 
-            let mut dbus_send = std::process::Command::new("dbus-send");
+            let mut dbus_send = crate::launch::blocking(crate::launch::Purpose::Desktop, "dbus-send");
             dbus_send
                 .args([
                     "--session",
@@ -1305,7 +1305,7 @@ fn reveal_commands(path: &std::path::Path) -> Vec<std::process::Command> {
             ("thunar", None),
             ("pcmanfm", None),
         ] {
-            let mut manager = std::process::Command::new(program);
+            let mut manager = crate::launch::blocking(crate::launch::Purpose::Desktop, program);
             if let Some(select) = select {
                 manager.arg(select);
             }
@@ -1352,12 +1352,12 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
     let result = match request.target.as_str() {
         "vscode" => {
             // Try "code" command first, fall back to macOS open command
-            let code_result = std::process::Command::new("code").args(&args).spawn();
+            let code_result = crate::launch::blocking(crate::launch::Purpose::Desktop, "code").args(&args).spawn();
             if code_result.is_err() {
                 // Fallback for macOS: use open -a "Visual Studio Code"
                 #[cfg(target_os = "macos")]
                 {
-                    std::process::Command::new("open")
+                    crate::launch::blocking(crate::launch::Purpose::Desktop, "open")
                         .args(["-a", "Visual Studio Code", "--args"])
                         .args(&args)
                         .spawn()
@@ -1372,12 +1372,12 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
         }
         "cursor" => {
             // Try "cursor" command first, fall back to macOS open command
-            let cursor_result = std::process::Command::new("cursor").args(&args).spawn();
+            let cursor_result = crate::launch::blocking(crate::launch::Purpose::Desktop, "cursor").args(&args).spawn();
             if cursor_result.is_err() {
                 // Fallback for macOS: use open -a "Cursor"
                 #[cfg(target_os = "macos")]
                 {
-                    std::process::Command::new("open")
+                    crate::launch::blocking(crate::launch::Purpose::Desktop, "open")
                         .args(["-a", "Cursor", "--args"])
                         .args(&args)
                         .spawn()

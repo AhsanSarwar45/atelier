@@ -71,6 +71,11 @@ function rail(workingIn: string | null) {
   );
 }
 
+/** The folders git was asked about, whatever else was said with each. */
+function askedAbout(): unknown[] {
+  return calls.status.mock.calls.map((call) => call[0]);
+}
+
 describe('the Git rail reads the chat’s own worktree', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -83,8 +88,8 @@ describe('the Git rail reads the chat’s own worktree', () => {
   it('asks git about the folder the chat is running in, not the project’s checkout', async () => {
     rail(WORKTREE);
 
-    await waitFor(() => expect(calls.status).toHaveBeenCalledWith(WORKTREE));
-    expect(calls.status).not.toHaveBeenCalledWith(PROJECT);
+    await waitFor(() => expect(askedAbout()).toContain(WORKTREE));
+    expect(askedAbout()).not.toContain(PROJECT);
     // The branch on screen is the worktree's, which is the whole point: it is
     // the line of work this chat's agent is committing onto.
     await waitFor(() => expect(screen.getByTestId('git-branch-name')).toHaveTextContent('bw-rx1y.1'));
@@ -95,7 +100,7 @@ describe('the Git rail reads the chat’s own worktree', () => {
   it('falls back to the project’s checkout for a chat that has no folder of its own', async () => {
     rail(null);
 
-    await waitFor(() => expect(calls.status).toHaveBeenCalledWith(PROJECT));
+    await waitFor(() => expect(askedAbout()).toContain(PROJECT));
     await waitFor(() => expect(screen.getByTestId('git-branch-name')).toHaveTextContent('main'));
   });
 

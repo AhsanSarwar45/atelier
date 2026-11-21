@@ -637,6 +637,8 @@ export interface GitLogQuery {
   file?: string;
   /** The line of work to walk, instead of the one checked out. */
   ref?: string;
+  /** A reader asked for this themselves, so git is run rather than a held answer given. */
+  fresh?: boolean;
 }
 
 /**
@@ -760,8 +762,11 @@ export const git = {
   // joining the read that was already in the air.
 
   /** What the repository has changed, and where its branch stands. */
-  status: (path: string, signal?: AbortSignal) => fetchApi<GitStatus>(
-    `/api/git/status?path=${encodeURIComponent(path)}`,
+  status: (path: string, signal?: AbortSignal, fresh?: boolean) => fetchApi<GitStatus>(
+    // The server reads a repository once for every window that draws it and
+    // hands them all the same answer for a few seconds. `fresh` is a reader
+    // who asked for this themselves and is owed a new run of git.
+    `/api/git/status?path=${encodeURIComponent(path)}${fresh ? '&fresh=true' : ''}`,
     signal ? { signal } : undefined,
   ),
 
@@ -1009,6 +1014,7 @@ export const git = {
       const value = query[name]?.trim();
       if (value) asked.push(`${name}=${encodeURIComponent(value)}`);
     }
+    if (query.fresh) asked.push('fresh=true');
     return fetchApi<GitLogResponse>(
       `/api/git/log?${asked.join('&')}`,
       signal ? { signal } : undefined,

@@ -5,16 +5,13 @@
 use std::collections::BTreeMap;
 
 use std::path::Path;
-use std::process::Command;
-
 use crate::workbench::tasks::checks::{self, Check};
 use serde_json::json;
 
 fn git(dir: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = crate::routes::git_command_blocking(dir).unwrap()
         .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
         .args(args)
-        .current_dir(dir)
         .output()
         .unwrap();
     assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));

@@ -214,13 +214,9 @@ fn checkouts_of(project: &Path) -> Vec<PathBuf> {
     if let Ok(real) = project.canonicalize() {
         found.push(real);
     }
-    let Some(git) = crate::routes::find_git() else {
-        return found;
-    };
-    let Ok(said) = std::process::Command::new(git)
-        .args(["worktree", "list", "--porcelain"])
-        .current_dir(project)
-        .output()
+    let Ok(said) = crate::routes::git_command_blocking(project).and_then(|mut git| {
+        git.args(["worktree", "list", "--porcelain"]).output()
+    })
     else {
         return found;
     };

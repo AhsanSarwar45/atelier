@@ -806,7 +806,8 @@ pub fn is_test_file(path: &str) -> bool {
 
 /// The committed files under `dir`, relative to `folder`.
 fn tracked_under(folder: &Path, dir: &str) -> Vec<String> {
-    let output = std::process::Command::new("git").args(["ls-files", "-z", "--", dir]).current_dir(folder).output();
+    let output = crate::routes::git_command_blocking(folder)
+        .and_then(|mut git| git.args(["ls-files", "-z", "--", dir]).output());
     match output {
         Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
             .split('\0')

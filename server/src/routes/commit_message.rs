@@ -250,7 +250,7 @@ pub(crate) async fn ask_agent(settings: &CommitMessageSettings, prompt: &str) ->
         .map_err(|why| Refused::new(StatusCode::INTERNAL_SERVER_ERROR, why.to_string()))?;
     let answer_file = scratch.join("answer.txt");
 
-    let mut command = Command::new(program);
+    let mut command = crate::launch::command(crate::launch::Purpose::Tool, program);
     command
         .current_dir(&scratch)
         .env_remove("CLAUDECODE")

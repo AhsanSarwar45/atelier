@@ -279,8 +279,8 @@ pub fn render(scope: Scope, stored: &[Stored]) -> Option<String> {
 /// level, else the nearest folder with a project manifest.
 pub fn project_root(data: &Path, folder: &Path) -> Option<PathBuf> {
     let folder = fs::canonicalize(folder).ok()?;
-    let git = std::process::Command::new("git")
-        .arg("-C").arg(&folder).args(["rev-parse", "--show-toplevel"]).output();
+    let git = crate::routes::git_command_blocking(&folder).and_then(|mut git| git
+        .args(["rev-parse", "--show-toplevel"]).output());
     if let Some(root) = git.ok().filter(|out| out.status.success())
         .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim())) {
         return Some(root);

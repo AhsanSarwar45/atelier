@@ -584,7 +584,7 @@ async fn cli_output(
     args: &[&str],
     within: Duration,
 ) -> Result<std::process::Output, String> {
-    let mut command = tokio::process::Command::new(program);
+    let mut command = crate::launch::command(crate::launch::Purpose::Tool, program);
     command
         .args(args)
         .env("NO_COLOR", "1")

@@ -679,7 +679,7 @@ pub fn in_a_group_this_process_started(pid: u32, proc_root: &Path) -> bool {
     {
         let _ = proc_root;
         fn ask(pid: u32, column: &str) -> Option<u32> {
-            let out = std::process::Command::new("ps")
+            let out = crate::launch::blocking(crate::launch::Purpose::Probe, "ps")
                 .args(["-o", &format!("{column}="), "-p", &pid.to_string()])
                 .output()
                 .ok()?;
@@ -736,7 +736,7 @@ pub fn pid_alive(pid: u32, proc_root: &Path) -> bool {
         }
         // As on Linux, an unreaped child no longer owns the conversation.
         // `kill(pid, 0)` alone cannot distinguish that bookkeeping process.
-        !std::process::Command::new("ps")
+        !crate::launch::blocking(crate::launch::Purpose::Probe, "ps")
             .args(["-o", "stat=", "-p", &pid.to_string()])
             .output()
             .ok()
@@ -746,7 +746,7 @@ pub fn pid_alive(pid: u32, proc_root: &Path) -> bool {
     #[cfg(windows)]
     {
         let _ = proc_root;
-        std::process::Command::new("tasklist")
+        crate::launch::blocking(crate::launch::Purpose::Probe, "tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH"])
             .output()
             .ok()
@@ -773,7 +773,7 @@ pub fn terminate_pid(pid: u32) -> std::io::Result<()> {
     }
     #[cfg(windows)]
     {
-        let status = std::process::Command::new("taskkill")
+        let status = crate::launch::blocking(crate::launch::Purpose::Probe, "taskkill")
             .args(["/PID", &pid.to_string()])
             .status()?;
         if status.success() {
@@ -1162,7 +1162,7 @@ fn codex_commands<'a>(rows: impl IntoIterator<Item = &'a str>) -> Vec<(u32, Stri
 
 #[cfg(all(unix, not(target_os = "linux")))]
 fn native_codex_commands() -> Vec<(u32, String)> {
-    std::process::Command::new("ps")
+    crate::launch::blocking(crate::launch::Purpose::Probe, "ps")
         .args(["-axo", "pid=,args="])
         .output()
         .ok()
@@ -1176,7 +1176,7 @@ fn native_codex_commands() -> Vec<(u32, String)> {
 fn native_codex_commands() -> Vec<(u32, String)> {
     // PowerShell and CIM are part of every Windows version Atelier supports.
     // Tabs make the PID boundary unambiguous even when CommandLine has spaces.
-    std::process::Command::new("powershell.exe")
+    crate::launch::blocking(crate::launch::Purpose::Probe, "powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",

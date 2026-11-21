@@ -73,7 +73,7 @@ fn this_computer_is_called() -> Option<String> {
             return Some(windows);
         }
     }
-    let said = std::process::Command::new("hostname").output().ok()?;
+    let said = crate::launch::blocking(crate::launch::Purpose::Probe, "hostname").output().ok()?;
     let said = String::from_utf8(said.stdout).ok()?;
     let said = said.trim().to_string();
     (!said.is_empty()).then_some(said)

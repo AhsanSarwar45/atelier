@@ -131,7 +131,9 @@ async fn answered(answer: git::Answer) -> (StatusCode, Value) {
 }
 
 async fn status_of(dir: &TempDir) -> (StatusCode, Value) {
-    answered(git::status(GitQuery(git::PathParams { path: here(dir) })).await).await
+    // Asked the way a reader who pressed refresh asks: these tests change the
+    // repository behind the app's back and read it straight afterwards.
+    answered(git::status(GitQuery(git::StatusParams { path: here(dir), fresh: true })).await).await
 }
 
 async fn branches_of(dir: &TempDir) -> (StatusCode, Value) {
@@ -153,6 +155,8 @@ async fn log_of(dir: &TempDir, limit: u32) -> (StatusCode, Value) {
 /// a case says only what it is about.
 async fn filtered_log(dir: &TempDir, mut params: git::LogParams) -> (StatusCode, Value) {
     params.path = here(dir);
+    // Asked the way a reader who pressed refresh asks, as the status is.
+    params.fresh = true;
     if params.limit == 0 {
         params.limit = 50;
     }
@@ -436,8 +440,9 @@ async fn a_path_outside_the_home_directory_is_refused_before_git_is_run() {
         return;
     }
     let (code, body) = answered(
-        git::status(GitQuery(git::PathParams {
+        git::status(GitQuery(git::StatusParams {
             path: "/etc".to_string(),
+            fresh: true,
         }))
         .await,
     )

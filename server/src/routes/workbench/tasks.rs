@@ -395,16 +395,17 @@ async fn session_folder(state: &WorkbenchState, session: &str) -> Option<String>
 async fn missing_commits(cwd: &str, commits: &[String]) -> HashSet<String> {
     let mut missing = HashSet::new();
     for sha in commits {
-        let found = tokio::process::Command::new("git")
-            .arg("-C")
-            .arg(cwd)
-            .args(["cat-file", "-e", &format!("{sha}^{{commit}}")])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await
-            .is_ok_and(|status| status.success());
+        let found = match crate::routes::git_command(cwd) {
+            Ok(mut git) => git
+                .args(["cat-file", "-e", &format!("{sha}^{{commit}}")])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await
+                .is_ok_and(|status| status.success()),
+            Err(_) => false,
+        };
         if !found {
             missing.insert(sha.clone());
         }

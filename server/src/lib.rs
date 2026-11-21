@@ -6,6 +6,7 @@ pub mod doing;
 pub mod handover;
 pub mod identity;
 pub mod laid_down;
+pub mod launch;
 pub mod join;
 pub mod local_host;
 pub mod needs;

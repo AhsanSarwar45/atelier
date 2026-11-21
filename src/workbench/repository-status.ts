@@ -62,6 +62,17 @@ const onTheWay = new Map<string, Promise<GitStatus>>();
 const moves = new Map<string, number>();
 
 /**
+ * Repositories whose next read is owed a new run of git by the server.
+ *
+ * The server holds an answer for a few seconds and gives it to every window
+ * that asks, which is what makes any number of windows cost what one does. A
+ * reader coming back to the window has been away, possibly editing the very
+ * files this is about, so the one read that follows asks the server to run
+ * git rather than hand over what it gave another window a moment ago.
+ */
+const owedFresh = new Set<string>();
+
+/**
  * What git says about `path`, possibly the answer it just gave somebody else.
  *
  * `fresh` is for a read a reader asked for: it ignores what is held and
@@ -85,8 +96,8 @@ export async function readRepositoryStatus(
     if (already) return already;
   }
   const movesBefore = moves.get(path) ?? 0;
-  const reading = git
-    .status(path)
+  const anew = owedFresh.delete(path) || fresh;
+  const reading = (anew ? git.status(path, undefined, true) : git.status(path))
     .then((status) => {
       // Kept only if nothing said the repository moved while this was running.
       // The caller is still given it — it is the newest answer anyone has —
@@ -108,9 +119,10 @@ export async function readRepositoryStatus(
  * same news, and the reader behind it should join that one rather than start a
  * second run over the same repository.
  */
-export function repositoryMayHaveMoved(path: string): void {
+export function repositoryMayHaveMoved(path: string, { askAnew = false }: { askAnew?: boolean } = {}): void {
   held.delete(path);
   moves.set(path, (moves.get(path) ?? 0) + 1);
+  if (askAnew) owedFresh.add(path);
 }
 
 /** Throw away everything held. For a test that wants a clean bench. */
@@ -118,4 +130,5 @@ export function forgetRepositoryStatus(): void {
   held.clear();
   onTheWay.clear();
   moves.clear();
+  owedFresh.clear();
 }

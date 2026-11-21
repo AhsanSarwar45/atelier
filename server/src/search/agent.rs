@@ -258,7 +258,7 @@ fn agent_command(agent: &Agent) -> Command {
         token,
         prompt,
     } = *agent;
-    let mut command = Command::new(program);
+    let mut command = crate::launch::command(crate::launch::Purpose::Tool, program);
     command
         .current_dir(scratch)
         .env_remove("CLAUDECODE")

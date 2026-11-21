@@ -87,7 +87,7 @@ fn carrying(token: &str, proc_root: &Path) -> Vec<u32> {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     fn alive(pid: u32) -> bool {
         // Signal 0 checks without signalling; a zombie still answers, so look
@@ -105,7 +105,7 @@ mod tests {
         let token = uuid::Uuid::new_v4().to_string();
         let pids = tempfile::tempdir().unwrap();
         let written = pids.path().join("pids");
-        let mut parent = Command::new("sh")
+        let mut parent = crate::launch::blocking(crate::launch::Purpose::Tool, "sh")
             .arg("-c")
             .arg(format!(
                 "setsid sh -c 'echo $$ >> {0}; exec sleep 30' & \
@@ -135,7 +135,7 @@ mod tests {
             assert_ne!(unsafe { libc::getpgid(*pid as libc::pid_t) }, parent.id() as libc::pid_t);
         }
         // A process of another Atelier, which must be left alone.
-        let mut stranger = Command::new("sleep")
+        let mut stranger = crate::launch::blocking(crate::launch::Purpose::Tool, "sleep")
             .arg("30")
             .env(OWNER_ENV, "another-atelier")
             .spawn()

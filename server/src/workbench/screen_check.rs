@@ -5,7 +5,6 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -151,7 +150,7 @@ pub fn parse_windows_windows(text: &str) -> Result<Vec<NativeWindow>, String> {
 }
 
 fn run(program: &str, args: &[&str], label: &str) -> Result<String, String> {
-    let output = Command::new(program)
+    let output = crate::launch::blocking(crate::launch::Purpose::Tool, program)
         .args(args)
         .output()
         .map_err(|e| format!("{label}: {e}"))?;

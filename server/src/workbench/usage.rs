@@ -691,7 +691,7 @@ fn claude_user_agent() -> &'static str {
     static AGENT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     AGENT.get_or_init(|| {
         let version = crate::routes::find_tool("claude", &[])
-            .and_then(|claude| std::process::Command::new(claude).arg("--version").output().ok())
+            .and_then(|claude| crate::launch::blocking(crate::launch::Purpose::Probe, claude).arg("--version").output().ok())
             .and_then(|out| {
                 String::from_utf8(out.stdout)
                     .ok()?

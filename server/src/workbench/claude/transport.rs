@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{ChildStderr, ChildStdout, Command};
+use tokio::process::{ChildStderr, ChildStdout};
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 
@@ -177,7 +177,7 @@ pub struct ClaudeTransport {
 
 impl ClaudeTransport {
     pub async fn start(config: ClaudeTransportConfig) -> Result<Self, ClaudeTransportError> {
-        let mut command = Command::new(&config.executable);
+        let mut command = crate::launch::command(crate::launch::Purpose::Agent, &config.executable);
         command
             .args(&config.args)
             .current_dir(&config.cwd)

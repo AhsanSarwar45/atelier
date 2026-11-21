@@ -20,7 +20,7 @@ use agent_client_protocol::schema::v1::{
     ResourceLink, SetSessionModeRequest, TerminalOutputRequest, TextContent, TextResourceContents,
     WaitForTerminalExitRequest, WriteTextFileRequest,
 };
-use agent_client_protocol::{AcpAgent, Agent, ConnectionTo, UntypedMessage};
+use agent_client_protocol::{Agent, ConnectionTo, UntypedMessage};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -283,7 +283,7 @@ pub async fn list_sessions(
     let client = declining_prompts!(agent_client_protocol::Client.builder());
     client
         .connect_with(
-            AcpAgent::new(config),
+            crate::launch::acp_agent(config),
             async move |connection: ConnectionTo<Agent>| {
                 let initialized = connection
                     .send_request(initialize_request(false)?)
@@ -361,7 +361,7 @@ async fn one_shot_call(
     let method = method.to_string();
     Ok(agent_client_protocol::Client
         .builder()
-        .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
+        .connect_with(crate::launch::acp_agent(config), async move |connection: ConnectionTo<Agent>| {
             let initialized = connection.send_request(initialize_request(false)?).block_task().await?;
             agreed_version(&initialized)?;
             if capability
@@ -553,7 +553,7 @@ pub async fn load_history(
     let finish_brand = brand.clone();
     let (modes, config_options, agent_controls) = client
         .connect_with(
-            AcpAgent::new(config),
+            crate::launch::acp_agent(config),
             async move |connection: ConnectionTo<Agent>| {
                 let initialized = connection
                     .send_request(initialize_request(false)?)
@@ -712,7 +712,7 @@ pub async fn ask_provider_catalogue(session: &Session) -> Result<(Value, Vec<Val
         );
     let client = declining_prompts!(serving_client_io!(client, io));
     let answered = client
-        .connect_with(AcpAgent::new(config), async move |connection: ConnectionTo<Agent>| {
+        .connect_with(crate::launch::acp_agent(config), async move |connection: ConnectionTo<Agent>| {
             let initialized = connection.send_request(initialize_request(false)?).block_task().await?;
             agreed_version(&initialized)?;
             let agent_controls = initialized
@@ -2819,7 +2819,7 @@ impl AcpDriver {
                 )
                 ;
             let client = serving_client_io!(client, task_io);
-            let agent = AcpAgent::new(config);
+            let agent = crate::launch::acp_agent(config);
             let ready = Arc::new(Mutex::new(Some(ready)));
             let connection_ready = ready.clone();
             let stop_reply = Arc::new(Mutex::new(None::<Reply>));

@@ -96,7 +96,7 @@ fn own_names() -> &'static [String] {
             .or_else(|| {
                 // macOS has neither file. The server already shells out for git,
                 // so one more at startup is in keeping.
-                std::process::Command::new("hostname")
+                crate::launch::blocking(crate::launch::Purpose::Probe, "hostname")
                     .output()
                     .ok()
                     .filter(|out| out.status.success())

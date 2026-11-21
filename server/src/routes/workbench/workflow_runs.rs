@@ -284,7 +284,7 @@ fn agent_prompt(workflow: &Workflow, stage: &Stage, item: &Value) -> String {
 }
 
 async fn shell(cwd: &str, command: &str) -> Result<(bool, String, String), String> {
-    let mut child = tokio::process::Command::new("sh");
+    let mut child = crate::launch::command(crate::launch::Purpose::Check, "sh");
     child.arg("-c").arg(command).current_dir(cwd).kill_on_drop(true);
     match tokio::time::timeout(COMMAND_LIMIT, child.output()).await {
         Err(_) => Err(format!("`{command}` took longer than {} seconds", COMMAND_LIMIT.as_secs())),

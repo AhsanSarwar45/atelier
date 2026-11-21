@@ -8,7 +8,6 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub const SCHEMA_VERSION: u32 = 1;
 pub const REPOSITORY_MANIFEST: &str = ".atelier/project.toml";
@@ -114,7 +113,7 @@ struct LegacyManifest {
 struct LegacyReview { persona: Option<String>, proves: Option<String> }
 
 fn git(root: &Path, args: &[&str]) -> String {
-    Command::new("git").arg("-C").arg(root).args(args).output().ok()
+    crate::routes::git_command_blocking(root).and_then(|mut git| git.args(args).output()).ok()
         .filter(|out| out.status.success())
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .unwrap_or_default()

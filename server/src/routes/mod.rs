@@ -9,6 +9,7 @@ pub mod fs;
 pub mod fs_watch;
 pub mod git;
 pub mod git_watch;
+pub mod repository_reads;
 pub mod install_method;
 pub mod live;
 pub mod library;
@@ -434,19 +435,28 @@ pub fn find_git() -> Option<PathBuf> {
 /// tool drops it: a reader who installs git while Atelier is up is found on
 /// their next click rather than after a restart.
 ///
-/// `GIT_OPTIONAL_LOCKS=0` is git's own switch for a program that reads a
-/// repository in the background: a read such as `git status` then never saves
-/// the index as a side effect. The Git panel's watcher reports a saved index
-/// as a change and the panel reads again, so in a repository where every read
-/// saves it (one with `core.fsmonitor` set) the two never stop. Commands that
-/// must write the index, such as `add` and `commit`, are not affected.
-pub fn git_command() -> std::io::Result<Command> {
+/// The command itself is made by [`crate::launch::git`], the one place this
+/// server starts a program from, which is where the rules every git runs under
+/// are kept (a read never saves the index) and where git's budget is counted.
+/// The budget is each folder's own, which is why the folder git is to run in
+/// is asked for here rather than set by the caller afterwards.
+pub fn git_command(at: impl AsRef<Path>) -> std::io::Result<Command> {
     match find_git() {
-        Some(git) => {
-            let mut command = Command::new(git);
-            command.env("GIT_OPTIONAL_LOCKS", "0");
-            Ok(command)
+        Some(git) => crate::launch::git(git, at.as_ref()),
+        None => {
+            forget_tools();
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                GIT_MISSING,
+            ))
         }
+    }
+}
+
+/// [`git_command`] for code that waits on git in place.
+pub fn git_command_blocking(at: impl AsRef<Path>) -> std::io::Result<std::process::Command> {
+    match find_git() {
+        Some(git) => crate::launch::git_blocking(git, at.as_ref()),
         None => {
             forget_tools();
             Err(std::io::Error::new(
@@ -459,7 +469,7 @@ pub fn git_command() -> std::io::Result<Command> {
 
 /// Run git in `dir` and hand back everything it produced.
 pub async fn git_output(dir: impl AsRef<Path>, args: &[&str]) -> std::io::Result<Output> {
-    git_command()?.args(args).current_dir(dir).output().await
+    git_command(dir)?.args(args).output().await
 }
 
 /// Validates that a path is safe to access.
@@ -720,7 +730,7 @@ mod tests {
         );
         assert!(git.is_file(), "{} is not a file to start", git.display());
         assert_eq!(
-            git_command().expect("a git to run").as_std().get_program(),
+            git_command(".").expect("a git to run").as_std().get_program(),
             git.as_os_str(),
             "the command we hand out has to be aimed at that file"
         );

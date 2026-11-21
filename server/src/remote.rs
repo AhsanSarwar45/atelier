@@ -475,7 +475,7 @@ fn agreed() -> Result<bool, String> {
 /// out.
 fn run_letting_it_ask(step: &[String]) -> Result<(), String> {
     let (program, args) = step.split_first().ok_or("an empty command")?;
-    let status = std::process::Command::new(program)
+    let status = crate::launch::blocking(crate::launch::Purpose::Tool, program)
         .args(args)
         .status()
         .map_err(|e| format!("{program} could not be run: {e}"))?;
@@ -558,7 +558,7 @@ fn said_within(
     args: &[String],
     patience: std::time::Duration,
 ) -> Result<Said, String> {
-    let mut child = std::process::Command::new(program)
+    let mut child = crate::launch::blocking(crate::launch::Purpose::Tool, program)
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

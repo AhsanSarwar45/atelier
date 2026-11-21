@@ -611,7 +611,7 @@ pub fn case(rest: &[String]) -> Result<i32, String> {
         return Err(format!("\"{id}\" is not a case id GRID/ROW/COL/CASE, each part {}\n{USE}", super::ID_RULE));
     }
     use std::io::{BufRead, Write};
-    let mut child = std::process::Command::new(&command[0])
+    let mut child = crate::launch::blocking(crate::launch::Purpose::Check, &command[0])
         .args(&command[1..])
         .stdout(std::process::Stdio::piped())
         .spawn()

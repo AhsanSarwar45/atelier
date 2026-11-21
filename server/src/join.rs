@@ -18,7 +18,6 @@
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Every hook name an Atelier version ever wrote into a project, except
 /// `doing`, which still runs.
@@ -166,9 +165,9 @@ fn git_hook(root: &Path) -> Option<PathBuf> {
     if !root.join(".git").exists() {
         return None;
     }
-    let output = crate::routes::find_git().and_then(|git| Command::new(git)
+    let output = crate::routes::git_command_blocking(root).and_then(|mut git| git
         .args(["rev-parse", "--git-path", "hooks/reference-transaction"])
-        .current_dir(root).output().ok());
+        .output()).ok();
     Some(output.filter(|output| output.status.success())
         .map(|output| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
         .map(|path| if path.is_absolute() { path } else { root.join(path) })
@@ -210,6 +209,7 @@ pub fn tidy_registered(db: std::sync::Arc<crate::db::Database>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
     use serde_json::json;
 
     fn commands(value: &Value) -> Vec<String> {

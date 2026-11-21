@@ -749,7 +749,7 @@ export function GitView({
       try {
         // Asked together, read status first: when both fail, the status
         // answer is the one that says whether there is a repository at all.
-        const log = git.log(path, { limit: 1 }, signal);
+        const log = git.log(path, quietly ? { limit: 1 } : { limit: 1, fresh: true }, signal);
         log.catch(() => {});
         // The status goes through the shared reader so that the file tree
         // beside this rail, drawn from the same answer on the same rule,

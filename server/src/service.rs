@@ -18,7 +18,6 @@
 
 use crate::identity::{DISPLAY, NAME, ORGANISATION, QUALIFIER};
 use std::path::PathBuf;
-use std::process::Command;
 
 /// What the reader asked of the service.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -496,7 +495,7 @@ fn status() -> Result<(), String> {
 /// One command, run and reported on. Its own output is the reader's.
 fn say(step: &[String]) -> Result<(), String> {
     let (program, args) = step.split_first().ok_or("an empty command")?;
-    let out = Command::new(program)
+    let out = crate::launch::blocking(crate::launch::Purpose::Update, program)
         .args(args)
         .output()
         .map_err(|e| format!("{program} could not be run: {e}"))?;

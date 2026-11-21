@@ -46,7 +46,7 @@ async fn inspect(tool: &'static str, required_for: &'static str, hint: &'static 
     };
     let version = if let Some(program) = path.as_ref() {
         tokio::time::timeout(std::time::Duration::from_secs(3),
-            tokio::process::Command::new(program).arg("--version").output()).await.ok().and_then(Result::ok)
+            crate::launch::command(crate::launch::Purpose::Probe, program).arg("--version").output()).await.ok().and_then(Result::ok)
             .map(|output| {
                 let text = if output.stdout.is_empty() { &output.stderr } else { &output.stdout };
                 String::from_utf8_lossy(text).trim().to_string()

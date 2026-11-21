@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -312,7 +312,7 @@ impl Drop for BrowserChild {
 async fn launch(executable: &Path, viewport: &Viewport) -> Result<(BrowserChild, String), String> {
     let profile = std::env::temp_dir().join(format!("atelier-browser-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&profile).map_err(|e| e.to_string())?;
-    let spawned = Command::new(executable)
+    let spawned = crate::launch::command(crate::launch::Purpose::Browser, executable)
         .args([
             "--headless=new",
             "--disable-gpu",
@@ -992,6 +992,7 @@ pub async fn capture_recipe(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::process::Command;
 
     #[tokio::test]
     async fn browser_child_reaps_its_exact_process_before_removing_the_profile() {

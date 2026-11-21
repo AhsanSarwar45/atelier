@@ -73,7 +73,7 @@ pub async fn run_shell(
     keep_tail: bool,
 ) -> std::io::Result<ShellRun> {
     let script = if merged { format!("exec 2>&1\n{command}") } else { command.to_string() };
-    let mut process = tokio::process::Command::new("sh");
+    let mut process = crate::launch::command(crate::launch::Purpose::Check, "sh");
     process
         .arg("-c")
         .arg(script)
@@ -498,14 +498,14 @@ async fn blobs(folder: &Path, ids: &[String]) -> HashMap<String, String> {
     if ids.is_empty() {
         return found;
     }
-    let Ok(mut child) = tokio::process::Command::new("git")
-        .args(["cat-file", "--batch"])
-        .current_dir(folder)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
+    let Ok(mut child) = crate::routes::git_command(folder).and_then(|mut git| {
+        git.args(["cat-file", "--batch"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+    })
     else {
         return found;
     };

@@ -38,7 +38,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, MasterPty, PtySize};
 use serde::Serialize;
 
 /// How long to wait on a program that answers a question, before deciding it
@@ -155,7 +155,7 @@ pub async fn standing(brand: &str, directory: Option<&Path>) -> Standing {
         };
     }
 
-    let mut command = tokio::process::Command::new(program);
+    let mut command = crate::launch::command(crate::launch::Purpose::Agent, program);
     command.args(asking(brand));
     if let Some(directory) = directory {
         command.env(variable, directory);
@@ -202,7 +202,7 @@ async fn asked_on_a_terminal(
         })
         .map_err(|why| format!("A terminal could not be opened to ask on: {why}"))?;
 
-    let mut command = CommandBuilder::new(program);
+    let mut command = crate::launch::in_a_terminal(crate::launch::Purpose::Agent, program);
     for word in words {
         command.arg(word);
     }
@@ -383,7 +383,7 @@ impl SignIns {
             })
             .map_err(|why| format!("A terminal could not be opened to sign in with: {why}"))?;
 
-        let mut command = CommandBuilder::new(&program);
+        let mut command = crate::launch::in_a_terminal(crate::launch::Purpose::Agent, &program);
         for word in signing_in(brand) {
             command.arg(word);
         }

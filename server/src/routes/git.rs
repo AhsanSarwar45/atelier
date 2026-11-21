@@ -298,10 +298,43 @@ where
 // ----------------------------------------------------------------------------
 
 /// A repository's turn at being written to.
-type RepoLock = Arc<AsyncMutex<()>>;
+pub struct RepoLock {
+    repo: PathBuf,
+    turn: Arc<AsyncMutex<()>>,
+}
+
+impl RepoLock {
+    /// Wait for the turn. What comes back is held for as long as the write
+    /// lasts.
+    pub async fn lock(&self) -> Writing<'_> {
+        Writing { repo: &self.repo, _turn: self.turn.lock().await }
+    }
+
+    /// The turn if nobody has it, without waiting.
+    pub fn try_lock(&self) -> Result<Writing<'_>, tokio::sync::TryLockError> {
+        Ok(Writing { repo: &self.repo, _turn: self.turn.try_lock()? })
+    }
+}
+
+/// A write to a repository, while it lasts.
+///
+/// When it ends, whatever was held about the repository is dropped
+/// (`repository_reads.rs`), so the read that follows a stage or a commit sees
+/// it. Said here rather than in each route, so a write route written later
+/// cannot forget to.
+pub struct Writing<'a> {
+    repo: &'a Path,
+    _turn: tokio::sync::MutexGuard<'a, ()>,
+}
+
+impl Drop for Writing<'_> {
+    fn drop(&mut self) {
+        super::repository_reads::moved(self.repo);
+    }
+}
 
 /// The lock each repository waits on, found by its canonical path.
-static REPO_LOCKS: OnceLock<Mutex<HashMap<PathBuf, RepoLock>>> = OnceLock::new();
+static REPO_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<AsyncMutex<()>>>>> = OnceLock::new();
 
 /// The lock that serializes writes to one repository.
 ///
@@ -317,7 +350,8 @@ pub fn repo_lock(repo: &Path) -> RepoLock {
     let key = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
     let locks = REPO_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut locks = locks.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    Arc::clone(locks.entry(key).or_insert_with(|| Arc::new(AsyncMutex::new(()))))
+    let turn = Arc::clone(locks.entry(key.clone()).or_insert_with(|| Arc::new(AsyncMutex::new(()))));
+    RepoLock { repo: key, turn }
 }
 
 // ----------------------------------------------------------------------------
@@ -480,10 +514,9 @@ async fn run_git_remote(
     args: &[&str],
     passphrase: Option<&str>,
 ) -> Result<Output, Refused> {
-    let mut running = super::git_command().map_err(could_not_run)?;
+    let mut running = super::git_command(repo).map_err(could_not_run)?;
     running
         .args(args)
-        .current_dir(repo)
         .env("GIT_TERMINAL_PROMPT", "0");
 
     // Held until git has finished; dropping it takes the helper off disk. It
@@ -690,6 +723,18 @@ pub async fn init(GitJson(body): GitJson<InitRequest>) -> Answer {
 pub struct PathParams {
     /// Absolute working directory of the repository.
     pub path: String,
+}
+
+/// Query parameters for the status of a repository.
+#[derive(Deserialize)]
+pub struct StatusParams {
+    /// Absolute working directory of the repository.
+    pub path: String,
+    /// Set by a reader who asked for this themselves, a refresh or the read
+    /// after a write, and so is owed a new run of git rather than the answer
+    /// another window was just given.
+    #[serde(default)]
+    pub fresh: bool,
 }
 
 /// One file git has something to say about.
@@ -903,11 +948,34 @@ pub fn read_porcelain_v2(raw: &[u8]) -> StatusResponse {
 ///
 /// # Endpoint
 ///
-/// `GET /api/git/status?path=...`
-pub async fn status(GitQuery(params): GitQuery<PathParams>) -> Answer {
+/// `GET /api/git/status?path=...&fresh=true`
+pub async fn status(GitQuery(params): GitQuery<StatusParams>) -> Answer {
     let repo = checked_repo(&params.path)?;
+    super::repository_reads::shared(&repo, STATUS, params.fresh, || read_status(&repo)).await
+}
+
+/// What the status of a repository is held under (`repository_reads.rs`).
+pub(super) const STATUS: &str = "status";
+
+/// The status of `repo` as it goes on the wire, read now. For the watcher on
+/// the git directory, which reads it to tell a repository that changed from
+/// one that was only written to (`git_watch.rs`); every window is then given
+/// this same answer rather than running git for itself.
+///
+/// With it, whether the reader found it changed and told the windows itself.
+pub(super) async fn status_now(repo: &Path) -> Result<(axum::body::Bytes, bool), Refused> {
+    super::repository_reads::shared_bytes(repo, STATUS, true, || read_status(repo)).await
+}
+
+/// [`status_now`], or the answer somebody was just given.
+pub(super) async fn status_held(repo: &Path) -> Result<(axum::body::Bytes, bool), Refused> {
+    super::repository_reads::shared_bytes(repo, STATUS, false, || read_status(repo)).await
+}
+
+/// Ask git for the status. Every caller goes through the shared reader.
+async fn read_status(repo: &Path) -> Answer {
     let output = run_git(
-        &repo,
+        repo,
         &[
             "status",
             "--porcelain=v2",
@@ -917,20 +985,20 @@ pub async fn status(GitQuery(params): GitQuery<PathParams>) -> Answer {
         ],
     )
     .await?;
-    if !output.status.success() && !is_a_repository(&repo).await {
+    if !output.status.success() && !is_a_repository(repo).await {
         let said = String::from_utf8_lossy(&output.stderr).into_owned();
         return Err(Refused::not_a_repository(said));
     }
     let output = spoke_or_refused(output)?;
     let mut status = read_porcelain_v2(&output.stdout);
-    if let Some((sent_to, ahead)) = ahead_of_where_a_push_goes(&repo).await {
+    if let Some((sent_to, ahead)) = ahead_of_where_a_push_goes(repo).await {
         status.ahead = ahead;
         status.push_to = Some(sent_to);
     }
-    status.has_remote = has_remote(&repo).await;
-    status.has_commits = has_commits(&repo).await;
-    status.stashes = how_many_stashes(&repo).await;
-    status.operation = operation_under_way(&repo).await;
+    status.has_remote = has_remote(repo).await;
+    status.has_commits = has_commits(repo).await;
+    status.stashes = how_many_stashes(repo).await;
+    status.operation = operation_under_way(repo).await;
     Ok(Json(status).into_response())
 }
 
@@ -1840,7 +1908,7 @@ pub async fn checkout(GitJson(body): GitJson<CheckoutRequest>) -> Answer {
 /// answered by git itself rather than by sieving what was already read: a
 /// search that only looks at the fifty commits the panel happens to be
 /// holding is a search that lies about the history behind them (bw-g6zy.1).
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug)]
 pub struct LogParams {
     /// Absolute working directory of the repository.
     pub path: String,
@@ -1876,6 +1944,9 @@ pub struct LogParams {
     /// The line of work to walk, instead of the one checked out.
     #[serde(default, rename = "ref")]
     pub reference: Option<String>,
+    /// Set by a reader who asked for this themselves; see [`StatusParams`].
+    #[serde(default)]
+    pub fresh: bool,
 }
 
 fn fifty() -> u32 {
@@ -1986,6 +2057,30 @@ fn inside_the_repo(value: &str) -> Result<(), Refused> {
 /// `GET /api/git/log?path=...&limit=50&skip=0&grep=...&author=...&since=...&until=...&sha=...&file=...&ref=...`
 pub async fn log(GitQuery(params): GitQuery<LogParams>) -> Answer {
     let repo = checked_repo(&params.path)?;
+    let fresh = params.fresh;
+    let question = format!("log {:?}", LogParams { fresh: false, ..clone_of(&params) });
+    super::repository_reads::shared(&repo, &question, fresh, || read_log(&repo, params)).await
+}
+
+/// The same question, to name what its answer is held under.
+fn clone_of(params: &LogParams) -> LogParams {
+    LogParams {
+        path: params.path.clone(),
+        limit: params.limit,
+        skip: params.skip,
+        grep: params.grep.clone(),
+        author: params.author.clone(),
+        since: params.since.clone(),
+        until: params.until.clone(),
+        sha: params.sha.clone(),
+        file: params.file.clone(),
+        reference: params.reference.clone(),
+        fresh: params.fresh,
+    }
+}
+
+/// Ask git for the history. Every caller goes through the shared reader.
+async fn read_log(repo: &Path, params: LogParams) -> Answer {
 
     let how_many = params.limit.clamp(1, 1000).to_string();
     let mut args: Vec<String> = vec![
@@ -3330,7 +3425,7 @@ mod tests {
         let dir = a_scratch_repository_under_home();
         let repo = a_repository_pushed_somewhere_else(dir.path());
 
-        let answer = status(GitQuery(PathParams { path: repo.to_string_lossy().into_owned() }))
+        let answer = status(GitQuery(StatusParams { path: repo.to_string_lossy().into_owned(), fresh: true }))
             .await
             .expect("a status of a repository that exists");
         let said = read_json(answer).await;
@@ -3353,7 +3448,7 @@ mod tests {
 
         assert!(ahead_of_where_a_push_goes(&repo).await.is_none());
 
-        let answer = status(GitQuery(PathParams { path: repo.to_string_lossy().into_owned() }))
+        let answer = status(GitQuery(StatusParams { path: repo.to_string_lossy().into_owned(), fresh: true }))
             .await
             .expect("a status of a repository that exists");
         let said = read_json(answer).await;

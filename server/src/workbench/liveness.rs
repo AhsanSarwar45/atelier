@@ -268,7 +268,7 @@ fn look_for_holders(files: &[PathBuf]) -> HashSet<PathBuf> {
         .iter()
         .filter(|file| {
             !file.exists()
-                || std::process::Command::new("lsof")
+                || crate::launch::blocking(crate::launch::Purpose::Probe, "lsof")
                     .arg("-t")
                     .arg("--")
                     .arg(file.as_os_str())

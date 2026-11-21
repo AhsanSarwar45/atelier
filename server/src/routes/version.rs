@@ -382,11 +382,11 @@ async fn finish_update(watch: UpdateWatch, outcome: Result<Option<PathBuf>, Stri
         Ok(Some(script)) => {
             watch.phase(Phase::Restarting, None).await;
             let spawned = if cfg!(windows) {
-                std::process::Command::new("cmd")
+                crate::launch::blocking(crate::launch::Purpose::Update, "cmd")
                     .args(["/C", "start", "/B", "", script.to_str().unwrap_or("")])
                     .spawn()
             } else {
-                std::process::Command::new("sh").arg(&script).spawn()
+                crate::launch::blocking(crate::launch::Purpose::Update, "sh").arg(&script).spawn()
             };
 
             if let Err(e) = spawned {
@@ -642,7 +642,7 @@ async fn run_homebrew_with(
 /// the restart launches. A newer install is valid too, if another update won
 /// the race while the advertised release was cached.
 async fn verify_homebrew_version(program: &Path, target: &str) -> Result<(), String> {
-    let mut command = tokio::process::Command::new(program);
+    let mut command = crate::launch::command(crate::launch::Purpose::Probe, program);
     command.arg("--version").kill_on_drop(true);
     let output = tokio::time::timeout(std::time::Duration::from_secs(10), command.output())
         .await
@@ -681,7 +681,7 @@ async fn verify_homebrew_version(program: &Path, target: &str) -> Result<(), Str
 
 /// Where brew writes the formula's archive while it is still arriving.
 async fn brew_download(brew: &Path) -> Option<PathBuf> {
-    let said = tokio::process::Command::new(brew)
+    let said = crate::launch::command(crate::launch::Purpose::Update, brew)
         .args(["--cache", install_method::FORMULA])
         .output()
         .await
@@ -726,7 +726,7 @@ async fn say(
 ) -> Result<(), String> {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
-    let mut child = tokio::process::Command::new(brew)
+    let mut child = crate::launch::command(crate::launch::Purpose::Update, brew)
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
