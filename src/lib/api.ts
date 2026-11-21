@@ -4,10 +4,10 @@
  */
 
 import { apiUrl } from '@/lib/api-base';
-import { onFolder, onRepository } from '@/workbench/live-wire';
 import { CellDetailSchema, GridDetailSchema, GridsResponseSchema, ProposalAnswerSchema, ProposalResponseSchema, TaskActionResponseSchema, TaskCreateResponseSchema, TaskDetailSchema, TasksResponseSchema } from '@/lib/api-schemas';
 import type { Project, Tag } from '@/types';
 import type { CellDetail, GridActionAnswer, GridDetail, GridOwnerAction, GridsList } from '@/workbench/grids/types';
+import { onFolder, onRepository } from '@/workbench/live-wire';
 import type { OwnerAction, ProposalChoice, Task, TaskEvent, TaskProposal, TaskTypeInfo, TaskTypesChange, TaskTypesListing } from '@/workbench/tasks/types';
 
 /**
@@ -435,7 +435,9 @@ export const mention = {
    * grouped by kind with the best group first. The order is the server's.
    */
   search: (place: MentionPlace, q: string, limit = 20, signal?: AbortSignal, kind?: MentionOffer['kind']) =>
-    fetchApi<{ items: MentionOffer[] }>(
+    // `pending` names the kinds not ready in time — the files of a very big
+    // folder — which the menu asks for again.
+    fetchApi<{ items: MentionOffer[]; pending?: MentionOffer['kind'][] }>(
       mentionAddress(place, { q, limit: String(limit), ...(kind ? { kind } : {}) }),
       signal ? { signal } : undefined,
     ),

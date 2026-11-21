@@ -1503,6 +1503,22 @@ pub const MOST_FOUND: usize = 200;
 /// what is left, and it is enough — see [`listing`] for what "stale" costs.
 const LISTING_FRESH: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// The most paths one root's listing holds.
+///
+/// A chat can work in a folder that is not a project at all — the home folder,
+/// with millions of files under it and no ignore file to thin them. Walking all
+/// of that kept the `@` menu waiting for minutes and would hold every path in
+/// memory. Twice the 50,000-file tree the search is measured on is room for any
+/// real checkout; past it the walk stops, and a deeper file is still one typed
+/// path away.
+const MOST_LISTED: usize = 100_000;
+
+/// How long a search waits for a root's first walk before answering without it.
+///
+/// The menu also offers tasks, chats and skills, and those must not wait on a
+/// cold disk. The walk carries on behind, and a later keystroke gets its files.
+const FIRST_WALK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// One path under a root, held in the shape the scorer reads it in.
 struct Candidate {
     /// Relative to the root, `/`-separated.
@@ -1539,7 +1555,7 @@ static REFRESHING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSe
 /// cover: an ignored file is not a file the reader means to point an agent at,
 /// and `node_modules` alone would be most of the answer otherwise. `.git` is
 /// pruned whole, the way the tree drops it.
-fn walk_all(root: &std::path::Path) -> Vec<Candidate> {
+fn walk_all(root: &std::path::Path, most: usize) -> Vec<Candidate> {
     let mut paths = Vec::new();
     let walk = ignore::WalkBuilder::new(root)
         // Hidden files are the reader's business: `.github/workflows/ci.yml` is
@@ -1550,6 +1566,9 @@ fn walk_all(root: &std::path::Path) -> Vec<Candidate> {
         .filter_entry(|entry| entry.file_name() != std::ffi::OsStr::new(".git"))
         .build();
     for entry in walk.filter_map(|entry| entry.ok()) {
+        if paths.len() >= most {
+            break;
+        }
         let Ok(relative) = entry.path().strip_prefix(root) else { continue };
         if relative.as_os_str().is_empty() {
             continue;
@@ -1574,31 +1593,44 @@ fn walk_all(root: &std::path::Path) -> Vec<Candidate> {
 /// what he would wait for is a file that appeared in the last five seconds. So
 /// the search answers from what is in hand and the walk happens off to the
 /// side; the next keystroke gets the new listing.
-async fn listing(root: &std::path::Path) -> std::io::Result<std::sync::Arc<Listing>> {
+///
+/// With nothing walked yet there is nothing to serve, so the first search waits
+/// for the walk, but only for [`FIRST_WALK_WAIT`]. Every search that arrives
+/// while that walk runs shares it rather than starting its own.
+async fn listing(root: &std::path::Path) -> std::sync::Arc<Listing> {
     let held = LISTINGS.lock().unwrap().get(root).cloned();
     if let Some(held) = held {
         if held.walked.elapsed() >= LISTING_FRESH {
             refresh(root.to_path_buf());
         }
-        return Ok(held);
+        return held;
     }
-    // Nothing walked yet: this one waits, because there is nothing to serve.
-    let walked = walk_for(root.to_path_buf()).await?;
-    Ok(walked)
+    refresh(root.to_path_buf());
+    let give_up = std::time::Instant::now() + FIRST_WALK_WAIT;
+    loop {
+        if let Some(walked) = LISTINGS.lock().unwrap().get(root).cloned() {
+            return walked;
+        }
+        // A walk that ended without a listing failed, and one still running
+        // past the wait is answered without, so files are left out this time.
+        if !REFRESHING.lock().unwrap().contains(root) || std::time::Instant::now() >= give_up {
+            return std::sync::Arc::new(Listing { paths: Vec::new(), walked: std::time::Instant::now() });
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }
 
 /// Walk a root and put it in the cache, off the async runtime's threads.
-async fn walk_for(root: PathBuf) -> std::io::Result<std::sync::Arc<Listing>> {
+async fn walk_for(root: PathBuf) -> std::io::Result<()> {
     let walked = tokio::task::spawn_blocking(move || {
-        let listing = std::sync::Arc::new(Listing { paths: walk_all(&root), walked: std::time::Instant::now() });
-        LISTINGS.lock().unwrap().insert(root, listing.clone());
-        listing
+        let listing = std::sync::Arc::new(Listing { paths: walk_all(&root, MOST_LISTED), walked: std::time::Instant::now() });
+        LISTINGS.lock().unwrap().insert(root, listing);
     })
     .await;
     walked.map_err(|e| std::io::Error::other(e.to_string()))
 }
 
-/// Start one walk of a stale root, unless one is already running for it.
+/// Start one walk of a root, unless one is already running for it.
 fn refresh(root: PathBuf) {
     if !REFRESHING.lock().unwrap().insert(root.clone()) {
         return;
@@ -1607,9 +1639,24 @@ fn refresh(root: PathBuf) {
         let done = walk_for(root.clone()).await;
         REFRESHING.lock().unwrap().remove(&root);
         if let Err(e) = done {
-            warn!("could not walk {} again: {e}", root.display());
+            warn!("could not walk {}: {e}", root.display());
         }
     });
+}
+
+/// Hold a root as though its first walk were still running, until dropped:
+/// what a folder as big as the home folder looks like to a search.
+#[cfg(test)]
+pub fn hold_walk(root: &std::path::Path) -> impl Drop {
+    struct Held(PathBuf);
+    impl Drop for Held {
+        fn drop(&mut self) {
+            REFRESHING.lock().unwrap().remove(&self.0);
+        }
+    }
+    LISTINGS.lock().unwrap().remove(root);
+    REFRESHING.lock().unwrap().insert(root.to_path_buf());
+    Held(root.to_path_buf())
 }
 
 /// A whole exact name.
@@ -1808,7 +1855,7 @@ pub async fn found_paths(root: &str, wanted: &str, limit: usize) -> Result<Vec<F
         return Err("Path is not a directory".into());
     }
     let root = root.canonicalize().unwrap_or(root);
-    let listing = listing(&root).await.map_err(|e| format!("Failed to search directory: {e}"))?;
+    let listing = listing(&root).await;
     Ok(best(&listing.paths, wanted, limit.clamp(1, MOST_FOUND)))
 }
 
@@ -1832,15 +1879,7 @@ pub async fn find(Query(params): Query<FsFindParams>) -> impl IntoResponse {
     // Canonical, so the same checkout reached by two names is one listing.
     let root = root.canonicalize().unwrap_or(root);
 
-    let listing = match listing(&root).await {
-        Ok(listing) => listing,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Failed to search directory: {e}") })),
-            )
-        }
-    };
+    let listing = listing(&root).await;
     let limit = params.limit.unwrap_or(20).clamp(1, MOST_FOUND);
     let entries = best(&listing.paths, &params.q, limit);
 
@@ -2760,6 +2799,22 @@ mod tests {
         assert_eq!(answer["entries"].as_array().unwrap().len(), 1);
         assert_eq!(answer["entries"][0]["path"], "src/main.rs");
         assert_eq!(answer["entries"][0]["kind"], "file");
+    }
+
+    /// A folder with more under it than a listing holds — the home folder —
+    /// is walked only as far as the cap, so the `@` menu still answers.
+    #[test]
+    fn a_walk_stops_at_its_cap() {
+        let root = scratch();
+        for folder in 0..10 {
+            let dir = root.path().join(format!("folder-{folder}"));
+            std::fs::create_dir(&dir).unwrap();
+            for file in 0..10 {
+                std::fs::write(dir.join(format!("file-{file}.txt")), "").unwrap();
+            }
+        }
+        assert_eq!(walk_all(root.path(), 25).len(), 25);
+        assert_eq!(walk_all(root.path(), MOST_LISTED).len(), 110);
     }
 
     /// Outside the home directory is not searchable, the way nothing else here is.

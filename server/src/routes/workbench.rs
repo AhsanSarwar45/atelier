@@ -1296,7 +1296,7 @@ async fn search_chats(
     let Some(index) = state.search.clone() else {
         return Err(ApiError::unavailable("the search index is not open".into()));
     };
-    let typed = query.q.unwrap_or_default();
+    let typed = query.q.clone().unwrap_or_default();
     let parsed = crate::workbench::search_query::parse(typed.trim_start(), chrono::Local::now());
     let sort = match query.sort.as_deref() {
         Some("newest") => Sort::Newest,
@@ -2940,48 +2940,74 @@ async fn mention(
         return Ok(Json(json!({ "items": named })));
     }
 
-    let typed = query.q.unwrap_or_default();
+    let typed = query.q.clone().unwrap_or_default();
     let (typed_kind, wanted) = mention::scoped(typed.trim());
     let only = typed_kind.or_else(|| query.kind.as_deref().and_then(Kind::parse));
     let limit = query.limit.unwrap_or(20).clamp(1, 50);
     let share = |kind: Kind| if only.is_some() { limit } else { kind.share() };
-    let mut groups = Vec::new();
-    for kind in Kind::ALL {
-        if only.is_some_and(|only| only != kind) {
-            continue;
+    // Every kind is asked at once, and none is waited for past MENTION_WAIT:
+    // the files of a folder as big as the home folder take a while to list,
+    // and the skills beside them must not wait for that. What is not ready is
+    // named in `pending`, and the menu asks again for it.
+    let kinds: Vec<Kind> = Kind::ALL.into_iter().filter(|kind| only.is_none_or(|only| only == *kind)).collect();
+    let asked = kinds.iter().map(|&kind| {
+        let (database, cwd, query) = (&database, &cwd, &query);
+        async move {
+            let offers = async {
+                Ok::<_, ApiError>(match kind {
+                    Kind::File if !cwd.is_empty() => crate::routes::fs::found_paths(cwd, wanted, share(kind))
+                        .await
+                        .map(|found| mention::files(found, wanted))
+                        .unwrap_or_default(),
+                    Kind::Task => mention::tasks(
+                        &mention_tasks(database, query.project_id.as_deref()).await,
+                        wanted,
+                        share(kind),
+                    ),
+                    Kind::Grid => mention::grids(
+                        &mention_grids(database, query.project_id.as_deref()).await,
+                        wanted,
+                        share(kind),
+                    ),
+                    Kind::Chat => mention::chats(
+                        &mention_chats(database).await?,
+                        wanted,
+                        query.session.as_deref(),
+                        query.project_id.as_deref(),
+                        share(kind),
+                    ),
+                    Kind::Skill if !cwd.is_empty() => mention::skills(&mention_skills(cwd).await, wanted, share(kind)),
+                    Kind::Diff if !cwd.is_empty() => mention::diffs(&mention_changes(cwd).await, wanted, share(kind)),
+                    _ => Vec::new(),
+                })
+            };
+            (kind, tokio::time::timeout(MENTION_WAIT, offers).await)
         }
-        let offers = match kind {
-            Kind::File if !cwd.is_empty() => crate::routes::fs::found_paths(&cwd, wanted, share(kind))
-                .await
-                .map(|found| mention::files(found, wanted))
-                .unwrap_or_default(),
-            Kind::Task => mention::tasks(
-                &mention_tasks(&database, query.project_id.as_deref()).await,
-                wanted,
-                share(kind),
-            ),
-            Kind::Grid => mention::grids(
-                &mention_grids(&database, query.project_id.as_deref()).await,
-                wanted,
-                share(kind),
-            ),
-            Kind::Chat => mention::chats(
-                &mention_chats(&database).await?,
-                wanted,
-                query.session.as_deref(),
-                query.project_id.as_deref(),
-                share(kind),
-            ),
-            Kind::Skill if !cwd.is_empty() => mention::skills(&mention_skills(&cwd).await, wanted, share(kind)),
-            Kind::Diff if !cwd.is_empty() => mention::diffs(&mention_changes(&cwd).await, wanted, share(kind)),
-            _ => Vec::new(),
-        };
-        if !offers.is_empty() {
-            groups.push((kind, offers));
+    });
+    let mut groups = Vec::new();
+    let mut pending = Vec::new();
+    for (kind, answered) in futures::future::join_all(asked).await {
+        match answered {
+            Ok(offers) => {
+                let offers = offers?;
+                if !offers.is_empty() {
+                    groups.push((kind, offers));
+                }
+            }
+            Err(_) => pending.push(kind),
         }
     }
-    Ok(Json(json!({ "items": mention::in_order(groups, !wanted.is_empty()) })))
+    let items = mention::in_order(groups, !wanted.is_empty());
+    if pending.is_empty() {
+        Ok(Json(json!({ "items": items })))
+    } else {
+        Ok(Json(json!({ "items": items, "pending": pending })))
+    }
 }
+
+/// How long the `@` menu's answer waits for any one kind before going without
+/// it and saying it is still coming.
+const MENTION_WAIT: Duration = Duration::from_millis(250);
 
 #[derive(Deserialize)]
 struct ChatTextQuery {
@@ -3843,6 +3869,40 @@ mod tests {
                 .unwrap(),
         )
         .unwrap()
+    }
+
+    async fn mention_answer(state: WorkbenchState, query: &str) -> Value {
+        let response = router(state)
+            .oneshot(axum::http::Request::builder().uri(format!("/mention?{query}")).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
+
+    /// A folder whose files are still being listed — the home folder, say —
+    /// does not hold the `@` menu back: it answers at once and says files are
+    /// still coming, then answers with them once the listing is done.
+    #[tokio::test]
+    async fn the_at_menu_answers_while_files_are_still_listed() {
+        let (_directory, state) = fixture();
+        let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
+        let folder = tempfile::Builder::new().prefix(".atelier-mention-test-").tempdir_in(home).unwrap();
+        std::fs::write(folder.path().join("notes.md"), "").unwrap();
+        let root = folder.path().canonicalize().unwrap();
+        let query = format!("cwd={}&q=", root.display());
+
+        let walk = crate::routes::fs::hold_walk(&root);
+        let began = std::time::Instant::now();
+        let answer = mention_answer(state.clone(), &query).await;
+        assert!(began.elapsed() < Duration::from_secs(1), "the menu waited {:?} for files", began.elapsed());
+        assert_eq!(answer["pending"], json!(["file"]), "{answer}");
+        assert!(!answer["items"].as_array().unwrap().iter().any(|item| item["kind"] == "file"), "{answer}");
+
+        drop(walk);
+        let answer = mention_answer(state, &query).await;
+        assert!(answer.get("pending").is_none(), "{answer}");
+        assert!(answer["items"].as_array().unwrap().iter().any(|item| item["id"] == "notes.md"), "{answer}");
     }
 
     /// The tray is told what to draw, rather than working it out.

@@ -64,9 +64,9 @@ import { tabsListVariants, tabsTriggerVariants } from '@/components/ui/tabs';
 import { mention, type FsFoundPath, type MentionOffer, type MentionPlace } from '@/lib/api';
 import { swallowClickAt } from '@/lib/stray-click';
 import { cn } from '@/lib/utils';
-import type { Brand, CommandInfo } from '@/workbench/protocol';
 import { resolvePath } from '@/workbench/paths';
 import { knownReal } from '@/workbench/paths-on-disk';
+import type { Brand, CommandInfo } from '@/workbench/protocol';
 import { learnChat, learnGrid, learnSkill, learnTask, setReferenceAsker } from '@/workbench/reference-names';
 import { AUDIT, canBeginReference, formatAtelierReference, formatReference, MATRIX, MERGE, NEW_TASK, type AtelierKind } from '@/workbench/references';
 
@@ -573,6 +573,21 @@ function lines(found: readonly MentionOffer[], cwd: string): Completion[] {
 /** The badge for a line of the menu, kept on the line itself for drawing. */
 const drawnBadges = new WeakMap<Completion, Reference>();
 
+/** How long the menu waits before asking again for what was still coming. */
+const ASK_AGAIN_AFTER = 400;
+
+/**
+ * Ask again, a moment from now, for a menu whose answer said some kinds were
+ * still coming — the files of a folder as big as the home folder. The menu is
+ * open with everything else meanwhile, and nothing is asked if it has closed or
+ * the text has changed, since that asks again by itself.
+ */
+function askAgainSoon(view: EditorView, doc: EditorState['doc']) {
+  setTimeout(() => {
+    if (view.state.doc === doc && completionStatus(view.state) === 'active') startCompletion(view);
+  }, ASK_AGAIN_AFTER);
+}
+
 /**
  * What the menu offers for what has been typed after the `@`.
  *
@@ -625,6 +640,7 @@ function offering(placeOf: () => MentionPlace): CompletionSource {
     });
     // Unsectioned, so CodeMirror draws it above every group.
     options.unshift(...asked);
+    if (found.pending?.length && context.view) askAgainSoon(context.view, context.state.doc);
     // A tab with nothing in it still shows its tabs, or there would be no way
     // back from it but deleting what was typed.
     if (!options.length) options.push(nothingFound(scopeOf(context.state)));

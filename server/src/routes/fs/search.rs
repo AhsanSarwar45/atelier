@@ -322,7 +322,7 @@ fn refusal((status, error): (StatusCode, String)) -> Response {
 
 /// Search a root's files off the async runtime's threads.
 async fn searched(root: PathBuf, query: FileQuery, sort: Sort, offset: usize, limit: usize) -> Result<(Vec<Match>, Option<usize>, Vec<String>), String> {
-    let listing = listing(&root).await.map_err(|e| format!("Failed to search directory: {e}"))?;
+    let listing = listing(&root).await;
     tokio::task::spawn_blocking(move || {
         let (found, next) = search(&root, &listing.paths, &query, sort, offset, limit);
         (found, next, query.words.ignored)
@@ -376,7 +376,7 @@ impl Files {
     /// ignores, never one outside the root however it was spelled.
     async fn listed(&self, id: &str) -> Option<String> {
         let wanted = id.trim().trim_start_matches("./").replace('\\', "/");
-        let listing = listing(&self.root).await.ok()?;
+        let listing = listing(&self.root).await;
         listing.paths.iter().find(|candidate| !candidate.dir && candidate.path == wanted).map(|candidate| candidate.path.clone())
     }
 }
@@ -546,7 +546,7 @@ mod tests {
         write("docs/notes.md", "The cobalts are not the word.\nloader\n");
         write("ignored/secret.rs", "cobalt\n");
         write("image.bin", "cobalt\0\0");
-        let paths = super::super::walk_all(root.path());
+        let paths = super::super::walk_all(root.path(), super::super::MOST_LISTED);
         (root, paths)
     }
 
