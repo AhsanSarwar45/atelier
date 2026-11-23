@@ -16,6 +16,10 @@
  *
  * The tree opens folded below the top line of each process, so a chat with a
  * deep run shows a short list; a branch opens on its arrow (bw-5etd7).
+ *
+ * A folded line stands for everything under it, so it shows the memory of the
+ * whole branch; opened, it shows only its own, as its children show theirs.
+ * The figures are PSS, so adding them up does not count shared memory twice.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -67,6 +71,10 @@ export interface RunningNode {
   label: string;
   detail?: string;
   bytes?: number;
+  /** Memory of this line and everything under it. */
+  total: number;
+  /** How many processes are under this line. */
+  below: number;
   /** Stops with the chat whether ticked or not. */
   locked: boolean;
   children: RunningNode[];
@@ -88,40 +96,64 @@ export function runningTree(running: ChatRunning): RunningNode[] {
   }
   const node = (process: ChatProcess, seen: Set<number>): RunningNode => {
     seen.add(process.pid);
+    const children = (under.get(process.pid) ?? []).filter((c) => !seen.has(c.pid)).map((c) => node(c, seen));
     return {
       key: processKey(process.pid),
       label: `${process.name} (${process.pid})`,
       detail: process.command || undefined,
       bytes: process.bytes,
+      total: process.bytes + sumOf(children, 'total'),
+      below: children.length + sumOf(children, 'below'),
       locked: process.role === 'agent' || process.closesWithChat,
-      children: (under.get(process.pid) ?? []).filter((c) => !seen.has(c.pid)).map((c) => node(c, seen)),
+      children,
     };
   };
   const tree: RunningNode[] = [];
   if (running.processes.length) {
     const seen = new Set<number>();
+    const children = (under.get(null) ?? []).map((p) => node(p, seen));
     tree.push({
       key: PROCESSES,
       label: 'Processes',
+      total: sumOf(children, 'total'),
+      below: children.length + sumOf(children, 'below'),
       locked: false,
-      children: (under.get(null) ?? []).map((p) => node(p, seen)),
+      children,
     });
   }
   if (running.containers.length) {
     tree.push({
       key: CONTAINERS,
       label: 'Docker containers',
+      total: 0,
+      below: 0,
       locked: false,
       children: running.containers.map((c) => ({
         key: containerKey(c.id),
         label: c.name,
         detail: c.project ? `${c.image} · ${c.project}` : c.image,
+        total: 0,
+        below: 0,
         locked: false,
         children: [],
       })),
     });
   }
   return tree;
+}
+
+const sumOf = (nodes: RunningNode[], field: 'total' | 'below') => nodes.reduce((sum, n) => sum + n[field], 0);
+
+/**
+ * The memory a line shows: a group's or a folded line's is its whole branch,
+ * an opened line's only its own. A folded line also says how that splits.
+ */
+export function lineMemory(node: RunningNode, shut: boolean): { bytes: number; split?: string } {
+  if (node.key.startsWith('group:')) return { bytes: node.total };
+  const own = node.bytes ?? 0;
+  if (!shut || !node.below) return { bytes: own };
+  const rest = `${memoryWords(node.total - own)} in ${node.below} ${node.below === 1 ? 'process' : 'processes'} under it`;
+  return { bytes: node.total, split: own ? `${memoryWords(own)} itself, ${rest}` : rest };
 }
 
 /** Every process line with lines under it, which is what starts folded. */
@@ -257,6 +289,14 @@ export function CloseChatDialog({ chat, onCancel, onBusy, onClosed }: Props) {
   // Counted from the list on screen, so the button never promises to stop
   // something the window is not showing.
   const count = useMemo(() => [...allTickable(tree)].filter((key) => ticked.has(key)).length, [tree, ticked]);
+  // What the agent's group holds is freed whatever is ticked.
+  const frees = useMemo(
+    () =>
+      (running?.processes ?? [])
+        .filter((p) => p.role === 'agent' || p.closesWithChat || ticked.has(processKey(p.pid)))
+        .reduce((sum, p) => sum + p.bytes, 0),
+    [running, ticked],
+  );
 
   return (
     <AlertDialog open={chat !== null} onOpenChange={(open) => { if (!open && !busy) onCancel(); }}>
@@ -322,6 +362,7 @@ export function CloseChatDialog({ chat, onCancel, onBusy, onClosed }: Props) {
           <Button variant="destructive" disabled={busy} data-testid="close-chat-confirm" onClick={() => void confirm()}>
             {busy && <Spinner className="size-4" />}
             {count ? `Close and stop ${count}` : 'Close chat'}
+            {frees > 0 && ` · frees ${memoryWords(frees)}`}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -351,6 +392,7 @@ function Line({
   const shut = folded.has(node.key);
   const fixed = node.locked && !tickable(node).length;
   const group = node.key.startsWith('group:');
+  const memory = lineMemory(node, shut);
   return (
     <>
       <div
@@ -396,7 +438,7 @@ function Line({
           <span className={cn('truncate sm:shrink-0', group && 'font-medium', state === 'off' && 'text-t-tertiary')}>
             {node.label}
           </span>
-          {(node.detail || node.bytes || (node.locked && !group)) && (
+          {(node.detail || memory.bytes > 0 || (node.locked && !group)) && (
             <div className="flex min-w-0 flex-1 items-baseline gap-2">
               {node.detail && (
                 <Tooltip label={node.detail}>
@@ -405,7 +447,13 @@ function Line({
               )}
               <span className="ml-auto flex shrink-0 items-baseline gap-2 pl-2 text-xs text-t-tertiary">
                 {node.locked && !group && <span data-testid="close-chat-locked">Stops with chat</span>}
-                {node.bytes ? <span className="tabular-nums">{memoryWords(node.bytes)}</span> : null}
+                {memory.bytes > 0 && (
+                  <Tooltip label={memory.split}>
+                    <span data-testid="close-chat-memory" aria-label={memory.split} className="tabular-nums">
+                      {memoryWords(memory.bytes)}
+                    </span>
+                  </Tooltip>
+                )}
               </span>
             </div>
           )}

@@ -134,3 +134,51 @@ describe('closing a chat with things running', () => {
     expect(screen.getByTestId('close-chat-confirm')).toHaveTextContent('Close chat');
   });
 });
+
+/**
+ * A folded line stands for everything under it, so its memory is the whole
+ * branch's; an opened line shows only its own, since its children show theirs.
+ * The numbers are PSS, so the sums do not count shared memory twice.
+ */
+describe('memory in the close chat window', () => {
+  const memory = (key: string) => within(line(key)).queryByTestId('close-chat-memory');
+
+  it('a folded line shows the memory of its whole branch, and says how it splits', async () => {
+    await open();
+
+    expect(memory('p:30')).toHaveTextContent('2.0 GB');
+    expect(memory('p:30')).toHaveAccessibleName('48 MB itself, 1.9 GB in 2 processes under it');
+  });
+
+  it('an opened line shows only its own memory', async () => {
+    await open();
+
+    await act(async () => void fireEvent.click(within(line('p:30')).getByRole('button', { name: /^Expand / })));
+    expect(memory('p:30')).toHaveTextContent('48 MB');
+    expect(memory('p:30')).not.toHaveAccessibleName(/under it/);
+    expect(memory('p:31')).toHaveTextContent('1.9 GB');
+  });
+
+  it('the Processes line shows the memory of every process', async () => {
+    await open();
+
+    expect(memory('group:processes')).toHaveTextContent('2.0 GB');
+  });
+
+  it('the button says how much memory the close frees', async () => {
+    await open();
+
+    expect(screen.getByTestId('close-chat-confirm')).toHaveTextContent('Close and stop 4 · frees 2.0 GB');
+    await unfold();
+    await act(async () => void fireEvent.click(tick('p:31')));
+    expect(screen.getByTestId('close-chat-confirm')).toHaveTextContent('Close and stop 2 · frees 48 MB');
+  });
+
+  it('a line with no memory to speak of shows no number', async () => {
+    await open();
+    await unfold();
+
+    expect(memory('p:20')).toBeNull();
+    expect(memory('p:22')).toBeNull();
+  });
+});
