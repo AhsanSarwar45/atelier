@@ -1653,7 +1653,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             let last = events(connection, &task.project_id, number)?
                 .into_iter()
                 .filter(|event| matches!(event["kind"].as_str(), Some("amended" | "amend_undone")))
-                .last();
+                .next_back();
             let previous = match last {
                 Some(event) if event["kind"] == "amended" && event["payload"]["plan"] == task.plan => event["payload"]["previous"].clone(),
                 _ => return refuse(format!("#{number} has no plan change to undo")),

@@ -2124,12 +2124,12 @@ async fn read_log(repo: &Path, params: LogParams) -> Answer {
     }
 
     let spoken: Vec<&str> = args.iter().map(String::as_str).collect();
-    let read = run_git(&repo, &spoken).await?;
+    let read = run_git(repo, &spoken).await?;
 
     if !read.status.success() {
         // A project nobody has saved anything in yet has an empty history,
         // which is not a failure worth showing anyone.
-        if !has_commits(&repo).await {
+        if !has_commits(repo).await {
             return Ok(Json(LogResponse { commits: Vec::new() }).into_response());
         }
         return Err(git_said_no(&read));
@@ -2148,7 +2148,7 @@ async fn read_log(repo: &Path, params: LogParams) -> Answer {
     // there when it is (bw-g6zy.1). A name that resolves to nothing is simply
     // no extra answer, not a failure — half a name is what typing looks like.
     if let Some(named) = filled(&params.sha) {
-        if let Some(found) = one_commit(&repo, named).await? {
+        if let Some(found) = one_commit(repo, named).await? {
             if !commits.iter().any(|seen| seen.sha == found.sha) {
                 commits.insert(0, found);
                 commits.truncate(params.limit.clamp(1, 1000) as usize);

@@ -580,6 +580,659 @@ pub fn validate(library: &Library, project: bool) -> Result<(), String> {
     }
     Ok(())
 }
+pub(super) fn valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 80
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+pub(super) fn library_path(data: &Path, root: Option<&Path>) -> Result<PathBuf, String> {
+    match root {
+        None => Ok(data.join("library.json")),
+        Some(root) => {
+            let manifest = crate::project_manifest::locate(root, data)
+                .ok_or("Register this project before editing its library")?;
+            Ok(manifest.path.with_file_name("library.json"))
+        }
+    }
+}
+fn read_path(path: &Path) -> Result<Library, String> {
+    if !path.exists() {
+        return Ok(Library::default());
+    }
+    serde_json::from_str(&bounded_read(path, MAX_LIBRARY)?)
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+pub fn read(data: &Path, root: Option<&Path>) -> Result<Library, String> {
+    read_path(&library_path(data, root)?)
+}
+pub fn revision(library: &Library) -> String {
+    digest(&serde_json::to_vec(library).expect("serializable library"))
+}
+pub fn source_revision(data: &Path) -> Result<String, String> {
+    let global = read(data, None)?;
+    let folders = super::skill_folders::discover(&data.join("skills"))?;
+    if folders.is_empty() { return Ok(revision(&global)); }
+    Ok(digest(&serde_json::to_vec(&(global, folders.into_iter().map(|s| s.item).collect::<Vec<_>>())).map_err(|e| e.to_string())?))
+}
+pub fn write(
+    data: &Path,
+    root: Option<&Path>,
+    library: &Library,
+    expected: &str,
+) -> Result<(), String> {
+    write_with_source(data, root, library, expected, None)
+}
+
+pub fn write_with_source(
+    data: &Path,
+    root: Option<&Path>,
+    library: &Library,
+    expected: &str,
+    source_revision: Option<&str>,
+) -> Result<(), String> {
+    let _guard = WRITES.lock().map_err(|e| e.to_string())?;
+    if let Some(expected) = source_revision.filter(|_| root.is_some()) {
+        if self::source_revision(data)? != expected {
+            return Err("Global library changed in another editor. Reload before customizing it.".into());
+        }
+    }
+    validate(library, root.is_some())?;
+    let path = library_path(data, root)?;
+    let previous = read_path(&path)?;
+    if revision(&previous) != expected {
+        return Err("Library changed in another editor. Reload before saving.".into());
+    }
+    let folder_ids: std::collections::HashSet<_> = super::skill_folders::discover(&path.with_file_name("skills"))?
+        .into_iter().map(|s| s.item.id).collect();
+    if library.items.iter().any(|item| folder_ids.contains(&item.id)
+        && !previous.items.iter().any(|old| old.id == item.id)) {
+        return Err("A skill folder already owns this ID. Edit its SKILL.md or choose another ID.".into());
+    }
+    super::provider_defaults::atomic_write(
+        &path,
+        &serde_json::to_vec_pretty(library).map_err(|e| e.to_string())?,
+    )
+}
+
+/// The Tasks rules for a project whose owner turned Require approval off:
+/// the agent creates and starts the task it needs instead of proposing it
+/// and waiting (docs/tasks.md, "Require approval").
+fn without_approval(rules: &str) -> String {
+    const ASK: &str = "write only the
+  check files, run `atelier task propose`, and stop. The owner answers
+  **Create task** (start it), **Just do it** (work without a task),
+  **Cancel** (remove the check files) or **Request changes** with a note
+  (revise and propose again). A new proposal replaces a waiting one.";
+    const CREATE: &str = "write the
+  check files, run `atelier task create`, then start it. The owner has
+  turned approval off, so do not propose and wait.";
+    const REFUSED: &str = " `create` is refused unless the owner's latest
+  message has `@task`.";
+    debug_assert!(rules.contains(ASK) && rules.contains(REFUSED), "the Tasks rules no longer say what without_approval replaces");
+    rules.replace(ASK, CREATE).replace(REFUSED, "")
+}
+
+fn builtins() -> Vec<Item> {
+    [
+        (
+            "atelier-presentation",
+            "Atelier",
+            include_str!("../../../machinery/skills/atelier/SKILL.md"),
+            Condition::Always,
+            vec![],
+        ),
+        (
+            "atelier-tasks",
+            "Tasks",
+            include_str!("../../../machinery/skills/tasks/SKILL.md"),
+            Condition::Always,
+            vec![],
+        ),
+    ]
+    .into_iter()
+    .map(|(id, name, text, when, requires)| Item {
+        id: id.into(),
+        name: name.into(),
+        kind: Kind::Instruction,
+        description: "Application guidance; maintained by Atelier".into(),
+        content: body(text),
+        when,
+        requires,
+        automatic: true,
+        parameters: BTreeMap::new(),
+        resources: BTreeMap::new(),
+        bundle: "Atelier".into(),
+    })
+    // The detail behind the short instructions, read only when a session
+    // needs it, so every session does not carry it.
+    .chain([Item {
+        id: "atelier-reference".into(),
+        name: "Atelier reference".into(),
+        kind: Kind::Skill,
+        description: "Read before writing widget, explainer or artifact JSON, saving a memory, editing agent guidance, running screen-check (references/screen-check.md) or managing Chrome without the chrome server".into(),
+        content: body(include_str!("../../../machinery/skills/atelier-reference/SKILL.md")),
+        when: Condition::Always,
+        requires: vec![],
+        automatic: true,
+        parameters: BTreeMap::new(),
+        resources: [
+            ("references/screen-check.md", include_str!("../../../machinery/skills/atelier-reference/references/screen-check.md")),
+            ("references/choosing-visuals.md", include_str!("../../../machinery/skills/atelier-reference/references/choosing-visuals.md")),
+            ("references/visual-artifacts.md", include_str!("../../../machinery/skills/atelier-reference/references/visual-artifacts.md")),
+        ]
+        .into_iter()
+        .map(|(name, text)| (name.into(), text.into()))
+        .collect(),
+        bundle: "Atelier".into(),
+    }])
+    .collect()
+}
+/// A carried skill file without its front matter.
+fn body(text: &str) -> String {
+    text.splitn(3, "---").nth(2).unwrap_or(text).trim().into()
+}
+pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
+    let _guard = WRITES.lock().map_err(|e| e.to_string())?;
+    let mut global = read(data, None)?;
+    validate(&global, false)?;
+    let located = root.and_then(|r| crate::project_manifest::locate(r, data));
+    let mut local = match &located {
+        Some(p) => read_path(&p.path.with_file_name("library.json"))?,
+        None => Library::default(),
+    };
+    validate(&local, true)?;
+    let mut folders = BTreeMap::new();
+    for (scope, library, base) in [
+        ("global", &mut global, Some(data.to_path_buf())),
+        ("project", &mut local, located.as_ref().and_then(|p| p.path.parent().map(Path::to_path_buf))),
+    ] {
+        if let Some(base) = base {
+            for mut source in super::skill_folders::discover(&base.join("skills"))? {
+                let duplicate = library.items.iter().any(|i| i.id == source.item.id);
+                if duplicate {
+                    source.error = Some(format!("Skill {} exists in both {scope} library.json and {}; remove the JSON item or move the folder to keep one source", source.item.id, source.directory.display()));
+                } else {
+                    library.items.push(source.item.clone());
+                }
+                folders.insert((scope.to_string(), source.item.id.clone()), (source.directory, source.error, duplicate));
+            }
+        }
+    }
+    let output_style = local
+        .output_style
+        .as_ref()
+        .or(global.output_style.as_ref())
+        .cloned()
+        .unwrap_or_default();
+    let tasks_off = !super::tasks::switch::enabled(data, root);
+    let ask_first = super::tasks::switch::approval(data, root);
+    let mut items: BTreeMap<String, (Item, &str)> = builtins()
+        .into_iter()
+        .filter(|i| !(tasks_off && i.id == "atelier-tasks"))
+        .map(|mut i| {
+            if !ask_first && i.id == "atelier-tasks" {
+                i.content = without_approval(&i.content);
+            }
+            (i.id.clone(), (i, "built-in"))
+        })
+        .collect();
+    if !global.general_instructions.trim().is_empty() {
+        items.insert("atelier-general-instructions".into(), (Item {
+            id: "atelier-general-instructions".into(),
+            name: "Global instructions".into(),
+            kind: Kind::Instruction,
+            content: global.general_instructions.clone(),
+            description: String::new(), when: Condition::Always, requires: vec![],
+            automatic: true, parameters: BTreeMap::new(), resources: BTreeMap::new(), bundle: String::new(),
+        }, "global"));
+    }
+    // Atelier memory rides in the snapshot like any instruction, so a chat's
+    // memories are pinned with its connection and reach every provider.
+    let project_root = root.map(|root| super::agent_memory::project_root(data, root).unwrap_or_else(|| root.to_path_buf()));
+    for (scope, source, name) in [
+        (super::agent_memory::Scope::Global, "global", "Global memory"),
+        (super::agent_memory::Scope::Project, "project", "Project memory"),
+    ] {
+        if scope == super::agent_memory::Scope::Project && project_root.is_none() {
+            continue;
+        }
+        let stored = super::agent_memory::list_scope(data, scope, project_root.as_deref()).map(|(stored, _)| stored).unwrap_or_default();
+        if let Some(content) = super::agent_memory::render(scope, &stored) {
+            let id = format!("atelier-memory-{}", scope.name());
+            items.insert(id.clone(), (Item {
+                id, name: name.into(), kind: Kind::Instruction, content,
+                description: String::new(), when: Condition::Always, requires: vec![],
+                automatic: true, parameters: BTreeMap::new(), resources: BTreeMap::new(), bundle: String::new(),
+            }, source));
+        }
+    }
+    for item in global.items {
+        items.insert(item.id.clone(), (item, "global"));
+    }
+    let mut conflicts = std::collections::HashSet::new();
+    for item in local.items {
+        if items.contains_key(&item.id) {
+            conflicts.insert(item.id.clone());
+        }
+        items.insert(item.id.clone(), (item, "project"));
+    }
+    let mut resolved = vec![];
+    for (id, (mut item, source)) in items {
+        // Local skill switches share project storage with inherited overrides,
+        // but must never apply stale inherited content to a local source.
+        let disabled = (source == "global" || (source == "project" && item.kind == Kind::Skill))
+            && local.overrides.get(&id).is_some_and(|over| over.disabled);
+        let over = if source == "global" {
+            local.overrides.get(&id)
+        } else {
+            None
+        };
+        if let Some(over) = over {
+            if let Some(when) = &over.when {
+                item.when = when.clone();
+            }
+            if let Some(content) = &over.content {
+                item.content = content.clone();
+            }
+            if let Some(automatic) = over.automatic {
+                item.automatic = automatic;
+            }
+            item.parameters.extend(over.parameters.clone());
+        }
+        let mut evaluation = if conflicts.contains(&id) {
+            Evaluation::unknown("This project item conflicts with a newly added global ID. Remove the project item and use Customize, or recreate it with a distinct ID.".into())
+        } else {
+            item.when.evaluate(root)
+        };
+        let missing: Vec<_> = item
+            .requires
+            .iter()
+            .filter(|name| crate::routes::find_tool(name, &[]).is_none())
+            .cloned()
+            .collect();
+        let mut state = if conflicts.contains(&id) {
+            "conflict"
+        } else if disabled {
+            "disabled"
+        } else if item.kind == Kind::OutputStyle && item.id != output_style {
+            "not_selected"
+        } else if evaluation.matched == Some(false) {
+            "not_applicable"
+        } else if evaluation.matched.is_none() {
+            "unknown"
+        } else if !missing.is_empty() {
+            "unavailable"
+        } else {
+            "available"
+        };
+        let folder_source = folders.get(&(source.to_string(), id.clone()));
+        let folder = folder_source.map(|(path, error, _)| {
+            if let Some(error) = error { Err(error.clone()) }
+            else { super::skill_folders::pin(data, path, &item) }
+        }).transpose().unwrap_or_else(|error| {
+            if state != "disabled" { state = "invalid"; }
+            evaluation = Evaluation::unknown(format!("Invalid skill folder: {error}"));
+            None
+        });
+        resolved.push(Resolved {
+            folder,
+            // A colliding JSON item remains editable/removable in Settings.
+            folder_source: folder_source.filter(|(_, _, duplicate)| !duplicate).map(|(path, _, _)| path.clone()),
+            item,
+            source: source.into(),
+            customized: over.is_some(),
+            state: state.into(),
+            evaluation,
+            missing,
+        });
+    }
+    let revision = digest(&serde_json::to_vec(&resolved).map_err(|e| e.to_string())?);
+    Ok(Snapshot {
+        revision,
+        items: resolved,
+        tasks_off,
+    })
+}
+impl Snapshot {
+    pub fn mcp_servers(&self) -> Result<Vec<agent_client_protocol::schema::v1::McpServer>, String> {
+        if self.commands().is_empty() {
+            return Ok(vec![]);
+        }
+        serde_json::from_value(json!([{"name":"atelier-shared-skills",
+            "command":std::env::current_exe().map_err(|e| e.to_string())?,
+            "args":["tool","skills","mcp",self.revision],
+            "env":[{"name":"ATELIER_DATA_DIR","value":data_dir()?.to_string_lossy()}]
+        }]))
+        .map_err(|e| e.to_string())
+    }
+    pub fn persist(&self, data: &Path) -> Result<(), String> {
+        let path = data
+            .join("library-snapshots")
+            .join(format!("{}.json", self.revision));
+        if !path.exists() {
+            super::provider_defaults::atomic_write(
+                &path,
+                &serde_json::to_vec(self).map_err(|e| e.to_string())?,
+            )?;
+        }
+        Ok(())
+    }
+    pub fn commands(&self) -> Vec<Value> {
+        // Atelier's own reference is read by agents, never typed as a command.
+        self.items.iter().filter(|r| r.state == "available" && r.item.kind == Kind::Skill && r.source != "built-in").map(|r| json!({
+            "name":format!("skill:{}", r.item.id), "title":r.item.name, "description":r.item.description, "kind":"skill", "execution":"shared"
+        })).collect()
+    }
+    /// The skills a task type may name: `[{id, name, description}]`.
+    pub fn skills(&self) -> Vec<Value> {
+        self.items.iter().filter(|r| r.state == "available" && r.item.kind == Kind::Skill).map(|r| json!({
+            "id": r.item.id, "name": r.item.name, "description": r.item.description,
+        })).collect()
+    }
+    pub fn read_skill(&self, id: &str, resource: Option<&str>) -> Result<String, String> {
+        let row = self
+            .items
+            .iter()
+            .find(|r| r.item.id == id)
+            .ok_or("Unknown skill")?;
+        if row.state != "available" || row.item.kind != Kind::Skill {
+            return Err(format!("{} is {}", row.item.name, row.state));
+        }
+        let text = match resource {
+            Some(name) if row.folder.is_some() => return super::skill_folders::read(row.folder.as_ref().unwrap(), name),
+            Some(name) => row
+                .item
+                .resources
+                .get(name)
+                .ok_or("Unknown skill resource")?,
+            None => &row.item.content,
+        };
+        let mut text = text.clone();
+        if let Some(folder) = &row.folder {
+            text.push_str(&format!("\n\nSkill directory: {}\nResolve relative paths from this directory. Read references and run helpers with your existing filesystem/shell tools and permissions. This is a pinned copy: write generated output elsewhere, not into this directory.", folder.directory.display()));
+        }
+        // Replace placeholders once, never recursively interpret substituted values.
+        let pattern = regex::Regex::new(r"\{\{([a-z0-9-]+)\}\}").expect("constant regex");
+        text = pattern
+            .replace_all(&text, |caps: &regex::Captures| {
+                row.item
+                    .parameters
+                    .get(&caps[1])
+                    .cloned()
+                    .unwrap_or_else(|| caps[0].into())
+            })
+            .into_owned();
+        if resource.is_none() && !row.item.resources.is_empty() {
+            text.push_str(&format!(
+                "\n\nSupporting resources (read with atelier_skill_read): {}",
+                row.item
+                    .resources
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        Ok(text)
+    }
+    /// A skill's library name and its text, for a message that names it as a
+    /// reference rather than running it (`references.rs`, bw-mi3s.2).
+    pub fn skill_text(&self, id: &str) -> Result<(String, String), String> {
+        let text = self.read_skill(id, None)?;
+        let name = self.items.iter().find(|r| r.item.id == id).map(|r| r.item.name.clone()).unwrap_or_else(|| id.to_string());
+        Ok((name, text))
+    }
+    /// The block that tells the agent to run `/skill:<id>`, for a message that
+    /// starts with one; nothing for any other message.
+    ///
+    /// A block of its own, sent after everything the person sent, rather than
+    /// the message's text rewritten: a message with an attachment is sent as
+    /// its parts, and rewriting the text alone lost the instructions on the way
+    /// (bw-mi3s.2).
+    pub fn command_block(&self, text: &str) -> Result<Option<String>, String> {
+        let Some(rest) = text.trim_start().strip_prefix("/skill:") else {
+            return Ok(None);
+        };
+        let (id, arguments) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+        // The block says outright that this is a command the person ran, so the
+        // provider carries it out the way it would one of its own slash
+        // commands rather than reading a pasted skill as background (bw-zldt.1).
+        let arguments = arguments.trim();
+        let body = format!(
+            "The user ran the Atelier command /skill:{id} (shared skill {id}, revision {}). Carry out the instructions below now, as you would a slash command the user typed. The user's arguments are: {}\n\n{}",
+            self.revision,
+            if arguments.is_empty() { "(none)" } else { arguments },
+            self.read_skill(id, None)?,
+        );
+        Ok(Some(super::metadata::added_by_atelier(super::metadata::COMMAND, &body)))
+    }
+    /// A `/skill:` line and its block together, as one text: what the person
+    /// typed stays first and stays theirs, and the instructions ride in a block
+    /// Atelier added, which the chat's title and transcript leave out.
+    pub fn expand(&self, text: &str) -> Result<Option<String>, String> {
+        let Some(block) = self.command_block(text)? else {
+            return Ok(None);
+        };
+        let rest = text.trim_start().strip_prefix("/skill:").unwrap_or_default();
+        let (id, arguments) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+        let arguments = arguments.trim();
+        let typed = format!("/skill:{id}{}{arguments}", if arguments.is_empty() { "" } else { " " });
+        Ok(Some(format!("{typed}\n\n{block}")))
+    }
+    pub fn guidance(&self) -> String {
+        // Native resume can retain older instruction blocks. The connector
+        // repeats this snapshot once at connection start; that current block
+        // supersedes prior snapshots rather than accumulating their styles.
+        let mut pieces = vec![format!("Shared library revision: {}. Content is pinned for this connection; settings changes apply on reconnect. Shared skills use atelier_skill_read; explicitly selected skills arrive in the user turn. Read a relevant automatic skill before using its procedure. If the tool is unavailable, use `atelier tool skills read {} ID [RESOURCE]`. Native provider instructions may also apply. Project customizations replace the corresponding global settings. Output styles affect presentation, never tool permissions or required result formats.", self.revision, self.revision)];
+        pieces.push("On a later connection, atelier_connection_guidance supplies the current user-configured library and supersedes this snapshot, including its instructions and output style. Earlier responses are history, not current configuration.".into());
+        if let Ok(data) = data_dir() {
+            pieces.push(format!("Read-only workers without the skill tool or shell may read the same pinned skill content and resources from {}. Only items whose state is available apply.", data.join("library-snapshots").join(format!("{}.json", self.revision)).display()));
+        }
+        let pattern = regex::Regex::new(r"\{\{([a-z0-9-]+)\}\}").expect("constant regex");
+        for row in &self.items {
+            if row.state == "available" {
+                if row.item.kind != Kind::Skill {
+                    let content =
+                        pattern.replace_all(&row.item.content, |caps: &regex::Captures| {
+                            row.item
+                                .parameters
+                                .get(&caps[1])
+                                .cloned()
+                                .unwrap_or_else(|| caps[0].into())
+                        });
+                    pieces.push(format!(
+                        "{} instructions — {}:\n{}",
+                        row.source, row.item.name, content
+                    ));
+                } else if row.item.automatic {
+                    pieces.push(format!(
+                        "Available skill {}: {}. {}",
+                        row.item.id, row.item.name, row.item.description
+                    ));
+                }
+            } else if row.state == "unavailable" {
+                pieces.push(format!("{} applies here but is unavailable: missing {}. Do not assume its requirements are installed.", row.item.name, row.missing.join(", ")));
+            }
+        }
+        pieces.join("\n\n")
+    }
+}
+/// The Atelier commands a chat in `root` can run, read without starting it.
+///
+/// A woken chat's menu carries these from the snapshot its connection pinned;
+/// a stopped one has no connection, and a slash in it listed none (bw-zldt.2).
+/// Nothing is persisted here: the revision is pinned when the chat wakes.
+pub fn commands_for(root: &Path) -> Vec<Value> {
+    data_dir()
+        .and_then(|data| resolve(&data, Some(root)))
+        .map(|snapshot| snapshot.commands())
+        .unwrap_or_default()
+}
+pub fn snapshot(root: &Path) -> Result<Snapshot, String> {
+    let data = data_dir()?;
+    let snap = resolve(&data, Some(root))?;
+    snap.persist(&data)?;
+    Ok(snap)
+}
+fn load_snapshot(data: &Path, revision: &str) -> Result<Snapshot, String> {
+    if revision.len() != 64 || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Invalid snapshot revision".into());
+    }
+    let snap: Snapshot = serde_json::from_str(&bounded_read(
+        &data
+            .join("library-snapshots")
+            .join(format!("{revision}.json")),
+        8 * MAX_LIBRARY,
+    )?)
+    .map_err(|e| e.to_string())?;
+    if digest(&serde_json::to_vec(&snap.items).map_err(|e| e.to_string())?) != revision {
+        return Err("Snapshot integrity check failed".into());
+    }
+    Ok(snap)
+}
+
+/// Read-only stdio MCP server, used unchanged by every ACP provider.
+/// Discover editable sources without creating settings, migrating manifests,
+/// or generating a session snapshot. Personal settings use the same Git identity
+/// as the resolver, so linked worktrees find the same personal library.
+fn locations(data: &Path, folder: &Path) -> Result<Value, String> {
+    let folder = fs::canonicalize(folder).map_err(|e| format!("Project folder: {e}"))?;
+    if !folder.is_dir() {
+        return Err("Project folder must be a directory".into());
+    }
+    let git = std::process::Command::new("git")
+        .arg("-C").arg(&folder).args(["rev-parse", "--show-toplevel"]).output();
+    let git_root = git.ok().filter(|out| out.status.success())
+        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()));
+    let root = git_root.unwrap_or_else(|| {
+        folder.ancestors().find(|dir| {
+            crate::project_manifest::repository_path(dir).is_file()
+                || crate::project_manifest::personal_path(dir, data).is_file()
+        }).unwrap_or(&folder).to_path_buf()
+    });
+    let repository = crate::project_manifest::repository_path(&root);
+    let personal = crate::project_manifest::personal_path(&root, data);
+    let selected = if repository.is_file() { Some((repository, "repository")) }
+        else if personal.is_file() { Some((personal, "personal")) } else { None };
+    let project = selected.map(|(manifest, storage)| {
+        crate::project_manifest::read(&manifest)?;
+        Ok::<_, String>(json!({
+            "root": root, "storage": storage, "manifest": manifest,
+            "instructions": crate::project_manifest::instructions_path(&manifest),
+            "library": manifest.with_file_name("library.json"),
+            "skills": manifest.with_file_name("skills"),
+        }))
+    }).transpose()?;
+    Ok(json!({
+        "global": {"library": data.join("library.json"), "skills": data.join("skills"), "instructions_field": "general_instructions"},
+        "project": project,
+        "project_registered": project.is_some(),
+        "project_root": root,
+        "format": "Skills are folders under skills/<id>/SKILL.md with scripts, references and assets preserved. Text-only library.json items remain supported. Commands are skills with automatic=false; output_style selects a style ID.",
+        "note": "Paths may not exist until first save. No project settings were created. Edit sources, never library-snapshots; reconnect to apply changes.",
+    }))
+}
+
+pub fn cli(args: &[String]) -> Result<i32, String> {
+    let action = args.first().map(String::as_str).unwrap_or("help");
+    if matches!(action, "help" | "--help" | "-h") {
+        println!("Usage: atelier tool skills locations [--project PATH] | list | read REVISION ID [RESOURCE] | mcp REVISION");
+        return Ok(0);
+    }
+    if action == "locations" {
+        let folder = match &args[1..] {
+            [] => std::env::current_dir().map_err(|e| e.to_string())?,
+            [flag, path] if flag == "--project" => PathBuf::from(path),
+            _ => return Err("Usage: atelier tool skills locations [--project PATH]".into()),
+        };
+        let data = std::path::absolute(data_dir()?).map_err(|e| e.to_string())?;
+        println!("{}", serde_json::to_string_pretty(&locations(&data, &folder)?).map_err(|e| e.to_string())?);
+        return Ok(0);
+    }
+    if action == "list" {
+        let root = std::env::current_dir().map_err(|e| e.to_string())?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&snapshot(&root)?).map_err(|e| e.to_string())?
+        );
+        return Ok(0);
+    }
+    let data = data_dir()?;
+    let revision = args
+        .get(1)
+        .ok_or("Usage: atelier tool skills list | read REVISION ID [RESOURCE] | mcp REVISION")?;
+    let snap = load_snapshot(&data, revision)?;
+    if action == "read" {
+        println!(
+            "{}",
+            snap.read_skill(
+                args.get(2).ok_or("Missing skill ID")?,
+                args.get(3).map(String::as_str)
+            )?
+        );
+        return Ok(0);
+    }
+    if action != "mcp" {
+        return Err("Unknown skills operation".into());
+    }
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let mut output = std::io::stdout().lock();
+    loop {
+        let mut line = String::new();
+        use std::io::Read;
+        if input
+            .by_ref()
+            .take(1024 * 1024)
+            .read_line(&mut line)
+            .map_err(|e| e.to_string())?
+            == 0
+        {
+            break;
+        }
+        if line.len() >= 1024 * 1024 {
+            return Err("MCP message exceeds limit".into());
+        }
+        let request: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
+        let Some(id) = request.get("id") else {
+            continue;
+        };
+        let result = match request["method"].as_str().unwrap_or_default() {
+            "initialize" => {
+                json!({"protocolVersion":request["params"]["protocolVersion"].as_str().unwrap_or("2024-11-05"),"capabilities":{"tools":{}},"serverInfo":{"name":"atelier-skills","version":"1"}})
+            }
+            "ping" => json!({}),
+            "tools/list" => {
+                json!({"tools":[{"name":"atelier_skill_read","description":"Read an available shared skill or its supporting resource. Use the skill IDs in the session instructions.","inputSchema":{"type":"object","properties":{"id":{"type":"string"},"resource":{"type":"string"}},"required":["id"],"additionalProperties":false}}]})
+            }
+            "tools/call" if request["params"]["name"] == "atelier_skill_read" => {
+                let args = &request["params"]["arguments"];
+                match snap.read_skill(
+                    args["id"].as_str().unwrap_or_default(),
+                    args["resource"].as_str(),
+                ) {
+                    Ok(text) => json!({"content":[{"type":"text","text":text}]}),
+                    Err(error) => json!({"isError":true,"content":[{"type":"text","text":error}]}),
+                }
+            }
+            _ => {
+                writeln!(output, "{}", json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Method not found"}})).map_err(|e| e.to_string())?;
+                output.flush().map_err(|e| e.to_string())?;
+                continue;
+            }
+        };
+        writeln!(
+            output,
+            "{}",
+            json!({"jsonrpc":"2.0","id":id,"result":result})
+        )
+        .map_err(|e| e.to_string())?;
+        output.flush().map_err(|e| e.to_string())?;
+    }
+    Ok(0)
+}
 
 #[cfg(test)]
 mod tests {
@@ -1047,658 +1700,4 @@ mod tests {
             "project"
         );
     }
-}
-pub(super) fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 80
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-}
-pub(super) fn library_path(data: &Path, root: Option<&Path>) -> Result<PathBuf, String> {
-    match root {
-        None => Ok(data.join("library.json")),
-        Some(root) => {
-            let manifest = crate::project_manifest::locate(root, data)
-                .ok_or("Register this project before editing its library")?;
-            Ok(manifest.path.with_file_name("library.json"))
-        }
-    }
-}
-fn read_path(path: &Path) -> Result<Library, String> {
-    if !path.exists() {
-        return Ok(Library::default());
-    }
-    serde_json::from_str(&bounded_read(path, MAX_LIBRARY)?)
-        .map_err(|e| format!("{}: {e}", path.display()))
-}
-pub fn read(data: &Path, root: Option<&Path>) -> Result<Library, String> {
-    read_path(&library_path(data, root)?)
-}
-pub fn revision(library: &Library) -> String {
-    digest(&serde_json::to_vec(library).expect("serializable library"))
-}
-pub fn source_revision(data: &Path) -> Result<String, String> {
-    let global = read(data, None)?;
-    let folders = super::skill_folders::discover(&data.join("skills"))?;
-    if folders.is_empty() { return Ok(revision(&global)); }
-    Ok(digest(&serde_json::to_vec(&(global, folders.into_iter().map(|s| s.item).collect::<Vec<_>>())).map_err(|e| e.to_string())?))
-}
-pub fn write(
-    data: &Path,
-    root: Option<&Path>,
-    library: &Library,
-    expected: &str,
-) -> Result<(), String> {
-    write_with_source(data, root, library, expected, None)
-}
-
-pub fn write_with_source(
-    data: &Path,
-    root: Option<&Path>,
-    library: &Library,
-    expected: &str,
-    source_revision: Option<&str>,
-) -> Result<(), String> {
-    let _guard = WRITES.lock().map_err(|e| e.to_string())?;
-    if let Some(expected) = source_revision.filter(|_| root.is_some()) {
-        if self::source_revision(data)? != expected {
-            return Err("Global library changed in another editor. Reload before customizing it.".into());
-        }
-    }
-    validate(library, root.is_some())?;
-    let path = library_path(data, root)?;
-    let previous = read_path(&path)?;
-    if revision(&previous) != expected {
-        return Err("Library changed in another editor. Reload before saving.".into());
-    }
-    let folder_ids: std::collections::HashSet<_> = super::skill_folders::discover(&path.with_file_name("skills"))?
-        .into_iter().map(|s| s.item.id).collect();
-    if library.items.iter().any(|item| folder_ids.contains(&item.id)
-        && !previous.items.iter().any(|old| old.id == item.id)) {
-        return Err("A skill folder already owns this ID. Edit its SKILL.md or choose another ID.".into());
-    }
-    super::provider_defaults::atomic_write(
-        &path,
-        &serde_json::to_vec_pretty(library).map_err(|e| e.to_string())?,
-    )
-}
-
-/// The Tasks rules for a project whose owner turned Require approval off:
-/// the agent creates and starts the task it needs instead of proposing it
-/// and waiting (docs/tasks.md, "Require approval").
-fn without_approval(rules: &str) -> String {
-    const ASK: &str = "write only the
-  check files, run `atelier task propose`, and stop. The owner answers
-  **Create task** (start it), **Just do it** (work without a task),
-  **Cancel** (remove the check files) or **Request changes** with a note
-  (revise and propose again). A new proposal replaces a waiting one.";
-    const CREATE: &str = "write the
-  check files, run `atelier task create`, then start it. The owner has
-  turned approval off, so do not propose and wait.";
-    const REFUSED: &str = " `create` is refused unless the owner's latest
-  message has `@task`.";
-    debug_assert!(rules.contains(ASK) && rules.contains(REFUSED), "the Tasks rules no longer say what without_approval replaces");
-    rules.replace(ASK, CREATE).replace(REFUSED, "")
-}
-
-fn builtins() -> Vec<Item> {
-    [
-        (
-            "atelier-presentation",
-            "Atelier",
-            include_str!("../../../machinery/skills/atelier/SKILL.md"),
-            Condition::Always,
-            vec![],
-        ),
-        (
-            "atelier-tasks",
-            "Tasks",
-            include_str!("../../../machinery/skills/tasks/SKILL.md"),
-            Condition::Always,
-            vec![],
-        ),
-    ]
-    .into_iter()
-    .map(|(id, name, text, when, requires)| Item {
-        id: id.into(),
-        name: name.into(),
-        kind: Kind::Instruction,
-        description: "Application guidance; maintained by Atelier".into(),
-        content: body(text),
-        when,
-        requires,
-        automatic: true,
-        parameters: BTreeMap::new(),
-        resources: BTreeMap::new(),
-        bundle: "Atelier".into(),
-    })
-    // The detail behind the short instructions, read only when a session
-    // needs it, so every session does not carry it.
-    .chain([Item {
-        id: "atelier-reference".into(),
-        name: "Atelier reference".into(),
-        kind: Kind::Skill,
-        description: "Read before writing widget, explainer or artifact JSON, saving a memory, editing agent guidance, running screen-check (references/screen-check.md) or managing Chrome without the chrome server".into(),
-        content: body(include_str!("../../../machinery/skills/atelier-reference/SKILL.md")),
-        when: Condition::Always,
-        requires: vec![],
-        automatic: true,
-        parameters: BTreeMap::new(),
-        resources: [
-            ("references/screen-check.md", include_str!("../../../machinery/skills/atelier-reference/references/screen-check.md")),
-            ("references/choosing-visuals.md", include_str!("../../../machinery/skills/atelier-reference/references/choosing-visuals.md")),
-            ("references/visual-artifacts.md", include_str!("../../../machinery/skills/atelier-reference/references/visual-artifacts.md")),
-        ]
-        .into_iter()
-        .map(|(name, text)| (name.into(), text.into()))
-        .collect(),
-        bundle: "Atelier".into(),
-    }])
-    .collect()
-}
-/// A carried skill file without its front matter.
-fn body(text: &str) -> String {
-    text.splitn(3, "---").nth(2).unwrap_or(text).trim().into()
-}
-pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
-    let _guard = WRITES.lock().map_err(|e| e.to_string())?;
-    let mut global = read(data, None)?;
-    validate(&global, false)?;
-    let located = root.and_then(|r| crate::project_manifest::locate(r, data));
-    let mut local = match &located {
-        Some(p) => read_path(&p.path.with_file_name("library.json"))?,
-        None => Library::default(),
-    };
-    validate(&local, true)?;
-    let mut folders = BTreeMap::new();
-    for (scope, library, base) in [
-        ("global", &mut global, Some(data.to_path_buf())),
-        ("project", &mut local, located.as_ref().and_then(|p| p.path.parent().map(Path::to_path_buf))),
-    ] {
-        if let Some(base) = base {
-            for mut source in super::skill_folders::discover(&base.join("skills"))? {
-                let duplicate = library.items.iter().any(|i| i.id == source.item.id);
-                if duplicate {
-                    source.error = Some(format!("Skill {} exists in both {scope} library.json and {}; remove the JSON item or move the folder to keep one source", source.item.id, source.directory.display()));
-                } else {
-                    library.items.push(source.item.clone());
-                }
-                folders.insert((scope.to_string(), source.item.id.clone()), (source.directory, source.error, duplicate));
-            }
-        }
-    }
-    let output_style = local
-        .output_style
-        .as_ref()
-        .or(global.output_style.as_ref())
-        .cloned()
-        .unwrap_or_default();
-    let tasks_off = !super::tasks::switch::enabled(data, root);
-    let ask_first = super::tasks::switch::approval(data, root);
-    let mut items: BTreeMap<String, (Item, &str)> = builtins()
-        .into_iter()
-        .filter(|i| !(tasks_off && i.id == "atelier-tasks"))
-        .map(|mut i| {
-            if !ask_first && i.id == "atelier-tasks" {
-                i.content = without_approval(&i.content);
-            }
-            (i.id.clone(), (i, "built-in"))
-        })
-        .collect();
-    if !global.general_instructions.trim().is_empty() {
-        items.insert("atelier-general-instructions".into(), (Item {
-            id: "atelier-general-instructions".into(),
-            name: "Global instructions".into(),
-            kind: Kind::Instruction,
-            content: global.general_instructions.clone(),
-            description: String::new(), when: Condition::Always, requires: vec![],
-            automatic: true, parameters: BTreeMap::new(), resources: BTreeMap::new(), bundle: String::new(),
-        }, "global"));
-    }
-    // Atelier memory rides in the snapshot like any instruction, so a chat's
-    // memories are pinned with its connection and reach every provider.
-    let project_root = root.map(|root| super::agent_memory::project_root(data, root).unwrap_or_else(|| root.to_path_buf()));
-    for (scope, source, name) in [
-        (super::agent_memory::Scope::Global, "global", "Global memory"),
-        (super::agent_memory::Scope::Project, "project", "Project memory"),
-    ] {
-        if scope == super::agent_memory::Scope::Project && project_root.is_none() {
-            continue;
-        }
-        let stored = super::agent_memory::list_scope(data, scope, project_root.as_deref()).map(|(stored, _)| stored).unwrap_or_default();
-        if let Some(content) = super::agent_memory::render(scope, &stored) {
-            let id = format!("atelier-memory-{}", scope.name());
-            items.insert(id.clone(), (Item {
-                id, name: name.into(), kind: Kind::Instruction, content,
-                description: String::new(), when: Condition::Always, requires: vec![],
-                automatic: true, parameters: BTreeMap::new(), resources: BTreeMap::new(), bundle: String::new(),
-            }, source));
-        }
-    }
-    for item in global.items {
-        items.insert(item.id.clone(), (item, "global"));
-    }
-    let mut conflicts = std::collections::HashSet::new();
-    for item in local.items {
-        if items.contains_key(&item.id) {
-            conflicts.insert(item.id.clone());
-        }
-        items.insert(item.id.clone(), (item, "project"));
-    }
-    let mut resolved = vec![];
-    for (id, (mut item, source)) in items {
-        // Local skill switches share project storage with inherited overrides,
-        // but must never apply stale inherited content to a local source.
-        let disabled = (source == "global" || (source == "project" && item.kind == Kind::Skill))
-            && local.overrides.get(&id).is_some_and(|over| over.disabled);
-        let over = if source == "global" {
-            local.overrides.get(&id)
-        } else {
-            None
-        };
-        if let Some(over) = over {
-            if let Some(when) = &over.when {
-                item.when = when.clone();
-            }
-            if let Some(content) = &over.content {
-                item.content = content.clone();
-            }
-            if let Some(automatic) = over.automatic {
-                item.automatic = automatic;
-            }
-            item.parameters.extend(over.parameters.clone());
-        }
-        let mut evaluation = if conflicts.contains(&id) {
-            Evaluation::unknown("This project item conflicts with a newly added global ID. Remove the project item and use Customize, or recreate it with a distinct ID.".into())
-        } else {
-            item.when.evaluate(root)
-        };
-        let missing: Vec<_> = item
-            .requires
-            .iter()
-            .filter(|name| crate::routes::find_tool(name, &[]).is_none())
-            .cloned()
-            .collect();
-        let mut state = if conflicts.contains(&id) {
-            "conflict"
-        } else if disabled {
-            "disabled"
-        } else if item.kind == Kind::OutputStyle && item.id != output_style {
-            "not_selected"
-        } else if evaluation.matched == Some(false) {
-            "not_applicable"
-        } else if evaluation.matched.is_none() {
-            "unknown"
-        } else if !missing.is_empty() {
-            "unavailable"
-        } else {
-            "available"
-        };
-        let folder_source = folders.get(&(source.to_string(), id.clone()));
-        let folder = folder_source.map(|(path, error, _)| {
-            if let Some(error) = error { Err(error.clone()) }
-            else { super::skill_folders::pin(data, path, &item) }
-        }).transpose().unwrap_or_else(|error| {
-            if state != "disabled" { state = "invalid"; }
-            evaluation = Evaluation::unknown(format!("Invalid skill folder: {error}"));
-            None
-        });
-        resolved.push(Resolved {
-            folder,
-            // A colliding JSON item remains editable/removable in Settings.
-            folder_source: folder_source.filter(|(_, _, duplicate)| !duplicate).map(|(path, _, _)| path.clone()),
-            item,
-            source: source.into(),
-            customized: over.is_some(),
-            state: state.into(),
-            evaluation,
-            missing,
-        });
-    }
-    let revision = digest(&serde_json::to_vec(&resolved).map_err(|e| e.to_string())?);
-    Ok(Snapshot {
-        revision,
-        items: resolved,
-        tasks_off,
-    })
-}
-impl Snapshot {
-    pub fn mcp_servers(&self) -> Result<Vec<agent_client_protocol::schema::v1::McpServer>, String> {
-        if self.commands().is_empty() {
-            return Ok(vec![]);
-        }
-        serde_json::from_value(json!([{"name":"atelier-shared-skills",
-            "command":std::env::current_exe().map_err(|e| e.to_string())?,
-            "args":["tool","skills","mcp",self.revision],
-            "env":[{"name":"ATELIER_DATA_DIR","value":data_dir()?.to_string_lossy()}]
-        }]))
-        .map_err(|e| e.to_string())
-    }
-    pub fn persist(&self, data: &Path) -> Result<(), String> {
-        let path = data
-            .join("library-snapshots")
-            .join(format!("{}.json", self.revision));
-        if !path.exists() {
-            super::provider_defaults::atomic_write(
-                &path,
-                &serde_json::to_vec(self).map_err(|e| e.to_string())?,
-            )?;
-        }
-        Ok(())
-    }
-    pub fn commands(&self) -> Vec<Value> {
-        // Atelier's own reference is read by agents, never typed as a command.
-        self.items.iter().filter(|r| r.state == "available" && r.item.kind == Kind::Skill && r.source != "built-in").map(|r| json!({
-            "name":format!("skill:{}", r.item.id), "title":r.item.name, "description":r.item.description, "kind":"skill", "execution":"shared"
-        })).collect()
-    }
-    /// The skills a task type may name: `[{id, name, description}]`.
-    pub fn skills(&self) -> Vec<Value> {
-        self.items.iter().filter(|r| r.state == "available" && r.item.kind == Kind::Skill).map(|r| json!({
-            "id": r.item.id, "name": r.item.name, "description": r.item.description,
-        })).collect()
-    }
-    pub fn read_skill(&self, id: &str, resource: Option<&str>) -> Result<String, String> {
-        let row = self
-            .items
-            .iter()
-            .find(|r| r.item.id == id)
-            .ok_or("Unknown skill")?;
-        if row.state != "available" || row.item.kind != Kind::Skill {
-            return Err(format!("{} is {}", row.item.name, row.state));
-        }
-        let text = match resource {
-            Some(name) if row.folder.is_some() => return super::skill_folders::read(row.folder.as_ref().unwrap(), name),
-            Some(name) => row
-                .item
-                .resources
-                .get(name)
-                .ok_or("Unknown skill resource")?,
-            None => &row.item.content,
-        };
-        let mut text = text.clone();
-        if let Some(folder) = &row.folder {
-            text.push_str(&format!("\n\nSkill directory: {}\nResolve relative paths from this directory. Read references and run helpers with your existing filesystem/shell tools and permissions. This is a pinned copy: write generated output elsewhere, not into this directory.", folder.directory.display()));
-        }
-        // Replace placeholders once, never recursively interpret substituted values.
-        let pattern = regex::Regex::new(r"\{\{([a-z0-9-]+)\}\}").expect("constant regex");
-        text = pattern
-            .replace_all(&text, |caps: &regex::Captures| {
-                row.item
-                    .parameters
-                    .get(&caps[1])
-                    .cloned()
-                    .unwrap_or_else(|| caps[0].into())
-            })
-            .into_owned();
-        if resource.is_none() && !row.item.resources.is_empty() {
-            text.push_str(&format!(
-                "\n\nSupporting resources (read with atelier_skill_read): {}",
-                row.item
-                    .resources
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        Ok(text)
-    }
-    /// A skill's library name and its text, for a message that names it as a
-    /// reference rather than running it (`references.rs`, bw-mi3s.2).
-    pub fn skill_text(&self, id: &str) -> Result<(String, String), String> {
-        let text = self.read_skill(id, None)?;
-        let name = self.items.iter().find(|r| r.item.id == id).map(|r| r.item.name.clone()).unwrap_or_else(|| id.to_string());
-        Ok((name, text))
-    }
-    /// The block that tells the agent to run `/skill:<id>`, for a message that
-    /// starts with one; nothing for any other message.
-    ///
-    /// A block of its own, sent after everything the person sent, rather than
-    /// the message's text rewritten: a message with an attachment is sent as
-    /// its parts, and rewriting the text alone lost the instructions on the way
-    /// (bw-mi3s.2).
-    pub fn command_block(&self, text: &str) -> Result<Option<String>, String> {
-        let Some(rest) = text.trim_start().strip_prefix("/skill:") else {
-            return Ok(None);
-        };
-        let (id, arguments) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-        // The block says outright that this is a command the person ran, so the
-        // provider carries it out the way it would one of its own slash
-        // commands rather than reading a pasted skill as background (bw-zldt.1).
-        let arguments = arguments.trim();
-        let body = format!(
-            "The user ran the Atelier command /skill:{id} (shared skill {id}, revision {}). Carry out the instructions below now, as you would a slash command the user typed. The user's arguments are: {}\n\n{}",
-            self.revision,
-            if arguments.is_empty() { "(none)" } else { arguments },
-            self.read_skill(id, None)?,
-        );
-        Ok(Some(super::metadata::added_by_atelier(super::metadata::COMMAND, &body)))
-    }
-    /// A `/skill:` line and its block together, as one text: what the person
-    /// typed stays first and stays theirs, and the instructions ride in a block
-    /// Atelier added, which the chat's title and transcript leave out.
-    pub fn expand(&self, text: &str) -> Result<Option<String>, String> {
-        let Some(block) = self.command_block(text)? else {
-            return Ok(None);
-        };
-        let rest = text.trim_start().strip_prefix("/skill:").unwrap_or_default();
-        let (id, arguments) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-        let arguments = arguments.trim();
-        let typed = format!("/skill:{id}{}{arguments}", if arguments.is_empty() { "" } else { " " });
-        Ok(Some(format!("{typed}\n\n{block}")))
-    }
-    pub fn guidance(&self) -> String {
-        // Native resume can retain older instruction blocks. The connector
-        // repeats this snapshot once at connection start; that current block
-        // supersedes prior snapshots rather than accumulating their styles.
-        let mut pieces = vec![format!("Shared library revision: {}. Content is pinned for this connection; settings changes apply on reconnect. Shared skills use atelier_skill_read; explicitly selected skills arrive in the user turn. Read a relevant automatic skill before using its procedure. If the tool is unavailable, use `atelier tool skills read {} ID [RESOURCE]`. Native provider instructions may also apply. Project customizations replace the corresponding global settings. Output styles affect presentation, never tool permissions or required result formats.", self.revision, self.revision)];
-        pieces.push("On a later connection, atelier_connection_guidance supplies the current user-configured library and supersedes this snapshot, including its instructions and output style. Earlier responses are history, not current configuration.".into());
-        if let Ok(data) = data_dir() {
-            pieces.push(format!("Read-only workers without the skill tool or shell may read the same pinned skill content and resources from {}. Only items whose state is available apply.", data.join("library-snapshots").join(format!("{}.json", self.revision)).display()));
-        }
-        for row in &self.items {
-            if row.state == "available" {
-                if row.item.kind != Kind::Skill {
-                    let pattern =
-                        regex::Regex::new(r"\{\{([a-z0-9-]+)\}\}").expect("constant regex");
-                    let content =
-                        pattern.replace_all(&row.item.content, |caps: &regex::Captures| {
-                            row.item
-                                .parameters
-                                .get(&caps[1])
-                                .cloned()
-                                .unwrap_or_else(|| caps[0].into())
-                        });
-                    pieces.push(format!(
-                        "{} instructions — {}:\n{}",
-                        row.source, row.item.name, content
-                    ));
-                } else if row.item.automatic {
-                    pieces.push(format!(
-                        "Available skill {}: {}. {}",
-                        row.item.id, row.item.name, row.item.description
-                    ));
-                }
-            } else if row.state == "unavailable" {
-                pieces.push(format!("{} applies here but is unavailable: missing {}. Do not assume its requirements are installed.", row.item.name, row.missing.join(", ")));
-            }
-        }
-        pieces.join("\n\n")
-    }
-}
-/// The Atelier commands a chat in `root` can run, read without starting it.
-///
-/// A woken chat's menu carries these from the snapshot its connection pinned;
-/// a stopped one has no connection, and a slash in it listed none (bw-zldt.2).
-/// Nothing is persisted here: the revision is pinned when the chat wakes.
-pub fn commands_for(root: &Path) -> Vec<Value> {
-    data_dir()
-        .and_then(|data| resolve(&data, Some(root)))
-        .map(|snapshot| snapshot.commands())
-        .unwrap_or_default()
-}
-pub fn snapshot(root: &Path) -> Result<Snapshot, String> {
-    let data = data_dir()?;
-    let snap = resolve(&data, Some(root))?;
-    snap.persist(&data)?;
-    Ok(snap)
-}
-fn load_snapshot(data: &Path, revision: &str) -> Result<Snapshot, String> {
-    if revision.len() != 64 || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("Invalid snapshot revision".into());
-    }
-    let snap: Snapshot = serde_json::from_str(&bounded_read(
-        &data
-            .join("library-snapshots")
-            .join(format!("{revision}.json")),
-        8 * MAX_LIBRARY,
-    )?)
-    .map_err(|e| e.to_string())?;
-    if digest(&serde_json::to_vec(&snap.items).map_err(|e| e.to_string())?) != revision {
-        return Err("Snapshot integrity check failed".into());
-    }
-    Ok(snap)
-}
-
-/// Read-only stdio MCP server, used unchanged by every ACP provider.
-/// Discover editable sources without creating settings, migrating manifests,
-/// or generating a session snapshot. Personal settings use the same Git identity
-/// as the resolver, so linked worktrees find the same personal library.
-fn locations(data: &Path, folder: &Path) -> Result<Value, String> {
-    let folder = fs::canonicalize(folder).map_err(|e| format!("Project folder: {e}"))?;
-    if !folder.is_dir() {
-        return Err("Project folder must be a directory".into());
-    }
-    let git = std::process::Command::new("git")
-        .arg("-C").arg(&folder).args(["rev-parse", "--show-toplevel"]).output();
-    let git_root = git.ok().filter(|out| out.status.success())
-        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()));
-    let root = git_root.unwrap_or_else(|| {
-        folder.ancestors().find(|dir| {
-            crate::project_manifest::repository_path(dir).is_file()
-                || crate::project_manifest::personal_path(dir, data).is_file()
-        }).unwrap_or(&folder).to_path_buf()
-    });
-    let repository = crate::project_manifest::repository_path(&root);
-    let personal = crate::project_manifest::personal_path(&root, data);
-    let selected = if repository.is_file() { Some((repository, "repository")) }
-        else if personal.is_file() { Some((personal, "personal")) } else { None };
-    let project = selected.map(|(manifest, storage)| {
-        crate::project_manifest::read(&manifest)?;
-        Ok::<_, String>(json!({
-            "root": root, "storage": storage, "manifest": manifest,
-            "instructions": crate::project_manifest::instructions_path(&manifest),
-            "library": manifest.with_file_name("library.json"),
-            "skills": manifest.with_file_name("skills"),
-        }))
-    }).transpose()?;
-    Ok(json!({
-        "global": {"library": data.join("library.json"), "skills": data.join("skills"), "instructions_field": "general_instructions"},
-        "project": project,
-        "project_registered": project.is_some(),
-        "project_root": root,
-        "format": "Skills are folders under skills/<id>/SKILL.md with scripts, references and assets preserved. Text-only library.json items remain supported. Commands are skills with automatic=false; output_style selects a style ID.",
-        "note": "Paths may not exist until first save. No project settings were created. Edit sources, never library-snapshots; reconnect to apply changes.",
-    }))
-}
-
-pub fn cli(args: &[String]) -> Result<i32, String> {
-    let action = args.first().map(String::as_str).unwrap_or("help");
-    if matches!(action, "help" | "--help" | "-h") {
-        println!("Usage: atelier tool skills locations [--project PATH] | list | read REVISION ID [RESOURCE] | mcp REVISION");
-        return Ok(0);
-    }
-    if action == "locations" {
-        let folder = match &args[1..] {
-            [] => std::env::current_dir().map_err(|e| e.to_string())?,
-            [flag, path] if flag == "--project" => PathBuf::from(path),
-            _ => return Err("Usage: atelier tool skills locations [--project PATH]".into()),
-        };
-        let data = std::path::absolute(data_dir()?).map_err(|e| e.to_string())?;
-        println!("{}", serde_json::to_string_pretty(&locations(&data, &folder)?).map_err(|e| e.to_string())?);
-        return Ok(0);
-    }
-    if action == "list" {
-        let root = std::env::current_dir().map_err(|e| e.to_string())?;
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&snapshot(&root)?).map_err(|e| e.to_string())?
-        );
-        return Ok(0);
-    }
-    let data = data_dir()?;
-    let revision = args
-        .get(1)
-        .ok_or("Usage: atelier tool skills list | read REVISION ID [RESOURCE] | mcp REVISION")?;
-    let snap = load_snapshot(&data, revision)?;
-    if action == "read" {
-        println!(
-            "{}",
-            snap.read_skill(
-                args.get(2).ok_or("Missing skill ID")?,
-                args.get(3).map(String::as_str)
-            )?
-        );
-        return Ok(0);
-    }
-    if action != "mcp" {
-        return Err("Unknown skills operation".into());
-    }
-    let stdin = std::io::stdin();
-    let mut input = stdin.lock();
-    let mut output = std::io::stdout().lock();
-    loop {
-        let mut line = String::new();
-        use std::io::Read;
-        if input
-            .by_ref()
-            .take(1024 * 1024)
-            .read_line(&mut line)
-            .map_err(|e| e.to_string())?
-            == 0
-        {
-            break;
-        }
-        if line.len() >= 1024 * 1024 {
-            return Err("MCP message exceeds limit".into());
-        }
-        let request: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
-        let Some(id) = request.get("id") else {
-            continue;
-        };
-        let result = match request["method"].as_str().unwrap_or_default() {
-            "initialize" => {
-                json!({"protocolVersion":request["params"]["protocolVersion"].as_str().unwrap_or("2024-11-05"),"capabilities":{"tools":{}},"serverInfo":{"name":"atelier-skills","version":"1"}})
-            }
-            "ping" => json!({}),
-            "tools/list" => {
-                json!({"tools":[{"name":"atelier_skill_read","description":"Read an available shared skill or its supporting resource. Use the skill IDs in the session instructions.","inputSchema":{"type":"object","properties":{"id":{"type":"string"},"resource":{"type":"string"}},"required":["id"],"additionalProperties":false}}]})
-            }
-            "tools/call" if request["params"]["name"] == "atelier_skill_read" => {
-                let args = &request["params"]["arguments"];
-                match snap.read_skill(
-                    args["id"].as_str().unwrap_or_default(),
-                    args["resource"].as_str(),
-                ) {
-                    Ok(text) => json!({"content":[{"type":"text","text":text}]}),
-                    Err(error) => json!({"isError":true,"content":[{"type":"text","text":error}]}),
-                }
-            }
-            _ => {
-                writeln!(output, "{}", json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Method not found"}})).map_err(|e| e.to_string())?;
-                output.flush().map_err(|e| e.to_string())?;
-                continue;
-            }
-        };
-        writeln!(
-            output,
-            "{}",
-            json!({"jsonrpc":"2.0","id":id,"result":result})
-        )
-        .map_err(|e| e.to_string())?;
-        output.flush().map_err(|e| e.to_string())?;
-    }
-    Ok(0)
 }

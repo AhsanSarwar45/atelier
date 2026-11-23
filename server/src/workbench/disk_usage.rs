@@ -92,7 +92,7 @@ const ORDER: [&str; 10] = ["chats", "archive", "media", "claude", "codex", "sear
 /// and the browser profiles the app keeps.
 pub fn measure(data: &Path, media: Option<&Path>, browser: Option<&Path>) -> (u64, Vec<Part>) {
     let mut sizes: HashMap<&'static str, u64> = HashMap::new();
-    let media_inside = media.map_or(false, |media| media.parent() == Some(data));
+    let media_inside = media.is_some_and(|media| media.parent() == Some(data));
     for entry in std::fs::read_dir(data).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         if name == "profiles" {
@@ -192,7 +192,7 @@ pub fn ages(chats: &[Chat], indexed: &Indexed, sizes: &HashMap<String, u64>) -> 
         let cleared = indexed
             .cleared
             .get(&(r.session_id.clone(), super::storage_index::Kind::of(&r.asset)))
-            .map_or(false, |through| r.last_seq <= *through);
+            .is_some_and(|through| r.last_seq <= *through);
         if cleared {
             continue;
         }

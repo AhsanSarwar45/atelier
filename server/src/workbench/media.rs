@@ -845,7 +845,7 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
                     .and_then(Value::as_object)
                     .ok_or("proposal is required and is an object")?;
                 required_string(proposal, "projectId", 400)?;
-                if !proposal.get("id").and_then(Value::as_i64).is_some_and(|n| n >= 1) {
+                if proposal.get("id").and_then(Value::as_i64).is_none_or(|n| n < 1) {
                     return Err("proposal.id is a whole number from 1 upwards".into());
                 }
                 let kind = required_string(proposal, "type", 40)?;
@@ -866,7 +866,7 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
                 .and_then(Value::as_object)
                 .ok_or("task is required and is an object")?;
             required_string(task, "projectId", 400)?;
-            if !task.get("number").and_then(Value::as_i64).is_some_and(|n| n >= 1) {
+            if task.get("number").and_then(Value::as_i64).is_none_or(|n| n < 1) {
                 return Err("task.number is a whole number from 1 upwards".into());
             }
             let kind = required_string(task, "type", 40)?;
@@ -921,7 +921,7 @@ pub fn widget_block(value: &Value) -> Result<String, String> {
             if let Some(audit) = object.get("audit").filter(|a| !a.is_null()) {
                 let audit = audit.as_object().ok_or("audit is an object: {passed, reopened, cells}")?;
                 for key in ["passed", "reopened"] {
-                    if !audit.get(key).and_then(Value::as_i64).is_some_and(|n| n >= 0) {
+                    if audit.get(key).and_then(Value::as_i64).is_none_or(|n| n < 0) {
                         return Err(format!("audit.{key} is a whole number from 0 upwards"));
                     }
                 }

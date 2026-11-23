@@ -524,7 +524,7 @@ async fn an_approval_stage_waits_until_the_owner_continues() {
     let (code, body) = act(&fixture, json!({"action": "continue", "run": run["id"]})).await;
     assert_eq!(code, 200, "continue failed: {body}");
     let prompts = told_more(&fixture, &id, before).await;
-    assert!(prompts.last().map_or(false, |p| p.contains("Ship KEY-8")), "continuing did not start the next stage: {prompts:?}");
+    assert!(prompts.last().is_some_and(|p| p.contains("Ship KEY-8")), "continuing did not start the next stage: {prompts:?}");
 }
 
 #[tokio::test]

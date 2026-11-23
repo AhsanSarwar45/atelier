@@ -92,10 +92,7 @@ async fn base_tip(dir: &Path) -> Option<(String, String)> {
     // stamp that no longer matches, and the next asker reads again.
     let stamp = RefsStamp::of(&common, &base);
     let answer = match &base {
-        Some(base) => match git(dir, &["rev-parse", "--verify", &format!("refs/heads/{base}^{{commit}}")]).await {
-            Some(tip) => Some((tip, common.display().to_string())),
-            None => None,
-        },
+        Some(base) => git(dir, &["rev-parse", "--verify", &format!("refs/heads/{base}^{{commit}}")]).await.map(|tip| (tip, common.display().to_string())),
         None => None,
     };
     if let Some(stamp) = stamp {

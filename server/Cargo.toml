@@ -111,6 +111,12 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 
+[lints.clippy]
+# Style lints the code base uses on purpose; the rest stay errors under -D warnings.
+type_complexity = "allow"
+too_many_arguments = "allow"
+large_enum_variant = "allow"
+
 [build-dependencies]
 # Gzips the screens once at build time, so they are carried and served compressed.
 flate2 = "1"

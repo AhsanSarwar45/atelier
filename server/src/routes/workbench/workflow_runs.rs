@@ -928,11 +928,10 @@ async fn tick(state: &WorkbenchState, project_id: &str, project_path: &str, forc
         {
             let mut polled = POLLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             let polled = polled.get_or_insert_with(HashMap::new);
-            if !force || polled.contains_key(&key) {
-                if polled.get(&key).is_some_and(|last| last.elapsed() < every) {
+            if (!force || polled.contains_key(&key))
+                && polled.get(&key).is_some_and(|last| last.elapsed() < every) {
                     continue;
                 }
-            }
             polled.insert(key, Instant::now());
         }
         let found = match items(project_path, flow).await {
@@ -1044,12 +1043,12 @@ pub(super) async fn act(State(state): State<WorkbenchState>, Json(ask): Json<Ask
             if ask.action == "stop" {
                 run.status = "stopped".into();
                 run.note = None;
-                save(&state, &mut run).await?;
+                save(&state, &run).await?;
             } else if run.status == "needs_owner" && run.session.is_none() {
                 // It never got its chat: back in the queue.
                 run.status = "queued".into();
                 run.note = None;
-                save(&state, &mut run).await?;
+                save(&state, &run).await?;
             } else {
                 if run.status != "needs_owner" {
                     return Err(format!("This run is {}, not waiting for you", run.status).into());

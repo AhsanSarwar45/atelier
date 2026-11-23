@@ -351,7 +351,7 @@ impl StorageIndex {
                     .query_row("SELECT MAX(seq) FROM event WHERE session_id = ?1", [id], |r| r.get(0))
                     .map_err(text)?
             };
-            if newest.map_or(false, |newest| newest > through) {
+            if newest.is_some_and(|newest| newest > through) {
                 moved();
                 self.catch_up(&chats, &mut index, id, through).map_err(text)?;
             } else if !known.contains_key(id) {

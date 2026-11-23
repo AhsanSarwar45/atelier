@@ -4765,7 +4765,7 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
     // Tasks (docs/tasks.md): the app's own record of work, keyed by project
     // and number, with one event row per change.
     super::tasks::ensure_schema(transaction)?;
-    super::grids::ensure_schema(&transaction)?;
+    super::grids::ensure_schema(transaction)?;
     // What the owner has read and a device been told of what waits on him
     // besides a chat's own question (`waiting.rs`).
     super::waiting::ensure_schema(transaction)?;
@@ -7035,7 +7035,7 @@ mod tests {
     #[test]
     fn only_a_standing_limit_on_a_chat_started_here_is_reported() {
         let directory = tempfile::tempdir().unwrap();
-        let mut store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
         for id in ["here", "there"] {
             let mut row = session(id, "claude", None, "2026-10-09T00:00:00Z");
             row.origin = if id == "here" { "app" } else { "terminal" }.into();

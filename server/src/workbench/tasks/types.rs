@@ -189,7 +189,7 @@ pub fn recipe(name: &str) -> Option<String> {
 fn example_check(name: &str, id: &str) -> Value {
     let (command, kind, red, files) = match name {
         "docs" => (
-            format!("grep -q 'Quick start' README.md || {{ echo 'README.md has no quick start'; exit 1; }}"),
+            "grep -q 'Quick start' README.md || { echo 'README.md has no quick start'; exit 1; }".to_string(),
             "structure", "has no quick start", json!([]),
         ),
         "refactor" => (format!("cargo test -p app --test {id}"), "characterisation", "", json!([format!("tests/{id}.rs")])),

@@ -441,7 +441,7 @@ pub fn readme_in(dir: &Path) -> Option<String> {
                 && path
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.to_ascii_lowercase() == "readme.md")
+                    .is_some_and(|n| n.eq_ignore_ascii_case("readme.md"))
         })
         .collect();
     found.sort();

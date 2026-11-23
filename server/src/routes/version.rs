@@ -190,7 +190,7 @@ async fn check_github_release() -> VersionCheckResponse {
                 .map(|a| a.browser_download_url.clone())
         })
     };
-    let asset_url = current_platform_asset().and_then(|name| asset_named(name));
+    let asset_url = current_platform_asset().and_then(asset_named);
     let asset_size = current_platform_asset().and_then(|name| {
         release
             .assets
@@ -588,17 +588,17 @@ async fn run_homebrew_with(
             Some("Checking Homebrew for the new version".into()),
         )
         .await;
-    say(&brew, &["update"], watch, &[]).await?;
+    say(brew, &["update"], watch, &[]).await?;
 
     watch
         .phase(Phase::Downloading, Some("Starting the download".into()))
         .await;
     // Asked after the refresh, so it names the new version's download.
-    let counting = brew_download(&brew)
+    let counting = brew_download(brew)
         .await
         .map(|partial| tokio::spawn(count_download(partial, size, watch.clone())));
     let upgraded = say(
-        &brew,
+        brew,
         &["upgrade", install_method::FORMULA],
         watch,
         &[
@@ -630,7 +630,7 @@ async fn run_homebrew_with(
     // succeeded (bw-45wvy).
     generate_unix_restart_script(
         &std::env::temp_dir(),
-        &restart_as,
+        restart_as,
         std::process::id(),
         &port,
     )

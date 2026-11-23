@@ -507,11 +507,10 @@ async fn respond(
         }
         None => None,
     };
-    if outcome.widget == Some("discover") {
-        if outcome.failed.is_some() {
+    if outcome.widget == Some("discover")
+        && outcome.failed.is_some() {
             return Err(ApiError::from(outcome.summary.clone()));
         }
-    }
     Ok(Json(json!({
         "grid": summary, "cell": cell, "widget": widget, "summary": outcome.summary,
         "failed": outcome.failed, "template": outcome.template, "audit": outcome.audit,
@@ -689,7 +688,7 @@ async fn verify(state: &WorkbenchState, request: Request) -> Result<Json<Value>,
     for (row, col) in &targets {
         match verify_one(state, &request, row, col).await {
             Ok(outcome) => {
-                announce_grids(state, &project, &[slug.clone()]);
+                announce_grids(state, &project, std::slice::from_ref(&slug));
                 match outcome.failed {
                     Some(reason) => failures.push(format!("{slug}.{row}.{col}: {reason}")),
                     None => passed += 1,
@@ -766,7 +765,7 @@ async fn watch_tick(state: &WorkbenchState) {
             match discover(state, &project, &slug, None, "app").await {
                 Ok(outcome) => {
                     tracing::info!(project = %project, grid = %slug, "{}", outcome.summary);
-                    announce_grids(state, &project, &[slug.clone()]);
+                    announce_grids(state, &project, std::slice::from_ref(&slug));
                 }
                 Err(error) => tracing::warn!(project = %project, grid = %slug, "grid discovery failed: {}", error.message),
             }

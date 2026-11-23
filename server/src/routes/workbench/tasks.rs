@@ -347,7 +347,7 @@ fn task_settings(state: &WorkbenchState, project: &str, fallback: Option<&str>) 
 /// The task types the project offers: built-ins, the install's and its own.
 fn type_catalog(state: &WorkbenchState, project: &str) -> Result<tasks::catalog::Catalog, ApiError> {
     let folder = project_folder(state, project);
-    tasks::catalog::for_folder(folder.as_deref().map(std::path::Path::new)).map_err(|error| ApiError::from(error))
+    tasks::catalog::for_folder(folder.as_deref().map(std::path::Path::new)).map_err(ApiError::from)
 }
 
 /// For a draft with checks, in the folder its checks run in: the locked

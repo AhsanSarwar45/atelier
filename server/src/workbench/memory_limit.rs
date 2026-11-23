@@ -144,7 +144,7 @@ impl Standing {
         self.settling.retain(|_, since| now < *since + SETTLING);
         let seen: Vec<&String> = measured.iter().map(|(id, _)| id).collect();
         self.strikes
-            .retain(|id, _| seen.iter().any(|seen| *seen == id));
+            .retain(|id, _| seen.contains(&id));
         let mut stopping = Vec::new();
         for (id, bytes) in measured {
             if self.settling.contains_key(id) {

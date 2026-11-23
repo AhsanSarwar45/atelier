@@ -429,9 +429,8 @@ mod tests {
         let (status, said) = ask(&app, Method::POST, &migration, Some(json!({ "provider": "ask" }))).await;
         assert_eq!(status, StatusCode::OK, "{said}");
         assert!(as_json(&said)["provider"].is_null(), "{said}");
-        assert_eq!(
+        assert!(
             db.setting(MIGRATED).unwrap().is_some(),
-            true,
             "carrying nothing across is still carrying it across, or the next browser does it again"
         );
     }

@@ -351,7 +351,7 @@ pub fn change_with_id(global: &Path, project: Option<&Path>, change: &Value) -> 
                     .and_then(Value::as_array_mut)
                     .and_then(|made| made.iter_mut().find(|made| made["name"] == name))
                     .ok_or_else(|| format!("\"{name}\" was made by the other scope; change its {key} there"))?;
-                if key == "description" && !value.as_str().is_some_and(|text| !text.trim().is_empty()) {
+                if key == "description" && value.as_str().is_none_or(|text| text.trim().is_empty()) {
                     return Err("description must be one line of text".into());
                 }
                 if key != "description" && !value.is_boolean() {

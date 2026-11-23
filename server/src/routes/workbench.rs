@@ -518,7 +518,7 @@ impl WorkbenchState {
         };
         if let Some(saved) = crate::workbench::usage::claude_snapshot(&directory) {
             let saved = with_last_resets(json(saved)?);
-            if last.as_ref().map_or(true, |last| taken(&saved) > taken(last)) {
+            if last.as_ref().is_none_or(|last| taken(&saved) > taken(last)) {
                 return Ok(saved);
             }
         }
@@ -2912,19 +2912,19 @@ async fn mention(
         for reference in ids.split(',').filter(|r| !r.is_empty()).take(50) {
             let Some((kind, id)) = reference.split_once(':') else { continue };
             let found = match Kind::parse(kind) {
-                Some(Kind::Chat) => mention::chats(&mention_chats(&database).await?, "", None, None, usize::MAX)
+                Some(Kind::Chat) => mention::chats(&mention_chats(database).await?, "", None, None, usize::MAX)
                     .into_iter()
                     .find(|offer| offer.id == id),
                 Some(Kind::Skill) => mention::skills(&mention_skills(&cwd).await, "", usize::MAX)
                     .into_iter()
                     .find(|offer| offer.id == id),
-                Some(Kind::Task) => mention::tasks(&mention_tasks(&database, query.project_id.as_deref()).await, id, usize::MAX)
+                Some(Kind::Task) => mention::tasks(&mention_tasks(database, query.project_id.as_deref()).await, id, usize::MAX)
                     .into_iter()
                     .find(|offer| offer.id == id),
                 Some(Kind::Grid) => {
                     // A selection names its grid first: `camera.glare.*`.
                     let slug = id.split('.').next().unwrap_or(id);
-                    mention::grids(&mention_grids(&database, query.project_id.as_deref()).await, slug, usize::MAX)
+                    mention::grids(&mention_grids(database, query.project_id.as_deref()).await, slug, usize::MAX)
                         .into_iter()
                         .find(|offer| offer.id == slug)
                         .map(|mut offer| {

@@ -776,7 +776,7 @@ pub async fn report(database: &ChatDb) -> Result<MemoryReport, String> {
         total = total.saturating_add(bytes);
         swapped_total = swapped_total.saturating_add(cost.swapped);
         let session_id = effective_chat(found.pid, &process_map, inherited_chat_id.as_ref());
-        let role = role_of(&found, root, &process_map, session_id.as_deref());
+        let role = role_of(found, root, &process_map, session_id.as_deref());
         if let Some(id) = session_id.as_ref() {
             let entry = grouped.entry(id.clone()).or_default();
             entry.0 = entry.0.saturating_add(bytes);

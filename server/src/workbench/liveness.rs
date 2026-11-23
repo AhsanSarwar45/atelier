@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(record_endings(&record)["one"]["state"], "done");
         let mut file = fs::OpenOptions::new().append(true).open(&record).unwrap();
         use std::io::Write;
-        write!(file, "{}\n{}", notice("two", "killed"), "{\"type\":\"queue-op").unwrap();
+        write!(file, "{}\n{{\"type\":\"queue-op", notice("two", "killed")).unwrap();
         let endings = record_endings(&record);
         assert_eq!(endings["two"]["state"], "stopped");
         assert_eq!(endings.len(), 2);

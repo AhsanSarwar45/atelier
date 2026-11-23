@@ -187,17 +187,12 @@ pub async fn worth_saying(
     let sessions = chats.list_sessions(None).await?;
 
     let mut rows: Vec<Row> = sessions
-        .iter()
-        .cloned()
-        .filter(|session| worth_announcing(&session.state))
-        // Read already, in the state it is in now. A chat that has since moved
-        // on to want something else is not this chat, and says so again.
-        .filter(|session| {
+        .iter().filter(|&session| worth_announcing(&session.state)).filter(|&session| {
             notices
                 .get(&session.id)
                 .and_then(|notice| notice.read_state.as_deref())
                 != Some(session.state.as_str())
-        })
+        }).cloned()
         .filter_map(|session| {
             let project_name = names.get(&session.project_id)?.clone();
             let at = appeared(

@@ -162,7 +162,7 @@ pub fn resolve(
 /// still be on its way over the wire.
 fn reply_is_over(facts: &RuntimeFacts, evidence: &Evidence, now: DateTime<Utc>) -> bool {
     evidence.reply_ended_at.is_some_and(|ended| {
-        facts.prompted_at.map_or(true, |prompted| ended >= prompted)
+        facts.prompted_at.is_none_or(|prompted| ended >= prompted)
             && now
                 .signed_duration_since(ended)
                 .to_std()

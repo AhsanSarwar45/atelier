@@ -640,7 +640,7 @@ pub async fn run(rest: &[String]) -> Result<i32, String> {
             Ok(0)
         }
         "list" => {
-            words(rest, &["--rows"]).and_then(|w| if w.is_empty() { Ok(()) } else { Err(format!("usage: atelier grid list [--rows]")) })?;
+            words(rest, &["--rows"]).and_then(|w| if w.is_empty() { Ok(()) } else { Err("usage: atelier grid list [--rows]".to_string()) })?;
             let session = session()?;
             let value = listing(&session).await?;
             let grids = value["grids"].as_array().cloned().unwrap_or_default();

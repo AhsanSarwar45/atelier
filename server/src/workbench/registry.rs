@@ -168,7 +168,7 @@ impl ReconcilePace {
             .filter(|id| {
                 self.last
                     .get(*id)
-                    .map_or(true, |at| now.duration_since(*at) >= RECONCILE_GAP)
+                    .is_none_or(|at| now.duration_since(*at) >= RECONCILE_GAP)
             })
             .cloned()
             .collect();
@@ -209,15 +209,14 @@ async fn reconcile_session(
             None => Ok(Value::Null),
         };
     }
-    if launching.load(std::sync::atomic::Ordering::Acquire) != 0 {
-        if database
+    if launching.load(std::sync::atomic::Ordering::Acquire) != 0
+        && database
             .get_session(session_id.to_string())
             .await?
             .is_some_and(|session| session.state == "starting")
         {
             return Ok(Value::Null);
         }
-    }
     super::status::reconcile(database, session_id, None).await
 }
 

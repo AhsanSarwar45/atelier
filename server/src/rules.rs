@@ -373,7 +373,7 @@ pub async fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
     }
     // Where the owner turned tasks off, both refuse before reaching the app.
     if (name == "task" || name == "grid") && !crate::workbench::tasks::switch::here() {
-        return Err(crate::workbench::tasks::switch::off_here().into());
+        return Err(crate::workbench::tasks::switch::off_here());
     }
     if name == "task" {
         return crate::workbench::tasks::cli::run(rest).await;

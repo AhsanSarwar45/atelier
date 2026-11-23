@@ -745,7 +745,7 @@ pub async fn ask_provider_catalogue(session: &Session) -> Result<(Value, Vec<Val
     let (modes, config_options, agent_controls) = answered?;
     let mut menu = menu_fields(&session.brand, session.model.as_deref(), &modes, &config_options, &agent_controls, &json!([]));
     let commands = std::mem::take(&mut *announced.lock().await);
-    if !commands.as_array().is_some_and(|list| !list.is_empty()) {
+    if commands.as_array().is_none_or(|list| list.is_empty()) {
         return Err(format!("{} named no commands in time", session.brand));
     }
     menu["commands"] = commands;

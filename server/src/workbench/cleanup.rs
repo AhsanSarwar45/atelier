@@ -236,7 +236,7 @@ fn broadest(rules: &[Rule], applies: impl Fn(&Rule) -> bool) -> Option<usize> {
 fn applies(rule: &Rule, project: &str, last_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
     rule.enabled
         && last_at < now - chrono::Duration::days(rule.days() as i64)
-        && rule.project_id.as_ref().map_or(true, |p| p == project)
+        && rule.project_id.as_ref().is_none_or(|p| p == project)
 }
 
 /// Decide what a list of rules does to the chats as they stand.
@@ -343,7 +343,7 @@ pub fn plan(
                 .get(chat.id.as_str())
                 .into_iter()
                 .flatten()
-                .filter(|r| Kind::of(&r.asset) == kind && already.map_or(true, |done| r.last_seq > done))
+                .filter(|r| Kind::of(&r.asset) == kind && already.is_none_or(|done| r.last_seq > done))
                 .filter(|r| sizes.contains_key(&r.asset))
                 .map(|r| &r.asset)
                 .collect();
@@ -1142,7 +1142,7 @@ pub fn job(
         }
         let due = last_run(&cleaner.settings)
             .and_then(|run| DateTime::parse_from_rfc3339(&run.at).ok())
-            .map_or(true, |at| Utc::now() - at.with_timezone(&Utc) >= RUN_EVERY);
+            .is_none_or(|at| Utc::now() - at.with_timezone(&Utc) >= RUN_EVERY);
         if due {
             if let Err(error) = runtime.block_on(cleaner.run(&registry)) {
                 tracing::warn!(%error, "storage cleanup did not run");

@@ -1672,7 +1672,7 @@ fn rollout_events(path: &Path, offset: u64, line: usize) -> (Vec<Value>, u64, us
         if !line.contains("\"response_item\"") {
             continue;
         }
-        let Ok(row) = serde_json::from_str::<Value>(&line) else {
+        let Ok(row) = serde_json::from_str::<Value>(line) else {
             continue;
         };
         if row["type"] != "response_item" {
@@ -1694,7 +1694,7 @@ fn rollout_events(path: &Path, offset: u64, line: usize) -> (Vec<Value>, u64, us
                     .filter_map(|part| part["text"].as_str())
                     .filter(|words| {
                         !words.trim().is_empty()
-                            && !(role == "user" && super::codex::history::machine_context(words))
+                            && (role != "user" || !super::codex::history::machine_context(words))
                     })
                     .collect::<Vec<_>>()
                     .join("\n");

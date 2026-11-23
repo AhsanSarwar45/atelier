@@ -439,7 +439,7 @@ mod tests {
         let store = tempfile::tempdir().unwrap();
         // A 3x2 PNG header, padded past the inline limit.
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x03\0\0\0\x02".to_vec();
-        png.extend(std::iter::repeat(0u8).take(16 * 1024));
+        png.extend(std::iter::repeat_n(0u8, 16 * 1024));
         let big = format!(
             "data:image/png;base64,{}",
             base64::engine::general_purpose::STANDARD.encode(&png)

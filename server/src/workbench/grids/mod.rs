@@ -3337,7 +3337,7 @@ pub fn next_batch(connection: &Connection, project: &str, slug: &str, prints: &P
         Scope::Row(id) if !loaded.row(id).is_some_and(GridRow::counts) => {
             return refuse(format!("grid \"{slug}\" has no row \"{id}\" with cells; run `atelier grid show {slug}`"));
         }
-        Scope::Col(id) if !loaded.column(id).is_some_and(|col| col.retired_at.is_none()) => {
+        Scope::Col(id) if loaded.column(id).is_none_or(|col| col.retired_at.is_some()) => {
             return refuse(format!("grid \"{slug}\" has no column \"{id}\"; run `atelier grid show {slug}`"));
         }
         _ => {}
@@ -3455,7 +3455,7 @@ pub fn picked_task(connection: &Connection, project: &str, pick: &Pick, prints: 
         }
     }
     for id in pick.cols.iter().flatten() {
-        if !loaded.column(id).is_some_and(|col| col.retired_at.is_none()) {
+        if loaded.column(id).is_none_or(|col| col.retired_at.is_some()) {
             return refuse(format!("grid \"{slug}\" has no column \"{id}\""));
         }
     }
