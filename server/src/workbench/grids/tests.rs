@@ -116,7 +116,7 @@ fn prove(store: &Store, session: &str, slug: &str, row: &str, col: &str, print: 
 fn task_create(store: &Store, session: &str, cells: Value) -> Result<tasks::Outcome, TaskError> {
     owner_says(store, session, "@task do these cells");
     let plan = cell_plan(store, &cells);
-    tasks::apply(store, &tasks::Request { types: Default::default(),
+    tasks::apply(store, &tasks::Request { types: Default::default(), approval_off: false,
         gate: None,
         action: "create".into(),
         actor: "agent".into(),
@@ -133,7 +133,7 @@ fn task_create(store: &Store, session: &str, cells: Value) -> Result<tasks::Outc
 
 fn task(store: &Store, session: Option<&str>, actor: &str, action: &str, number: i64, payload: Value) -> Result<tasks::Outcome, TaskError> {
     let held = tasks::get(store.connection(), "p", number).ok().flatten();
-    tasks::apply(store, &tasks::Request { types: Default::default(),
+    tasks::apply(store, &tasks::Request { types: Default::default(), approval_off: false,
         gate: tasks::gate::tests::simulated(held.as_ref(), action),
         action: action.into(),
         actor: actor.into(),
@@ -626,7 +626,7 @@ fn chat(store: &Store, id: &str, title: &str) {
 
 fn agent_create(store: &Store, session: &str, cells: Value) -> Result<tasks::Outcome, TaskError> {
     let plan = cell_plan(store, &cells);
-    tasks::apply(store, &tasks::Request { types: Default::default(),
+    tasks::apply(store, &tasks::Request { types: Default::default(), approval_off: false,
         gate: None,
         action: "create".into(),
         actor: "agent".into(),

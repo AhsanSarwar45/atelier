@@ -207,16 +207,31 @@ pub(super) struct SwitchQuery {
 pub(super) struct SwitchChange {
     /// `install` or `project`.
     scope: String,
+    /// `enabled` (Use tasks, the default) or `approval` (Require approval).
+    setting: Option<String>,
     /// `null` forgets a project's own choice, so it follows the app's.
     enabled: Option<bool>,
 }
 
-/// The install's choice, the project's own (or null) and what applies.
+/// For Use tasks (at the top level) and Require approval (`approval`): the
+/// install's choice, the project's own (or null) and what applies.
 fn switch_state(state: &WorkbenchState, project: Option<&str>) -> Result<Value, ApiError> {
     let (data, dir) = kinds_folders(state, project)?;
-    let install = tasks::switch::read(&data).unwrap_or(true);
-    let own = dir.as_deref().and_then(tasks::switch::read);
-    Ok(json!({"install": install, "project": own, "enabled": own.unwrap_or(install)}))
+    let scoped = |key: &str| {
+        let install = tasks::switch::read_key(&data, key).unwrap_or(true);
+        let own = dir.as_deref().and_then(|dir| tasks::switch::read_key(dir, key));
+        json!({"install": install, "project": own, "enabled": own.unwrap_or(install)})
+    };
+    let mut answer = scoped(tasks::switch::ENABLED);
+    answer["approval"] = scoped(tasks::switch::APPROVAL);
+    Ok(answer)
+}
+
+/// Whether an agent in `project` must ask the owner before it creates a task.
+fn approval_needed(state: &WorkbenchState, project: &str) -> bool {
+    let Ok(data) = crate::workbench::library::data_dir() else { return true };
+    let folder = project_folder(state, project);
+    tasks::switch::approval(&data, folder.as_deref().map(std::path::Path::new))
 }
 
 /// GET /api/workbench/tasks-switch: whether tasks are on for the app, and
@@ -234,9 +249,14 @@ pub(super) async fn set_tasks_switch(
 ) -> Result<Json<Value>, ApiError> {
     let project = query.project.as_deref().filter(|id| !id.is_empty());
     let (data, dir) = kinds_folders(&state, project)?;
+    let key = match change.setting.as_deref().unwrap_or(tasks::switch::ENABLED) {
+        tasks::switch::ENABLED => tasks::switch::ENABLED,
+        tasks::switch::APPROVAL => tasks::switch::APPROVAL,
+        other => return Err(format!("unknown setting {other}: use enabled or approval").into()),
+    };
     match change.scope.as_str() {
-        "install" => tasks::switch::write(&data, Some(change.enabled.unwrap_or(true)))?,
-        "project" => tasks::switch::write(dir.as_deref().ok_or_else(|| "name the project to change".to_string())?, change.enabled)?,
+        "install" => tasks::switch::write_key(&data, key, Some(change.enabled.unwrap_or(true)))?,
+        "project" => tasks::switch::write_key(dir.as_deref().ok_or_else(|| "name the project to change".to_string())?, key, change.enabled)?,
         other => return Err(format!("unknown scope {other}: use install or project").into()),
     }
     let answer = switch_state(&state, project)?;
@@ -474,6 +494,15 @@ pub(super) async fn act(
     // The chat an agent's card is drawn in, whatever the agent does with the
     // command's output.
     let printed_for = session.clone();
+    let approval_off = request.actor == "agent"
+        && matches!(request.action.as_str(), "create" | "propose")
+        && !approval_needed(&state, &project);
+    let mut request = request;
+    if approval_off && request.action == "propose" {
+        // The owner turned approval off: a chat whose guidance still says
+        // propose gets the task at once, as a create would.
+        request.action = "create".into();
+    }
     if request.action == "propose" && request.actor == "agent" {
         let session = session.unwrap_or_default();
         let payload = request.payload;
@@ -638,6 +667,7 @@ pub(super) async fn act(
         visual_files: visual,
         gate,
         types,
+        approval_off,
         now: chrono::Utc::now().timestamp_millis(),
     };
     let outcome = state
@@ -1228,5 +1258,163 @@ mod tests {
         let mut next = completed("ok\n");
         crate::workbench::wire::bound_event(&mut next);
         assert!(!next.fields.contains_key("presented"), "a later call drew an earlier card again: {:?}", next.fields.get("presented"));
+    }
+
+    /// A chat `chat` in a fresh repository with one check script, as an
+    /// agent's create or propose needs. Returns the repository.
+    async fn a_chat_in_a_repo(state: &WorkbenchState, project: &str, chat: &str) -> tempfile::TempDir {
+        let repo = tempfile::tempdir().unwrap();
+        // These tests change app-wide tasks settings: a data folder of their own.
+        crate::identity::use_test_data_dir(&repo.path().join("data"));
+        let dir = repo.path().to_path_buf();
+        git(&dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join("check.sh"), "echo 'value FAILED'; exit 1\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "start"]);
+        let session = Session {
+            id: chat.into(),
+            brand: "claude".into(),
+            external_id: None,
+            project_id: project.to_string(),
+            project_path: dir.display().to_string(),
+            cwd: dir.display().to_string(),
+            model: None,
+            permission_mode: "default".into(),
+            effort: None,
+            collaboration_mode: None,
+            profile: None,
+            title: None,
+            state: "idle".into(),
+            origin: "app".into(),
+            created_at: "2026-11-23T00:00:00.000Z".into(),
+            last_active_at: "2026-11-23T00:00:00.000Z".into(),
+            last_spoke_at: None,
+            begun_by: Some("person".into()),
+            named_by_owner: false,
+            auto_approve: false,
+            parent_session_id: None,
+            workers: None,
+        };
+        state.database().create_session(session).await.unwrap();
+        let asked = chat.to_string();
+        state
+            .database()
+            .write_tasks(move |store| {
+                store.open_message(&asked, "m0", "user", "2026-11-23T00:00:00Z").unwrap();
+                store.grow_message(&asked, "m0", "fix the export").unwrap();
+            })
+            .await
+            .unwrap();
+        repo
+    }
+
+    /// A feature draft whose one check runs `check.sh`.
+    fn a_draft() -> Value {
+        let decisions: serde_json::Map<String, Value> =
+            tasks::types::TYPES.iter().map(|kind| (kind.name.to_string(), json!(format!("{} or not", kind.name)))).collect();
+        json!({"type": "feature", "title": "Export", "why": "W", "decisions": decisions, "plan": {"outcome": "o",
+            "criteria": [{"id": "value", "text": "the value is 2", "checks": [{"name": "value", "command": "sh check.sh",
+                "kind": "test", "given": "g", "when": "w", "then": "t", "red": "value FAILED", "files": ["check.sh"]}]}],
+            "requirements": [
+                {"id": "edge-cases", "text": "t", "declined": "not needed here"},
+                {"id": "docs-updated", "text": "t", "declined": "not needed here"}]}})
+    }
+
+    async fn agent_draft(state: &WorkbenchState, chat: &str, action: &str) -> Result<Json<Value>, ApiError> {
+        let request = ActionRequest {
+            action: action.into(),
+            actor: "agent".into(),
+            session: Some(chat.into()),
+            project: None,
+            number: None,
+            payload: a_draft(),
+            files: Default::default(),
+            ephemeral: false,
+            grid: None,
+            chat: None,
+            brand: None,
+            by_workflow: false,
+        };
+        act(State(state.clone()), Json(request)).await
+    }
+
+    /// The owner changes a setting of the tasks switch, as Settings → Tasks does.
+    async fn set_switch(state: &WorkbenchState, project: Option<&str>, change: Value) -> Value {
+        let query = SwitchQuery { project: project.map(str::to_string) };
+        let change: SwitchChange = serde_json::from_value(change).unwrap();
+        let Json(answer) = set_tasks_switch(State(state.clone()), Query(query), Json(change))
+            .await
+            .map_err(|error| error.message)
+            .unwrap();
+        answer
+    }
+
+    /// With approval on (the default), an agent's create without `@task` is
+    /// still refused: turning approval off for one project leaves others asking.
+    #[tokio::test]
+    async fn without_at_task_a_create_is_refused_while_approval_is_on() {
+        let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
+        let _repo = a_chat_in_a_repo(&state, &project, "asker").await;
+        let refused = match agent_draft(&state, "asker", "create").await {
+            Ok(Json(answer)) => panic!("a create without @task went through: {answer}"),
+            Err(error) => error.message,
+        };
+        assert!(refused.contains("no @task"), "{refused}");
+    }
+
+    /// The owner turns Require approval off for the project: an agent creates
+    /// a task on its own, with no `@task` and no proposal.
+    #[tokio::test]
+    async fn an_agent_creates_a_task_itself_when_approval_is_off() {
+        let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
+        let _repo = a_chat_in_a_repo(&state, &project, "doer").await;
+        set_switch(&state, Some(&project), json!({"scope": "project", "setting": "approval", "enabled": false})).await;
+        let Json(answer) = agent_draft(&state, "doer", "create").await.map_err(|error| error.message).unwrap();
+        assert_eq!(answer["task"]["status"], "todo", "{answer}");
+        assert_eq!(answer["task"]["title"], "Export", "{answer}");
+    }
+
+    /// A proposal made while approval is off (a chat whose guidance predates
+    /// the change) becomes a task at once instead of waiting on the owner.
+    #[tokio::test]
+    async fn a_proposal_becomes_a_task_when_approval_is_off() {
+        let (_directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
+        let _repo = a_chat_in_a_repo(&state, &project, "proposer").await;
+        set_switch(&state, None, json!({"scope": "install", "setting": "approval", "enabled": false})).await;
+        let Json(answer) = agent_draft(&state, "proposer", "propose").await.map_err(|error| error.message).unwrap();
+        assert_eq!(answer["task"]["status"], "todo", "no task was created: {answer}");
+        let asked = project.clone();
+        let waiting = state
+            .database()
+            .read_tasks(move |store| store.connection().query_row(
+                "SELECT COUNT(*) FROM task_proposal WHERE project_id = ?1 AND status = 'pending'", [asked], |row| row.get::<_, i64>(0)))
+            .await
+            .unwrap();
+        assert_eq!(waiting, 0, "a proposal still waits on the owner");
+    }
+
+    /// Require approval has an app choice and a project choice like Use
+    /// tasks: on until turned off, a project's own choice wins, and `null`
+    /// sends the project back to the app's. Use tasks is left alone.
+    #[tokio::test]
+    async fn the_tasks_switch_keeps_require_approval_per_scope() {
+        let (directory, state, project) = fixture(RowFirst { fail: false, race: false }).await;
+        crate::identity::use_test_data_dir(&directory.path().join("data"));
+        let Json(read) = tasks_switch(State(state.clone()), Query(SwitchQuery { project: Some(project.clone()) }))
+            .await
+            .map_err(|error| error.message)
+            .unwrap();
+        assert_eq!(read["approval"], json!({"install": true, "project": null, "enabled": true}), "{read}");
+
+        let answer = set_switch(&state, Some(&project), json!({"scope": "install", "setting": "approval", "enabled": false})).await;
+        assert_eq!(answer["approval"], json!({"install": false, "project": null, "enabled": false}), "{answer}");
+        let answer = set_switch(&state, Some(&project), json!({"scope": "project", "setting": "approval", "enabled": true})).await;
+        assert_eq!(answer["approval"], json!({"install": false, "project": true, "enabled": true}), "{answer}");
+        assert_eq!(answer["enabled"], true, "turning approval on changed Use tasks: {answer}");
+        let answer = set_switch(&state, Some(&project), json!({"scope": "project", "enabled": false})).await;
+        assert_eq!(answer["approval"]["project"], true, "turning tasks off forgot the approval choice: {answer}");
+        let answer = set_switch(&state, Some(&project), json!({"scope": "project", "setting": "approval", "enabled": null})).await;
+        assert_eq!(answer["approval"], json!({"install": false, "project": null, "enabled": false}), "{answer}");
+        assert_eq!(answer["project"], false, "forgetting approval forgot Use tasks: {answer}");
     }
 }

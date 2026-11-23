@@ -41,7 +41,23 @@ pub const EARLIER: (&str, &str, &str) = ("com", "beads", "kanban-ui");
 /// `ATELIER_DATA_DIR` overrides it, for a person who keeps their data on
 /// another disk and for a check that must not touch the reader's own.
 pub fn data_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(dir) = TEST_DATA_DIR.with(|dir| dir.borrow().clone()) {
+        return Some(dir);
+    }
     resolve_data_dir(std::env::var("ATELIER_DATA_DIR").ok())
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_DATA_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Gives the calling test thread a data folder of its own, for a test that
+/// changes an app-wide setting the tests beside it would otherwise read.
+#[cfg(test)]
+pub fn use_test_data_dir(dir: &std::path::Path) {
+    TEST_DATA_DIR.with(|held| *held.borrow_mut() = Some(dir.to_path_buf()));
 }
 
 /// The rule behind it, kept apart from the environment so it can be tested
@@ -49,6 +65,9 @@ pub fn data_dir() -> Option<PathBuf> {
 fn resolve_data_dir(override_dir: Option<String>) -> Option<PathBuf> {
     match override_dir.filter(|d| !d.trim().is_empty()) {
         Some(dir) => Some(PathBuf::from(dir)),
+        // A test that saves a setting without naming a folder would change
+        // the owner's own: under test the default is a throwaway folder.
+        None if cfg!(test) => Some(std::env::temp_dir().join(format!("atelier-test-data-{}", std::process::id()))),
         None => directories::ProjectDirs::from(QUALIFIER, ORGANISATION, APPLICATION)
             .map(|dirs| dirs.data_dir().to_path_buf()),
     }
@@ -213,6 +232,17 @@ fn resolve_dir(override_dir: Option<String>, data: Option<PathBuf>, leaf: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A test that changes settings without naming a folder of its own
+    /// must not change the owner's: under test, the data folder is a
+    /// throwaway one in the temp folder.
+    #[test]
+    fn a_test_never_resolves_the_owners_data_folder() {
+        let owners = directories::ProjectDirs::from(QUALIFIER, ORGANISATION, APPLICATION).map(|dirs| dirs.data_dir().to_path_buf());
+        let resolved = resolve_data_dir(None).expect("a data folder");
+        assert_ne!(Some(resolved.clone()), owners, "tests resolve the owner's data folder");
+        assert!(resolved.starts_with(std::env::temp_dir()), "tests resolve the owner's data folder: {}", resolved.display());
+    }
 
     #[test]
     fn the_name_that_shipped_has_not_moved() {

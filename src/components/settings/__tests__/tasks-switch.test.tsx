@@ -41,11 +41,11 @@ describe('the Use tasks switch', () => {
     held.install = false;
     const { TasksSwitch } = await import('@/components/settings/tasks-switch');
     render(<TasksSwitch projectId="p1" />);
-    const same = await screen.findByRole('radio', { name: /Same as app/ });
-    await waitFor(() => expect(same).toBeChecked());
-    expect(same).toHaveAccessibleName(/Off/);
-    fireEvent.click(screen.getByRole('radio', { name: 'On' }));
-    await waitFor(() => expect(screen.getByRole('radio', { name: 'On' })).toBeChecked());
+    const select = await screen.findByRole('combobox', { name: 'Use tasks' });
+    await waitFor(() => expect(select).toHaveTextContent('Same as app (Off)'));
+    fireEvent.click(select);
+    fireEvent.click(await screen.findByRole('option', { name: 'On' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Use tasks' })).toHaveTextContent('On'));
     expect(held.project).toBe(true);
     expect(asked.some((one) => one.startsWith('PUT') && one.includes('project=p1'))).toBe(true);
   });

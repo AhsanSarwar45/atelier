@@ -238,4 +238,25 @@ mod tests {
         let told = told_of_tasks(data.path(), root.path());
         assert!(told.contains(&"instructions — Tasks".to_string()), "a project that turns tasks on gets the rules: {told:?}");
     }
+
+    /// With Require approval off, a chat is told to create and start the
+    /// tasks it needs itself, not to propose one and wait for the owner.
+    #[test]
+    fn a_chat_creates_tasks_itself_when_approval_is_off() {
+        let data = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let told = |data: &Path| {
+            let snapshot = super::super::library::resolve(data, Some(root.path())).unwrap();
+            build_with_library(root.path(), &snapshot)
+        };
+        let asking = told(data.path());
+        assert!(asking.contains("run `atelier task propose`, and stop"), "approval on asks first:\n{asking}");
+
+        fs::write(data.path().join("tasks.json"), serde_json::json!({"approval": false}).to_string()).unwrap();
+        let policy = told(data.path());
+        assert!(policy.contains("instructions — Tasks"), "tasks are still on:\n{policy}");
+        assert!(!policy.contains("run `atelier task propose`, and stop"), "the chat is still told to propose and wait:\n{policy}");
+        assert!(!policy.contains("`create` is refused unless"), "the chat is told create needs @task:\n{policy}");
+        assert!(policy.contains("run `atelier task create`, then start it"), "the chat is not told to create the task itself:\n{policy}");
+    }
 }

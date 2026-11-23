@@ -14,7 +14,9 @@ the task and what it must prove when it finishes.
 - Agents never create a task on their own initiative. The owner asks with
   `@task`, or the agent proposes one (`atelier task propose`) and the owner
   answers **Create task**. The server enforces this: an agent's `create` is
-  refused unless the session's latest owner message has a bare `@task`.
+  refused unless the session's latest owner message has a bare `@task`. An
+  owner who turns **Require approval** off lets agents create tasks
+  themselves (see Require approval).
 - Each type has a plan (given at create) and a result (given at done). The
   server rejects a result that does not cover the plan.
 - Tasks are test-first. Every plan item carries one or more checks, written
@@ -51,6 +53,27 @@ exists:
 
 Open chats pick up a change when they next connect. Existing tasks are kept,
 and come back when tasks are turned on again.
+
+## Require approval
+
+Settings → Tasks also has a **Require approval** switch, scoped like Use
+tasks: the app's choice, and per project **Same as app**, **On** or **Off**.
+It is on until the owner turns it off. It is saved in the same `tasks.json`
+as `{"approval": true|false}`, beside `enabled`
+(`tasks::switch::approval`). `GET /api/workbench/tasks-switch` answers it
+under `approval: {install, project, enabled}`, and `PUT` changes it with
+`{"scope": …, "setting": "approval", "enabled": …}`.
+
+Where approval is off:
+
+- An agent's `atelier task create` needs no `@task` in the owner's message.
+- The chat's Tasks rules tell the agent to write the check files, run
+  `atelier task create` and start the task, instead of proposing and
+  waiting.
+- `atelier task propose` creates the task at once, for a chat whose rules
+  were given before the change. No proposal waits on the owner.
+
+Open chats are told the new rules when they next connect.
 
 ## Data
 

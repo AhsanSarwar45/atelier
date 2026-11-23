@@ -1124,6 +1124,24 @@ pub fn write_with_source(
     )
 }
 
+/// The Tasks rules for a project whose owner turned Require approval off:
+/// the agent creates and starts the task it needs instead of proposing it
+/// and waiting (docs/tasks.md, "Require approval").
+fn without_approval(rules: &str) -> String {
+    const ASK: &str = "write only the
+  check files, run `atelier task propose`, and stop. The owner answers
+  **Create task** (start it), **Just do it** (work without a task),
+  **Cancel** (remove the check files) or **Request changes** with a note
+  (revise and propose again). A new proposal replaces a waiting one.";
+    const CREATE: &str = "write the
+  check files, run `atelier task create`, then start it. The owner has
+  turned approval off, so do not propose and wait.";
+    const REFUSED: &str = " `create` is refused unless the owner's latest
+  message has `@task`.";
+    debug_assert!(rules.contains(ASK) && rules.contains(REFUSED), "the Tasks rules no longer say what without_approval replaces");
+    rules.replace(ASK, CREATE).replace(REFUSED, "")
+}
+
 fn builtins() -> Vec<Item> {
     [
         (
@@ -1217,10 +1235,16 @@ pub fn resolve(data: &Path, root: Option<&Path>) -> Result<Snapshot, String> {
         .cloned()
         .unwrap_or_default();
     let tasks_off = !super::tasks::switch::enabled(data, root);
+    let ask_first = super::tasks::switch::approval(data, root);
     let mut items: BTreeMap<String, (Item, &str)> = builtins()
         .into_iter()
         .filter(|i| !(tasks_off && i.id == "atelier-tasks"))
-        .map(|i| (i.id.clone(), (i, "built-in")))
+        .map(|mut i| {
+            if !ask_first && i.id == "atelier-tasks" {
+                i.content = without_approval(&i.content);
+            }
+            (i.id.clone(), (i, "built-in"))
+        })
         .collect();
     if !global.general_instructions.trim().is_empty() {
         items.insert("atelier-general-instructions".into(), (Item {

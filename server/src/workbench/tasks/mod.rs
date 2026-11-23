@@ -444,6 +444,9 @@ pub struct Request {
     pub gate: Option<checks::Gate>,
     /// The types the project offers (catalog.rs), read by the route.
     pub types: catalog::Catalog,
+    /// The owner turned Require approval off (`switch::approval`): an
+    /// agent's create needs no `@task`.
+    pub approval_off: bool,
     pub now: i64,
 }
 
@@ -1334,7 +1337,7 @@ fn apply_in(connection: &Connection, request: &Request) -> Result<Outcome, TaskE
             return refuse("the owner creates a task from grid cells with {grid, chat}, on its own route");
         }
         let draft = check_draft(&request.payload, "create", &request.types, Author::Agent)?;
-        if !owner_asked_for_a_task(connection, caller.unwrap())? {
+        if !request.approval_off && !owner_asked_for_a_task(connection, caller.unwrap())? {
             return refuse(
                 "the owner has not asked for a task: their latest message has no @task. Do not create one yourself. \
                  Run `atelier task propose` with this same payload and stop; the owner answers Create task, Just do it or \
@@ -1750,7 +1753,7 @@ mod tests {
 
     fn ask(store: &Store, actor: &str, session: Option<&str>, action: &str, number: Option<i64>, payload: Value) -> Result<Outcome, TaskError> {
         let task = number.and_then(|number| get(store.connection(), "p", number).ok().flatten());
-        apply(store, &Request { types: Default::default(),
+        apply(store, &Request { types: Default::default(), approval_off: false,
             gate: gate::tests::simulated(task.as_ref(), action),
             action: action.into(),
             actor: actor.into(),
@@ -1904,7 +1907,7 @@ mod tests {
         assert!(refused(agent(&store, "s1", "done", Some(one), done.clone())).starts_with("commits is required for a feature task"));
         done["commits"] = json!(["xyz"]);
         assert!(refused(agent(&store, "s1", "done", Some(one), done.clone())).contains("is not a commit SHA"));
-        let mut request = Request { types: Default::default(),
+        let mut request = Request { types: Default::default(), approval_off: false,
             gate: None,
             action: "done".into(), actor: "agent".into(), session: Some("s1".into()), project: "p".into(),
             number: Some(one), payload: done_payload("feature"), missing_commits: HashSet::from(["abcdef1".to_string()]),
@@ -1926,7 +1929,7 @@ mod tests {
             let session = format!("n{index}");
             let one = create(&store, &session, kind);
             agent(&store, &session, "start", Some(one), json!({})).unwrap();
-            let mut request = Request { types: Default::default(),
+            let mut request = Request { types: Default::default(), approval_off: false,
                 gate: None,
                 action: "done".into(), actor: "agent".into(), session: Some(session.clone()), project: "p".into(),
                 number: Some(one), payload: done_payload(kind), missing_commits: HashSet::new(),

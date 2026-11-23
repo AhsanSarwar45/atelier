@@ -401,11 +401,19 @@ export interface MentionOffer {
 
 /** Where the `@` is being typed, which decides what it offers. */
 /** The owner's Use tasks switch: the app's choice, a project's own, and what applies. */
-export interface TasksSwitchState {
+/** One tasks setting: the app's choice, the project's own (`null` follows the app) and what applies. */
+export interface TasksSetting {
   install: boolean;
   project: boolean | null;
   enabled: boolean;
 }
+
+/** Use tasks at the top level, Require approval under `approval`. */
+export interface TasksSwitchState extends TasksSetting {
+  approval: TasksSetting;
+}
+
+export type TasksSettingName = 'enabled' | 'approval';
 
 export interface MentionPlace {
   /** The folder the chat works in: its files and its skills. */
@@ -1660,12 +1668,13 @@ export const tasks = {
     const query = projectId ? `?${new URLSearchParams({ project: projectId })}` : '';
     return fetchApi<TasksSwitchState>(`/api/workbench/tasks-switch${query}`);
   },
-  /** Turn tasks on or off for the app, or for a project (`null` follows the app). */
-  setSwitch: async (projectId: string | null | undefined, enabled: boolean | null) => {
+  /** Turn Use tasks (or Require approval) on or off for the app, or for a project (`null` follows the app). */
+  setSwitch: async (projectId: string | null | undefined, enabled: boolean | null, setting: TasksSettingName = 'enabled') => {
     const query = projectId ? `?${new URLSearchParams({ project: projectId })}` : '';
+    const scope = projectId ? 'project' : 'install';
     return fetchApi<TasksSwitchState>(`/api/workbench/tasks-switch${query}`, {
       method: 'PUT',
-      body: JSON.stringify({ scope: projectId ? 'project' : 'install', enabled }),
+      body: JSON.stringify(setting === 'enabled' ? { scope, enabled } : { scope, setting, enabled }),
     });
   },
   typesListing: async (projectId?: string | null) => {
