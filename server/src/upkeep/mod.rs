@@ -19,7 +19,7 @@
 
 mod pace;
 
-pub use pace::{thread_bytes, Pace, Paced};
+pub use pace::{thread_bytes, Counted, Pace, Paced};
 
 use std::time::{Duration, Instant};
 

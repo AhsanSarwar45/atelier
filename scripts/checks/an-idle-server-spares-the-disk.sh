@@ -98,11 +98,12 @@ def watch(seconds, until=None):
     server = subprocess.Popen([binary], env=env, stdout=log, stderr=log, start_new_session=True)
 
     def threads():
-        """Bytes read so far by each thread still alive, with its name.
+        """What each thread still alive has read so far, with its name.
 
-        The larger of what the thread asked for in read calls (rchar) and what
-        the disk was asked for on its behalf (read_bytes): a file read through
-        memory, as SQLite reads its database, makes no read call."""
+        Two counts: what the thread asked for in read calls (rchar) and what
+        the disk was asked for on its behalf (read_bytes). A file read through
+        memory, as SQLite reads its database, makes no read call, so what a
+        thread read in a second is the larger of what the two gained."""
         seen = {}
         base = f"/proc/{server.pid}/task"
         try:
@@ -113,7 +114,7 @@ def watch(seconds, until=None):
             try:
                 name = open(f"{base}/{tid}/comm").read().strip()
                 io = dict(row.split(": ") for row in open(f"{base}/{tid}/io").read().splitlines())
-                seen[tid] = (name, max(int(io["rchar"]), int(io.get("read_bytes", 0))))
+                seen[tid] = (name, int(io["rchar"]), int(io.get("read_bytes", 0)))
             except OSError:
                 pass
         return seen
@@ -127,8 +128,9 @@ def watch(seconds, until=None):
                 sys.exit(2)
             time.sleep(1)
             now, upkeep = threads(), 0
-            for tid, (name, total) in now.items():
-                more = total - last.get(tid, (name, 0))[1]
+            for tid, (name, calls, disk) in now.items():
+                _, calls_before, disk_before = last.get(tid, (name, 0, 0))
+                more = max(calls - calls_before, disk - disk_before)
                 if more > 0:
                     read[name] = read.get(name, 0) + more
                     if name.startswith("upkeep"):

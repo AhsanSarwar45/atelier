@@ -38,10 +38,10 @@ pub struct Pace {
     budget: Cell<f64>,
     filled_at: Cell<Instant>,
     /// The kernel's count for this thread when it was last settled.
-    counted: Cell<Option<u64>>,
+    counted: Cell<Option<Counted>>,
     /// What the job said it did since then.
     reported: Cell<u64>,
-    count: fn() -> Option<u64>,
+    count: fn() -> Option<Counted>,
     busy: fn() -> Option<f32>,
 }
 
@@ -57,7 +57,7 @@ impl Pace {
         Self::of(u64::MAX, || None, || None)
     }
 
-    fn of(per_second: u64, count: fn() -> Option<u64>, busy: fn() -> Option<f32>) -> Self {
+    fn of(per_second: u64, count: fn() -> Option<Counted>, busy: fn() -> Option<f32>) -> Self {
         Self {
             per_second,
             budget: Cell::new(SAVED_UP.min(per_second) as f64),
@@ -146,23 +146,55 @@ impl<R: Read> Read for Paced<'_, R> {
     }
 }
 
-/// Bytes this thread has read and written so far, by the kernel's count.
+/// What the kernel has counted for a thread so far.
 ///
-/// The kernel keeps two counts. One is what the thread asked for in read and
-/// write calls, whether or not the disk was needed; the other is what the
-/// disk was asked for on its behalf, which also counts a file read through
-/// memory (SQLite's `mmap_size`), where no call is made at all. The larger of
-/// the two is taken, for reading and for writing.
-pub fn thread_bytes() -> Option<u64> {
+/// The kernel keeps two counts each way. One is what the thread asked for in
+/// read and write calls, whether or not the disk was needed; the other is what
+/// the disk was asked for on its behalf, which also counts a file read through
+/// memory (SQLite's `mmap_size`), where no call is made at all.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Counted {
+    read_calls: u64,
+    read_disk: u64,
+    write_calls: u64,
+    write_disk: u64,
+}
+
+impl Counted {
+    /// Bytes read and written since `before`: for each way, the larger of
+    /// what the two counts gained. The gains are compared, not the counts: a
+    /// thread whose disk count is ahead of its call count (the program's own
+    /// pages were read in for it) would otherwise hide what it then reads in
+    /// calls.
+    pub fn saturating_sub(self, before: Self) -> u64 {
+        let gained = |now: u64, before: u64| now.saturating_sub(before);
+        gained(self.read_calls, before.read_calls).max(gained(self.read_disk, before.read_disk))
+            + gained(self.write_calls, before.write_calls).max(gained(self.write_disk, before.write_disk))
+    }
+}
+
+impl std::ops::Sub for Counted {
+    type Output = u64;
+
+    fn sub(self, before: Self) -> u64 {
+        self.saturating_sub(before)
+    }
+}
+
+/// What the kernel has counted for this thread so far.
+pub fn thread_bytes() -> Option<Counted> {
     let io = std::fs::read_to_string("/proc/thread-self/io").ok()?;
     let field = |name: &str| {
         io.lines()
             .find_map(|line| line.strip_prefix(name))
             .and_then(|value| value.trim().parse::<u64>().ok())
     };
-    let read = field("rchar:")?.max(field("read_bytes:").unwrap_or(0));
-    let written = field("wchar:")?.max(field("write_bytes:").unwrap_or(0));
-    Some(read + written)
+    Some(Counted {
+        read_calls: field("rchar:")?,
+        read_disk: field("read_bytes:").unwrap_or(0),
+        write_calls: field("wchar:")?,
+        write_disk: field("write_bytes:").unwrap_or(0),
+    })
 }
 
 /// How much of the last ten seconds something spent waiting for the disk.
@@ -184,7 +216,7 @@ fn busy_percent(pressure: &str) -> Option<f32> {
 mod tests {
     use super::*;
 
-    fn none() -> Option<u64> {
+    fn none() -> Option<Counted> {
         None
     }
 
@@ -214,10 +246,19 @@ mod tests {
     #[test]
     fn the_larger_of_the_kernels_count_and_the_jobs_is_charged() {
         thread_local!(static COUNTED: Cell<u64> = const { Cell::new(0) });
-        let pace = Pace::of(1000, || Some(COUNTED.with(Cell::get)), || None);
+        let pace = Pace::of(1000, || Some(Counted { read_calls: COUNTED.with(Cell::get), ..Default::default() }), || None);
         COUNTED.with(|counted| counted.set(5000));
         pace.spent(10);
         assert!(pace.owed() >= Duration::from_millis(3900));
+    }
+
+    #[test]
+    fn what_a_thread_did_is_the_larger_gain_of_the_two_counts_each_way() {
+        // The disk count starts ahead of the call count, and only calls follow.
+        let before = Counted { read_calls: 100, read_disk: 5000, write_calls: 0, write_disk: 0 };
+        let now = Counted { read_calls: 1100, read_disk: 5000, write_calls: 30, write_disk: 4096 };
+        assert_eq!(now - before, 1000 + 4096);
+        assert_eq!(before - now, 0);
     }
 
     #[test]

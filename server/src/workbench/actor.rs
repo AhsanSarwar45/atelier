@@ -795,7 +795,7 @@ const HEAVY_READ: u64 = 16 * 1024 * 1024;
 /// Name a read in the log when it read a great deal, by the function that
 /// asked for it, so the reads that load the disk are found without a
 /// profiler. `before` is the thread's byte count when the read began.
-fn name_a_heavy_read(asked_by: &'static str, before: Option<u64>) {
+fn name_a_heavy_read(asked_by: &'static str, before: Option<crate::upkeep::Counted>) {
     let Some(read) = crate::upkeep::thread_bytes().zip(before).map(|(now, before)| now.saturating_sub(before)) else {
         return;
     };
