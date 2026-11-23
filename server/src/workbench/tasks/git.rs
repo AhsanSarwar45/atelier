@@ -9,7 +9,7 @@
 //! count, and a rebase that rewrote the commits does not.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 async fn git(dir: &Path, args: &[&str]) -> Option<String> {
@@ -67,41 +67,154 @@ fn known() -> &'static Mutex<HashMap<(String, String, String), bool>> {
     KNOWN.get_or_init(Default::default)
 }
 
+/// The tip of the folder's base branch and the repository it is in; None
+/// with no repository or no base branch.
+///
+/// Every done task in a list asks this of the same folder, and each asking
+/// was four runs of git, so a list of sixty tasks started 260 processes each
+/// time it was drawn. The answer is kept for as long as the files git keeps
+/// branches in sit as they did ([`RefsStamp`]).
+async fn base_tip(dir: &Path) -> Option<(String, String)> {
+    static KEPT: OnceLock<Mutex<HashMap<PathBuf, (RefsStamp, Option<(String, String)>)>>> = OnceLock::new();
+    let kept = KEPT.get_or_init(Default::default);
+    let common = {
+        let dir = dir.to_path_buf();
+        tokio::task::spawn_blocking(move || crate::project_manifest::git_identity(&dir)).await.ok()?
+    };
+    let known = kept.lock().unwrap().get(dir).cloned();
+    if let Some((stamp, answer)) = known {
+        if RefsStamp::of(&common, &stamp.base).is_some_and(|now| now == stamp) {
+            return answer;
+        }
+    }
+    let base = base_branch(dir).await;
+    // Taken before the tip is read: a branch that moves meanwhile leaves a
+    // stamp that no longer matches, and the next asker reads again.
+    let stamp = RefsStamp::of(&common, &base);
+    let answer = match &base {
+        Some(base) => match git(dir, &["rev-parse", "--verify", &format!("refs/heads/{base}^{{commit}}")]).await {
+            Some(tip) => Some((tip, common.display().to_string())),
+            None => None,
+        },
+        None => None,
+    };
+    if let Some(stamp) = stamp {
+        kept.lock().unwrap().insert(dir.to_path_buf(), (stamp, answer.clone()));
+    }
+    answer
+}
+
+/// The files a repository keeps its branches in, as the file system
+/// describes them: the base branch's own file, the packed branches, and what
+/// decides which branch is the base. While none of them moved, neither did
+/// the base branch or its tip.
+#[derive(Clone, PartialEq)]
+struct RefsStamp {
+    base: Option<String>,
+    files: Vec<Option<(u64, std::time::SystemTime)>>,
+}
+
+impl RefsStamp {
+    /// None for a repository that keeps its branches some other way
+    /// (`reftable`), whose answer is then never kept.
+    fn of(common: &Path, base: &Option<String>) -> Option<Self> {
+        if !common.join("refs").is_dir() || common.join("reftable").exists() {
+            return None;
+        }
+        let seen = |name: String| {
+            let meta = std::fs::metadata(common.join(name)).ok()?;
+            Some((meta.len(), meta.modified().ok()?))
+        };
+        let mut names = vec![
+            "packed-refs".to_string(),
+            "refs/remotes/origin/HEAD".to_string(),
+            "refs/heads/main".to_string(),
+            "refs/heads/master".to_string(),
+        ];
+        names.extend(base.iter().map(|base| format!("refs/heads/{base}")));
+        Some(Self { base: base.clone(), files: names.into_iter().map(seen).collect() })
+    }
+}
+
 /// Whether every commit is in the base branch: None when there are no commits,
 /// no repository or no base branch, or git could not tell.
 pub async fn merged(dir: &Path, commits: &[String]) -> Option<bool> {
     if commits.is_empty() {
         return None;
     }
-    let base = base_branch(dir).await?;
-    let tip = git(dir, &["rev-parse", "--verify", &format!("refs/heads/{base}^{{commit}}")]).await?;
-    let repo = git(dir, &["rev-parse", "--git-common-dir"]).await.unwrap_or_else(|| dir.display().to_string());
-    let repo = dir.join(repo).display().to_string();
+    let (tip, repo) = base_tip(dir).await?;
     for sha in commits {
-        let key = (repo.clone(), tip.clone(), sha.clone());
-        let cached = known().lock().unwrap().get(&key).copied();
-        let ancestor = match cached {
-            Some(answer) => answer,
-            None => {
-                let output = crate::routes::git_output(dir, &["merge-base", "--is-ancestor", sha, &tip]).await.ok()?;
-                let answer = match output.status.code() {
-                    Some(0) => true,
-                    Some(1) => false,
-                    _ => return None,
-                };
-                let mut known = known().lock().unwrap();
-                if known.len() > 50_000 {
-                    known.clear();
-                }
-                known.insert(key, answer);
-                answer
-            }
-        };
-        if !ancestor {
+        if !in_base(dir, &repo, &tip, sha).await? {
             return Some(false);
         }
     }
     Some(true)
+}
+
+/// The base tip each commit was last found under, by (repository, commit).
+fn reached() -> &'static Mutex<HashMap<(String, String), String>> {
+    static REACHED: OnceLock<Mutex<HashMap<(String, String), String>>> = OnceLock::new();
+    REACHED.get_or_init(Default::default)
+}
+
+/// Whether the commit is in the base branch at this tip; None when git could
+/// not tell.
+///
+/// A commit that reached the base branch stays in it while the branch only
+/// moves forward. So when the tip moves, one question (is the earlier tip in
+/// the new one) answers for every commit that was in the earlier tip, instead
+/// of each of them being asked again. A base branch that was rewound or
+/// rewritten fails that question, and each commit is then asked afresh.
+async fn in_base(dir: &Path, repo: &str, tip: &str, sha: &str) -> Option<bool> {
+    if let Some(answer) = asked(repo, tip, sha) {
+        return Some(answer);
+    }
+    let earlier = reached().lock().unwrap().get(&(repo.to_string(), sha.to_string())).cloned();
+    let carried = match earlier {
+        Some(earlier) if earlier != tip => {
+            let forward = match asked(repo, tip, &earlier) {
+                Some(forward) => forward,
+                None => ask(dir, repo, tip, &earlier).await.unwrap_or(false),
+            };
+            forward.then_some(true)
+        }
+        _ => None,
+    };
+    let answer = match carried {
+        Some(answer) => {
+            keep(repo, tip, sha, answer);
+            answer
+        }
+        None => ask(dir, repo, tip, sha).await?,
+    };
+    if answer {
+        reached().lock().unwrap().insert((repo.to_string(), sha.to_string()), tip.to_string());
+    }
+    Some(answer)
+}
+
+fn asked(repo: &str, tip: &str, sha: &str) -> Option<bool> {
+    known().lock().unwrap().get(&(repo.to_string(), tip.to_string(), sha.to_string())).copied()
+}
+
+fn keep(repo: &str, tip: &str, sha: &str, answer: bool) {
+    let mut known = known().lock().unwrap();
+    if known.len() > 50_000 {
+        known.clear();
+    }
+    known.insert((repo.to_string(), tip.to_string(), sha.to_string()), answer);
+}
+
+/// Ask git whether the commit is in the tip, and keep the answer.
+async fn ask(dir: &Path, repo: &str, tip: &str, sha: &str) -> Option<bool> {
+    let output = crate::routes::git_output(dir, &["merge-base", "--is-ancestor", sha, tip]).await.ok()?;
+    let answer = match output.status.code() {
+        Some(0) => true,
+        Some(1) => false,
+        _ => return None,
+    };
+    keep(repo, tip, sha, answer);
+    Some(answer)
 }
 
 /// What `@merge` needs to know about the chat's folder, worked out when the
@@ -290,6 +403,26 @@ mod tests {
         assert_eq!(merged(&feature, &[sha.clone()]).await, Some(true));
         assert_eq!(merged(&feature, &[sha[..10].to_string()]).await, Some(true), "a short SHA is read too");
         assert_eq!(merged(&feature, &["0123456789abcdef".into()]).await, None, "an unknown commit is unknown");
+    }
+
+    #[tokio::test]
+    async fn a_merged_commit_is_not_asked_about_again_when_the_base_moves_forward() {
+        let (_root, main, feature, sha) = repository();
+        run(&main, &["merge", "-q", "--ff-only", "feature"]);
+        commit(&main, "next");
+        assert_eq!(merged(&feature, &[sha.clone()]).await, Some(true));
+        let repo = base_tip(&feature).await.unwrap().1;
+
+        commit(&main, "later");
+        let (tip, _) = base_tip(&feature).await.unwrap();
+        assert_eq!(merged(&feature, &[sha.clone()]).await, Some(true));
+        let earlier = known().lock().unwrap().keys().filter(|(r, t, _)| r == &repo && t == &tip).count();
+        assert_eq!(earlier, 2, "one question for the earlier tip, and the commit's answer carried over");
+        assert_eq!(reached().lock().unwrap().get(&(repo.clone(), sha.clone())), Some(&tip));
+
+        // A base branch moved back loses the commit, and that is seen.
+        run(&main, &["reset", "-q", "--hard", "HEAD~3"]);
+        assert_eq!(merged(&feature, &[sha.clone()]).await, Some(false));
     }
 
     #[tokio::test]

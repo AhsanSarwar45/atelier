@@ -1699,39 +1699,9 @@ fn helper_rows_up_to(path: &Path, size: u64) -> Option<(Vec<Value>, u64)> {
     Some(whole_rows(&String::from_utf8_lossy(&bytes)))
 }
 
-/// Whether each of `calls` succeeded, from the tool results in a record.
-///
-/// The record is read a line at a time and only a line naming one of these
-/// calls is parsed, so a record of hundreds of megabytes costs one pass over
-/// its bytes and none of its memory.
-fn call_outcomes(record: &Path, calls: &HashSet<String>) -> HashMap<String, bool> {
-    let mut outcomes = HashMap::new();
-    if calls.is_empty() {
-        return outcomes;
-    }
-    let Ok(file) = fs::File::open(record) else {
-        return outcomes;
-    };
-    let mut reader = std::io::BufReader::new(file);
-    let mut line = Vec::new();
-    while matches!(std::io::BufRead::read_until(&mut reader, b'\n', &mut line), Ok(read) if read > 0) {
-        if names_a_result_for(&line, calls) {
-            if let Ok(row) = serde_json::from_slice::<Value>(&line) {
-                outcomes.extend(
-                    tool_outcomes(std::slice::from_ref(&row))
-                        .into_iter()
-                        .filter(|(call, _)| calls.contains(call)),
-                );
-            }
-        }
-        line.clear();
-    }
-    outcomes
-}
-
 /// Whether a raw record line holds a tool result for one of `calls`, judged
 /// from the bytes of each `"tool_use_id"` value without parsing the line.
-fn names_a_result_for(line: &[u8], calls: &HashSet<String>) -> bool {
+pub(super) fn names_a_result_for(line: &[u8], calls: &HashSet<String>) -> bool {
     const KEY: &[u8] = b"\"tool_use_id\"";
     let mut rest = line;
     while let Some(at) = rest.windows(KEY.len()).position(|window| window == KEY) {
@@ -1908,7 +1878,7 @@ fn first_settings(path: &Path) -> Option<(String, Option<String>)> {
     None
 }
 
-fn tool_outcomes(rows: &[Value]) -> HashMap<String, bool> {
+pub(super) fn tool_outcomes(rows: &[Value]) -> HashMap<String, bool> {
     let mut outcomes = HashMap::new();
     for row in rows {
         for block in row["message"]["content"].as_array().into_iter().flatten() {
@@ -1938,33 +1908,9 @@ pub fn delegates_work(record: &Path) -> bool {
             return true;
         }
     }
-    // Every open of a chat asks this. Parse only a line that could hold such a
-    // call, rather than the whole record into memory.
-    let Ok(file) = fs::File::open(record) else {
-        return false;
-    };
-    let mut reader = std::io::BufReader::new(file);
-    let mut line = Vec::new();
-    let has = |line: &[u8], text: &[u8]| line.windows(text.len()).any(|window| window == text);
-    while matches!(std::io::BufRead::read_until(&mut reader, b'\n', &mut line), Ok(read) if read > 0) {
-        let could = has(&line, b"\"tool_use\"") && (has(&line, b"\"Task\"") || has(&line, b"\"Agent\""));
-        let delegated = could
-            && serde_json::from_slice::<Value>(&line).is_ok_and(|row| {
-                row["message"]["content"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .any(|block| {
-                        block["type"] == "tool_use"
-                            && matches!(block["name"].as_str(), Some("Task") | Some("Agent"))
-                    })
-            });
-        if delegated {
-            return true;
-        }
-        line.clear();
-    }
-    false
+    // Every open of a chat asks this; the record is read from where the
+    // last answer stopped, not from its first line (`record_scan`).
+    super::record_scan::delegated(record)
 }
 
 /// Read every helper record beside one chat, several at a time.
@@ -2110,7 +2056,8 @@ impl HelperFollower {
     /// record and 218 helpers, and parsing them all took ten seconds and
     /// three gigabytes on each open. A helper is known by its size and the
     /// call its `meta.json` names; the outcomes of those calls are found by
-    /// scanning the record for their ids.
+    /// scanning the record for their ids, from where the last scan of it
+    /// stopped (`record_scan`).
     pub fn after_import(record: &Path) -> Self {
         let mut follower = Self::new(record, HashMap::new());
         for path in follower.paths() {
@@ -2132,7 +2079,7 @@ impl HelperFollower {
             }
         }
         let wanted = follower.calls.keys().cloned().collect();
-        follower.outcomes = call_outcomes(record, &wanted);
+        follower.outcomes = super::record_scan::outcomes(record, &wanted);
         for (call, agent) in &follower.calls {
             if follower.outcomes.contains_key(call) {
                 follower.ended.insert(agent.clone());

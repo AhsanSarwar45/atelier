@@ -330,10 +330,21 @@ pub struct Store {
     /// Each chat's helpers as last folded, with the newest lifecycle row and
     /// the count of them they were folded from (`projected_agents`).
     agents_folded: std::cell::RefCell<HashMap<String, ((i64, i64), Vec<Value>)>>,
+    /// Each chat's helpers and their states as last read (`agent_states`).
+    agent_states_seen: std::cell::RefCell<HashMap<String, ((i64, i64), Vec<(i64, Value)>)>>,
     /// A reader beside the writer (`open_reader`): it may write nothing but
     /// a chat's id rows, in `ensure_event_refs`, and its own temporary table
     /// of a page's ids (`load_ref_window`).
     reader: bool,
+    /// The chats mid-turn as last asked for, and the database's change
+    /// counters then (`active_session_ids`).
+    active_seen: std::cell::RefCell<Option<((u64, i64), Vec<String>)>>,
+    /// The replies being streamed, by chat and message: the pieces not yet
+    /// added to the stored message (`grow_message`).
+    growing: std::cell::RefCell<HashMap<(String, String), Growing>>,
+    /// `growing` as it was when the open event batch began, put back if the
+    /// batch is rolled back.
+    growing_at_batch: std::cell::RefCell<Option<HashMap<(String, String), Growing>>>,
 }
 
 /// What has already been said about one chat, and to whom (`session_notice`).
@@ -596,6 +607,20 @@ const PROJECTION_HEAD_SQL: &str = r#"SELECT
 /// 512 MB of the file, so the pages read most are served from the kernel's
 /// page cache, shared by every connection and given back under pressure,
 /// rather than copied into each connection's own memory.
+/// The pieces of one streamed reply waiting to be stored.
+#[derive(Clone)]
+struct Growing {
+    text: String,
+    /// When the stored message was last written.
+    stored_at: std::time::Instant,
+}
+
+/// How long a streamed reply's new text may wait before it is stored, and how
+/// much of it. Storing rewrites the whole message, so a reply stored with
+/// every piece wrote its own length thousands of times.
+const GROWN_WAITS: std::time::Duration = std::time::Duration::from_secs(2);
+const GROWN_HELD: usize = 16 * 1024;
+
 const CONNECTION_PRAGMAS: &str = "PRAGMA cache_size = -65536; PRAGMA mmap_size = 536870912;";
 
 impl Store {
@@ -612,7 +637,11 @@ impl Store {
         Ok(Self {
             connection,
             agents_folded: Default::default(),
+            agent_states_seen: Default::default(),
             reader: false,
+            active_seen: Default::default(),
+            growing: Default::default(),
+            growing_at_batch: Default::default(),
         })
     }
 
@@ -631,7 +660,11 @@ impl Store {
         Ok(Self {
             connection,
             agents_folded: Default::default(),
+            agent_states_seen: Default::default(),
             reader: true,
+            active_seen: Default::default(),
+            growing: Default::default(),
+            growing_at_batch: Default::default(),
         })
     }
 
@@ -728,6 +761,7 @@ impl Store {
 
     pub fn delete_session(&mut self, id: &str) -> rusqlite::Result<()> {
         self.agents_folded.borrow_mut().remove(id);
+        self.agent_states_seen.borrow_mut().remove(id);
         let transaction = self.connection.transaction()?;
         transaction.execute("DELETE FROM event WHERE session_id = ?1", [id])?;
         transaction.execute("DELETE FROM event_ref WHERE session_id = ?1", [id])?;
@@ -1098,49 +1132,54 @@ fn held_in_its_project(
     /// changes the row without an event — so either one being active puts the
     /// chat in front of the status decision (bw-1fw6).
     ///
-    /// Each chat is asked for its own newest state row, by chat. The cost is
-    /// then one index seek per chat — a number that grows as slowly as the
-    /// chat list does — and not one pass over every state row ever written.
-    ///
-    /// It used to name `event` first, repeat `type='session.state'` outside
-    /// the join, and take the newest seq of each chat from a `GROUP BY` over
-    /// the whole type index. Both halves of that are reading the store has no
-    /// use for: the planner drove the statement from the type index and
-    /// fetched every `session.state` row ever kept off its own page to parse
-    /// as json, and even once that was corrected the grouping still walked all
-    /// of them. The sweep asks this every five seconds: on the owner's 6.1 GB
-    /// store the first cost 620 MB a tick and the second 16 MB, against 4 MB
-    /// for asking chat by chat. The plan is asserted in a test, because the
-    /// cost was entirely in the plan — the answer was always right (bw-y18u.1).
-    ///
-    /// One deliberate difference: an event left behind by a chat whose row is
-    /// gone can no longer put that chat's id in front of the sweep, which had
-    /// nothing to reconcile it against anyway.
+    /// Both are on the chat's own row: `state`, and `said_state`, the state
+    /// its newest `session.state` event names (`note_the_state_said`). The
+    /// sweep asks this every five seconds, so it must not reach the events at
+    /// all: asking each chat's events cost one seek per chat into a table of
+    /// millions of rows, and before that a pass over every state row ever
+    /// kept, 620 MB a tick on the owner's store (bw-y18u.1). That it reads no
+    /// event is asserted in a test.
     fn active_session_sql() -> String {
         let placeholders = super::status::ACTIVE_STATES
             .iter()
             .map(|state| format!("'{state}'"))
             .collect::<Vec<_>>()
             .join(",");
-        format!(
-            r#"SELECT id FROM session WHERE state IN ({placeholders})
-               UNION
-               SELECT chat.id FROM session AS chat
-                WHERE json_extract(
-                        (SELECT newest.json FROM event AS newest
-                          WHERE newest.session_id=chat.id
-                            AND newest.type='session.state'
-                          ORDER BY newest.seq DESC LIMIT 1),
-                        '$.state') IN ({placeholders})"#
-        )
+        format!("SELECT id FROM session WHERE state IN ({placeholders}) OR said_state IN ({placeholders})")
     }
 
     /// The chats in the middle of a turn, by id — what the registry's sweep
     /// looks for, without loading every chat ever kept to find them.
+    ///
+    /// The sweep asks every five seconds, and on a store of thousands of
+    /// chats each answer is thousands of seeks. Nothing can change the answer
+    /// but a write, so the last one stands until this connection has written
+    /// or another has committed: a server nobody is using asks the disk
+    /// nothing.
     pub fn active_session_ids(&self) -> rusqlite::Result<Vec<String>> {
-        let mut statement = self.connection.prepare(&Self::active_session_sql())?;
-        let found = statement.query_map([], |row| row.get(0))?.collect();
-        found
+        let moved = self.moved()?;
+        if let Some((at, found)) = self.active_seen.borrow().as_ref() {
+            if *at == moved {
+                return Ok(found.clone());
+            }
+        }
+        let mut statement = self.connection.prepare_cached(&Self::active_session_sql())?;
+        let found: Vec<String> = statement.query_map([], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
+        *self.active_seen.borrow_mut() = Some((moved, found.clone()));
+        Ok(found)
+    }
+
+    /// Two numbers of which one moves with every change to the database:
+    /// the rows this connection has changed, and the commits of every other
+    /// connection. Reading them touches no page of the file.
+    fn moved(&self) -> rusqlite::Result<(u64, i64)> {
+        let others: i64 = self
+            .connection
+            .prepare_cached("PRAGMA data_version")?
+            .query_row([], |row| row.get(0))?;
+        // SAFETY: the handle is this connection's own and is only read from.
+        let own = unsafe { rusqlite::ffi::sqlite3_total_changes64(self.connection.handle()) };
+        Ok((own as u64, others))
     }
 
     /// What these calls answered, for the ones that sent a command to the
@@ -1446,8 +1485,44 @@ fn held_in_its_project(
             }
             self.remove_superseded_progress(event, session_id, seq)?;
             self.note_the_person_spoke(event, session_id, at)?;
+            self.note_the_state_said(event, session_id, seq, at)?;
         }
         Ok(changed == 1)
+    }
+
+    /// What a chat's newest `session.state` event says, kept on the chat's
+    /// own row: the state, its label, detail and call, and since when the
+    /// chat has been in that state under that label.
+    ///
+    /// The sweep asks which chats are mid-turn every five seconds and every
+    /// window asks every chat's activity when it opens. Answering from the
+    /// events meant a seek per chat into a table of millions of rows: on the
+    /// owner's 20 GB store 117 MB from the disk at every start for the first
+    /// and 792 MB for the second. The row is in a table both read anyway.
+    fn note_the_state_said(&self, event: &Event, session_id: &str, seq: i64, at: &str) -> rusqlite::Result<()> {
+        if event.kind != EventKind::SessionState {
+            return Ok(());
+        }
+        let text = |name: &str| event.fields.get(name).and_then(Value::as_str);
+        let call = event.fields.get("call").filter(|call| !call.is_null()).map(Value::to_string);
+        self.connection
+            .prepare_cached(
+                "UPDATE session SET
+                   said_since = CASE WHEN said_state IS ?1 AND COALESCE(said_label,'') = ?2
+                                     THEN COALESCE(said_since, ?5) ELSE ?5 END,
+                   said_state = ?1, said_label = ?2, said_detail = ?3, said_call = ?4, said_state_seq = ?6
+                 WHERE id = ?7 AND COALESCE(said_state_seq, 0) <= ?6",
+            )?
+            .execute(params![
+                text("state"),
+                text("label").unwrap_or(""),
+                text("detail").unwrap_or(""),
+                call,
+                at,
+                seq,
+                session_id
+            ])?;
+        Ok(())
     }
 
     /// The list's own clock, kept by the one event that moves it.
@@ -1767,16 +1842,24 @@ fn held_in_its_project(
     /// the sole connection owner, so no other command can observe the batch
     /// until `commit_event_batch` returns.
     pub fn begin_event_batch(&self) -> rusqlite::Result<()> {
-        self.connection.execute_batch("BEGIN IMMEDIATE")
+        self.connection.execute_batch("BEGIN IMMEDIATE")?;
+        *self.growing_at_batch.borrow_mut() = Some(self.growing.borrow().clone());
+        Ok(())
     }
 
     pub fn commit_event_batch(&self) -> rusqlite::Result<()> {
-        self.connection.execute_batch("COMMIT")
+        self.connection.execute_batch("COMMIT")?;
+        self.growing_at_batch.borrow_mut().take();
+        Ok(())
     }
 
     pub fn rollback_event_batch(&self) {
         let _ = self.connection.execute_batch("ROLLBACK");
+        if let Some(growing) = self.growing_at_batch.borrow_mut().take() {
+            *self.growing.borrow_mut() = growing;
+        }
         self.agents_folded.borrow_mut().clear();
+        self.agent_states_seen.borrow_mut().clear();
     }
 
     pub fn events_since(&self, session_id: &str, since: i64) -> rusqlite::Result<Vec<Event>> {
@@ -1919,59 +2002,48 @@ fn held_in_its_project(
             .map(|json| serde_json::from_str(&json).map_err(json_error))
             .transpose()
     }
-    /// The activity of every chat that ever reported one, read from its latest
-    /// `session.state` row alone.
+    /// The activity of every chat that ever reported one.
     ///
     /// This is the query behind every chat-list snapshot, so it is asked on
-    /// every socket open and again whenever a live feed falls behind. It used
-    /// to filter the whole event table by type, which no index served: on a
-    /// board of a million events that was a read of the entire file — two
-    /// gigabytes from disk, five to fifty seconds — on the one thread every
-    /// other read and every append waits behind (bw-uxoe). Now `event_by_type`
-    /// finds the newest state row of each chat without touching another, and
-    /// only a chat that is still counting reads its own short run of states
-    /// to say since when.
+    /// every socket open and again whenever a live feed falls behind. It is
+    /// answered from the chats' own rows (`note_the_state_said`) and reads no
+    /// event. It used to read them: first the whole event table (bw-uxoe),
+    /// then every state row ever stored, then the newest state row of each
+    /// chat, which was still a seek per chat into the largest table for every
+    /// connection that was asked.
     pub fn session_activities(&self) -> rusqlite::Result<HashMap<String, SessionActivity>> {
-        let mut statement = self.connection.prepare(
-            "SELECT e.session_id, json_extract(e.json,'$.state'), COALESCE(json_extract(e.json,'$.label'),''), \
-                    COALESCE(json_extract(e.json,'$.detail'),''), COALESCE(json_extract(e.json,'$.call'),'') \
-             FROM (SELECT session_id, MAX(seq) seq FROM event WHERE type='session.state' GROUP BY session_id) latest \
-             JOIN event e ON e.session_id=latest.session_id AND e.seq=latest.seq",
+        let mut statement = self.connection.prepare_cached(
+            "SELECT id, said_state, COALESCE(said_label,''), COALESCE(said_detail,''), \
+                    COALESCE(said_call,''), said_since \
+               FROM session WHERE said_state IS NOT NULL",
         )?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })?;
-        let latest: Vec<_> = rows.collect::<rusqlite::Result<_>>()?;
-        let mut activities = HashMap::with_capacity(latest.len());
-        for (session_id, state, label, detail, call) in latest {
-            let Some(state) = state else { continue };
-            let counting = matches!(
-                state.as_str(),
-                "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
-            );
-            let activity = if counting {
-                SessionActivity {
-                    detail,
-                    call: serde_json::from_str(&call).unwrap_or(Value::Null),
-                    ..self.session_activity(&session_id)?
-                }
-            } else {
-                SessionActivity {
-                    label: if state == "dormant" { String::new() } else { label },
-                    detail: String::new(),
-                    call: Value::Null,
-                    busy_since: None,
-                }
-            };
-            activities.insert(session_id, activity);
-        }
-        Ok(activities)
+        let found = statement
+            .query_map([], |row| {
+                let state: String = row.get(1)?;
+                let label: String = row.get(2)?;
+                let counting = matches!(
+                    state.as_str(),
+                    "starting" | "thinking" | "streaming" | "running_tool" | "waiting_for_agents" | "waiting_permission"
+                );
+                let activity = if counting {
+                    SessionActivity {
+                        label,
+                        detail: row.get(3)?,
+                        call: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or(Value::Null),
+                        busy_since: row.get(5)?,
+                    }
+                } else {
+                    SessionActivity {
+                        label: if state == "dormant" { String::new() } else { label },
+                        detail: String::new(),
+                        call: Value::Null,
+                        busy_since: None,
+                    }
+                };
+                Ok((row.get(0)?, activity))
+            })?
+            .collect();
+        found
     }
 
     pub fn token_stats(&self, session_id: &str) -> rusqlite::Result<TokenStats> {
@@ -2296,22 +2368,123 @@ fn held_in_its_project(
         self.connection
             .prepare_cached("INSERT OR IGNORE INTO message (session_id, message_id, role, text, at) VALUES (?1,?2,?3,'',?4)")?
             .execute(params![session_id, message_id, role, at])?;
+        // An agent's reply arrives in thousands of pieces and is held
+        // (`grow_message`). What a person wrote is stored at once: it is one
+        // piece, and it is read back the moment it is sent.
+        if role == "assistant" && !self.reader {
+            self.growing.borrow_mut().insert(
+                (session_id.to_string(), message_id.to_string()),
+                Growing { text: String::new(), stored_at: std::time::Instant::now() },
+            );
+        }
         Ok(())
     }
 
+    /// Add a piece to a message.
+    ///
+    /// A piece of a reply opened by this process is held, and the stored
+    /// message is rewritten at most every `GROWN_WAITS` or `GROWN_HELD` bytes,
+    /// when anything else happens in the chat (`store_grown`) and before the
+    /// messages are read here.
     pub fn grow_message(
         &self,
         session_id: &str,
         message_id: &str,
         text: &str,
     ) -> rusqlite::Result<()> {
+        let key = (session_id.to_string(), message_id.to_string());
+        let mut growing = self.growing.borrow_mut();
+        let Some(held) = growing.get_mut(&key) else {
+            return self.add_to_message(session_id, message_id, text);
+        };
+        held.text.push_str(text);
+        if held.text.len() < GROWN_HELD && held.stored_at.elapsed() < GROWN_WAITS {
+            return Ok(());
+        }
+        let text = std::mem::take(&mut held.text);
+        held.stored_at = std::time::Instant::now();
+        drop(growing);
+        self.add_to_message(session_id, message_id, &text)
+    }
+
+    fn add_to_message(&self, session_id: &str, message_id: &str, text: &str) -> rusqlite::Result<()> {
+        if text.is_empty() {
+            return Ok(());
+        }
         self.connection
             .prepare_cached("UPDATE message SET text = text || ?1 WHERE session_id = ?2 AND message_id = ?3")?
             .execute(params![text, session_id, message_id])?;
         Ok(())
     }
 
+    /// Store what is held of a chat's streamed replies and stop holding them:
+    /// something other than a piece of text happened in the chat, so its
+    /// replies so far are complete. `None` is every chat.
+    pub fn store_grown(&self, session_id: Option<&str>) -> rusqlite::Result<()> {
+        if self.growing.borrow().is_empty() {
+            return Ok(());
+        }
+        let ended: Vec<_> = {
+            let mut growing = self.growing.borrow_mut();
+            let keys: Vec<_> = growing
+                .keys()
+                .filter(|(session, _)| session_id.is_none_or(|id| id == session))
+                .cloned()
+                .collect();
+            keys.into_iter().filter_map(|key| growing.remove(&key).map(|held| (key, held))).collect()
+        };
+        for ((session, message), held) in ended {
+            self.add_to_message(&session, &message, &held.text)?;
+        }
+        Ok(())
+    }
+
+    /// Store everything held and keep holding: the messages are about to be
+    /// read on this connection.
+    fn store_grown_now(&self) -> rusqlite::Result<()> {
+        if self.growing.borrow().is_empty() {
+            return Ok(());
+        }
+        let held: Vec<_> = self
+            .growing
+            .borrow_mut()
+            .iter_mut()
+            .filter(|(_, held)| !held.text.is_empty())
+            .map(|(key, held)| {
+                held.stored_at = std::time::Instant::now();
+                (key.clone(), std::mem::take(&mut held.text))
+            })
+            .collect();
+        for ((session, message), text) in held {
+            self.add_to_message(&session, &message, &text)?;
+        }
+        Ok(())
+    }
+
+    /// Store what has waited `GROWN_WAITS`, so a reply that stopped arriving
+    /// part way is not held for good. The replies stay held.
+    pub fn store_grown_that_waited(&self) -> rusqlite::Result<()> {
+        if self.growing.borrow().is_empty() {
+            return Ok(());
+        }
+        let waited: Vec<_> = self
+            .growing
+            .borrow_mut()
+            .iter_mut()
+            .filter(|(_, held)| !held.text.is_empty() && held.stored_at.elapsed() >= GROWN_WAITS)
+            .map(|(key, held)| {
+                held.stored_at = std::time::Instant::now();
+                (key.clone(), std::mem::take(&mut held.text))
+            })
+            .collect();
+        for ((session, message), text) in waited {
+            self.add_to_message(&session, &message, &text)?;
+        }
+        Ok(())
+    }
+
     pub fn retract_message(&self, session_id: &str, message_id: &str) -> rusqlite::Result<()> {
+        self.growing.borrow_mut().remove(&(session_id.to_string(), message_id.to_string()));
         self.connection.execute(
             "DELETE FROM message WHERE session_id = ?1 AND message_id = ?2",
             params![session_id, message_id],
@@ -2507,6 +2680,7 @@ fn held_in_its_project(
     }
 
     pub fn search(&self, query: &str, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
+        self.store_grown_now()?;
         let escaped = query
             .replace('\\', "\\\\")
             .replace('%', "\\%")
@@ -2544,6 +2718,7 @@ fn held_in_its_project(
     /// authoritative; this is only enough conversational context for the new
     /// provider session to continue coherently.
     pub fn account_handoff(&self, session_id: &str) -> rusqlite::Result<String> {
+        self.store_grown_now()?;
         let mut statement = self.connection.prepare(
             "SELECT role, text FROM message WHERE session_id=?1 AND text<>'' ORDER BY at DESC LIMIT 80",
         )?;
@@ -2570,6 +2745,7 @@ fn held_in_its_project(
     /// reference to this chat (bw-mi3s.3). The person's messages are their own
     /// words, without the blocks Atelier added to them.
     pub fn chat_text(&self, session_id: &str) -> rusqlite::Result<String> {
+        self.store_grown_now()?;
         let mut statement = self
             .connection
             .prepare("SELECT role, text FROM message WHERE session_id=?1 AND text<>'' ORDER BY at ASC")?;
@@ -3080,7 +3256,30 @@ fn held_in_its_project(
     /// The rows come off the type index. Left to itself, the planner walked
     /// every row of the chat in order to test its type: 600,000 rows and 8 s
     /// from disk to find 2,000, before the first page of a long chat was sent.
+    ///
+    /// The answer is kept until the chat stores another of those rows, which
+    /// the index alone says (as in `projected_agents`): one open of a chat
+    /// asks this several times over, and each asking read every helper's
+    /// stored report again.
     fn agent_states(&self, session_id: &str) -> rusqlite::Result<Vec<(i64, Value)>> {
+        let seen: (i64, i64) = self.connection.prepare_cached(
+            "SELECT COALESCE(MAX(seq),0), COUNT(*) FROM event INDEXED BY event_by_type \
+             WHERE session_id=?1 AND type IN \
+               ('agent.started','agent.progress','agent.finished','transcript.reset')",
+        )?.query_row([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        if let Some((at, states)) = self.agent_states_seen.borrow().get(session_id) {
+            if *at == seen {
+                return Ok(states.clone());
+            }
+        }
+        let states = self.read_agent_states(session_id)?;
+        self.agent_states_seen
+            .borrow_mut()
+            .insert(session_id.to_string(), (seen, states.clone()));
+        Ok(states)
+    }
+
+    fn read_agent_states(&self, session_id: &str) -> rusqlite::Result<Vec<(i64, Value)>> {
         let mut statement = self.connection.prepare(AGENT_STATES_SQL)?;
         let events = statement.query_map([session_id], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
@@ -4048,6 +4247,46 @@ fn scrub_base64(value: &mut Value) -> usize {
     }
 }
 
+/// The upkeep job that runs `scrub_stored_base64` until nothing is left.
+pub fn scrub_job(path: std::path::PathBuf) -> crate::upkeep::Job {
+    crate::upkeep::Job::new("stored pictures", Duration::from_secs(24 * 3600), move |_| {
+        match scrub_stored_base64(&path, 200) {
+            Ok(Some(_)) => crate::upkeep::Turn::More,
+            Ok(None) => crate::upkeep::Turn::Done,
+            Err(error) => {
+                tracing::warn!(%error, "stored pictures not cleaned; trying again later");
+                crate::upkeep::Turn::Done
+            }
+        }
+    })
+}
+
+/// The chats that stored an event after the one numbered `seen`, and the
+/// number of the newest event now, for an index that follows the chat
+/// database from another file and keeps the number it got to.
+///
+/// Events are only ever added at the end of the table, so the chats of the
+/// rows past `seen` are all that said anything since. `None` for the chats
+/// means every one of them: nothing has been seen yet, or the table ends
+/// before `seen`, so its newest events were removed and their numbers will be
+/// given out again.
+pub fn chats_with_events_after(
+    chats: &Connection,
+    seen: Option<i64>,
+) -> rusqlite::Result<(Option<std::collections::HashSet<String>>, i64)> {
+    let newest: i64 = chats.query_row("SELECT COALESCE(MAX(rowid), 0) FROM event", [], |row| row.get(0))?;
+    let spoke = match seen {
+        Some(seen) if newest >= seen => Some(
+            chats
+                .prepare_cached("SELECT DISTINCT session_id FROM event WHERE rowid>?1")?
+                .query_map([seen], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?,
+        ),
+        _ => None,
+    };
+    Ok((spoke, newest))
+}
+
 /// Clean tool events stored before `scrub_base64` ran on append, a few at a
 /// time, so the record stops being read in full for pictures nobody shows.
 ///
@@ -4238,6 +4477,33 @@ fn reconcile_capabilities(transaction: &Transaction<'_>) -> rusqlite::Result<()>
         transaction.execute_batch(
             "ALTER TABLE session ADD COLUMN begun_by TEXT;
              UPDATE session SET begun_by='person' WHERE origin='app' AND begun_by IS NULL;",
+        )?;
+    }
+
+    // What each chat's newest `session.state` event says, so the sweep for
+    // chats mid-turn and the chat list's activity read the chats and not
+    // their events (`note_the_state_said`). Filled once from the events; a
+    // chat mid-turn at that moment counts from its newest state event.
+    if !columns(transaction, "session")?
+        .iter()
+        .any(|name| name == "said_state")
+    {
+        transaction.execute_batch(
+            r#"ALTER TABLE session ADD COLUMN said_state TEXT;
+               ALTER TABLE session ADD COLUMN said_state_seq INTEGER;
+               ALTER TABLE session ADD COLUMN said_label TEXT;
+               ALTER TABLE session ADD COLUMN said_detail TEXT;
+               ALTER TABLE session ADD COLUMN said_call TEXT;
+               ALTER TABLE session ADD COLUMN said_since TEXT;
+               UPDATE session SET said_state_seq =
+                 (SELECT MAX(seq) FROM event WHERE event.session_id=session.id AND event.type='session.state');
+               UPDATE session SET (said_state, said_label, said_detail, said_call, said_since) =
+                 (SELECT json_extract(json,'$.state'), COALESCE(json_extract(json,'$.label'),''),
+                         COALESCE(json_extract(json,'$.detail'),''), json_extract(json,'$.call'),
+                         json_extract(json,'$.at')
+                    FROM event
+                   WHERE event.session_id=session.id AND event.seq=session.said_state_seq)
+                WHERE said_state_seq IS NOT NULL;"#,
         )?;
     }
 
@@ -7425,16 +7691,36 @@ mod tests {
         }
     }
 
-    /// The sweep's question — which chats are mid-turn — reads the json of
-    /// each chat's newest state row and of nothing else.
+    /// The sweep's answer is kept until the database changes, and a change
+    /// made through any connection ends it.
+    #[test]
+    fn the_chats_mid_turn_are_asked_again_once_anything_is_written() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        let store = Store::open(&path).unwrap();
+        store.create_session(&session("one", "claude", None, "2026-09-01T00:00:00Z")).unwrap();
+        store.create_session(&session("two", "claude", None, "2026-09-01T00:00:00Z")).unwrap();
+        assert!(store.active_session_ids().unwrap().is_empty());
+
+        store
+            .update_session("one", SessionPatch { state: Some("streaming".into()), ..SessionPatch::default() }, None)
+            .unwrap();
+        assert_eq!(store.active_session_ids().unwrap(), ["one"]);
+
+        let other = Connection::open(&path).unwrap();
+        other.execute("UPDATE session SET state='thinking' WHERE id='two'", []).unwrap();
+        let mut active = store.active_session_ids().unwrap();
+        active.sort();
+        assert_eq!(active, ["one", "two"]);
+    }
+
+    /// The sweep's question, which chats are mid-turn, is answered from the
+    /// chats' own rows and reads no event.
     ///
-    /// It used to name `event` first and repeat `type='session.state'` outside
-    /// the join, which let the planner drive from the type index and fetch
-    /// every state row the store had ever kept, off its own page, to parse as
-    /// json. Measured on the owner's 6.1 GB store: 166,534 rows and 620 MB of
-    /// reading every five seconds, for ever, to name two chats. The plan is
-    /// asserted because the cost is entirely in the plan — the answer was
-    /// always right (bw-y18u.1).
+    /// It used to read the events: first every state row the store had ever
+    /// kept (166,534 rows and 620 MB every five seconds on the owner's 6.1 GB
+    /// store, bw-y18u.1), then the newest state row of each chat, which was
+    /// still one seek per chat into the largest table at every start.
     #[test]
     fn workbench_core_active_chats_read_only_the_newest_state_of_each() {
         let directory = tempfile::tempdir().unwrap();
@@ -7486,33 +7772,52 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        let reaching_events: Vec<&String> = plan
-            .iter()
-            .filter(|step| step.contains("event"))
-            .collect();
-        assert_eq!(
-            reaching_events.len(),
-            1,
-            "the event table is reached once, and only to answer per chat: {plan:?}"
-        );
         assert!(
-            reaching_events[0].contains("session_id=?"),
-            "each chat is asked for its own newest state, not the whole type \
-             index walked for everyone's: {plan:?}"
-        );
-        assert!(
-            !plan.iter().any(|step| step.contains("FOR ORDER BY")),
-            "newest means last in that chat's run of the index, with nothing \
-             sorted to find it: {plan:?}"
+            !plan.iter().any(|step| step.contains("event")),
+            "the events are not read to find the chats mid-turn: {plan:?}"
         );
     }
 
-    /// The chat list's activity column is read through the type index, from
-    /// each chat's newest state row — never by a walk of every event (bw-uxoe).
+    /// A store kept by an older build learns each chat's newest said state
+    /// once, when it is opened.
+    #[test]
+    fn an_older_store_learns_what_each_chat_last_said() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workbench.db");
+        {
+            let store = Store::open(&path).unwrap();
+            store.create_session(&session("working", "claude", None, "2026-08-20T00:00:00Z")).unwrap();
+            store.create_session(&session("silent", "claude", None, "2026-08-20T00:00:00Z")).unwrap();
+            for (seq, state) in [(1, "dormant"), (2, "streaming")] {
+                let event: Event = serde_json::from_value(json!({
+                    "type":"session.state", "sessionId":"working", "seq":seq,
+                    "at":"2026-08-20T00:00:01Z", "state":state, "label":""
+                }))
+                .unwrap();
+                assert!(store.append_event(&event).unwrap());
+            }
+            store
+                .connection
+                .execute_batch(
+                    "ALTER TABLE session DROP COLUMN said_state; ALTER TABLE session DROP COLUMN said_state_seq;
+                     ALTER TABLE session DROP COLUMN said_label; ALTER TABLE session DROP COLUMN said_detail;
+                     ALTER TABLE session DROP COLUMN said_call; ALTER TABLE session DROP COLUMN said_since;",
+                )
+                .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.active_session_ids().unwrap(), ["working"]);
+        let activities = store.session_activities().unwrap();
+        assert_eq!(activities.len(), 1, "a chat that said nothing has no activity");
+        assert_eq!(activities["working"].busy_since.as_deref(), Some("2026-08-20T00:00:01Z"));
+    }
+
+    /// The chat list's activity column is read from the chats' own rows and
+    /// follows every state event stored, never by reading events (bw-uxoe).
     #[test]
     fn workbench_core_session_activities_read_only_the_latest_state() {
         let directory = tempfile::tempdir().unwrap();
-        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        let mut store = Store::open(&directory.path().join("workbench.db")).unwrap();
         for id in ["busy", "resting", "silent"] {
             store
                 .create_session(&session(id, "claude", None, "2026-08-20T00:00:00Z"))
@@ -7547,26 +7852,28 @@ mod tests {
         assert_eq!(activities["resting"].busy_since, None);
         assert_eq!(activities["busy"], store.session_activity("busy").unwrap());
 
-        let index: i64 = store
-            .connection
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='event_by_type'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(index, 1, "the type index is part of every opened database");
+        // The answer is kept, and follows what is stored after it was made.
+        assert_eq!(store.session_activities().unwrap(), activities);
+        assert!(store.append_event(&state("silent", 1, "thinking", "Thinking", "2026-08-20T00:00:04Z")).unwrap());
+        assert!(store.append_event(&state("busy", 4, "dormant", "Dormant", "2026-08-20T00:00:05Z")).unwrap());
+        let later = store.session_activities().unwrap();
+        assert_eq!(later["silent"].label, "Thinking");
+        assert_eq!(later["busy"].busy_since, None);
+        assert_eq!(later["resting"], activities["resting"]);
+        store.delete_session("silent").unwrap();
+        assert!(!store.session_activities().unwrap().contains_key("silent"), "a deleted chat kept its activity");
+
         let plan: Vec<String> = store
             .connection
-            .prepare("EXPLAIN QUERY PLAN SELECT session_id, MAX(seq) FROM event WHERE type='session.state' GROUP BY session_id")
+            .prepare("EXPLAIN QUERY PLAN SELECT id, said_state, said_label, said_detail, said_call, said_since FROM session WHERE said_state IS NOT NULL")
             .unwrap()
             .query_map([], |row| row.get::<_, String>(3))
             .unwrap()
             .map(Result::unwrap)
             .collect();
         assert!(
-            plan.iter().any(|step| step.contains("event_by_type")),
-            "the latest state is found through the type index, not a scan: {plan:?}"
+            !plan.iter().any(|step| step.contains("event")),
+            "the events are not read for the chat list's activity: {plan:?}"
         );
     }
 

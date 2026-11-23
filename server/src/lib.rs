@@ -22,4 +22,5 @@ pub mod search;
 pub mod service;
 pub mod serving;
 pub mod terminal;
+pub mod upkeep;
 pub mod workbench;

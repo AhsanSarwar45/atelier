@@ -69,12 +69,20 @@ pub fn without_the_deleted_mark(path: &str) -> &str {
 /// that had no Reports tab and nothing to ask about it. This is a hash of the
 /// file's own bytes — enough to say "not the same file", which is the only
 /// question ever put to it, and never offered as a certified digest.
+///
+/// A build is read once, not once a start: what a look found is remembered
+/// beside the app's data (`remember_looks_in`), and the first look at a new
+/// build is taken by upkeep, at its pace (`learn_the_programs`). Until then
+/// the answer is `pending`.
 pub fn fingerprint() -> &'static str {
     static PRINT: OnceLock<String> = OnceLock::new();
-    PRINT.get_or_init(|| match program().as_deref().and_then(look) {
-        Some(seen) => print_of(&seen),
-        None => "unknown".to_string(),
-    })
+    if let Some(print) = PRINT.get() {
+        return print;
+    }
+    match program().as_deref().and_then(remembered) {
+        Some(seen) => PRINT.get_or_init(|| print_of(&seen)),
+        None => "pending",
+    }
 }
 
 /// When this copy started, in the one format that reads the same everywhere.
@@ -92,10 +100,124 @@ pub struct Seen {
 
 /// Look at a program file. Nothing if it is not there or cannot be read.
 pub fn look(path: &Path) -> Option<Seen> {
-    let bytes = std::fs::read(path).ok()?;
+    look_at(path, &crate::upkeep::Pace::unlimited())
+}
+
+/// `look`, reading no faster than `pace` allows.
+fn look_at(path: &Path, pace: &crate::upkeep::Pace) -> Option<Seen> {
+    use std::io::Read;
+    let mut file = crate::upkeep::Paced::new(std::fs::File::open(path).ok()?, pace);
     let mut hasher = DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Some(Seen { len: bytes.len() as u64, mark: hasher.finish() })
+    let mut len = 0u64;
+    let mut block = vec![0u8; 1 << 20];
+    loop {
+        // Whole blocks, so the same bytes always reach the hasher the same way.
+        let mut filled = 0;
+        while filled < block.len() {
+            match file.read(&mut block[filled..]).ok()? {
+                0 => break,
+                read => filled += read,
+            }
+        }
+        if filled == 0 {
+            break;
+        }
+        block[..filled].hash(&mut hasher);
+        len += filled as u64;
+    }
+    Some(Seen { len, mark: hasher.finish() })
+}
+
+/* ------------------------------------------------------------------ *
+ * Looks, remembered.
+ * ------------------------------------------------------------------ */
+
+static LOOKS: OnceLock<PathBuf> = OnceLock::new();
+
+/// Keep what looks found in this file, so a build is read once and not at
+/// every start.
+pub fn remember_looks_in(store: PathBuf) {
+    let _ = LOOKS.set(store);
+}
+
+/// One remembered look: the file as it was glanced at, and what reading it
+/// found.
+type Remembered = (String, u64, Option<(u64, u32)>, Option<(u64, u64)>, u64);
+
+fn remembered_looks() -> Vec<Remembered> {
+    LOOKS
+        .get()
+        .and_then(|store| std::fs::read(store).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn as_remembered(path: &Path, glance: &Glance, mark: u64) -> Remembered {
+    let written = glance
+        .written_at
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|since| (since.as_secs(), since.subsec_nanos()));
+    (path.display().to_string(), glance.len, written, glance.file, mark)
+}
+
+/// What a look at this file found, if the file sits exactly as it did when
+/// it was looked at. Costs one question to the file system.
+pub fn remembered(path: &Path) -> Option<Seen> {
+    remembered_at(path, glance(path)?)
+}
+
+fn remembered_at(path: &Path, glance: Glance) -> Option<Seen> {
+    let wanted = as_remembered(path, &glance, 0);
+    remembered_looks()
+        .into_iter()
+        .find(|known| (&known.0, known.1, known.2, known.3) == (&wanted.0, wanted.1, wanted.2, wanted.3))
+        .map(|known| Seen { len: known.1, mark: known.4 })
+}
+
+/// Look at a program file unless a look at it is remembered, and remember
+/// what was found. A file that changes while it is read is not remembered.
+fn learn(path: &Path, pace: &crate::upkeep::Pace) -> Option<Seen> {
+    let before = glance(path)?;
+    if let Some(seen) = remembered_at(path, before) {
+        return Some(seen);
+    }
+    let seen = look_at(path, pace)?;
+    if glance(path) != Some(before) {
+        return None;
+    }
+    if let Some(store) = LOOKS.get() {
+        let name = path.display().to_string();
+        let mut looks = remembered_looks();
+        looks.retain(|known| known.0 != name);
+        looks.push(as_remembered(path, &before, seen.mark));
+        let beside = store.with_extension("json.part");
+        let written = serde_json::to_vec(&looks)
+            .map_err(std::io::Error::other)
+            .and_then(|bytes| std::fs::write(&beside, bytes))
+            .and_then(|()| std::fs::rename(&beside, store));
+        if let Err(error) = written {
+            tracing::warn!(%error, "could not remember the look at {}", path.display());
+        }
+    }
+    Some(seen)
+}
+
+/// The upkeep job that takes the first look at this build and at the program
+/// this computer starts at login. Once both are remembered it reads nothing.
+pub fn learn_the_programs(registered: Option<PathBuf>) -> crate::upkeep::Job {
+    let mut said = false;
+    crate::upkeep::Job::new("program looks", Duration::from_secs(3600), move |pace| {
+        if let Some(ours) = program() {
+            if learn(&ours, pace).is_some() && !said {
+                said = true;
+                tracing::info!("this is build {}", fingerprint());
+            }
+        }
+        if let Some(registered) = &registered {
+            learn(registered, pace);
+        }
+        crate::upkeep::Turn::Done
+    })
 }
 
 /// The short name a look is reported under.
@@ -174,6 +296,21 @@ pub fn a_newer_build_is_there(before: Option<Seen>, now: Option<Seen>) -> bool {
         (Some(was), Some(is)) => was != is,
         (Some(_), None) => true,
         (None, _) => false,
+    }
+}
+
+/// Whether the program file that moved is another build than the one this
+/// copy started beside.
+///
+/// The file did move, or nobody would be asking. If what it held at start
+/// was never read — it moved in this copy's first minutes, before upkeep got
+/// to it — there is nothing to compare with, and a file that can be read now
+/// counts as replaced: a restart nobody needed costs a second, a newer build
+/// left unnoticed costs the reader the update.
+fn replaced(before: Option<Seen>, now: Option<Seen>) -> bool {
+    match before {
+        Some(_) => a_newer_build_is_there(before, now),
+        None => true,
     }
 }
 
@@ -257,7 +394,10 @@ pub fn stand_down_for_a_newer_build(registered: PathBuf) {
         );
         return;
     }
-    let Some(at_start) = look(&registered) else {
+    // What the file was when this copy started. What it holds is read by
+    // upkeep, once per build (`learn_the_programs`), and asked for only if the
+    // file ever moves.
+    let Some(at_start) = glance(&registered) else {
         tracing::warn!(
             "the program this computer starts at login could not be read at {}, \
              so a newer build installed over it will not be noticed until the next restart",
@@ -265,7 +405,7 @@ pub fn stand_down_for_a_newer_build(registered: PathBuf) {
         );
         return;
     };
-    let mut quiet = glance(&registered);
+    let mut quiet = Some(at_start);
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(LOOK_EVERY).await;
@@ -278,8 +418,9 @@ pub fn stand_down_for_a_newer_build(registered: PathBuf) {
             if !worth_a_look(quiet, seen_now) {
                 continue;
             }
+            let before = remembered_at(&registered, at_start);
             let now = look(&registered);
-            if !a_newer_build_is_there(Some(at_start), now) {
+            if !replaced(before, now) {
                 // Something about the file moved without the build changing —
                 // a touch, a reinstall of the same bytes. Take the new glance
                 // as the quiet one, so it is not read again every ten seconds.
@@ -293,7 +434,7 @@ pub fn stand_down_for_a_newer_build(registered: PathBuf) {
             if UPDATING.load(Ordering::SeqCst) {
                 continue;
             }
-            if !a_newer_build_is_there(Some(at_start), settled) {
+            if !replaced(before, settled) {
                 // Back to the build already running, whatever happened in
                 // between. This is the file to sit quietly on now.
                 quiet = glance(&registered);

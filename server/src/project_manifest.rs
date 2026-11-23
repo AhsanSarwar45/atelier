@@ -119,9 +119,62 @@ fn git(root: &Path, args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// The repository a folder belongs to: git's common directory, the same for
+/// every worktree of it, or the folder itself outside a repository.
+///
+/// Every reading of a project's manifest asks this, and the open window asks
+/// for manifests all the time, so asking git each time started a process
+/// every second or two for as long as a window was open. The answer is kept
+/// for as long as the folder's own `.git` entry stays what it was.
 pub fn git_identity(root: &Path) -> PathBuf {
+    static KEPT: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, (GitEntry, PathBuf)>>> =
+        std::sync::LazyLock::new(Default::default);
+    let entry = GitEntry::of(root);
+    if let Some((kept, identity)) = KEPT.lock().unwrap().get(root) {
+        if kept.still(&entry) {
+            return identity.clone();
+        }
+    }
     let common = git(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-    if common.is_empty() { root.to_path_buf() } else { PathBuf::from(common) }
+    let identity = if common.is_empty() { root.to_path_buf() } else { PathBuf::from(common) };
+    KEPT.lock().unwrap().insert(root.to_path_buf(), (entry, identity.clone()));
+    identity
+}
+
+/// What a folder's `.git` entry is, as far as it decides which repository the
+/// folder belongs to.
+#[derive(Clone, PartialEq)]
+enum GitEntry {
+    /// The repository's own directory.
+    Directory,
+    /// A worktree's pointer file, by size and time written.
+    Pointer(u64, Option<std::time::SystemTime>),
+    /// None: the folder is inside a repository further up or in none, which
+    /// nothing in the folder itself says, so the answer is asked again after
+    /// a while.
+    Absent(std::time::Instant),
+}
+
+/// How long the answer stands for a folder with no `.git` entry of its own.
+const ABSENT_STANDS: std::time::Duration = std::time::Duration::from_secs(60);
+
+impl GitEntry {
+    fn of(root: &Path) -> Self {
+        match fs::symlink_metadata(root.join(".git")) {
+            Ok(meta) if meta.is_dir() => Self::Directory,
+            Ok(meta) => Self::Pointer(meta.len(), meta.modified().ok()),
+            Err(_) => Self::Absent(std::time::Instant::now()),
+        }
+    }
+
+    /// Whether an answer made when the entry was `self` still holds now that
+    /// it is `now`.
+    fn still(&self, now: &Self) -> bool {
+        match (self, now) {
+            (Self::Absent(then), Self::Absent(at)) => at.duration_since(*then) < ABSENT_STANDS,
+            (kept, now) => kept == now,
+        }
+    }
 }
 
 pub fn project_id(root: &Path) -> String {
@@ -435,6 +488,28 @@ pub fn move_to(root: &Path, data_dir: &Path, storage: ManifestStorage) -> Result
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// The repository a folder belongs to is kept while the folder's `.git`
+    /// entry is what it was, and asked again as soon as it is not.
+    #[test]
+    fn a_folders_repository_is_kept_until_its_git_entry_changes() {
+        let held = tempdir().unwrap();
+        let root = fs::canonicalize(held.path()).unwrap().join("example");
+        fs::create_dir_all(&root).unwrap();
+        assert_eq!(git_identity(&root), root, "a folder in no repository is its own");
+        let made = crate::routes::git_command_blocking(&root).unwrap().args(["init", "--quiet"]).status().unwrap();
+        assert!(made.success());
+        assert_eq!(git_identity(&root), root.join(".git"), "the folder became a repository");
+
+        let directory = GitEntry::Directory;
+        assert!(directory.still(&GitEntry::Directory));
+        let written = std::time::SystemTime::now();
+        assert!(!directory.still(&GitEntry::Pointer(40, Some(written))));
+        assert!(!GitEntry::Pointer(40, Some(written)).still(&GitEntry::Pointer(41, Some(written))));
+        let then = std::time::Instant::now();
+        assert!(GitEntry::Absent(then).still(&GitEntry::Absent(then + std::time::Duration::from_secs(5))));
+        assert!(!GitEntry::Absent(then).still(&GitEntry::Absent(then + ABSENT_STANDS)));
+    }
 
     #[test]
     fn project_manifest_round_trips_and_moves_without_two_truths() {

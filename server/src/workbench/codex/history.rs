@@ -6,7 +6,7 @@ use std::fs::{self, File};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 const MODES: &[&str] = &["untrusted", "on-request", "never"];
@@ -146,7 +146,9 @@ pub fn saved_answers() {
     let recently = saved.is_some_and(|(at, _)| at.elapsed() < Duration::from_secs(30));
     let known = answers().lock().unwrap_or_else(|e| e.into_inner());
     let learned = LEARNED.load(std::sync::atomic::Ordering::Relaxed);
-    if recently || saved.is_some_and(|(_, then)| then == learned) {
+    // Before the first save what was learned is counted from the start: a
+    // start that learned nothing has nothing to write.
+    if recently || saved.map_or(0, |(_, then)| then) == learned {
         return;
     }
     match save_answers(store, &known) {
@@ -375,56 +377,270 @@ fn read_session_source(path: &Path) -> Option<Value> {
 /// `useStateDbOnly` returned, measured against codex-cli 0.153.4 on the
 /// owner's 751 threads: not archived, with a first message, and with a
 /// rollout still on disk. A missing column is an error, not an empty list.
+///
+/// The listing is asked for every few seconds while a project is open. Read
+/// afresh it cost the whole database, 80 MB on the owner's account, since
+/// each row carries its thread's first message twice; and, because the rows
+/// were sorted by SQLite with those messages, 70 MB more written to a
+/// temporary file and read back. So the rows are kept:
+///
+/// - while the database's files sit as they did, the answer costs two
+///   questions to the file system;
+/// - once they moved, which is all the time while a Codex chat runs, each
+///   thread's change time is read from an index and only the rows that
+///   changed are read again;
+/// - every row is read again once a day, for a change that left a thread's
+///   change time alone;
+/// - and the rows are kept in a file beside the rollout answers, so a start
+///   reads the changed rows too, not the database.
+///
+/// A kept row holds the title made from the thread's first message, not the
+/// message: the three copies of it are 68 of the database's 80 MB.
 pub fn state_threads(home: &Path) -> Result<Vec<Value>, String> {
     let database = newest_state_database(home)
         .ok_or_else(|| format!("no Codex state database in {}", home.display()))?;
-    let connection = rusqlite::Connection::open_with_flags(
-        &database,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|error| format!("{}: {error}", database.display()))?;
-    connection
-        .busy_timeout(Duration::from_secs(2))
-        .map_err(|error| error.to_string())?;
-    let mut rows = connection
-        .prepare(
-            "SELECT id, rollout_path, cwd, name, title, preview, first_user_message, \
-             updated_at, git_branch, source, thread_source FROM threads \
-             WHERE archived = 0 AND preview <> '' ORDER BY updated_at DESC, id DESC",
-        )
-        .map_err(|error| format!("{}: {error}", database.display()))?;
-    let threads = rows
-        .query_map([], |row| {
-            let text = |index: usize| row.get::<_, Option<String>>(index);
-            let (id, path, cwd) = (text(0)?, text(1)?, text(2)?);
-            let (name, title, preview, first) = (text(3)?, text(4)?, text(5)?, text(6)?);
-            let (updated, branch) = (row.get::<_, Option<i64>>(7)?, text(8)?);
-            let (source, handed) = (text(9)?, text(10)?);
-            // A thread renamed in Codex keeps the new name in `title` and
-            // leaves `name` empty; an unnamed one's title is its first
-            // message.
-            let name = name.filter(|name| !name.is_empty()).or_else(|| {
-                title.filter(|title| {
-                    !title.is_empty()
-                        && Some(title) != preview.as_ref()
-                        && Some(title) != first.as_ref()
-                })
-            });
-            Ok(json!({
-                "id": id, "path": path, "cwd": cwd, "name": name, "preview": preview,
-                "updatedAt": updated, "gitInfo": {"branch": branch},
-                "source": listed_source(source.as_deref(), handed.as_deref()),
-            }))
-        })
-        .map_err(|error| format!("{}: {error}", database.display()))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("{}: {error}", database.display()))?;
+    let stamp = state_stamp(&database);
+    let kept = listed()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(load_listed)
+        .get(&database)
+        .cloned();
+    let threads = match kept {
+        Some(kept) if stamp.is_some() && Some(&kept.stamp) == stamp.as_ref() => kept.threads,
+        kept => {
+            let rows = read_state_rows(&database, kept.as_ref())?;
+            let threads = Arc::new(listed_threads(&rows.rows));
+            // Kept only if nothing was written while it was read.
+            if let Some(stamp) = stamp.filter(|stamp| state_stamp(&database).as_ref() == Some(stamp)) {
+                let mut listed = listed().lock().unwrap_or_else(|e| e.into_inner());
+                let listed = listed.get_or_insert_with(HashMap::new);
+                listed.insert(
+                    database.clone(),
+                    Listed { stamp, read_whole_at: rows.read_whole_at, rows: Arc::new(rows.rows), threads: threads.clone() },
+                );
+                if rows.changed {
+                    saved_listed(listed);
+                }
+            }
+            threads
+        }
+    };
     // A rollout deleted by hand leaves its row behind; `thread/list` left
     // such a thread out, and there is nothing in it to open.
     Ok(threads
-        .into_iter()
+        .iter()
         .filter(|thread| thread["path"].as_str().is_some_and(|path| Path::new(path).exists()))
+        .cloned()
         .collect())
+}
+
+/// Every state database read so far; None until the kept file was looked for.
+fn listed() -> &'static Mutex<Option<HashMap<PathBuf, Listed>>> {
+    static LISTED: Mutex<Option<HashMap<PathBuf, Listed>>> = Mutex::new(None);
+    &LISTED
+}
+
+/// The file the rows are kept in, beside the rollout answers.
+fn listed_store() -> Option<PathBuf> {
+    Some(ANSWER_STORE.get()?.with_file_name("codex-threads.json"))
+}
+
+type KeptListed = Vec<(PathBuf, StateStamp, std::time::SystemTime, Vec<(i64, StateRow)>)>;
+
+fn load_listed() -> HashMap<PathBuf, Listed> {
+    listed_store().map(|store| load_listed_from(&store)).unwrap_or_default()
+}
+
+fn load_listed_from(store: &Path) -> HashMap<PathBuf, Listed> {
+    fs::read(store)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<KeptListed>(&bytes).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(database, stamp, read_whole_at, rows)| {
+            let rows: HashMap<i64, StateRow> = rows.into_iter().collect();
+            let threads = Arc::new(listed_threads(&rows));
+            (database, Listed { stamp, read_whole_at, rows: Arc::new(rows), threads })
+        })
+        .collect()
+}
+
+/// Write the rows of every database still there. Written beside and renamed
+/// over, so a reader never finds half a file.
+fn save_listed(store: &Path, listed: &HashMap<PathBuf, Listed>) -> std::io::Result<()> {
+    let kept: Vec<_> = listed
+        .iter()
+        .filter(|(database, _)| database.exists())
+        .map(|(database, listed)| (database, listed.stamp, listed.read_whole_at, listed.rows.iter().collect::<Vec<_>>()))
+        .collect();
+    let beside = store.with_extension("json.part");
+    fs::write(&beside, serde_json::to_vec(&kept)?)?;
+    fs::rename(&beside, store)
+}
+
+/// How long changed rows wait to be written, so a running Codex chat, which
+/// changes its row every few seconds, does not have the file written as often.
+const LISTED_SAVED_EVERY: Duration = Duration::from_secs(300);
+
+/// Write the rows if they were not written lately. Rows that changed since
+/// are read again from the database by the next start, which costs little.
+fn saved_listed(listed: &HashMap<PathBuf, Listed>) {
+    static SAVED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    let Some(store) = listed_store() else {
+        return;
+    };
+    let mut saved = SAVED.lock().unwrap_or_else(|e| e.into_inner());
+    if saved.is_some_and(|at| at.elapsed() < LISTED_SAVED_EVERY) {
+        return;
+    }
+    let written = save_listed(&store, listed);
+    match written {
+        Ok(()) => *saved = Some(std::time::Instant::now()),
+        Err(error) => tracing::warn!(%error, "could not keep the Codex thread listing"),
+    }
+}
+
+/// One state database as last read.
+#[derive(Clone)]
+struct Listed {
+    stamp: StateStamp,
+    /// When every row was last read, changed or not.
+    read_whole_at: std::time::SystemTime,
+    /// Every row of `threads` by its rowid.
+    rows: Arc<HashMap<i64, StateRow>>,
+    /// The listing made from them.
+    threads: Arc<Vec<Value>>,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct StateRow {
+    updated: Option<i64>,
+    archived: bool,
+    id: Option<String>,
+    /// The thread as listed; `None` for one with no first message yet.
+    thread: Option<Value>,
+}
+
+struct StateRows {
+    rows: HashMap<i64, StateRow>,
+    read_whole_at: std::time::SystemTime,
+    /// Whether any row differs from the kept ones.
+    changed: bool,
+}
+
+/// How long changed rows alone are read before every row is read again.
+const READ_WHOLE_EVERY: Duration = Duration::from_secs(24 * 3600);
+
+const STATE_ROW_SQL: &str = "SELECT rowid, id, rollout_path, cwd, name, title, preview, first_user_message, \
+     updated_at, git_branch, source, thread_source, archived FROM threads";
+
+/// The listing: threads not archived and with a first message, newest first,
+/// as `ORDER BY updated_at DESC, id DESC` gave them.
+fn listed_threads(rows: &HashMap<i64, StateRow>) -> Vec<Value> {
+    let mut listed: Vec<&StateRow> = rows.values().filter(|row| !row.archived && row.thread.is_some()).collect();
+    listed.sort_by(|a, b| (b.updated, &b.id).cmp(&(a.updated, &a.id)));
+    listed.into_iter().filter_map(|row| row.thread.clone()).collect()
+}
+
+fn state_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, StateRow)> {
+    let text = |index: usize| row.get::<_, Option<String>>(index);
+    let (id, path, cwd) = (text(1)?, text(2)?, text(3)?);
+    let (name, title, preview, first) = (text(4)?, text(5)?, text(6)?, text(7)?);
+    let (updated, branch) = (row.get::<_, Option<i64>>(8)?, text(9)?);
+    let (source, handed) = (text(10)?, text(11)?);
+    let archived = row.get::<_, Option<i64>>(12)?.unwrap_or(0) != 0;
+    // A thread renamed in Codex keeps the new name in `title` and
+    // leaves `name` empty; an unnamed one's title is its first
+    // message.
+    let name = name.filter(|name| !name.is_empty()).or_else(|| {
+        title.filter(|title| {
+            !title.is_empty() && Some(title) != preview.as_ref() && Some(title) != first.as_ref()
+        })
+    });
+    let thread = preview.as_deref().is_some_and(|preview| !preview.is_empty()).then(|| {
+        json!({
+            "id": id, "path": path, "cwd": cwd, "name": name,
+            "title": preview.as_deref().and_then(crate::workbench::metadata::conversation_title),
+            "updatedAt": updated, "gitInfo": {"branch": branch},
+            "source": listed_source(source.as_deref(), handed.as_deref()),
+        })
+    });
+    Ok((row.get(0)?, StateRow { updated, archived, id, thread }))
+}
+
+/// The rows of `threads`: every one read when none is kept or the kept ones
+/// are due, otherwise the kept ones with the changed rows read again.
+fn read_state_rows(database: &Path, kept: Option<&Listed>) -> Result<StateRows, String> {
+    let failed = |error: rusqlite::Error| format!("{}: {error}", database.display());
+    let connection = rusqlite::Connection::open_with_flags(
+        database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(failed)?;
+    connection.busy_timeout(Duration::from_secs(2)).map_err(failed)?;
+    let due = |kept: &&Listed| kept.read_whole_at.elapsed().map_or(true, |since| since >= READ_WHOLE_EVERY);
+    let Some(kept) = kept.filter(|kept| !due(kept)) else {
+        // Put in order afterwards, not by SQLite: its sort carries every
+        // column of every row, and one too large for memory goes to a file
+        // on disk.
+        let rows = connection
+            .prepare(STATE_ROW_SQL)
+            .map_err(failed)?
+            .query_map([], state_row)
+            .map_err(failed)?
+            .collect::<Result<HashMap<_, _>, _>>()
+            .map_err(failed)?;
+        return Ok(StateRows { rows, read_whole_at: std::time::SystemTime::now(), changed: true });
+    };
+    // Both answered from an index alone, with no row of the table read.
+    let now: Vec<(i64, Option<i64>)> = connection
+        .prepare("SELECT rowid, updated_at FROM threads")
+        .map_err(failed)?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(failed)?
+        .collect::<Result<_, _>>()
+        .map_err(failed)?;
+    let archived: std::collections::HashSet<i64> = connection
+        .prepare("SELECT rowid FROM threads WHERE archived > 0")
+        .map_err(failed)?
+        .query_map([], |row| row.get(0))
+        .map_err(failed)?
+        .collect::<Result<_, _>>()
+        .map_err(failed)?;
+    let mut one = connection.prepare(&format!("{STATE_ROW_SQL} WHERE rowid=?1")).map_err(failed)?;
+    let mut rows = HashMap::with_capacity(now.len());
+    let mut changed = now.len() != kept.rows.len();
+    for (rowid, updated) in now {
+        match kept.rows.get(&rowid) {
+            Some(row) if row.updated == updated && row.archived == archived.contains(&rowid) => {
+                rows.insert(rowid, row.clone());
+            }
+            _ => {
+                use rusqlite::OptionalExtension;
+                changed = true;
+                if let Some((rowid, row)) = one.query_row([rowid], state_row).optional().map_err(failed)? {
+                    rows.insert(rowid, row);
+                }
+            }
+        }
+    }
+    Ok(StateRows { rows, read_whole_at: kept.read_whole_at, changed })
+}
+
+/// A state database as the file system describes it: the length and change
+/// time of the file and of its write-ahead log, where Codex's newest writes
+/// are until they are folded in.
+type StateStamp = [Option<(u64, std::time::SystemTime)>; 2];
+
+fn state_stamp(database: &Path) -> Option<StateStamp> {
+    let seen = |path: &Path| {
+        let meta = fs::metadata(path).ok()?;
+        Some((meta.len(), meta.modified().ok()?))
+    };
+    let mut log = database.as_os_str().to_owned();
+    log.push("-wal");
+    Some([Some(seen(database)?), seen(Path::new(&log))])
 }
 
 /// The highest-numbered `state_N.sqlite`: Codex starts a new file when its
@@ -847,6 +1063,85 @@ mod tests {
         assert_eq!(by_id("person")["updatedAt"], 30);
         let begun: Vec<&str> = ids.iter().map(|id| super::begun_by(by_id(id))).collect();
         assert_eq!(begun, ["agent", "person", "person", "agent"]);
+
+        // The listing follows the database: a thread that spoke moves up, a
+        // new one appears, an archived or deleted one leaves.
+        let database = rusqlite::Connection::open(home.path().join("state_5.sqlite")).unwrap();
+        database.execute("UPDATE threads SET updated_at=80, name='Renamed' WHERE id='guardian'", []).unwrap();
+        database.execute("UPDATE threads SET archived=1 WHERE id='review'", []).unwrap();
+        database.execute("DELETE FROM threads WHERE id='named'", []).unwrap();
+        database.execute("UPDATE threads SET updated_at=61, preview='begun', title='begun' WHERE id='unbegun'", []).unwrap();
+        database
+            .execute(
+                "INSERT INTO threads VALUES ('new', ?1, 90, 'cli', '/project', 'n', 0, 'main', 'n', NULL, 'n', NULL)",
+                [rollout("new")],
+            )
+            .unwrap();
+        drop(database);
+        let threads = super::state_threads(home.path()).unwrap();
+        let ids: Vec<&str> = threads.iter().map(|thread| thread["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["new", "guardian", "unbegun", "person"]);
+        assert_eq!(threads[1]["name"], "Renamed");
+    }
+
+    /// Once the rows are kept, a database that moved is asked for its
+    /// changed rows alone: a row that did not change is not read again.
+    #[test]
+    fn only_the_codex_threads_that_changed_are_read_again() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("state_5.sqlite");
+        let database = rusqlite::Connection::open(&path).unwrap();
+        database
+            .execute_batch(
+                "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, \
+                 updated_at INTEGER NOT NULL, source TEXT NOT NULL, cwd TEXT NOT NULL, \
+                 title TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, git_branch TEXT, \
+                 first_user_message TEXT NOT NULL DEFAULT '', thread_source TEXT, \
+                 preview TEXT NOT NULL DEFAULT '', name TEXT);
+                 CREATE INDEX idx_threads_updated_at ON threads(updated_at DESC, id DESC);
+                 CREATE INDEX idx_threads_archived ON threads(archived);
+                 INSERT INTO threads VALUES ('one', '/r/one', 10, 'cli', '/project', 'one', 0, 'main', 'one', NULL, 'one', NULL);
+                 INSERT INTO threads VALUES ('two', '/r/two', 20, 'cli', '/project', 'two', 0, 'main', 'two', NULL, 'two', NULL);",
+            )
+            .unwrap();
+        let whole = super::read_state_rows(&path, None).unwrap();
+        let kept = super::Listed {
+            stamp: super::state_stamp(&path).unwrap(),
+            read_whole_at: whole.read_whole_at,
+            rows: std::sync::Arc::new(whole.rows),
+            threads: Default::default(),
+        };
+        // A change that leaves the change time alone is what a read of the
+        // changed rows does not see, and what shows it read no other row.
+        database.execute("UPDATE threads SET cwd='/moved' WHERE id='one'", []).unwrap();
+        database.execute("UPDATE threads SET cwd='/moved', updated_at=30 WHERE id='two'", []).unwrap();
+        let rows = super::read_state_rows(&path, Some(&kept)).unwrap().rows;
+        let cwd = |id: &str| {
+            rows.values().find(|row| row.id.as_deref() == Some(id)).unwrap().thread.as_ref().unwrap()["cwd"].clone()
+        };
+        assert_eq!(cwd("one"), "/project", "a row that did not change was read again");
+        assert_eq!(cwd("two"), "/moved");
+
+        // The kept rows outlive a restart, and a start reads only what
+        // changed since: the row moved above is still the kept one.
+        let store = home.path().join("codex-threads.json");
+        let listed = std::collections::HashMap::from([(path.clone(), kept.clone())]);
+        super::save_listed(&store, &listed).unwrap();
+        let loaded = super::load_listed_from(&store).remove(&path).unwrap();
+        assert_eq!(loaded.stamp, kept.stamp);
+        assert_eq!(loaded.threads.len(), 2);
+        let after_a_start = super::read_state_rows(&path, Some(&loaded)).unwrap();
+        assert!(after_a_start.changed);
+        assert!(after_a_start.rows.values().any(|row| row.thread.as_ref().unwrap()["cwd"] == "/project"));
+        std::fs::write(&store, "not json").unwrap();
+        assert!(super::load_listed_from(&store).is_empty());
+
+        let due = super::Listed { read_whole_at: kept.read_whole_at - super::READ_WHOLE_EVERY, ..kept };
+        let rows = super::read_state_rows(&path, Some(&due)).unwrap().rows;
+        assert!(
+            rows.values().all(|row| row.thread.as_ref().unwrap()["cwd"] == "/moved"),
+            "every row is read again once in a while"
+        );
     }
 
     /// A database without the columns the listing needs is an error, so the

@@ -170,6 +170,9 @@ pub struct StorageIndex {
     /// Whether one fill has ever finished, after which a fill only catches up
     /// and is quick enough to wait for.
     filled: std::sync::atomic::AtomicBool,
+    /// Counts the fills that changed what the index holds, so a caller can
+    /// tell that nothing moved since it last looked (`changes`).
+    changes: std::sync::atomic::AtomicU64,
 }
 
 impl StorageIndex {
@@ -180,7 +183,13 @@ impl StorageIndex {
             filling: Mutex::new(()),
             progress: Mutex::new(Progress::default()),
             filled: std::sync::atomic::AtomicBool::new(false),
+            changes: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// A number that moves whenever a fill changed what the index holds.
+    pub fn changes(&self) -> u64 {
+        self.changes.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn filled(&self) -> bool {
@@ -238,6 +247,13 @@ impl StorageIndex {
              CREATE TABLE IF NOT EXISTS rewrite_seen (
                session_id TEXT PRIMARY KEY,
                generation INTEGER NOT NULL
+             );
+             -- The newest stored event a fill has looked at (`event.rowid` in
+             -- the chat record), so the next asks only the chats that stored
+             -- one since.
+             CREATE TABLE IF NOT EXISTS kept (
+               name TEXT PRIMARY KEY,
+               value INTEGER NOT NULL
              );",
         )?;
         // An index written before it counted long tool output never reads
@@ -248,6 +264,7 @@ impl StorageIndex {
             connection.execute_batch(&format!(
                 "BEGIN IMMEDIATE;
                  DELETE FROM measured; DELETE FROM asset_ref; DELETE FROM trimmable; DELETE FROM rewrite_seen;
+                 DELETE FROM kept;
                  PRAGMA user_version = {INDEX_VERSION};
                  COMMIT;"
             ))?;
@@ -289,7 +306,9 @@ impl StorageIndex {
             .map_err(text)?;
         let present: HashSet<&str> = sessions.iter().map(String::as_str).collect();
         let gone: Vec<&String> = known.keys().filter(|id| !present.contains(id.as_str())).collect();
+        let moved = || self.changes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if !gone.is_empty() {
+            moved();
             let transaction = index.transaction().map_err(text)?;
             for id in gone {
                 for table in ["measured", "asset_ref", "cleared", "trimmable", "rewrite_seen"] {
@@ -300,7 +319,17 @@ impl StorageIndex {
             }
             transaction.commit().map_err(text)?;
         }
-        self.forget_rewritten(&chats, &mut index).map_err(text)?;
+        if self.forget_rewritten(&chats, &mut index).map_err(text)? {
+            moved();
+        }
+        // Only the chats that stored an event since the last fill are asked
+        // for their newest; with thousands of chats, asking each one was most
+        // of what a fill that found nothing read.
+        let seen: Option<i64> = index
+            .query_row("SELECT value FROM kept WHERE name = 'events_seen'", [], |r| r.get(0))
+            .optional()
+            .map_err(text)?;
+        let (spoke, newest_event) = super::store::chats_with_events_after(&chats, seen).map_err(text)?;
         let known: HashMap<String, i64> = index
             .prepare("SELECT session_id, through_seq FROM measured")
             .and_then(|mut s| s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect())
@@ -314,12 +343,19 @@ impl StorageIndex {
         let mut counted = 0;
         for id in &sessions {
             let through = known.get(id).copied().unwrap_or(i64::MIN);
-            let newest: Option<i64> = chats
-                .query_row("SELECT MAX(seq) FROM event WHERE session_id = ?1", [id], |r| r.get(0))
-                .map_err(text)?;
+            let quiet = known.contains_key(id) && spoke.as_ref().is_some_and(|spoke| !spoke.contains(id));
+            let newest: Option<i64> = if quiet {
+                None
+            } else {
+                chats
+                    .query_row("SELECT MAX(seq) FROM event WHERE session_id = ?1", [id], |r| r.get(0))
+                    .map_err(text)?
+            };
             if newest.map_or(false, |newest| newest > through) {
+                moved();
                 self.catch_up(&chats, &mut index, id, through).map_err(text)?;
             } else if !known.contains_key(id) {
+                moved();
                 index
                     .execute(
                         "INSERT OR IGNORE INTO measured (session_id, through_seq, bytes) VALUES (?1, ?2, 0)",
@@ -333,6 +369,15 @@ impl StorageIndex {
                 report(progress);
             }
         }
+        if seen != Some(newest_event) {
+            index
+                .execute(
+                    "INSERT INTO kept (name, value) VALUES ('events_seen', ?1)
+                     ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+                    [newest_event],
+                )
+                .map_err(text)?;
+        }
         progress.measured = sessions.len();
         progress.ready = true;
         self.filled.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -342,7 +387,7 @@ impl StorageIndex {
     /// Chats whose events were rewritten in place since they were measured
     /// (shortened, cleaned of base64, restored from an archive) are measured
     /// again from their first event. What a rule removed stays removed.
-    fn forget_rewritten(&self, chats: &Connection, index: &mut Connection) -> rusqlite::Result<()> {
+    fn forget_rewritten(&self, chats: &Connection, index: &mut Connection) -> rusqlite::Result<bool> {
         let has_table = chats
             .query_row(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'event_rewrite'",
@@ -352,7 +397,7 @@ impl StorageIndex {
             .optional()?
             .is_some();
         if !has_table {
-            return Ok(());
+            return Ok(false);
         }
         let now: Vec<(String, i64)> = chats
             .prepare("SELECT session_id, generation FROM event_rewrite")?
@@ -364,7 +409,7 @@ impl StorageIndex {
             .collect::<rusqlite::Result<_>>()?;
         let changed: Vec<&(String, i64)> = now.iter().filter(|(id, at)| seen.get(id) != Some(at)).collect();
         if changed.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         let transaction = index.transaction()?;
         for (id, generation) in changed {
@@ -377,7 +422,8 @@ impl StorageIndex {
                 params![id, generation],
             )?;
         }
-        transaction.commit()
+        transaction.commit()?;
+        Ok(true)
     }
 
     fn catch_up(&self, chats: &Connection, index: &mut Connection, id: &str, mut through: i64) -> rusqlite::Result<()> {
@@ -613,6 +659,20 @@ impl Holders {
                 .map_err(text)?;
         }
         transaction.commit().map_err(text)
+    }
+
+    /// Say that what `copy` last wrote down still stands, without reading
+    /// or comparing the list again.
+    pub fn still_stands(&self, copy: &Path) -> Result<(), String> {
+        let text = |e: rusqlite::Error| e.to_string();
+        let connection = self.open().map_err(text)?;
+        connection
+            .execute(
+                "UPDATE copies SET published_at = ?2 WHERE copy = ?1",
+                params![copy.to_string_lossy().as_ref(), chrono::Utc::now().timestamp()],
+            )
+            .map(|_| ())
+            .map_err(text)
     }
 
     /// Whether `copy` has said what it shows within the last `within`.

@@ -515,21 +515,49 @@ impl Cleaner {
         })
     }
 
-    /// Catch the index up and write down what this copy shows.
-    pub async fn publish(&self) -> Result<(), String> {
-        let index = self.index.clone();
-        let archive = self.archive.clone();
-        let Some(media) = self.media.clone() else {
+    /// Catch the index up and write down what this copy shows. Blocking:
+    /// the upkeep thread calls it (`job`).
+    ///
+    /// `published` is what the index and the archive looked like when the
+    /// list was last written. While neither has moved the list is not read
+    /// or compared again, only marked as still standing: on a store of tens
+    /// of thousands of files the comparison reads the whole list.
+    fn publish(&self, published: &mut Option<(u64, Option<std::time::SystemTime>)>) -> Result<(), String> {
+        let Some(media) = self.media.as_deref() else {
             return Ok(());
         };
-        tokio::task::spawn_blocking(move || {
-            index.refresh()?;
-            let mut indexed = index.read()?;
-            indexed.archived = archived_assets(&archive);
-            shared_holders(&index, &media, &mut indexed, true)
-        })
-        .await
-        .map_err(|e| e.to_string())?
+        self.index.refresh()?;
+        let now = (self.index.changes(), std::fs::metadata(&self.archive).and_then(|m| m.modified()).ok());
+        let copy = std::fs::canonicalize(self.index.chats_path()).unwrap_or_else(|_| self.index.chats_path().to_path_buf());
+        if published.as_ref() == Some(&now) {
+            return Holders::beside(media).still_stands(&copy);
+        }
+        let mut indexed = self.index.read()?;
+        indexed.archived = archived_assets(&self.archive);
+        shared_holders(&self.index, media, &mut indexed, true)?;
+        *published = Some(now);
+        Ok(())
+    }
+
+    /// One step of handing unused pages back, on the writer. Answers the
+    /// pages left and the bytes the writer read and wrote for the step.
+    async fn reclaim_step(registry: &WorkbenchRegistry) -> Result<(i64, u64), String> {
+        let answer = registry
+            .database()
+            .upkeep(|store| {
+                if !store.reclaims_space().map_err(|e| e.to_string())? {
+                    return Ok(json!([0, 0]));
+                }
+                let before = crate::upkeep::thread_bytes();
+                let left = store.reclaim(RECLAIM_STEP).map_err(|e| e.to_string())?;
+                let spent = match (before, crate::upkeep::thread_bytes()) {
+                    (Some(before), Some(now)) => now.saturating_sub(before),
+                    _ => 0,
+                };
+                Ok(json!([left, spent]))
+            })
+            .await?;
+        Ok((answer[0].as_i64().unwrap_or(0), answer[1].as_u64().unwrap_or(0)))
     }
 
     pub async fn preview(&self, registry: &WorkbenchRegistry, rules: &[Rule]) -> Result<Vec<Effect>, String> {
@@ -851,20 +879,12 @@ impl Cleaner {
     }
 
     /// Hand the chat record's unused pages back to the disk, a step at a
-    /// time. Does nothing until the record has been shrunk once (`compact`).
+    /// time, after a cleanup the owner asked for. Does nothing until the
+    /// record has been shrunk once (`compact`).
     pub async fn reclaim(&self, registry: &WorkbenchRegistry) {
         loop {
-            let left = registry
-                .database()
-                .upkeep(|store| {
-                    if !store.reclaims_space().map_err(|e| e.to_string())? {
-                        return Ok(json!(0));
-                    }
-                    store.reclaim(RECLAIM_STEP).map(|left| json!(left)).map_err(|e| e.to_string())
-                })
-                .await;
-            match left.map(|left| left.as_i64().unwrap_or(0)) {
-                Ok(left) if left > 0 => tokio::task::yield_now().await,
+            match Self::reclaim_step(registry).await {
+                Ok((left, _)) if left > 0 => tokio::task::yield_now().await,
                 Ok(_) => break,
                 Err(error) => {
                     tracing::warn!(%error, "chat record space not handed back");
@@ -1071,46 +1091,65 @@ pub(crate) fn read_chats(path: &Path) -> Result<Vec<Chat>, String> {
         .collect())
 }
 
-/// Follow the rules about once a day, for as long as the registry lives. Does
-/// nothing at all while no rule is on.
-pub fn watch(cleaner: Arc<Cleaner>, registry: Arc<WorkbenchRegistry>) {
+/// The upkeep job that keeps the storage index caught up, hands freed space
+/// back and follows the owner's rules about once a day. With no rule on it
+/// removes nothing.
+///
+/// `runtime` is where the parts that go through the registry run; the job
+/// waits for each from the upkeep thread, so they take their turn with every
+/// other job.
+pub fn job(
+    cleaner: Arc<Cleaner>,
+    registry: Arc<WorkbenchRegistry>,
+    runtime: tokio::runtime::Handle,
+) -> crate::upkeep::Job {
     let registry = Arc::downgrade(&registry);
-    tokio::spawn(async move {
-        // Let a starting app settle before reading every chat.
-        tokio::time::sleep(Duration::from_secs(60)).await;
-        let mut every = tokio::time::interval(LOOK_EVERY);
-        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut published = None;
+    crate::upkeep::Job::new("storage", LOOK_EVERY, move |pace| {
+        let Some(registry) = registry.upgrade() else {
+            return crate::upkeep::Turn::Done;
+        };
+        // Every copy says what it shows, rules or none, so a copy that does
+        // clean up knows what to leave in the store they share.
+        if let Err(error) = cleaner.publish(&mut published) {
+            tracing::warn!(%error, "storage index not caught up");
+        }
+        pace.settle();
+        // Space a person's own deletes freed goes back to the disk too, a
+        // step at a time and each step paid for.
         loop {
-            every.tick().await;
-            let Some(registry) = registry.upgrade() else {
-                break;
-            };
-            // Every copy says what it shows, rules or none, so a copy that does
-            // clean up knows what to leave in the store they share.
-            if let Err(error) = cleaner.publish().await {
-                tracing::warn!(%error, "storage index not caught up");
-            }
-            // Space a person's own deletes freed goes back to the disk too.
-            cleaner.reclaim(&registry).await;
-            match rules(&cleaner.settings) {
-                Ok(rules) if rules.iter().any(|rule| rule.enabled) => {}
-                Ok(_) => continue,
+            match runtime.block_on(Cleaner::reclaim_step(&registry)) {
+                Ok((left, spent)) => {
+                    pace.spent(spent);
+                    pace.settle();
+                    if left <= 0 {
+                        break;
+                    }
+                }
                 Err(error) => {
-                    tracing::warn!(%error, "cleanup rules unreadable; nothing removed");
-                    continue;
+                    tracing::warn!(%error, "chat record space not handed back");
+                    break;
                 }
             }
-            let due = last_run(&cleaner.settings)
-                .and_then(|run| DateTime::parse_from_rfc3339(&run.at).ok())
-                .map_or(true, |at| Utc::now() - at.with_timezone(&Utc) >= RUN_EVERY);
-            if !due {
-                continue;
+        }
+        match rules(&cleaner.settings) {
+            Ok(rules) if rules.iter().any(|rule| rule.enabled) => {}
+            Ok(_) => return crate::upkeep::Turn::Done,
+            Err(error) => {
+                tracing::warn!(%error, "cleanup rules unreadable; nothing removed");
+                return crate::upkeep::Turn::Done;
             }
-            if let Err(error) = cleaner.run(&registry).await {
+        }
+        let due = last_run(&cleaner.settings)
+            .and_then(|run| DateTime::parse_from_rfc3339(&run.at).ok())
+            .map_or(true, |at| Utc::now() - at.with_timezone(&Utc) >= RUN_EVERY);
+        if due {
+            if let Err(error) = runtime.block_on(cleaner.run(&registry)) {
                 tracing::warn!(%error, "storage cleanup did not run");
             }
         }
-    });
+        crate::upkeep::Turn::Done
+    })
 }
 
 #[cfg(test)]

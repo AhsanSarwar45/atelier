@@ -66,7 +66,27 @@ CREATE TABLE IF NOT EXISTS source (
   mark TEXT NOT NULL,
   title TEXT
 );
+CREATE TABLE IF NOT EXISTS kept (
+  name TEXT PRIMARY KEY,
+  value INTEGER NOT NULL
+);
 "#;
+
+/// Under this name the index keeps the newest stored event it has looked at
+/// (`event.rowid` in the chat database), so a pass asks only the chats that
+/// said something since, and so does the first pass after a restart.
+const EVENTS_SEEN: &str = "events_seen";
+/// How often the records on disk are looked at for chats that are only a
+/// record. Each look lists every account's record folders.
+const RECORDS_EVERY: Duration = Duration::from_secs(600);
+/// How often every chat is compared with what is stored for it whether or
+/// not anything seems to have changed, as a net under the cheap passes.
+const EVERYTHING_EVERY: Duration = Duration::from_secs(24 * 3600);
+/// How often upkeep asks whether there is anything to index.
+const LOOKS_EVERY: Duration = Duration::from_secs(30);
+/// Under this name the index keeps when every chat was last compared, in
+/// seconds since 1970.
+const EVERYTHING_AT: &str = "everything_at";
 
 /// The part of a chat its title is kept under. No message or tool call is
 /// named this, so one reset of the words never takes the title with it.
@@ -96,6 +116,40 @@ struct Inner {
     /// them.
     writing: Mutex<()>,
     reader: Mutex<Option<Connection>>,
+    /// What the background passes remember between them.
+    kept: Mutex<Kept>,
+}
+
+/// What one pass leaves for the next, so a pass over a server nobody is
+/// using reads nothing.
+#[derive(Default)]
+struct Kept {
+    /// The connection to the chat database stays open: its `data_version`
+    /// says whether anything was committed since it was last asked, without
+    /// touching a page of the file.
+    chats: Option<Connection>,
+    version: Option<i64>,
+    /// The record files as last listed, and when.
+    records: Option<(std::time::Instant, Arc<RecordFiles>)>,
+    /// When every chat was last compared, read from the index once a run
+    /// so a restart is not a reason to compare them all again.
+    everything_at: Option<Option<std::time::SystemTime>>,
+    /// How many chats the last pass asked the chat database or a record
+    /// about, for the tests.
+    asked: usize,
+    /// Each chat's row as it stood at the last pass, hashed: a rename
+    /// changes no event.
+    rows: HashMap<String, u64>,
+}
+
+/// How much one pass looks at.
+#[derive(Clone, Copy)]
+struct Look {
+    /// Compare every chat, not only the ones that seem to have changed.
+    everything: bool,
+    /// List the record files again and compare each chat that is only a
+    /// record with its file.
+    records: bool,
 }
 
 /// What one pass did, for the log and the tests.
@@ -120,7 +174,7 @@ impl SessionRow {
     /// The title a search finds the chat by: the name it is shown under
     /// when its project's template builds one — so the ticket key the rail
     /// puts before the title is found too — and its own title otherwise.
-    fn searched_title(&self) -> Option<String> {
+    fn searched_title(&self, facts: &mut Facts) -> Option<String> {
         let title = self
             .title
             .as_deref()
@@ -130,10 +184,26 @@ impl SessionRow {
             .then(|| crate::workbench::chat_name::template_for(&self.project_path))
             .flatten()
             .and_then(|template| {
-                let facts = crate::workbench::chat_name::Facts::read(&template, Some(&self.cwd));
-                crate::workbench::chat_name::render(&template, title, &facts)
+                // Many chats share a folder; its branch is read once a pass.
+                let facts = facts
+                    .entry((self.project_path.clone(), self.cwd.clone()))
+                    .or_insert_with(|| crate::workbench::chat_name::Facts::read(&template, Some(&self.cwd)));
+                crate::workbench::chat_name::render(&template, title, facts)
             });
         named.or_else(|| title.map(str::to_string))
+    }
+}
+
+/// What each folder's name template reads from git, by project and folder.
+type Facts = HashMap<(String, String), crate::workbench::chat_name::Facts>;
+
+impl SessionRow {
+    fn hashed(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (&self.brand, &self.external_id, &self.title, &self.project_path, &self.cwd, self.named_by_owner)
+            .hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -174,38 +244,49 @@ impl SearchIndex {
                 accounts,
                 writing: Mutex::new(()),
                 reader: Mutex::new(None),
+                kept: Mutex::new(Kept::default()),
             }),
         })
     }
 
-    /// Keep the index current for as long as the process runs.
-    pub fn start(&self, every: Duration) {
+    /// The upkeep job that keeps the index current for as long as the
+    /// process runs. A turn that finds nothing committed to the chat database
+    /// since the last one, and the records looked at lately, reads nothing.
+    pub fn job(&self) -> crate::upkeep::Job {
         let inner = self.inner.clone();
-        let started = std::thread::Builder::new()
-            .name("atelier-search-index".to_string())
-            .spawn(move || loop {
-                let began = std::time::Instant::now();
-                match inner.refresh() {
-                    Ok(done) if done != Refreshed::default() => tracing::info!(
-                        from_events = done.from_events,
-                        from_records = done.from_records,
-                        forgotten = done.forgotten,
-                        elapsed_ms = began.elapsed().as_millis() as u64,
-                        "search index refreshed"
-                    ),
-                    Ok(_) => {}
-                    Err(error) => tracing::warn!(%error, "search index pass failed"),
-                }
-                std::thread::sleep(every);
-            });
-        if let Err(error) = started {
-            tracing::warn!(%error, "search index thread did not start");
-        }
+        crate::upkeep::Job::new("search index", LOOKS_EVERY, move |pace| {
+            let began = std::time::Instant::now();
+            match inner.turn(pace) {
+                Ok(done) if done != Refreshed::default() => tracing::info!(
+                    from_events = done.from_events,
+                    from_records = done.from_records,
+                    forgotten = done.forgotten,
+                    elapsed_ms = began.elapsed().as_millis() as u64,
+                    "search index refreshed"
+                ),
+                Ok(_) => {}
+                Err(error) => tracing::warn!(%error, "search index pass failed"),
+            }
+            crate::upkeep::Turn::Done
+        })
     }
 
-    /// One pass now, on the caller's thread.
+    /// One pass now over every chat and every record, on the caller's thread.
     pub fn refresh(&self) -> Result<Refreshed, String> {
-        self.inner.refresh()
+        self.inner.pass(Look { everything: true, records: true }, &crate::upkeep::Pace::unlimited())
+    }
+
+    /// One turn of the background job, for a test of what it reads.
+    #[cfg(test)]
+    fn turn(&self) -> Result<Refreshed, String> {
+        self.inner.kept.lock().unwrap().asked = 0;
+        self.inner.turn(&crate::upkeep::Pace::unlimited())
+    }
+
+    /// How many chats the last turn asked about.
+    #[cfg(test)]
+    fn asked(&self) -> usize {
+        self.inner.kept.lock().unwrap().asked
     }
 
     /// The best matches for the words given, every word required, the last
@@ -845,17 +926,82 @@ impl Inner {
         Ok(connection)
     }
 
-    fn refresh(&self) -> Result<Refreshed, String> {
+    /// One turn of the background job: nothing at all unless something was
+    /// committed to the chat database since the last turn or the records are
+    /// due a look.
+    fn turn(&self, pace: &crate::upkeep::Pace) -> Result<Refreshed, String> {
+        let look = {
+            let mut kept = self.kept.lock().unwrap();
+            let version = self.chats_version(&mut kept)?;
+            if kept.everything_at.is_none() {
+                let at: Option<i64> = open_index(&self.index_path)?
+                    .query_row("SELECT value FROM kept WHERE name=?1", [EVERYTHING_AT], |row| row.get(0))
+                    .optional()
+                    .map_err(text)?;
+                kept.everything_at =
+                    Some(at.map(|at| std::time::UNIX_EPOCH + Duration::from_secs(at.max(0) as u64)));
+            }
+            // A clock set back makes the last time lie in the future; that is
+            // no reason to wait longer than the interval.
+            let everything = kept
+                .everything_at
+                .flatten()
+                .is_none_or(|at| at.elapsed().map_or(true, |since| since >= EVERYTHING_EVERY));
+            let records = everything
+                || kept.records.as_ref().is_none_or(|(at, _)| at.elapsed() >= RECORDS_EVERY);
+            if !everything && !records && kept.version == Some(version) {
+                return Ok(Refreshed::default());
+            }
+            Look { everything, records }
+        };
+        self.pass(look, pace)
+    }
+
+    /// The chat database's count of other connections' commits, asked of a
+    /// connection that stays open so the count means something.
+    fn chats_version(&self, kept: &mut Kept) -> Result<i64, String> {
+        if kept.chats.is_none() {
+            let chats = Connection::open_with_flags(
+                &self.chats_path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .map_err(text)?;
+            chats.busy_timeout(Duration::from_secs(10)).map_err(text)?;
+            kept.chats = Some(chats);
+        }
+        kept.chats
+            .as_ref()
+            .expect("opened above")
+            .query_row("PRAGMA data_version", [], |row| row.get(0))
+            .map_err(text)
+    }
+
+    fn pass(&self, look: Look, pace: &crate::upkeep::Pace) -> Result<Refreshed, String> {
         let _writing = self.writing.lock().unwrap();
+        let mut kept = self.kept.lock().unwrap();
+        // Asked before anything is read: what is committed during the pass
+        // is then seen as a change by the next one.
+        let version = self.chats_version(&mut kept)?;
         let mut index = open_index(&self.index_path)?;
-        let chats = Connection::open_with_flags(
-            &self.chats_path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(text)?;
-        chats.busy_timeout(Duration::from_secs(10)).map_err(text)?;
+        let chats = kept.chats.take().expect("opened by chats_version");
+        let done = self.pass_with(&mut kept, &mut index, &chats, look, pace);
+        kept.chats = Some(chats);
+        if done.is_ok() {
+            kept.version = Some(version);
+        }
+        done
+    }
+
+    fn pass_with(
+        &self,
+        kept: &mut Kept,
+        index: &mut Connection,
+        chats: &Connection,
+        look: Look,
+        pace: &crate::upkeep::Pace,
+    ) -> Result<Refreshed, String> {
         let sessions = chats
-            .prepare(
+            .prepare_cached(
                 "SELECT id, brand, external_id, title, project_path, cwd, named_by_owner FROM session",
             )
             .and_then(|mut statement| {
@@ -891,21 +1037,68 @@ impl Inner {
                     .collect::<rusqlite::Result<HashMap<_, _>>>()
             })
             .map_err(text)?;
-        let records = RecordFiles::find(&self.accounts);
+        // Which chats stored an event since the last pass. Events are only
+        // ever added at the end of the table, so the chats of the rows past
+        // the last one seen are all of them; a table that ends before that
+        // row lost its newest events, and then every chat is asked.
+        let seen: Option<i64> = index
+            .query_row("SELECT value FROM kept WHERE name=?1", [EVENTS_SEEN], |row| row.get(0))
+            .optional()
+            .map_err(text)?;
+        let (spoke, newest) =
+            super::store::chats_with_events_after(chats, seen.filter(|_| !look.everything)).map_err(text)?;
+        let records = match (&kept.records, look.records) {
+            (Some((_, records)), false) => records.clone(),
+            _ => {
+                let records = Arc::new(RecordFiles::find(&self.accounts));
+                kept.records = Some((std::time::Instant::now(), records.clone()));
+                records
+            }
+        };
+        let mut facts = Facts::new();
         let mut done = Refreshed::default();
+        let mut failed = false;
+        let mut rows = HashMap::with_capacity(sessions.len());
+        kept.asked = 0;
         for session in &sessions {
             let before = known.remove(&session.id);
-            match index_session(&mut index, &chats, &records, session, before.as_ref()) {
-                Ok(Some(Kind::Events)) => done.from_events += 1,
-                Ok(Some(Kind::Record)) => done.from_records += 1,
-                Ok(None) => {}
+            let row = session.hashed();
+            let row_same = kept.rows.get(&session.id) == Some(&row);
+            let events = before.is_none() || spoke.as_ref().is_none_or(|spoke| spoke.contains(&session.id));
+            let record = look.records && before.as_ref().is_some_and(|known| known.kind != Kind::Events.name());
+            if !events && !record && row_same && !look.records {
+                rows.insert(session.id.clone(), row);
+                continue;
+            }
+            // The rest only have their title put together again, from what
+            // is already in hand.
+            if events || record {
+                kept.asked += 1;
+            }
+            // Paid for chat by chat, also where nothing turned out to have
+            // changed: finding that out is a few seeks into the chat
+            // database, and a look at every chat is thousands of them.
+            if events || record {
+                pace.settle();
+            }
+            match index_session(index, chats, &records, session, before.as_ref(), events, &mut facts) {
+                Ok(read) => {
+                    match read {
+                        Some(Kind::Events) => done.from_events += 1,
+                        Some(Kind::Record) => done.from_records += 1,
+                        None => {}
+                    }
+                    rows.insert(session.id.clone(), row);
+                }
                 // One unreadable chat is not a reason to leave every chat
                 // after it unindexed; it is tried again next pass.
                 Err(error) => {
+                    failed = true;
                     tracing::warn!(session = %session.id, %error, "chat not indexed")
                 }
             }
         }
+        kept.rows = rows;
         // What is left was indexed once and has since been deleted.
         for session_id in known.keys() {
             let transaction = index.transaction().map_err(text)?;
@@ -917,6 +1110,29 @@ impl Inner {
                 .map_err(text)?;
             transaction.commit().map_err(text)?;
             done.forgotten += 1;
+        }
+        // A chat that failed keeps the old mark, so the next pass asks the
+        // same chats again.
+        if !failed && seen != Some(newest) {
+            index
+                .execute(
+                    "INSERT INTO kept (name, value) VALUES (?1, ?2)
+                     ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+                    params![EVENTS_SEEN, newest],
+                )
+                .map_err(text)?;
+        }
+        if look.everything && !failed {
+            let now = std::time::SystemTime::now();
+            let since = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+            index
+                .execute(
+                    "INSERT INTO kept (name, value) VALUES (?1, ?2)
+                     ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+                    params![EVERYTHING_AT, since],
+                )
+                .map_err(text)?;
+            kept.everything_at = Some(Some(now));
         }
         Ok(done)
     }
@@ -945,15 +1161,27 @@ fn index_session(
     records: &RecordFiles,
     session: &SessionRow,
     known: Option<&Known>,
+    // Whether the chat may have stored an event since `known` was written.
+    // When it has not, its stored words are as they were and are not asked
+    // about.
+    events: bool,
+    facts: &mut Facts,
 ) -> Result<Option<Kind>, String> {
-    let spoken = chats
-        .prepare_cached("SELECT 1 FROM event WHERE type='text.delta' AND session_id=?1 LIMIT 1")
-        .and_then(|mut statement| statement.exists([&session.id]))
-        .map_err(text)?;
+    let from_events = known.is_some_and(|known| known.kind == Kind::Events.name());
+    let spoken = if events {
+        chats
+            .prepare_cached("SELECT 1 FROM event WHERE type='text.delta' AND session_id=?1 LIMIT 1")
+            .and_then(|mut statement| statement.exists([&session.id]))
+            .map_err(text)?
+    } else {
+        from_events
+    };
     // A chat that has stored words is read from them: those are the words the
     // app shows for it. Only a chat with none is read from its record, which
     // is where a chat nobody opened here keeps all of them.
-    let (kind, mark, record) = if spoken {
+    let (kind, mark, record) = if spoken && !events {
+        (Some(Kind::Events), known.map(|known| known.mark.clone()).unwrap_or_default(), None)
+    } else if spoken {
         let seq: i64 = chats
             .prepare_cached("SELECT COALESCE(MAX(seq), 0) FROM event WHERE session_id=?1")
             .and_then(|mut statement| statement.query_row([&session.id], |row| row.get(0)))
@@ -985,7 +1213,7 @@ fn index_session(
         words_current = true;
         mark = known.map(|known| known.mark.clone()).unwrap_or_default();
     }
-    let title = session.searched_title();
+    let title = session.searched_title(facts);
     let title_current = known.is_some_and(|known| known.title == title);
     if words_current && title_current {
         return Ok(None);
@@ -1748,6 +1976,67 @@ mod tests {
 
     /// A stored chat's words arrive a few characters at a time and across
     /// passes, and are taken back, and the chat itself can be deleted.
+    /// The background job looks at a chat only when there is a reason to:
+    /// with thousands of chats, asking each one every half minute was what
+    /// an idle server read all day.
+    #[test]
+    fn a_turn_asks_only_the_chats_that_said_something_since() {
+        let place = place();
+        let store = Store::open(&place.chats).unwrap();
+        let say = |chat: &str, seq: i64, text: &str| {
+            store
+                .append_event(&event(chat, seq, "message.started", json!({"messageId":format!("m{seq}"),"role":"assistant"})))
+                .unwrap();
+            store
+                .append_event(&event(chat, seq + 1, "text.delta", json!({"messageId":format!("m{seq}"),"text":text})))
+                .unwrap();
+        };
+        for chat in ["chat-1", "chat-2", "chat-3"] {
+            store.create_session(&session(chat, "claude", None, None)).unwrap();
+            say(chat, 1, "first words");
+        }
+
+        let index = index(&place);
+        assert_eq!(index.turn().unwrap().from_events, 3);
+        assert_eq!(index.turn().unwrap(), Refreshed::default());
+        assert_eq!(index.asked(), 0, "nothing was committed, so no chat is asked anything");
+
+        say("chat-2", 3, "and then tangerine");
+        assert_eq!(index.turn().unwrap().from_events, 1);
+        assert_eq!(index.asked(), 1, "only the chat that spoke is asked");
+        assert_eq!(found(&index, "tangerine").len(), 1);
+
+        // A restart is not a reason to ask every chat again.
+        let restarted = self::index(&place);
+        assert_eq!(restarted.turn().unwrap(), Refreshed::default());
+        assert_eq!(restarted.asked(), 0, "a restart asked chats that had not changed");
+        say("chat-3", 3, "a word said while it was down: quince");
+        let again = self::index(&place);
+        assert_eq!(again.turn().unwrap().from_events, 1);
+        assert_eq!(again.asked(), 1);
+        assert_eq!(found(&again, "quince").len(), 1);
+    }
+
+    /// A rename stores no event; the turn still finds it.
+    #[test]
+    fn a_turn_finds_a_chat_that_was_renamed() {
+        let place = place();
+        let store = Store::open(&place.chats).unwrap();
+        store.create_session(&session("chat-1", "claude", None, Some("Old name"))).unwrap();
+        let index = index(&place);
+        index.turn().unwrap();
+        assert_eq!(found(&index, "marmalade").len(), 0);
+        store
+            .update_session(
+                "chat-1",
+                crate::workbench::store::SessionPatch { title: Some(Some("Marmalade".into())), ..Default::default() },
+                None,
+            )
+            .unwrap();
+        index.turn().unwrap();
+        assert_eq!(found(&index, "marmalade").len(), 1);
+    }
+
     #[test]
     fn a_stored_chat_is_indexed_as_its_words_arrive() {
         let place = place();

@@ -2266,10 +2266,9 @@ async fn recorded_sessions(state: &WorkbenchState, brand: &str) -> Vec<Value> {
                         chrono::DateTime::from_timestamp(seconds, 0).map(|at| at.to_rfc3339())
                     })
                 });
-            let preview = thread["preview"].as_str().unwrap_or_default();
             let begun_by = crate::workbench::codex::history::begun_by(&thread);
             Some(json!({"brand":"codex","externalId":id,"lastActiveAt":updated,"begunBy":begun_by,
-                "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!(crate::workbench::metadata::conversation_title(preview))),
+                "name":thread.get("name").filter(|v|!v.is_null()).cloned().unwrap_or_else(||thread["title"].clone()),
                 "cwd":thread["cwd"],"branch":thread["gitInfo"]["branch"],"lastSpokeAt":thread["path"].as_str().and_then(|path|crate::workbench::codex::history::last_spoke_at(std::path::Path::new(path)))}))
         })
         .collect::<Vec<_>>();

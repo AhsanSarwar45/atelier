@@ -17,7 +17,8 @@
 
 use base64::Engine;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use crate::upkeep::{Pace, Paced};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -38,20 +39,122 @@ pub struct Swept {
 }
 
 /// Records already read and found with no pictures, by length and change
-/// time, so a sweep reads only what is new — a few hundred megabytes of
-/// cleaned records are not read again every ten minutes.
+/// time, so a record is read once: not again ten minutes later, and not
+/// again after a restart. The list is kept in a file beside the app's data;
+/// kept only in memory, every start read every finished record in full, and
+/// on a machine with months of agent runs that was gigabytes before anyone
+/// opened a window.
 #[derive(Default)]
 pub struct Sweeper {
     clean: HashMap<PathBuf, (u64, SystemTime)>,
+    /// Where `clean` is kept between runs of the app.
+    store: Option<PathBuf>,
+    /// Whether `clean` holds something the store does not.
+    unsaved: usize,
+    /// The records this pass has still to look at.
+    waiting: VecDeque<PathBuf>,
+    /// Every record the pass found, which is what the store keeps.
+    found: HashSet<PathBuf>,
+    /// What the pass has done so far.
+    swept: Swept,
+    passing: bool,
 }
 
+/// How long a record is left alone before its pictures go.
+const LEFT_ALONE: Duration = Duration::from_secs(3600);
+/// How long after one pass the next begins.
+const PASS_EVERY: Duration = Duration::from_secs(600);
+
+/// The upkeep job that sweeps the records under `profiles`, one record a
+/// turn, remembering in `store` which it found with nothing to strip.
+pub fn job(profiles: PathBuf, store: PathBuf) -> crate::upkeep::Job {
+    let mut sweeper = Sweeper::kept_in(store);
+    crate::upkeep::Job::new("agent records' pictures", PASS_EVERY, move |pace| {
+        match sweeper.turn(&profiles, LEFT_ALONE, pace) {
+            None => crate::upkeep::Turn::More,
+            Some(swept) => {
+                if swept.records > 0 {
+                    tracing::info!(
+                        records = swept.records,
+                        freed = swept.freed,
+                        "pictures stripped from agent records"
+                    );
+                }
+                crate::upkeep::Turn::Done
+            }
+        }
+    })
+}
+
+/// How many records are learned between two saves of the list, so a pass
+/// stopped halfway keeps most of what it read.
+const SAVED_EVERY: usize = 64;
+
+type Kept = Vec<(PathBuf, u64, u64, u32)>;
+
 impl Sweeper {
+    /// A sweeper that remembers what it found clean in `store`.
+    pub fn kept_in(store: PathBuf) -> Self {
+        let clean = fs::read(&store)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Kept>(&bytes).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(path, len, secs, nanos)| {
+                (path, (len, SystemTime::UNIX_EPOCH + Duration::new(secs, nanos)))
+            })
+            .collect();
+        Self { clean, store: Some(store), ..Self::default() }
+    }
+
+    fn save(&mut self) {
+        self.unsaved = 0;
+        let Some(store) = &self.store else {
+            return;
+        };
+        let kept: Kept = self
+            .clean
+            .iter()
+            .filter_map(|(path, (len, modified))| {
+                let since = modified.duration_since(SystemTime::UNIX_EPOCH).ok()?;
+                Some((path.clone(), *len, since.as_secs(), since.subsec_nanos()))
+            })
+            .collect();
+        // Written beside and renamed over, so a reader never finds half a list.
+        let beside = store.with_extension("json.part");
+        let written = serde_json::to_vec(&kept)
+            .map_err(std::io::Error::other)
+            .and_then(|bytes| fs::write(&beside, bytes))
+            .and_then(|()| fs::rename(&beside, store));
+        if let Err(error) = written {
+            tracing::warn!(%error, "could not keep the list of records with no pictures");
+        }
+    }
+
     /// Strip every record under `profiles` that an agent began and nothing has
     /// written to for `idle`.
     pub fn sweep(&mut self, profiles: &Path, idle: Duration) -> Swept {
-        let mut swept = Swept::default();
+        let pace = Pace::unlimited();
+        loop {
+            if let Some(swept) = self.turn(profiles, idle, &pace) {
+                return swept;
+            }
+        }
+    }
+
+    /// One step of a pass: find the records to look at, or look at one.
+    /// `Some` is what the whole pass did, once it has looked at them all.
+    pub fn turn(&mut self, profiles: &Path, idle: Duration, pace: &Pace) -> Option<Swept> {
+        if !self.passing {
+            self.passing = true;
+            self.swept = Swept::default();
+            let records = agent_records(profiles);
+            self.waiting = records.iter().cloned().collect();
+            self.found = records.into_iter().collect();
+            return None;
+        }
         let now = SystemTime::now();
-        for path in agent_records(profiles) {
+        while let Some(path) = self.waiting.pop_front() {
             let Ok(meta) = fs::metadata(&path) else {
                 continue;
             };
@@ -64,17 +167,24 @@ impl Sweeper {
             if self.clean.get(&path) == Some(&(meta.len(), modified)) {
                 continue;
             }
-            match strip(&path) {
+            // A record shorter than one picture holds none, and is not read.
+            if meta.len() <= PICTURE_KEPT as u64 {
+                self.clean.insert(path, (meta.len(), modified));
+                self.unsaved += 1;
+                continue;
+            }
+            match strip_at(&path, pace) {
                 // Left for later: held open, or written to while it was read.
                 Ok(None) => {}
                 Ok(Some(freed)) => {
                     if freed > 0 {
-                        swept.records += 1;
-                        swept.freed += freed;
+                        self.swept.records += 1;
+                        self.swept.freed += freed;
                     }
                     if let Ok(meta) = fs::metadata(&path) {
                         if let Ok(modified) = meta.modified() {
                             self.clean.insert(path, (meta.len(), modified));
+                            self.unsaved += 1;
                         }
                     }
                 }
@@ -82,8 +192,21 @@ impl Sweeper {
                     tracing::warn!(path = %path.display(), %error, "pictures not stripped from record")
                 }
             }
+            if self.unsaved >= SAVED_EVERY {
+                self.save();
+            }
+            // One record read is one step.
+            return None;
         }
-        swept
+        // A record that is gone is forgotten with the pass that missed it.
+        let known = self.clean.len();
+        let found = std::mem::take(&mut self.found);
+        self.clean.retain(|path, _| found.contains(path));
+        if self.unsaved > 0 || self.clean.len() != known {
+            self.save();
+        }
+        self.passing = false;
+        Some(std::mem::take(&mut self.swept))
     }
 }
 
@@ -136,6 +259,11 @@ fn jsonl_under(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
 /// changes while it is read — a run resumed after all — is left for the next
 /// sweep rather than losing what was written meanwhile.
 pub fn strip(path: &Path) -> std::io::Result<Option<u64>> {
+    strip_at(path, &Pace::unlimited())
+}
+
+/// `strip`, reading no faster than `pace` allows.
+pub fn strip_at(path: &Path, pace: &Pace) -> std::io::Result<Option<u64>> {
     // A provider keeps a record open for as long as the thread is loaded and
     // appends through that handle, so a record swapped while it is held would
     // send the next lines to the file it replaced. An idle hour does not prove
@@ -145,7 +273,7 @@ pub fn strip(path: &Path) -> std::io::Result<Option<u64>> {
     }
     let before = fs::metadata(path)?;
     let modified = before.modified()?;
-    let mut reader = BufReader::new(File::open(path)?);
+    let mut reader = BufReader::new(Paced::new(File::open(path)?, pace));
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let temporary = path.with_file_name(format!(".{name}.stripping"));
     let mut writer: Option<BufWriter<File>> = None;
@@ -164,8 +292,8 @@ pub fn strip(path: &Path) -> std::io::Result<Option<u64>> {
         if stripped.is_some() && writer.is_none() {
             // The first picture: everything before it is copied as it was.
             let mut fresh = BufWriter::new(File::create(&temporary)?);
-            let mut head = File::open(path)?;
-            std::io::copy(&mut (&mut head).take(read), &mut fresh)?;
+            let head = Paced::new(File::open(path)?, pace);
+            std::io::copy(&mut head.take(read), &mut fresh)?;
             written = read;
             writer = Some(fresh);
         }
@@ -366,6 +494,30 @@ mod tests {
         // A person's chats keep their pictures.
         assert_eq!(fs::read_to_string(&person).unwrap(), kept_person);
         assert_eq!(fs::read_to_string(&main).unwrap(), kept_main);
+    }
+
+    /// What a start found with no pictures, the next start does not read.
+    #[test]
+    fn a_record_found_clean_is_not_read_again_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let profiles = dir.path().join("profiles");
+        let store = dir.path().join("records-without-pictures.json");
+        let record = profiles.join("claude/me/projects/-work/chat/subagents/agent-1.jsonl");
+        let line = json!({"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"x".repeat(4000)}]}});
+        write(&record, &vec![line; 256]);
+        let len = fs::metadata(&record).unwrap().len();
+        let read = |sweeper: &mut Sweeper| {
+            let before = crate::upkeep::thread_bytes();
+            sweeper.sweep(&profiles, Duration::ZERO);
+            crate::upkeep::thread_bytes().zip(before).map(|(now, before)| now - before)
+        };
+
+        let first = read(&mut Sweeper::kept_in(store.clone()));
+        let again = read(&mut Sweeper::kept_in(store));
+        if let (Some(first), Some(again)) = (first, again) {
+            assert!(first >= len, "the first start reads the {len} byte record; it read {first}");
+            assert!(again < len / 4, "the next start read {again} bytes of a {len} byte record it had found clean");
+        }
     }
 
     #[test]

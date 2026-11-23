@@ -417,6 +417,12 @@ async fn serve(open_browser: bool) {
     // Which copy this is, worked out once here rather than on the first
     // request: reading the program's own bytes is the only honest way to tell
     // two builds of one version apart, and nobody should wait on it.
+    //
+    // The bytes are read once per build, by upkeep, and remembered beside the
+    // app's data; a start reads none of them (`handover::learn_the_programs`).
+    if let Some(data_dir) = identity::data_dir() {
+        handover::remember_looks_in(data_dir.join("program-looks.json"));
+    }
     let ours = handover::program().map(|p| p.display().to_string());
     info!(
         "{} {} (build {})",
@@ -438,9 +444,13 @@ async fn serve(open_browser: bool) {
     // And from here on, an install of a newer build over that same program
     // takes over by itself: this copy stands down and the computer starts
     // whatever replaced it (bw-8um.3.10.1).
-    if let Some(registered) = registered {
-        handover::stand_down_for_a_newer_build(std::path::PathBuf::from(registered));
+    let registered = registered.map(std::path::PathBuf::from);
+    if let Some(registered) = registered.clone() {
+        handover::stand_down_for_a_newer_build(registered);
     }
+    // Everything the server does that nobody asked for is a job in this list
+    // and runs on the one upkeep thread, started below (`upkeep`).
+    let mut upkeep_jobs = vec![handover::learn_the_programs(registered)];
 
     // Configure CORS for development
     let cors = CorsLayer::new()
@@ -515,6 +525,10 @@ async fn serve(open_browser: bool) {
     // does not read every record again (bw-69sa.3).
     workbench::claude::history::keep_summaries_in(data_dir.join("claude-summaries.json"));
     workbench::codex::history::keep_answers_in(data_dir.join("codex-rollouts.json"));
+    // What a pass over a chat's record found, so opening the chat again
+    // reads only what was written since (workbench/claude/record_scan.rs).
+    workbench::claude::record_scan::keep_in(data_dir.join("record-passes.json"));
+    upkeep_jobs.push(workbench::claude::record_scan::job());
     let mut workbench_state =
         routes::workbench::WorkbenchState::new(registry).with_projects(database.clone());
     match workbench::search_index::SearchIndex::open(
@@ -523,50 +537,51 @@ async fn serve(open_browser: bool) {
         search_accounts,
     ) {
         Ok(index) => {
-            index.start(std::time::Duration::from_secs(30));
+            upkeep_jobs.push(index.job());
             workbench_state = workbench_state.with_search(index);
         }
         Err(error) => tracing::warn!(%error, "search index unavailable; searching messages only"),
     }
 
     // Tool events stored before pictures were kept out of them still hold
-    // their base64; clean them slowly, a batch every two seconds, so the
-    // cleaning is never the heavy read it removes (bw-xeeqg.14).
-    {
-        let path = data_dir.join("workbench.db");
-        std::thread::spawn(move || loop {
-            match workbench::store::scrub_stored_base64(&path, 200) {
-                Ok(Some(_)) => std::thread::sleep(std::time::Duration::from_secs(2)),
-                Ok(None) => break,
-                Err(error) => {
-                    tracing::warn!(%error, "stored pictures not cleaned; trying again in a minute");
-                    std::thread::sleep(std::time::Duration::from_secs(60));
-                }
-            }
-        });
-    }
+    // their base64; clean them a batch at a time, so the cleaning is never
+    // the heavy read it removes (bw-xeeqg.14).
+    upkeep_jobs.push(workbench::store::scrub_job(data_dir.join("workbench.db")));
 
     // Records of chats an agent ran keep every picture the provider saw or
     // made, as base64, for good; a picture generator's runs filled 31 GB in a
     // week. Once a run has been left alone for an hour its pictures go
     // (bw-zubih.1).
+    upkeep_jobs.push(workbench::transcript_pictures::job(
+        data_dir.join("profiles"),
+        data_dir.join("records-without-pictures.json"),
+    ));
+
+    // Chats an older build stored without id rows are filed by id, a slice
+    // at a time on the writer, each slice asked for and paid for by upkeep.
     {
-        let profiles = data_dir.join("profiles");
-        std::thread::spawn(move || {
-            let mut sweeper = workbench::transcript_pictures::Sweeper::default();
-            loop {
-                std::thread::sleep(std::time::Duration::from_secs(120));
-                let swept = sweeper.sweep(&profiles, std::time::Duration::from_secs(3600));
-                if swept.records > 0 {
-                    tracing::info!(
-                        records = swept.records,
-                        freed = swept.freed,
-                        "pictures stripped from agent records"
-                    );
+        let registry = Arc::downgrade(workbench_state.registry());
+        let runtime = tokio::runtime::Handle::current();
+        upkeep_jobs.push(atelier::upkeep::Job::new(
+            "older chats' id rows",
+            std::time::Duration::from_secs(24 * 3600),
+            move |pace| {
+                let Some(registry) = registry.upgrade() else {
+                    return atelier::upkeep::Turn::Done;
+                };
+                match runtime.block_on(registry.database().backfill_slice()) {
+                    Ok((left, spent)) => {
+                        pace.spent(spent);
+                        if left {
+                            atelier::upkeep::Turn::More
+                        } else {
+                            atelier::upkeep::Turn::Done
+                        }
+                    }
+                    Err(_) => atelier::upkeep::Turn::Done,
                 }
-                std::thread::sleep(std::time::Duration::from_secs(480));
-            }
-        });
+            },
+        ));
     }
 
     // What tells a phone whose app is closed that a chat is waiting. The page
@@ -606,9 +621,15 @@ async fn serve(open_browser: bool) {
             data_dir.join("workbench.db"),
             data_dir.join("chat-archive"),
         ));
-        workbench::cleanup::watch(cleaner.clone(), workbench_state.registry().clone());
+        upkeep_jobs.push(workbench::cleanup::job(
+            cleaner.clone(),
+            workbench_state.registry().clone(),
+            tokio::runtime::Handle::current(),
+        ));
         routes::storage::StorageState::new(cleaner, workbench_state.registry().clone(), data_dir.clone())
     };
+
+    atelier::upkeep::start(upkeep_jobs);
 
     // A chat whose driver died with the last run of the server still has its
     // driven stretch ahead of its cursor; hand it back once, before a follower
